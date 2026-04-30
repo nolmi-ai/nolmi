@@ -1,0 +1,23 @@
+{
+  "name": "twin-lab",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Lab-Setup für persönliche AI-Twins mit A2A-Kommunikation",
+  "packageManager": "pnpm@9.12.0",
+  "scripts": {
+    "dev": "pnpm -r --parallel dev",
+    "build": "pnpm -r build",
+    "lint": "pnpm -r lint",
+    "typecheck": "pnpm -r typecheck",
+    "db:init": "pnpm --filter @twin-lab/runtime db:init",
+    "clean": "pnpm -r clean && rm -rf node_modules"
+  },
+  "devDependencies": {
+    "typescript": "^5.6.0",
+    "@types/node": "^22.0.0"
+  },
+  "engines": {
+    "node": ">=20.0.0",
+    "pnpm": ">=9.0.0"
+  }
+}

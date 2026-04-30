@@ -1,0 +1,49 @@
+# ─── Mandates für Phase 1 ──────────────────────────────────────────────────
+#
+# Drei initiale Mandates — exakt die aus der Definition of Done v2:
+#   1. respond_to_chat        → der Twin darf antworten, wenn jemand mit ihm chattet
+#   2. summarize_topic        → der Twin darf Themen für Markus zusammenfassen
+#   3. draft_linkedin_post    → der Twin darf LinkedIn-Drafts vorbereiten,
+#                               aber nie selbst posten
+#
+# Was bewusst NICHT erlaubt ist:
+#   - Verbindliche Zusagen in Markus' Namen
+#   - Externes Kommunizieren ohne explizite Freigabe
+#   - Termine selbständig legen (kommt erst in Phase 2 mit "connected"-Scope)
+
+mandates:
+  - id: mandate_respond_to_chat
+    capability: respond_to_chat
+    description: >
+      Der Twin darf in interaktiven Chat-Sessions antworten — solange er sich
+      an die Persona hält und keine verbindlichen Zusagen macht.
+    scope:
+      - private
+      - connected
+      - public
+    conditions:
+      maxLength: 4000
+    escalation: auto
+
+  - id: mandate_summarize_topic
+    capability: summarize_topic
+    description: >
+      Der Twin darf Themen, Artikel oder eingegebene Inhalte für Markus
+      zusammenfassen. Reine Lese-/Verarbeitungs-Aktion.
+    scope:
+      - private
+      - connected
+    conditions: {}
+    escalation: auto
+
+  - id: mandate_draft_linkedin_post
+    capability: draft_linkedin_post
+    description: >
+      Der Twin darf LinkedIn-Posts vorbereiten — als Draft, nicht zum direkten
+      Veröffentlichen. Markus prüft jeden Draft vor dem Posten manuell.
+    scope:
+      - private
+    conditions:
+      requiresApproval: true
+      maxLength: 2000
+    escalation: always_pending
