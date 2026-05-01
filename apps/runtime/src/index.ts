@@ -1,64 +1,59 @@
 import "dotenv/config";
-import { resolve, dirname } from "node:path";
-import { fileURLToPath } from "node:url";
 import { mkdir } from "node:fs/promises";
+import { dirname } from "node:path";
 import { createSqliteRepository } from "./repository/index.js";
 import { createProvider } from "./providers/index.js";
 import { EventBus } from "./events/bus.js";
 import { AuditService } from "./audit/service.js";
 import { TwinService } from "./twin-service.js";
 import { createServer } from "./server.js";
-import { loadPersonaFromDocs } from "./persona/loader.js";
+import { loadPersona } from "./persona/loader.js";
 import { loadMandatesFromYaml, syncMandates } from "./mandates/service.js";
 import { BridgeClient } from "./bridge/client.js";
 import { BridgeStream } from "./bridge/stream.js";
 import type { BridgeConfig } from "./bridge/types.js";
+import { loadRuntimeConfig } from "./config.js";
 
 // ─── BOOTSTRAP ───────────────────────────────────────────────────────────────
 //
 // Bootet den Runtime in dieser Reihenfolge:
-//   1. ENV laden, DB-File sicherstellen, Repository erzeugen
-//   2. Persona aus docs/persona.md laden, ins Repository schreiben
-//   3. Mandates aus docs/mandates.yaml laden, mit Repository syncen
+//   1. Config aus ENV laden, DB-File sicherstellen, Repository erzeugen
+//   2. Persona aus konfiguriertem Pfad laden, ins Repository schreiben
+//   3. Mandates aus konfiguriertem Pfad laden, mit Repository syncen
 //   4. Provider erzeugen (OpenAI oder Anthropic je nach ENV)
-//   5. Bridge-Modus prüfen → Client + Stream falls aktiv
-//   6. Services verkabeln
-//   7. HTTP-Server starten
+//   5. Services verkabeln
+//   6. HTTP-Server starten (Port/Host aus Config)
+//   7. Bridge-Modus prüfen → Client + Stream falls aktiv
 //   8. SIGINT/SIGTERM für graceful shutdown registrieren
 
 async function main() {
-  const __filename = fileURLToPath(import.meta.url);
-  const __dirname = dirname(__filename);
-  // Vom Runtime-src-Verzeichnis hoch zum Repo-Root, dann zu docs/
-  const repoRoot = resolve(__dirname, "../../..");
-  const dbPath = process.env.DATABASE_PATH ?? resolve(repoRoot, "data/twin.db");
-  const docsDir = resolve(repoRoot, "docs");
-
-  await mkdir(resolve(dbPath, ".."), { recursive: true });
+  const config = loadRuntimeConfig();
+  await mkdir(dirname(config.dbPath), { recursive: true });
 
   // 1. Repository
-  const repo = createSqliteRepository(dbPath);
+  const repo = createSqliteRepository(config.dbPath);
+  console.log(`[boot] DB: ${config.dbPath}`);
 
   // 2. Persona laden + speichern
-  const persona = await loadPersonaFromDocs(docsDir);
+  const persona = await loadPersona({
+    promptPath: config.personaPath,
+    metaPath: config.personaMetaPath,
+  });
   await repo.persona.save(persona);
-  console.log(`[boot] Persona geladen: ${persona.name} (@${persona.handle})`);
+  console.log(`[boot] Persona geladen aus ${config.personaPath}`);
+  console.log(`[boot] Persona: ${persona.name} (@${persona.handle})`);
 
   // 3. Mandates syncen
-  const mandates = await loadMandatesFromYaml(resolve(docsDir, "mandates.yaml"));
+  const mandates = await loadMandatesFromYaml(config.mandatesPath);
   await syncMandates(repo.mandates, mandates);
+  console.log(`[boot] Mandates geladen aus ${config.mandatesPath}`);
   console.log(`[boot] ${mandates.length} Mandates synchronisiert`);
 
   // 4. Provider
   const provider = createProvider();
   console.log(`[boot] Provider aktiv: ${provider.name}`);
 
-  // 5. Bridge-Modus
-  const bridgeConfig = readBridgeConfig();
-  let bridgeClient: BridgeClient | null = null;
-  let bridgeStream: BridgeStream | null = null;
-
-  // 6. Services
+  // 5. Services
   const bus = new EventBus();
   const audit = new AuditService(repo.audit, bus);
   const twin = new TwinService({
@@ -67,21 +62,21 @@ async function main() {
     bus,
     personaRepo: repo.persona,
     mandateRepo: repo.mandates,
-    bridgeClient: null, // wird gleich gesetzt, falls Bridge aktiv
+    bridgeClient: null, // wird gesetzt, falls Bridge aktiv
   });
 
-  // 7. Server
+  // 6. Server
   const app = await createServer({ twin, audit: repo.audit, bus });
-  const port = Number(process.env.RUNTIME_PORT ?? 4000);
-  const host = process.env.RUNTIME_HOST ?? "127.0.0.1";
+  await app.listen({ port: config.port, host: config.host });
+  console.log(`[boot] Runtime hört auf http://${config.host}:${config.port}`);
 
-  await app.listen({ port, host });
-  console.log(`[boot] Runtime hört auf http://${host}:${port}`);
-
-  // 8. Bridge nach dem Server-Start hochziehen — dann ist auch der Logger
+  // 7. Bridge nach dem Server-Start hochziehen — dann ist auch der Logger
   // verfügbar und das Inbox-Sync passiert in Ruhe.
+  const bridgeConfig = readBridgeConfig();
+  let bridgeStream: BridgeStream | null = null;
+
   if (bridgeConfig) {
-    bridgeClient = new BridgeClient(bridgeConfig, app.log);
+    const bridgeClient = new BridgeClient(bridgeConfig, app.log);
     twin.setBridgeClient(bridgeClient);
 
     console.log(
@@ -101,7 +96,10 @@ async function main() {
         `[boot] Inbox-Sync: ${syncedCount} Nachricht(en) als Pending-Audits erfasst`,
       );
     } catch (err) {
-      app.log.error({ err }, "[boot] Inbox-Sync fehlgeschlagen — Stream übernimmt Catch-up");
+      app.log.error(
+        { err },
+        "[boot] Inbox-Sync fehlgeschlagen — Stream übernimmt Catch-up",
+      );
     }
 
     // Stream öffnen — Bridge pusht künftige Nachrichten live.
@@ -119,7 +117,7 @@ async function main() {
     console.log("[boot] Bridge-Modus inaktiv (ENV unvollständig)");
   }
 
-  // 9. Graceful Shutdown
+  // 8. Graceful Shutdown
   const shutdown = async (signal: string) => {
     console.log(`[shutdown] ${signal} empfangen — fahre runter`);
     if (bridgeStream) bridgeStream.disconnect();
