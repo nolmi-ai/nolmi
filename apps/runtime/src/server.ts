@@ -3,11 +3,13 @@ import cors from "@fastify/cors";
 import type { TwinService } from "./twin-service.js";
 import type { AuditRepository } from "./repository/types.js";
 import type { EventBus } from "./events/bus.js";
+import type { TwinProfile } from "./twin-profiles-repo.js";
 import { ChatRequestSchema } from "@twin-lab/shared";
 
 // ─── HTTP SERVER ─────────────────────────────────────────────────────────────
 //
 // Endpoints:
+//   GET  /twin-profile            → aktives Twin-Profil (read-only, Token maskiert)
 //   POST /chat                    → Twin antworten lassen
 //   GET  /audit?limit=50          → Audit-Log lesen
 //   GET  /audit/pending           → nur pending Aktionen (für Settings-UI)
@@ -22,6 +24,8 @@ export interface ServerDeps {
   twin: TwinService;
   audit: AuditRepository;
   bus: EventBus;
+  /** Aktives Twin-Profil aus `twin_profiles`, beim Boot geladen. */
+  profile: TwinProfile;
 }
 
 export async function createServer(deps: ServerDeps) {
@@ -38,6 +42,31 @@ export async function createServer(deps: ServerDeps) {
     timestamp: new Date().toISOString(),
     subscribers: deps.bus.size(),
   }));
+
+  // ─── Twin-Profil (read-only) ───────────────────────────────────────────────
+  // Spiegelt das beim Boot geladene Profil für die Settings-UI. Sensitive
+  // Felder werden gefiltert: api_key gar nicht, bridge_token nur maskiert.
+  app.get("/twin-profile", async () => {
+    const p = deps.profile;
+    return {
+      twinId: p.twinId,
+      handle: p.handle,
+      displayName: p.displayName,
+      llmConfig: {
+        provider: p.llmConfig.provider,
+        model: p.llmConfig.model,
+        baseUrl: p.llmConfig.baseUrl ?? null,
+      },
+      bridge: {
+        url: p.bridgeUrl,
+        tokenMasked: maskToken(p.bridgeToken),
+      },
+      mandatesCount: p.mandates.length,
+      isActive: p.isActive,
+      createdAt: p.createdAt,
+      updatedAt: p.updatedAt,
+    };
+  });
 
   // ─── Chat ──────────────────────────────────────────────────────────────────
   app.post("/chat", async (request, reply) => {
@@ -132,4 +161,16 @@ export async function createServer(deps: ServerDeps) {
   });
 
   return app;
+}
+
+// ─── helpers ─────────────────────────────────────────────────────────────────
+
+/**
+ * Maskiert einen Bridge-Token für die UI-Anzeige: erste 4 + "…" + letzte 4
+ * Zeichen. Bei Tokens unter 9 Zeichen geben wir nur "…" zurück, weil sonst
+ * der "Maske" so viel offen liegt wie der Klartext.
+ */
+function maskToken(token: string): string {
+  if (token.length < 9) return "…";
+  return `${token.slice(0, 4)}…${token.slice(-4)}`;
 }

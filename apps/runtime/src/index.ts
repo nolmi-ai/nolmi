@@ -96,7 +96,7 @@ async function main() {
   });
 
   // 5. Server
-  const app = await createServer({ twin, audit: repo.audit, bus });
+  const app = await createServer({ twin, audit: repo.audit, bus, profile });
   await app.listen({ port: config.port, host: config.host });
   console.log(`[boot] Runtime hört auf http://${config.host}:${config.port}`);
 

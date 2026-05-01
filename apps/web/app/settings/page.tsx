@@ -5,11 +5,36 @@ import type { AuditEntry, ChatMessage } from "@twin-lab/shared";
 
 const RUNTIME_URL = process.env.NEXT_PUBLIC_RUNTIME_URL ?? "http://127.0.0.1:4000";
 
+// Spiegelt das `/twin-profile`-Response-Schema vom Runtime. Bewusst nur
+// hier definiert, weil read-only und keine Validierung wie bei AuditEntry
+// nötig ist — fetch + render, fertig.
+interface TwinProfileResponse {
+  twinId: string;
+  handle: string;
+  displayName: string;
+  llmConfig: {
+    provider: string;
+    model: string;
+    baseUrl: string | null;
+  };
+  bridge: {
+    url: string;
+    tokenMasked: string;
+  };
+  mandatesCount: number;
+  isActive: boolean;
+  createdAt: number;
+  updatedAt: number;
+}
+
 export default function SettingsPage() {
   const [audit, setAudit] = useState<AuditEntry[]>([]);
   const [pending, setPending] = useState<AuditEntry[]>([]);
   const [busy, setBusy] = useState<Record<string, boolean>>({});
   const [error, setError] = useState<string | null>(null);
+  const [profile, setProfile] = useState<TwinProfileResponse | null>(null);
+  const [profileLoading, setProfileLoading] = useState(true);
+  const [profileError, setProfileError] = useState<string | null>(null);
 
   const loadAudit = useCallback(async () => {
     try {
@@ -33,15 +58,34 @@ export default function SettingsPage() {
     }
   }, []);
 
+  // Twin-Profil ist read-only und ändert sich im laufenden Prozess nicht
+  // (Bootstrap schreibt in die DB, Runtime cached beim Boot). Einmal laden
+  // beim Mount reicht; manueller Retry über den Error-State-Button.
+  const loadProfile = useCallback(async () => {
+    setProfileLoading(true);
+    setProfileError(null);
+    try {
+      const res = await fetch(`${RUNTIME_URL}/twin-profile`);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = (await res.json()) as TwinProfileResponse;
+      setProfile(data);
+    } catch (err) {
+      setProfileError(err instanceof Error ? err.message : "Twin-Profil konnte nicht geladen werden");
+    } finally {
+      setProfileLoading(false);
+    }
+  }, []);
+
   useEffect(() => {
     loadAudit();
     loadPending();
+    loadProfile();
     const interval = setInterval(() => {
       loadPending();
       loadAudit();
     }, 3000);
     return () => clearInterval(interval);
-  }, [loadAudit, loadPending]);
+  }, [loadAudit, loadPending, loadProfile]);
 
   async function approve(id: string) {
     setBusy((b) => ({ ...b, [id]: true }));
@@ -103,6 +147,26 @@ export default function SettingsPage() {
           {error}
         </div>
       )}
+
+      <Section title="Twin-Profil">
+        {profileLoading ? (
+          <div className="text-sm text-muted">Lade Twin-Profil…</div>
+        ) : profileError ? (
+          <div className="space-y-2">
+            <div className="text-sm text-warn">
+              Twin-Profil konnte nicht geladen werden: {profileError}
+            </div>
+            <button
+              onClick={loadProfile}
+              className="text-xs text-accent hover:underline"
+            >
+              Erneut versuchen
+            </button>
+          </div>
+        ) : profile ? (
+          <ProfileBody profile={profile} />
+        ) : null}
+      </Section>
 
       <Section title={`Pending (${pending.length})`}>
         {pending.length === 0 ? (
@@ -308,4 +372,88 @@ function hasReply(entry: AuditEntry): boolean {
 function extractReply(entry: AuditEntry): string {
   const output = entry.output as { reply?: string } | null;
   return output?.reply ?? "";
+}
+
+// ─── TWIN-PROFIL SUB-COMPONENT ──────────────────────────────────────────────
+
+function ProfileBody({ profile }: { profile: TwinProfileResponse }) {
+  return (
+    <dl className="space-y-4 text-sm">
+      <Row label="Twin-ID">
+        <span className="font-mono text-xs italic text-muted">{profile.twinId}</span>
+      </Row>
+
+      <Row label="Persona">
+        <div className="space-y-0.5">
+          <div className="text-base text-text">{profile.displayName}</div>
+          <div className="text-xs text-muted font-mono">{profile.handle}</div>
+        </div>
+      </Row>
+
+      <Row label="LLM">
+        <span className="inline-flex items-center text-xs font-mono px-2 py-1 border border-border rounded text-text">
+          {profile.llmConfig.provider} / {profile.llmConfig.model}
+        </span>
+        {profile.llmConfig.baseUrl && (
+          <div className="mt-1 text-xs text-muted font-mono">
+            {profile.llmConfig.baseUrl}
+          </div>
+        )}
+      </Row>
+
+      <Row label="Bridge">
+        <div className="space-y-0.5">
+          <div className="text-text font-mono text-xs">{profile.bridge.url}</div>
+          <div className="text-xs text-muted">
+            Token: <span className="font-mono">{profile.bridge.tokenMasked}</span>
+          </div>
+        </div>
+      </Row>
+
+      <Row label="Mandates">
+        <span className="text-text">{profile.mandatesCount} Mandates aktiv</span>
+      </Row>
+
+      <Row label="Status">
+        <span className="inline-flex items-center gap-2 text-text">
+          <span
+            className={`inline-block w-2 h-2 rounded-full ${
+              profile.isActive ? "bg-accent" : "bg-muted"
+            }`}
+            aria-hidden="true"
+          />
+          {profile.isActive ? "Aktiv" : "Inaktiv"}
+        </span>
+      </Row>
+
+      <Row label="Erstellt">
+        <span className="text-xs text-muted">{formatGermanDate(profile.createdAt)}</span>
+      </Row>
+
+      <Row label="Aktualisiert">
+        <span className="text-xs text-muted">{formatGermanDate(profile.updatedAt)}</span>
+      </Row>
+    </dl>
+  );
+}
+
+function Row({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div className="flex flex-col gap-1 sm:flex-row sm:gap-4">
+      <dt className="text-xs uppercase tracking-wider text-muted sm:w-28 sm:flex-shrink-0 sm:pt-0.5">
+        {label}
+      </dt>
+      <dd className="flex-1 min-w-0">{children}</dd>
+    </div>
+  );
+}
+
+function formatGermanDate(unixMs: number): string {
+  return new Date(unixMs).toLocaleString("de-DE", {
+    day: "numeric",
+    month: "long",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
 }
