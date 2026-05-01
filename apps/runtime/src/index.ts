@@ -2,7 +2,8 @@ import "dotenv/config";
 import { mkdir } from "node:fs/promises";
 import { dirname } from "node:path";
 import { createSqliteRepository } from "./repository/index.js";
-import { createProvider } from "./providers/index.js";
+import { createLlmClient } from "./llm-client.js";
+import { formatLlmLabel, loadTwinLlmConfig } from "./llm-config.js";
 import { EventBus } from "./events/bus.js";
 import { AuditService } from "./audit/service.js";
 import { TwinService } from "./twin-service.js";
@@ -49,15 +50,20 @@ async function main() {
   console.log(`[boot] Mandates geladen aus ${config.mandatesPath}`);
   console.log(`[boot] ${mandates.length} Mandates synchronisiert`);
 
-  // 4. Provider
-  const provider = createProvider();
-  console.log(`[boot] Provider aktiv: ${provider.name}`);
+  // 4. LLM (Vercel AI SDK) — der eigentliche Modell-Call läuft über
+  // `generateText` im TwinService. Konfiguration kommt aus ENV und kann pro
+  // Twin-Instanz frei gesetzt werden (Provider, Modell, API-Key, BaseURL).
+  const llmConfig = loadTwinLlmConfig();
+  const model = createLlmClient(llmConfig);
+  const modelLabel = formatLlmLabel(llmConfig);
+  console.log(`[boot] LLM: ${modelLabel}`);
 
   // 5. Services
   const bus = new EventBus();
   const audit = new AuditService(repo.audit, bus);
   const twin = new TwinService({
-    provider,
+    model,
+    modelLabel,
     audit,
     bus,
     personaRepo: repo.persona,

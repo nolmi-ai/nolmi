@@ -1,5 +1,5 @@
 import type { AuditEntry, ChatMessage, Persona } from "@twin-lab/shared";
-import type { ModelProvider } from "./providers/index.js";
+import { generateText, type LanguageModel, type ModelMessage } from "ai";
 import type { MandateRepository, PersonaRepository } from "./repository/types.js";
 import { checkMandate } from "./mandates/service.js";
 import { AuditService } from "./audit/service.js";
@@ -27,7 +27,10 @@ import type { BridgeMessage } from "./bridge/types.js";
 // Twin ohne explizite Approval.
 
 export interface TwinServiceDeps {
-  provider: ModelProvider;
+  /** Vercel-AI-SDK-LanguageModel — siehe `llm-client.ts`. */
+  model: LanguageModel;
+  /** Kompaktes Label "<provider>/<model>", landet in Audit-Metadata. */
+  modelLabel: string;
   audit: AuditService;
   bus: EventBus;
   personaRepo: PersonaRepository;
@@ -354,9 +357,38 @@ export class TwinService {
 
   // ─── private helpers ─────────────────────────────────────────────────────
 
-  private async runModel(persona: Persona, messages: ChatMessage[], extraSystem?: string) {
-    const fullMessages = withPersona(persona, messages, extraSystem);
-    return this.deps.provider.complete({ messages: fullMessages });
+  /**
+   * Ein Modell-Call über das Vercel AI SDK. Persona kommt als top-level
+   * `system`-Parameter, der optionale `extraSystem`-Hinweis (z.B.
+   * Bridge-Konversations-Kontext) wird vor die Persona gesetzt — gleicher
+   * Wirkung wie früher die zwei system-Messages, aber ohne Provider-Splitting.
+   *
+   * Rückgabe-Shape ist die alte ProviderCompleteOutput, damit die Aufrufer
+   * (`approveDefault`, `approveTwinSend`, …) unverändert bleiben.
+   */
+  private async runModel(
+    persona: Persona,
+    messages: ChatMessage[],
+    extraSystem?: string,
+  ): Promise<{ content: string; metadata: Record<string, unknown> }> {
+    const system = extraSystem
+      ? `${extraSystem}\n\n${persona.systemPrompt}`
+      : persona.systemPrompt;
+
+    const result = await generateText({
+      model: this.deps.model,
+      system,
+      messages: toModelMessages(messages),
+    });
+
+    return {
+      content: result.text,
+      metadata: {
+        provider: this.deps.modelLabel,
+        usage: result.usage,
+        finishReason: result.finishReason,
+      },
+    };
   }
 
   /**
@@ -451,18 +483,16 @@ function extractMessages(entry: { input: Record<string, unknown> }, key: string)
   return value as ChatMessage[];
 }
 
-function withPersona(
-  persona: Persona,
-  messages: ChatMessage[],
-  extraSystem?: string,
-): ChatMessage[] {
-  // extraSystem kommt VOR der Persona — gedacht für situativen Kontext (z.B.
-  // Bridge-Konversations-Hinweis), den die Persona dann färbt. Beide Provider
-  // (OpenAI nativ, Anthropic via concat) handhaben mehrere system-Messages.
-  const head: ChatMessage[] = [];
-  if (extraSystem) head.push({ role: "system", content: extraSystem });
-  head.push({ role: "system", content: persona.systemPrompt });
-  return [...head, ...messages];
+/**
+ * Konvertiert unser kompakt-internes ChatMessage-Format ins ModelMessage-Shape
+ * des Vercel AI SDK. Wir filtern hier defensiv `system`-Rollen heraus — die
+ * Persona kommt über den `system`-Parameter von `generateText`, system-Slots
+ * im messages-Array sind in der neuen API verboten/redundant.
+ */
+function toModelMessages(messages: ChatMessage[]): ModelMessage[] {
+  return messages
+    .filter((m) => m.role !== "system")
+    .map((m) => ({ role: m.role as "user" | "assistant", content: m.content }));
 }
 
 // ─── CAPABILITY DETECTION ────────────────────────────────────────────────────
