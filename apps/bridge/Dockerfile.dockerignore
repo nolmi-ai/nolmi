@@ -1,0 +1,47 @@
+# BuildKit liest diese Datei automatisch, wenn der Build mit
+#   docker build -f apps/bridge/Dockerfile .
+# startet. Pfade sind relativ zum Build-Context (= Repo-Root).
+#
+# Standard-Ort wäre <context>/.dockerignore am Repo-Root — dort wäre die Datei
+# global für alle Dockerfiles. Hier wollen wir Bridge-spezifische Excludes,
+# also Per-File-Variante: gleiches Verzeichnis wie das Dockerfile,
+# Dateiname = "<dockerfile>.dockerignore".
+
+# Build-Artefakte (werden im Container neu erzeugt)
+node_modules
+**/node_modules
+dist
+**/dist
+**/*.tsbuildinfo
+
+# Runtime-Daten gehören NIE ins Image — würden sonst Bridge-State aus deinem
+# lokalen Setup mitschleifen.
+data
+**/data
+
+# Secrets — Image bleibt env-frei, Compose injiziert zur Laufzeit.
+.env
+.env.*
+
+# Git und CI
+.git
+.github
+
+# Doku — Image braucht weder README noch CLAUDE.md noch ADRs.
+*.md
+**/*.md
+
+# IDE / Editor
+.vscode
+.idea
+
+# Andere Apps des Monorepo: Bridge ist eigenständig, braucht weder Web-
+# Frontend noch Twin-Runtime im Image.
+apps/web
+apps/runtime
+
+# Logs / Coverage / Misc
+coverage
+*.log
+.DS_Store
+.turbo
