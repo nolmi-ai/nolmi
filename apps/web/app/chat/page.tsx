@@ -30,8 +30,23 @@ export default function ChatPage() {
         const body = await res.json().catch(() => ({ error: "Unknown error" }));
         throw new Error(body.error ?? `HTTP ${res.status}`);
       }
-      const data = (await res.json()) as { message: ChatMessage };
-      setMessages((current) => [...current, data.message]);
+      const data = (await res.json()) as {
+        message: ChatMessage | null;
+        auditId: string;
+        pending: boolean;
+      };
+      if (data.pending) {
+        setMessages((current) => [
+          ...current,
+          {
+            role: "assistant",
+            content:
+              "Diese Anfrage habe ich an Markus zur Freigabe weitergeleitet. Sobald er sie approved, läuft sie. Du siehst den Status im Settings-Tab.",
+          },
+        ]);
+      } else if (data.message) {
+        setMessages((current) => [...current, data.message!]);
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed");
     } finally {

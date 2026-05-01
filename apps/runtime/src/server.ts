@@ -8,13 +8,15 @@ import { ChatRequestSchema } from "@twin-lab/shared";
 // ─── HTTP SERVER ─────────────────────────────────────────────────────────────
 //
 // Endpoints:
-//   POST /chat             → Twin antworten lassen
-//   GET  /audit?limit=50   → Audit-Log lesen
-//   GET  /stream           → Server-Sent Events (Live-Stream der Twin-Aktivität)
-//   GET  /health           → Heartbeat-Check
+//   POST /chat                    → Twin antworten lassen
+//   GET  /audit?limit=50          → Audit-Log lesen
+//   GET  /audit/pending           → nur pending Aktionen (für Settings-UI)
+//   POST /audit/:id/approve       → pending Aktion freigeben → Twin führt aus
+//   POST /audit/:id/reject        → pending Aktion ablehnen
+//   GET  /stream                  → Server-Sent Events (Live-Stream)
+//   GET  /health                  → Heartbeat-Check
 //
 // Phase 1: keine Auth — läuft nur lokal auf 127.0.0.1.
-// Phase 2+: Auth-Layer kommt obendrauf.
 
 export interface ServerDeps {
   twin: TwinService;
@@ -26,7 +28,7 @@ export async function createServer(deps: ServerDeps) {
   const app = Fastify({ logger: true });
 
   await app.register(cors, {
-    origin: true, // in Phase 1 unkritisch, läuft nur lokal
+    origin: true,
     credentials: true,
   });
 
@@ -52,7 +54,7 @@ export async function createServer(deps: ServerDeps) {
     }
   });
 
-  // ─── Audit ─────────────────────────────────────────────────────────────────
+  // ─── Audit-Liste ───────────────────────────────────────────────────────────
   app.get<{ Querystring: { limit?: string; offset?: string } }>(
     "/audit",
     async (request) => {
@@ -60,6 +62,45 @@ export async function createServer(deps: ServerDeps) {
       const offset = Number(request.query.offset ?? 0);
       const entries = await deps.audit.list({ limit, offset });
       return { entries };
+    },
+  );
+
+  // ─── Pending-Liste ─────────────────────────────────────────────────────────
+  app.get("/audit/pending", async () => {
+    // Pragmatisch: alle holen, dann filtern. Bei wachsendem Volumen würden
+    // wir das ins Repository als eigene Methode mit WHERE status='pending'
+    // verschieben.
+    const entries = await deps.audit.list({ limit: 200 });
+    const pending = entries.filter((e) => e.status === "pending");
+    return { entries: pending };
+  });
+
+  // ─── Approve ───────────────────────────────────────────────────────────────
+  app.post<{ Params: { id: string } }>(
+    "/audit/:id/approve",
+    async (request, reply) => {
+      try {
+        const result = await deps.twin.approvePending(request.params.id);
+        return result;
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : "Unknown error";
+        return reply.status(400).send({ error: msg });
+      }
+    },
+  );
+
+  // ─── Reject ────────────────────────────────────────────────────────────────
+  app.post<{ Params: { id: string }; Body: { reason?: string } }>(
+    "/audit/:id/reject",
+    async (request, reply) => {
+      try {
+        const reason = request.body?.reason ?? "Rejected by user";
+        await deps.twin.rejectPending(request.params.id, reason);
+        return { ok: true };
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : "Unknown error";
+        return reply.status(400).send({ error: msg });
+      }
     },
   );
 
@@ -76,13 +117,10 @@ export async function createServer(deps: ServerDeps) {
       reply.raw.write(`data: ${JSON.stringify(event)}\n\n`);
     };
 
-    // Initialer Heartbeat
     send({ type: "heartbeat", payload: { timestamp: new Date().toISOString() } });
 
-    // Subscribe an EventBus
     const unsubscribe = deps.bus.subscribe((event) => send(event));
 
-    // Heartbeat alle 15s, damit Proxies die Verbindung nicht killen
     const heartbeat = setInterval(() => {
       send({ type: "heartbeat", payload: { timestamp: new Date().toISOString() } });
     }, 15_000);

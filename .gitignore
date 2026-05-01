@@ -8,3 +8,5 @@ data/*.db-journal
 *.log
 .DS_Store
 .turbo
+data/*.db-shm
+data/*.db-wal

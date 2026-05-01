@@ -10,11 +10,15 @@ import type { EventBus } from "../events/bus.js";
 //   start()    → status: pending oder approved
 //   complete() → status: executed (mit output)
 //   fail()     → status: failed
+//   reject()   → status: rejected (vom Mensch abgelehnt)
 //   block()    → status: blocked (Mandate-Verstoß)
+//
+// `repo` ist bewusst public, damit höhere Schichten (z.B. Twin-Service)
+// direkt lesen können, ohne den Service mit Read-Methoden zu überfrachten.
 
 export class AuditService {
   constructor(
-    private repo: AuditRepository,
+    public readonly repo: AuditRepository,
     private bus: EventBus,
   ) {}
 
@@ -61,6 +65,21 @@ export class AuditService {
     const updated: AuditEntry = {
       ...existing,
       status: "failed",
+      reason,
+      timestamp: new Date().toISOString(),
+    };
+    await this.repo.update(id, updated);
+    this.bus.emit({ type: "audit.updated", payload: updated });
+    return updated;
+  }
+
+  async reject(id: string, reason: string): Promise<AuditEntry> {
+    const existing = await this.repo.get(id);
+    if (!existing) throw new Error(`Audit entry ${id} not found`);
+
+    const updated: AuditEntry = {
+      ...existing,
+      status: "rejected",
       reason,
       timestamp: new Date().toISOString(),
     };
