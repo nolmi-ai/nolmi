@@ -95,6 +95,13 @@ export const TwinEventSchema = z.discriminatedUnion("type", [
     type: z.literal("heartbeat"),
     payload: z.object({ timestamp: z.string().datetime() }),
   }),
+  z.object({
+    type: z.literal("bridge.message.received"),
+    payload: z.object({
+      auditId: z.string(),
+      fromHandle: z.string(),
+    }),
+  }),
 ]);
 
 export type TwinEvent = z.infer<typeof TwinEventSchema>;

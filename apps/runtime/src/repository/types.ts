@@ -23,6 +23,12 @@ export interface AuditRepository {
   update(id: string, patch: Partial<AuditEntry>): Promise<void>;
   list(opts: { limit: number; offset?: number }): Promise<AuditEntry[]>;
   get(id: string): Promise<AuditEntry | null>;
+  /**
+   * Sucht den ersten Eintrag, dessen `input.<field>` exakt `value` ist.
+   * Genutzt für Idempotenz bei eingehenden Bridge-Nachrichten (field =
+   * "bridgeMessageId"). `field` muss ein simpler Identifier sein.
+   */
+  findByInputField(field: string, value: string): Promise<AuditEntry | null>;
 }
 
 export interface RepositoryBundle {

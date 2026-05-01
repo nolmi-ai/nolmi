@@ -47,3 +47,27 @@ mandates:
       requiresApproval: true
       maxLength: 2000
     escalation: always_pending
+
+  - id: mandate_send_to_twin
+    capability: send_to_twin
+    description: >
+      Der Twin darf Nachrichten an andere Twins über die Bridge senden — als
+      Draft, der vor dem Versand in Markus' Approval-Queue landet. Direkt-Sendung
+      ohne Freigabe ist explizit nicht erlaubt.
+    scope:
+      - connected
+    conditions:
+      requiresApproval: true
+    escalation: always_pending
+
+  - id: mandate_respond_to_twin_message
+    capability: respond_to_twin_message
+    description: >
+      Der Twin darf auf eingehende Nachrichten von anderen Twins antworten —
+      jede Antwort wird als Pending erfasst und erst nach Markus' Freigabe
+      über die Bridge zurückgesendet.
+    scope:
+      - connected
+    conditions:
+      requiresApproval: true
+    escalation: always_pending

@@ -125,4 +125,19 @@ class SqliteAuditRepository implements AuditRepository {
       | undefined;
     return row ? (JSON.parse(row.data) as AuditEntry) : null;
   }
+
+  async findByInputField(field: string, value: string): Promise<AuditEntry | null> {
+    // Pfad-Injection-Schutz: nur einfache Identifier zulassen, weil wir den
+    // json_extract-Pfad als String konkatenieren müssen (SQLite akzeptiert
+    // keinen Bind-Parameter im Pfad).
+    if (!/^[a-zA-Z0-9_]+$/.test(field)) {
+      throw new Error(`Invalid field name for findByInputField: ${field}`);
+    }
+    const row = this.db
+      .prepare(
+        `SELECT data FROM audit WHERE json_extract(data, '$.input.${field}') = ? LIMIT 1`,
+      )
+      .get(value) as { data: string } | undefined;
+    return row ? (JSON.parse(row.data) as AuditEntry) : null;
+  }
 }

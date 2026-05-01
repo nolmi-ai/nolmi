@@ -63,6 +63,9 @@ importers:
       dotenv:
         specifier: ^16.4.0
         version: 16.6.1
+      eventsource:
+        specifier: ^2.0.2
+        version: 2.0.2
       fastify:
         specifier: ^5.0.0
         version: 5.8.5
@@ -82,6 +85,9 @@ importers:
       '@types/better-sqlite3':
         specifier: ^7.6.0
         version: 7.6.13
+      '@types/eventsource':
+        specifier: ^1.1.15
+        version: 1.1.15
       '@types/node':
         specifier: ^22.0.0
         version: 22.19.17
@@ -553,6 +559,9 @@ packages:
   '@types/better-sqlite3@7.6.13':
     resolution: {integrity: sha512-NMv9ASNARoKksWtsq/SHakpYAYnhBrQgGD8zkLYk/jaK8jUGn08CfEdTRgYhMypUQAfzSP8W6gNLe0q19/t4VA==}
 
+  '@types/eventsource@1.1.15':
+    resolution: {integrity: sha512-XQmGcbnxUNa06HR3VBVkc9+A2Vpi9ZyLJcdS5dwaQQ/4ZMWFO+5c90FnMUpbtMZwB/FChoYHwuVg8TvkECacTA==}
+
   '@types/node-fetch@2.6.13':
     resolution: {integrity: sha512-QGpRVpzSaUs30JBSGPjOg4Uveu384erbHBoT1zeONvyCfwQxIkUshLAOqN/k9EjGviPRmWTTe6aH2qySWKTVSw==}
 
@@ -761,6 +770,10 @@ packages:
   event-target-shim@5.0.1:
     resolution: {integrity: sha512-i/2XbnSz/uxRCU6+NdVJgKWDTM427+MqYbkQzD321DuCQJUqOuJKIA0IM2+W2xtYHdKOmZ4dR6fExsd4SXL+WQ==}
     engines: {node: '>=6'}
+
+  eventsource@2.0.2:
+    resolution: {integrity: sha512-IzUmBGPR3+oUG9dUeXynyNmf91/3zUSJg1lCktzKw47OXuhco54U3r9B7O4XX+Rb1Itm9OZ2b0RkTs10bICOxA==}
+    engines: {node: '>=12.0.0'}
 
   expand-template@2.0.3:
     resolution: {integrity: sha512-XYfuKMvj4O35f/pOXLObndIRvyQ+/+6AhODh+OKWj9S9498pHHn/IMszH+gt0fBCRWMNfk1ZSp5x3AifmnI2vg==}
@@ -1673,6 +1686,8 @@ snapshots:
     dependencies:
       '@types/node': 22.19.17
 
+  '@types/eventsource@1.1.15': {}
+
   '@types/node-fetch@2.6.13':
     dependencies:
       '@types/node': 22.19.17
@@ -1894,6 +1909,8 @@ snapshots:
   escalade@3.2.0: {}
 
   event-target-shim@5.0.1: {}
+
+  eventsource@2.0.2: {}
 
   expand-template@2.0.3: {}
 

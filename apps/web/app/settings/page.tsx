@@ -113,13 +113,14 @@ export default function SettingsPage() {
           <ul className="space-y-3">
             {pending.map((entry) => {
               const lastMessage = extractLastMessage(entry);
+              const header = formatPendingHeader(entry);
               const isBusy = busy[entry.id] ?? false;
               return (
                 <li key={entry.id} className="border border-border rounded p-4 space-y-3">
                   <div className="flex items-start justify-between gap-3">
                     <div className="flex-1 min-w-0">
                       <div className="text-xs text-accent uppercase tracking-wider mb-1">
-                        {entry.capability}
+                        {header}
                       </div>
                       <div className="text-xs text-muted">
                         {new Date(entry.timestamp).toLocaleString()}
@@ -266,17 +267,37 @@ function Section({ title, children }: { title: string; children: React.ReactNode
   );
 }
 
+// Cascade über die bekannten Input-Shapes:
+//   - lastMessage / messages[]            → Chat-getriebene Capabilities
+//                                           (respond_to_chat, send_to_twin, …)
+//   - content                             → Bridge-eingehende Nachrichten
+//                                           (respond_to_twin_message)
+// So bleibt der Helper Capability-agnostisch und kommt mit neuen Capabilities
+// klar, solange sie eines dieser Felder befüllen.
 function extractLastMessage(entry: AuditEntry): string {
   const input = entry.input as {
     lastMessage?: string;
     messages?: ChatMessage[];
+    content?: string;
   };
   if (typeof input.lastMessage === "string") return input.lastMessage;
   if (Array.isArray(input.messages)) {
     const last = input.messages[input.messages.length - 1];
     if (last?.content) return last.content;
   }
+  if (typeof input.content === "string") return input.content;
   return "(keine Eingabe gefunden)";
+}
+
+function formatPendingHeader(entry: AuditEntry): string {
+  const input = entry.input as { fromHandle?: string; targetHandle?: string };
+  if (entry.capability === "respond_to_twin_message" && input.fromHandle) {
+    return `Eingehend von ${input.fromHandle}`;
+  }
+  if (entry.capability === "send_to_twin" && input.targetHandle) {
+    return `An ${input.targetHandle} senden`;
+  }
+  return entry.capability;
 }
 
 function hasReply(entry: AuditEntry): boolean {
