@@ -1,16 +1,13 @@
 import Database from "better-sqlite3";
-import type {
-  AuditRepository,
-  MandateRepository,
-  PersonaRepository,
-  RepositoryBundle,
-} from "./types.js";
-import type { AuditEntry, Mandate, Persona } from "@twin-lab/shared";
+import type { AuditRepository, RepositoryBundle } from "./types.js";
+import type { AuditEntry } from "@twin-lab/shared";
 
 // ─── SQLITE BUNDLE ───────────────────────────────────────────────────────────
 //
-// Eine einzige DB-Instanz pro Runtime, geteilt zwischen den drei Repositories.
-// `better-sqlite3` ist synchron — schnell, einfach, perfekt für Single-User.
+// Eine DB-Connection pro Runtime, mit WAL + foreign_keys. Die `db` ist im
+// Bundle exposed, damit andere Repos (TwinProfilesRepo etc.) dieselbe
+// Connection wiederverwenden können statt eine zweite auf dieselbe Datei zu
+// öffnen.
 
 export function createSqliteRepository(dbPath: string): RepositoryBundle {
   const db = new Database(dbPath);
@@ -18,65 +15,9 @@ export function createSqliteRepository(dbPath: string): RepositoryBundle {
   db.pragma("foreign_keys = ON");
 
   return {
-    persona: new SqlitePersonaRepository(db),
-    mandates: new SqliteMandateRepository(db),
     audit: new SqliteAuditRepository(db),
+    db,
   };
-}
-
-// ─── PERSONA ─────────────────────────────────────────────────────────────────
-
-class SqlitePersonaRepository implements PersonaRepository {
-  constructor(private db: Database.Database) {}
-
-  async get(): Promise<Persona | null> {
-    const row = this.db.prepare("SELECT data FROM persona WHERE id = 1").get() as
-      | { data: string }
-      | undefined;
-    return row ? (JSON.parse(row.data) as Persona) : null;
-  }
-
-  async save(persona: Persona): Promise<void> {
-    this.db
-      .prepare(
-        `INSERT INTO persona (id, data) VALUES (1, ?)
-         ON CONFLICT(id) DO UPDATE SET data = excluded.data`,
-      )
-      .run(JSON.stringify(persona));
-  }
-}
-
-// ─── MANDATES ────────────────────────────────────────────────────────────────
-
-class SqliteMandateRepository implements MandateRepository {
-  constructor(private db: Database.Database) {}
-
-  async list(): Promise<Mandate[]> {
-    const rows = this.db.prepare("SELECT data FROM mandates").all() as { data: string }[];
-    return rows.map((r) => JSON.parse(r.data) as Mandate);
-  }
-
-  async findByCapability(capability: string): Promise<Mandate | null> {
-    const rows = this.db.prepare("SELECT data FROM mandates").all() as { data: string }[];
-    for (const row of rows) {
-      const m = JSON.parse(row.data) as Mandate;
-      if (m.capability === capability) return m;
-    }
-    return null;
-  }
-
-  async upsert(mandate: Mandate): Promise<void> {
-    this.db
-      .prepare(
-        `INSERT INTO mandates (id, capability, data) VALUES (?, ?, ?)
-         ON CONFLICT(id) DO UPDATE SET capability = excluded.capability, data = excluded.data`,
-      )
-      .run(mandate.id, mandate.capability, JSON.stringify(mandate));
-  }
-
-  async delete(id: string): Promise<void> {
-    this.db.prepare("DELETE FROM mandates WHERE id = ?").run(id);
-  }
 }
 
 // ─── AUDIT ───────────────────────────────────────────────────────────────────

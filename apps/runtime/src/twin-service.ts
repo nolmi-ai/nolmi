@@ -1,6 +1,5 @@
-import type { AuditEntry, ChatMessage, Persona } from "@twin-lab/shared";
+import type { AuditEntry, ChatMessage, Mandate, Persona } from "@twin-lab/shared";
 import { generateText, type LanguageModel, type ModelMessage } from "ai";
-import type { MandateRepository, PersonaRepository } from "./repository/types.js";
 import { checkMandate } from "./mandates/service.js";
 import { AuditService } from "./audit/service.js";
 import type { EventBus } from "./events/bus.js";
@@ -33,8 +32,10 @@ export interface TwinServiceDeps {
   modelLabel: string;
   audit: AuditService;
   bus: EventBus;
-  personaRepo: PersonaRepository;
-  mandateRepo: MandateRepository;
+  /** Persona kommt aus `twin_profiles.persona_md` + `display_name`/`handle`. */
+  persona: Persona;
+  /** Mandates kommen aus `twin_profiles.mandates_json` als in-memory Array. */
+  mandates: Mandate[];
   bridgeClient?: BridgeClient | null;
 }
 
@@ -66,7 +67,7 @@ export class TwinService {
     const detection = detectCapability(lastUser);
 
     // 2. Mandate-Check
-    const check = await checkMandate(this.deps.mandateRepo, detection.capability);
+    const check = checkMandate(this.deps.mandates, detection.capability);
     if (!check.allowed) {
       const blocked = await this.deps.audit.block({
         capability: detection.capability,
@@ -87,10 +88,7 @@ export class TwinService {
       throw new Error(`Twin blocked: ${blocked.reason}`);
     }
 
-    const persona = await this.deps.personaRepo.get();
-    if (!persona) {
-      throw new Error("Persona not initialized — run db:init first");
-    }
+    const persona = this.deps.persona;
 
     // 3. Escalation-Check: läuft auto oder bleibt pending?
     const isPending = check.mandate?.escalation === "always_pending";
@@ -161,7 +159,7 @@ export class TwinService {
       return;
     }
 
-    const check = await checkMandate(this.deps.mandateRepo, "respond_to_twin_message");
+    const check = checkMandate(this.deps.mandates, "respond_to_twin_message");
     // Auch ohne Mandate erfassen wir die Nachricht — als blocked. So sieht der
     // User im Audit-Log, dass jemand geschrieben hat, kann aber nicht antworten
     // ohne erst das Mandate zu setzen.
@@ -216,8 +214,7 @@ export class TwinService {
       throw new Error(`Audit ${auditId} is not pending (status: ${entry.status})`);
     }
 
-    const persona = await this.deps.personaRepo.get();
-    if (!persona) throw new Error("Persona not initialized");
+    const persona = this.deps.persona;
 
     switch (entry.capability) {
       case "respond_to_twin_message":

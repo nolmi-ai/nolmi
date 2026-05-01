@@ -1,22 +1,15 @@
-import type { AuditEntry, Mandate, Persona } from "@twin-lab/shared";
+import type Database from "better-sqlite3";
+import type { AuditEntry } from "@twin-lab/shared";
 
 // ─── REPOSITORY-PATTERN ──────────────────────────────────────────────────────
 //
-// Alle DB-Zugriffe gehen über diese Interfaces.
-// Phase 1: SQLite-Implementierung. Später: Postgres, Supabase, was auch immer.
-// Wer Twin self-hosted, kann eigenes Repository einklinken.
-
-export interface PersonaRepository {
-  get(): Promise<Persona | null>;
-  save(persona: Persona): Promise<void>;
-}
-
-export interface MandateRepository {
-  list(): Promise<Mandate[]>;
-  findByCapability(capability: string): Promise<Mandate | null>;
-  upsert(mandate: Mandate): Promise<void>;
-  delete(id: string): Promise<void>;
-}
+// Phase 2.5: Persona/Mandate-Repos sind raus — beides kommt aus
+// `twin_profiles` und wird beim Boot in den TwinService injiziert. Bleibt
+// nur das Audit-Repo als per-Action-Sink.
+//
+// Der `RepositoryBundle` exponiert zusätzlich die rohe `db`-Connection,
+// damit andere Repos (TwinProfilesRepo, später Multi-Twin-Lookups) sich an
+// dieselbe Connection hängen können — kein zweites Open auf dieselbe Datei.
 
 export interface AuditRepository {
   append(entry: AuditEntry): Promise<void>;
@@ -32,7 +25,7 @@ export interface AuditRepository {
 }
 
 export interface RepositoryBundle {
-  persona: PersonaRepository;
-  mandates: MandateRepository;
   audit: AuditRepository;
+  /** Gemeinsame DB-Connection für ad-hoc Repos (z.B. TwinProfilesRepo). */
+  db: Database.Database;
 }

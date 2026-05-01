@@ -2,12 +2,14 @@ import { readFile } from "node:fs/promises";
 import { parse as parseYaml } from "yaml";
 import { nanoid } from "nanoid";
 import type { Mandate } from "@twin-lab/shared";
-import type { MandateRepository } from "../repository/types.js";
 
-// ─── MANDATE LOADER ──────────────────────────────────────────────────────────
+// ─── MANDATE LOADER (BOOTSTRAP-ONLY) ─────────────────────────────────────────
 //
-// Mandates kommen aus docs/mandates.yaml und werden beim Start synchronisiert
-// (existierende ID → update, neue ID → insert).
+// Liest docs/mandates.yaml und liefert ein Mandate-Array. Wird seit Phase 2.5
+// nicht mehr beim Boot benutzt — der Runtime liest Mandates aus
+// `twin_profiles.mandates_json`. Bleibt hier nur, weil das Bootstrap-Script
+// (apps/runtime/src/scripts/bootstrap-markus-twin.ts) die YAML in die DB
+// überträgt.
 
 interface MandateYamlEntry {
   id?: string;
@@ -35,19 +37,13 @@ export async function loadMandatesFromYaml(path: string): Promise<Mandate[]> {
   }));
 }
 
-export async function syncMandates(
-  repo: MandateRepository,
-  mandates: Mandate[],
-): Promise<void> {
-  for (const m of mandates) {
-    await repo.upsert(m);
-  }
-}
-
 // ─── MANDATE CHECK ───────────────────────────────────────────────────────────
 //
-// Vor jeder Twin-Aktion wird geprüft: gibt es ein passendes Mandate?
-// Wenn nicht → blocked. Wenn ja → result enthält das Mandate.
+// Vor jeder Twin-Aktion: gibt es ein Mandate für diese Capability im aktiven
+// Twin-Profil? Wenn nicht → blocked. Wenn ja → result enthält das Mandate.
+//
+// Operiert auf einem in-memory Mandate-Array (kommt aus `TwinProfile.mandates`
+// vom Boot). Kein DB-Lookup pro Call mehr.
 
 export interface MandateCheckResult {
   allowed: boolean;
@@ -55,22 +51,23 @@ export interface MandateCheckResult {
   reason: string | null;
 }
 
-export async function checkMandate(
-  repo: MandateRepository,
+export function checkMandate(
+  mandates: Mandate[],
   capability: string,
-): Promise<MandateCheckResult> {
-  const mandate = await repo.findByCapability(capability);
+): MandateCheckResult {
+  const mandate = mandates.find((m) => m.capability === capability);
 
   if (!mandate) {
     return {
       allowed: false,
       mandate: null,
-      reason: `No mandate found for capability "${capability}"`,
+      reason: `Kein Mandate für Capability "${capability}"`,
     };
   }
 
-  // In Phase 1: Mandate vorhanden = erlaubt.
-  // Conditions-Auswertung kommt in Phase 2 (z.B. maxLength, requiresApproval).
+  // Phase 1+2: Mandate vorhanden = erlaubt. Conditions-Auswertung
+  // (maxLength, requiresApproval, …) ist weiterhin nicht implementiert —
+  // `escalation: always_pending` reicht aktuell als Sicherheits-Gate.
   return {
     allowed: true,
     mandate,
