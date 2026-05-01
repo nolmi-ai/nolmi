@@ -1,31 +1,37 @@
-import Fastify from "fastify";
+import Fastify, { type FastifyInstance, type FastifyReply } from "fastify";
 import cors from "@fastify/cors";
-import type { TwinService } from "./twin-service.js";
 import type { AuditRepository } from "./repository/types.js";
-import type { EventBus } from "./events/bus.js";
-import type { TwinProfile } from "./twin-profiles-repo.js";
 import { ChatRequestSchema } from "@twin-lab/shared";
+import type { RegistryEntry, TwinServiceRegistry } from "./twin-service-registry.js";
 
 // ─── HTTP SERVER ─────────────────────────────────────────────────────────────
 //
-// Endpoints:
-//   GET  /twin-profile            → aktives Twin-Profil (read-only, Token maskiert)
-//   POST /chat                    → Twin antworten lassen
-//   GET  /audit?limit=50          → Audit-Log lesen
-//   GET  /audit/pending           → nur pending Aktionen (für Settings-UI)
-//   POST /audit/:id/approve       → pending Aktion freigeben → Twin führt aus
-//   POST /audit/:id/reject        → pending Aktion ablehnen
-//   GET  /stream                  → Server-Sent Events (Live-Stream)
-//   GET  /health                  → Heartbeat-Check
+// Phase 2.5d: Multi-Twin pro Runtime. Routing-Schema:
+//
+//   GET  /health                                      → server-weit
+//   GET  /twins                                       → Liste aller aktiven Twins
+//   GET  /twins/:handle/profile                       → Profil eines Twins
+//   POST /twins/:handle/chat                          → Chat mit einem Twin
+//   GET  /twins/:handle/audit?limit=50                → Audit-Log eines Twins
+//   GET  /twins/:handle/audit/pending                 → Pending eines Twins
+//   POST /twins/:handle/audit/:id/approve             → Approve
+//   POST /twins/:handle/audit/:id/reject              → Reject
+//   GET  /twins/:handle/stream                        → SSE für einen Twin
+//
+// Backward-Compat (legacy, route auf @markus):
+//   POST /chat                              → POST /twins/@markus/chat
+//   GET  /audit, /audit/pending             → /twins/@markus/audit*
+//   POST /audit/:id/approve, /audit/:id/reject
+//   GET  /stream                            → /twins/@markus/stream
+//   GET  /twin-profile                      → /twins/@markus/profile
 //
 // Phase 1: keine Auth — läuft nur lokal auf 127.0.0.1.
 
+const LEGACY_HANDLE = "@markus";
+
 export interface ServerDeps {
-  twin: TwinService;
   audit: AuditRepository;
-  bus: EventBus;
-  /** Aktives Twin-Profil aus `twin_profiles`, beim Boot geladen. */
-  profile: TwinProfile;
+  registry: TwinServiceRegistry;
 }
 
 export async function createServer(deps: ServerDeps) {
@@ -36,18 +42,22 @@ export async function createServer(deps: ServerDeps) {
     credentials: true,
   });
 
-  // ─── Health ────────────────────────────────────────────────────────────────
-  app.get("/health", async () => ({
-    status: "ok",
-    timestamp: new Date().toISOString(),
-    subscribers: deps.bus.size(),
-  }));
+  // ─── Helpers ───────────────────────────────────────────────────────────────
 
-  // ─── Twin-Profil (read-only) ───────────────────────────────────────────────
-  // Spiegelt das beim Boot geladene Profil für die Settings-UI. Sensitive
-  // Felder werden gefiltert: api_key gar nicht, bridge_token nur maskiert.
-  app.get("/twin-profile", async () => {
-    const p = deps.profile;
+  const requireEntry = (
+    handle: string,
+    reply: FastifyReply,
+  ): RegistryEntry | null => {
+    const entry = deps.registry.getEntry(handle);
+    if (!entry) {
+      reply.status(404).send({ error: `Twin "${handle}" nicht gefunden oder inaktiv` });
+      return null;
+    }
+    return entry;
+  };
+
+  const profileToResponse = (entry: RegistryEntry) => {
+    const p = entry.profile;
     return {
       twinId: p.twinId,
       handle: p.handle,
@@ -66,51 +76,85 @@ export async function createServer(deps: ServerDeps) {
       createdAt: p.createdAt,
       updatedAt: p.updatedAt,
     };
-  });
+  };
+
+  // ─── Health ────────────────────────────────────────────────────────────────
+  app.get("/health", async () => ({
+    status: "ok",
+    timestamp: new Date().toISOString(),
+    twins: deps.registry.list().length,
+  }));
+
+  // ─── Twin-Liste ────────────────────────────────────────────────────────────
+  app.get("/twins", async () => ({ twins: deps.registry.list() }));
+
+  // ─── Profil ────────────────────────────────────────────────────────────────
+  app.get<{ Params: { handle: string } }>(
+    "/twins/:handle/profile",
+    async (request, reply) => {
+      const entry = requireEntry(request.params.handle, reply);
+      if (!entry) return;
+      return profileToResponse(entry);
+    },
+  );
 
   // ─── Chat ──────────────────────────────────────────────────────────────────
-  app.post("/chat", async (request, reply) => {
-    const parsed = ChatRequestSchema.safeParse(request.body);
-    if (!parsed.success) {
-      return reply.status(400).send({ error: parsed.error.message });
-    }
-    try {
-      const result = await deps.twin.chat(parsed.data.messages);
-      return result;
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : "Unknown error";
-      return reply.status(500).send({ error: msg });
-    }
-  });
+  app.post<{ Params: { handle: string } }>(
+    "/twins/:handle/chat",
+    async (request, reply) => {
+      const entry = requireEntry(request.params.handle, reply);
+      if (!entry) return;
+      const parsed = ChatRequestSchema.safeParse(request.body);
+      if (!parsed.success) {
+        return reply.status(400).send({ error: parsed.error.message });
+      }
+      try {
+        return await entry.service.chat(parsed.data.messages);
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : "Unknown error";
+        return reply.status(500).send({ error: msg });
+      }
+    },
+  );
 
   // ─── Audit-Liste ───────────────────────────────────────────────────────────
-  app.get<{ Querystring: { limit?: string; offset?: string } }>(
-    "/audit",
-    async (request) => {
+  app.get<{ Params: { handle: string }; Querystring: { limit?: string; offset?: string } }>(
+    "/twins/:handle/audit",
+    async (request, reply) => {
+      const entry = requireEntry(request.params.handle, reply);
+      if (!entry) return;
       const limit = Math.min(Number(request.query.limit ?? 50), 200);
       const offset = Number(request.query.offset ?? 0);
-      const entries = await deps.audit.list({ limit, offset });
+      const entries = await deps.audit.list({ limit, offset, twinId: entry.twinId });
       return { entries };
     },
   );
 
   // ─── Pending-Liste ─────────────────────────────────────────────────────────
-  app.get("/audit/pending", async () => {
-    // Pragmatisch: alle holen, dann filtern. Bei wachsendem Volumen würden
-    // wir das ins Repository als eigene Methode mit WHERE status='pending'
-    // verschieben.
-    const entries = await deps.audit.list({ limit: 200 });
-    const pending = entries.filter((e) => e.status === "pending");
-    return { entries: pending };
-  });
+  app.get<{ Params: { handle: string } }>(
+    "/twins/:handle/audit/pending",
+    async (request, reply) => {
+      const entry = requireEntry(request.params.handle, reply);
+      if (!entry) return;
+      // Pragmatisch: alle holen (200), in JS auf pending filtern. Bei
+      // wachsendem Volumen besser eine WHERE status='pending'-Query im Repo.
+      const entries = await deps.audit.list({ limit: 200, twinId: entry.twinId });
+      return { entries: entries.filter((e) => e.status === "pending") };
+    },
+  );
 
   // ─── Approve ───────────────────────────────────────────────────────────────
-  app.post<{ Params: { id: string } }>(
-    "/audit/:id/approve",
+  app.post<{ Params: { handle: string; id: string } }>(
+    "/twins/:handle/audit/:id/approve",
     async (request, reply) => {
+      const entry = requireEntry(request.params.handle, reply);
+      if (!entry) return;
+      const auditEntry = await deps.audit.get(request.params.id);
+      if (!auditEntry || auditEntry.twinId !== entry.twinId) {
+        return reply.status(404).send({ error: "Audit-Eintrag nicht für diesen Twin" });
+      }
       try {
-        const result = await deps.twin.approvePending(request.params.id);
-        return result;
+        return await entry.service.approvePending(request.params.id);
       } catch (err) {
         const msg = err instanceof Error ? err.message : "Unknown error";
         return reply.status(400).send({ error: msg });
@@ -119,12 +163,18 @@ export async function createServer(deps: ServerDeps) {
   );
 
   // ─── Reject ────────────────────────────────────────────────────────────────
-  app.post<{ Params: { id: string }; Body: { reason?: string } }>(
-    "/audit/:id/reject",
+  app.post<{ Params: { handle: string; id: string }; Body: { reason?: string } }>(
+    "/twins/:handle/audit/:id/reject",
     async (request, reply) => {
+      const entry = requireEntry(request.params.handle, reply);
+      if (!entry) return;
+      const auditEntry = await deps.audit.get(request.params.id);
+      if (!auditEntry || auditEntry.twinId !== entry.twinId) {
+        return reply.status(404).send({ error: "Audit-Eintrag nicht für diesen Twin" });
+      }
       try {
         const reason = request.body?.reason ?? "Rejected by user";
-        await deps.twin.rejectPending(request.params.id, reason);
+        await entry.service.rejectPending(request.params.id, reason);
         return { ok: true };
       } catch (err) {
         const msg = err instanceof Error ? err.message : "Unknown error";
@@ -134,41 +184,162 @@ export async function createServer(deps: ServerDeps) {
   );
 
   // ─── Stream (SSE) ──────────────────────────────────────────────────────────
+  app.get<{ Params: { handle: string } }>(
+    "/twins/:handle/stream",
+    async (request, reply) => {
+      const entry = requireEntry(request.params.handle, reply);
+      if (!entry) return;
+
+      reply.raw.writeHead(200, {
+        "Content-Type": "text/event-stream",
+        "Cache-Control": "no-cache",
+        Connection: "keep-alive",
+        "Access-Control-Allow-Origin": "*",
+      });
+
+      const send = (event: unknown) => {
+        reply.raw.write(`data: ${JSON.stringify(event)}\n\n`);
+      };
+
+      send({ type: "heartbeat", payload: { timestamp: new Date().toISOString() } });
+
+      const unsubscribe = entry.bus.subscribe((event) => send(event));
+
+      const heartbeat = setInterval(() => {
+        send({ type: "heartbeat", payload: { timestamp: new Date().toISOString() } });
+      }, 15_000);
+
+      request.raw.on("close", () => {
+        clearInterval(heartbeat);
+        unsubscribe();
+      });
+    },
+  );
+
+  // ─── Legacy-Aliases (route auf @markus) ────────────────────────────────────
+  // Heute: erhält die Phase-2-UI am Leben, solange sie noch nicht alle
+  // Endpoints umgestellt hat. Soll nach UI-Migration entfernt werden.
+
+  registerLegacyAliases(app, deps, profileToResponse);
+
+  return app;
+}
+
+// ─── Legacy-Aliases ──────────────────────────────────────────────────────────
+
+function registerLegacyAliases(
+  app: FastifyInstance,
+  deps: ServerDeps,
+  profileToResponse: (entry: RegistryEntry) => unknown,
+) {
+  const requireLegacyEntry = (reply: FastifyReply): RegistryEntry | null => {
+    const entry = deps.registry.getEntry(LEGACY_HANDLE);
+    if (!entry) {
+      reply.status(404).send({
+        error: `Legacy-Default-Twin "${LEGACY_HANDLE}" nicht aktiv — Endpoints sind deprecated, nutze /twins/<handle>/...`,
+      });
+      return null;
+    }
+    return entry;
+  };
+
+  app.get("/twin-profile", async (_request, reply) => {
+    const entry = requireLegacyEntry(reply);
+    if (!entry) return;
+    return profileToResponse(entry);
+  });
+
+  app.post("/chat", async (request, reply) => {
+    const entry = requireLegacyEntry(reply);
+    if (!entry) return;
+    const parsed = ChatRequestSchema.safeParse(request.body);
+    if (!parsed.success) return reply.status(400).send({ error: parsed.error.message });
+    try {
+      return await entry.service.chat(parsed.data.messages);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Unknown error";
+      return reply.status(500).send({ error: msg });
+    }
+  });
+
+  app.get<{ Querystring: { limit?: string; offset?: string } }>(
+    "/audit",
+    async (request, reply) => {
+      const entry = requireLegacyEntry(reply);
+      if (!entry) return;
+      const limit = Math.min(Number(request.query.limit ?? 50), 200);
+      const offset = Number(request.query.offset ?? 0);
+      const entries = await deps.audit.list({ limit, offset, twinId: entry.twinId });
+      return { entries };
+    },
+  );
+
+  app.get("/audit/pending", async (_request, reply) => {
+    const entry = requireLegacyEntry(reply);
+    if (!entry) return;
+    const entries = await deps.audit.list({ limit: 200, twinId: entry.twinId });
+    return { entries: entries.filter((e) => e.status === "pending") };
+  });
+
+  app.post<{ Params: { id: string } }>(
+    "/audit/:id/approve",
+    async (request, reply) => {
+      const entry = requireLegacyEntry(reply);
+      if (!entry) return;
+      try {
+        return await entry.service.approvePending(request.params.id);
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : "Unknown error";
+        return reply.status(400).send({ error: msg });
+      }
+    },
+  );
+
+  app.post<{ Params: { id: string }; Body: { reason?: string } }>(
+    "/audit/:id/reject",
+    async (request, reply) => {
+      const entry = requireLegacyEntry(reply);
+      if (!entry) return;
+      try {
+        const reason = request.body?.reason ?? "Rejected by user";
+        await entry.service.rejectPending(request.params.id, reason);
+        return { ok: true };
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : "Unknown error";
+        return reply.status(400).send({ error: msg });
+      }
+    },
+  );
+
   app.get("/stream", async (request, reply) => {
+    const entry = requireLegacyEntry(reply);
+    if (!entry) return;
     reply.raw.writeHead(200, {
       "Content-Type": "text/event-stream",
       "Cache-Control": "no-cache",
       Connection: "keep-alive",
       "Access-Control-Allow-Origin": "*",
     });
-
     const send = (event: unknown) => {
       reply.raw.write(`data: ${JSON.stringify(event)}\n\n`);
     };
-
     send({ type: "heartbeat", payload: { timestamp: new Date().toISOString() } });
-
-    const unsubscribe = deps.bus.subscribe((event) => send(event));
-
+    const unsubscribe = entry.bus.subscribe((event) => send(event));
     const heartbeat = setInterval(() => {
       send({ type: "heartbeat", payload: { timestamp: new Date().toISOString() } });
     }, 15_000);
-
     request.raw.on("close", () => {
       clearInterval(heartbeat);
       unsubscribe();
     });
   });
-
-  return app;
 }
 
 // ─── helpers ─────────────────────────────────────────────────────────────────
 
 /**
  * Maskiert einen Bridge-Token für die UI-Anzeige: erste 4 + "…" + letzte 4
- * Zeichen. Bei Tokens unter 9 Zeichen geben wir nur "…" zurück, weil sonst
- * der "Maske" so viel offen liegt wie der Klartext.
+ * Zeichen. Bei Tokens unter 9 Zeichen geben wir nur "…" zurück.
  */
 function maskToken(token: string): string {
   if (token.length < 9) return "…";

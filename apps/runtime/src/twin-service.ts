@@ -26,6 +26,8 @@ import type { BridgeMessage } from "./bridge/types.js";
 // Twin ohne explizite Approval.
 
 export interface TwinServiceDeps {
+  /** Twin-ID aus dem Profil, für Audit-Filter und Logs. */
+  twinId: string;
   /** Vercel-AI-SDK-LanguageModel — siehe `llm-client.ts`. */
   model: LanguageModel;
   /** Kompaktes Label "<provider>/<model>", landet in Audit-Metadata. */
@@ -154,6 +156,7 @@ export class TwinService {
     const existing = await this.deps.audit.repo.findByInputField(
       "bridgeMessageId",
       msg.id,
+      { twinId: this.deps.twinId },
     );
     if (existing) {
       return;

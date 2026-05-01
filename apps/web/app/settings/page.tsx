@@ -1,13 +1,12 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import type { AuditEntry, ChatMessage } from "@twin-lab/shared";
 
 const RUNTIME_URL = process.env.NEXT_PUBLIC_RUNTIME_URL ?? "http://127.0.0.1:4000";
 
-// Spiegelt das `/twin-profile`-Response-Schema vom Runtime. Bewusst nur
-// hier definiert, weil read-only und keine Validierung wie bei AuditEntry
-// nötig ist — fetch + render, fertig.
+// Spiegelt das `/twins/:handle/profile`-Response-Schema vom Runtime.
 interface TwinProfileResponse {
   twinId: string;
   handle: string;
@@ -27,7 +26,27 @@ interface TwinProfileResponse {
   updatedAt: number;
 }
 
+interface TwinSummary {
+  twinId: string;
+  handle: string;
+  displayName: string;
+}
+
+// Outer-Wrapper für die Suspense-Boundary, die useSearchParams verlangt.
 export default function SettingsPage() {
+  return (
+    <Suspense fallback={<div className="text-sm text-muted">Lade Settings…</div>}>
+      <SettingsInner />
+    </Suspense>
+  );
+}
+
+function SettingsInner() {
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const requestedHandle = searchParams.get("twin");
+
+  const [twins, setTwins] = useState<TwinSummary[]>([]);
   const [audit, setAudit] = useState<AuditEntry[]>([]);
   const [pending, setPending] = useState<AuditEntry[]>([]);
   const [busy, setBusy] = useState<Record<string, boolean>>({});
@@ -36,9 +55,41 @@ export default function SettingsPage() {
   const [profileLoading, setProfileLoading] = useState(true);
   const [profileError, setProfileError] = useState<string | null>(null);
 
-  const loadAudit = useCallback(async () => {
+  // Effektiv ausgewählter Twin: ?twin= aus URL ODER Default = erster Twin.
+  const selectedHandle = useMemo(
+    () => requestedHandle ?? twins[0]?.handle ?? null,
+    [requestedHandle, twins],
+  );
+
+  // Twin-Liste einmalig laden, dann ggf. URL um ?twin= ergänzen, damit der
+  // Switcher den richtigen Wert zeigt.
+  useEffect(() => {
+    let cancelled = false;
+    fetch(`${RUNTIME_URL}/twins`)
+      .then((res) => {
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        return res.json() as Promise<{ twins: TwinSummary[] }>;
+      })
+      .then((data) => {
+        if (cancelled) return;
+        setTwins(data.twins);
+        if (!requestedHandle && data.twins[0]) {
+          const params = new URLSearchParams(searchParams.toString());
+          params.set("twin", data.twins[0].handle);
+          router.replace(`/settings?${params.toString()}`);
+        }
+      })
+      .catch((err) => {
+        if (!cancelled) setError(err instanceof Error ? err.message : "Failed to load twins");
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [requestedHandle, router, searchParams]);
+
+  const loadAudit = useCallback(async (handle: string) => {
     try {
-      const res = await fetch(`${RUNTIME_URL}/audit?limit=50`);
+      const res = await fetch(`${RUNTIME_URL}/twins/${handle}/audit?limit=50`);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = (await res.json()) as { entries: AuditEntry[] };
       setAudit(data.entries);
@@ -47,9 +98,9 @@ export default function SettingsPage() {
     }
   }, []);
 
-  const loadPending = useCallback(async () => {
+  const loadPending = useCallback(async (handle: string) => {
     try {
-      const res = await fetch(`${RUNTIME_URL}/audit/pending`);
+      const res = await fetch(`${RUNTIME_URL}/twins/${handle}/audit/pending`);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = (await res.json()) as { entries: AuditEntry[] };
       setPending(data.entries);
@@ -58,48 +109,55 @@ export default function SettingsPage() {
     }
   }, []);
 
-  // Twin-Profil ist read-only und ändert sich im laufenden Prozess nicht
-  // (Bootstrap schreibt in die DB, Runtime cached beim Boot). Einmal laden
-  // beim Mount reicht; manueller Retry über den Error-State-Button.
-  const loadProfile = useCallback(async () => {
+  const loadProfile = useCallback(async (handle: string) => {
     setProfileLoading(true);
     setProfileError(null);
     try {
-      const res = await fetch(`${RUNTIME_URL}/twin-profile`);
+      const res = await fetch(`${RUNTIME_URL}/twins/${handle}/profile`);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = (await res.json()) as TwinProfileResponse;
       setProfile(data);
     } catch (err) {
-      setProfileError(err instanceof Error ? err.message : "Twin-Profil konnte nicht geladen werden");
+      setProfileError(
+        err instanceof Error ? err.message : "Twin-Profil konnte nicht geladen werden",
+      );
     } finally {
       setProfileLoading(false);
     }
   }, []);
 
+  // Bei Twin-Wechsel: Audit + Pending + Profil neu laden, Polling auf den
+  // neuen Handle umhängen.
   useEffect(() => {
-    loadAudit();
-    loadPending();
-    loadProfile();
+    if (!selectedHandle) return;
+    setProfile(null);
+    setAudit([]);
+    setPending([]);
+    loadAudit(selectedHandle);
+    loadPending(selectedHandle);
+    loadProfile(selectedHandle);
     const interval = setInterval(() => {
-      loadPending();
-      loadAudit();
+      loadPending(selectedHandle);
+      loadAudit(selectedHandle);
     }, 3000);
     return () => clearInterval(interval);
-  }, [loadAudit, loadPending, loadProfile]);
+  }, [selectedHandle, loadAudit, loadPending, loadProfile]);
 
   async function approve(id: string) {
+    if (!selectedHandle) return;
     setBusy((b) => ({ ...b, [id]: true }));
     setError(null);
     try {
-      const res = await fetch(`${RUNTIME_URL}/audit/${id}/approve`, {
-        method: "POST",
-      });
+      const res = await fetch(
+        `${RUNTIME_URL}/twins/${selectedHandle}/audit/${id}/approve`,
+        { method: "POST" },
+      );
       if (!res.ok) {
         const body = await res.json().catch(() => ({ error: "Unknown error" }));
         throw new Error(body.error ?? `HTTP ${res.status}`);
       }
-      await loadPending();
-      await loadAudit();
+      await loadPending(selectedHandle);
+      await loadAudit(selectedHandle);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Approve failed");
     } finally {
@@ -108,6 +166,7 @@ export default function SettingsPage() {
   }
 
   async function reject(id: string) {
+    if (!selectedHandle) return;
     setBusy((b) => ({ ...b, [id]: true }));
     setError(null);
     try {
@@ -116,17 +175,20 @@ export default function SettingsPage() {
         setBusy((b) => ({ ...b, [id]: false }));
         return;
       }
-      const res = await fetch(`${RUNTIME_URL}/audit/${id}/reject`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ reason }),
-      });
+      const res = await fetch(
+        `${RUNTIME_URL}/twins/${selectedHandle}/audit/${id}/reject`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ reason }),
+        },
+      );
       if (!res.ok) {
         const body = await res.json().catch(() => ({ error: "Unknown error" }));
         throw new Error(body.error ?? `HTTP ${res.status}`);
       }
-      await loadPending();
-      await loadAudit();
+      await loadPending(selectedHandle);
+      await loadAudit(selectedHandle);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Reject failed");
     } finally {
@@ -140,7 +202,12 @@ export default function SettingsPage() {
 
   return (
     <div className="space-y-8">
-      <h1 className="text-xl font-semibold text-text">Settings</h1>
+      <div className="flex items-baseline gap-3">
+        <h1 className="text-xl font-semibold text-text">Settings</h1>
+        {selectedHandle && (
+          <span className="text-xs text-muted font-mono">{selectedHandle}</span>
+        )}
+      </div>
 
       {error && (
         <div className="text-xs text-warn border border-warn rounded px-3 py-2">
@@ -157,7 +224,7 @@ export default function SettingsPage() {
               Twin-Profil konnte nicht geladen werden: {profileError}
             </div>
             <button
-              onClick={loadProfile}
+              onClick={() => selectedHandle && loadProfile(selectedHandle)}
               className="text-xs text-accent hover:underline"
             >
               Erneut versuchen
@@ -265,12 +332,13 @@ export default function SettingsPage() {
 
       <Section title="Persona und Mandates">
         <p className="text-sm text-muted leading-relaxed">
-          Persona und Mandates werden in Phase 1 aus den Files in <code className="text-accent">/docs</code> geladen, nicht aus der UI. So bleibt der Stand versionierbar im Repo. Bearbeitung in der UI kommt in Phase 2.
+          Persona und Mandates werden aus Files unter <code className="text-accent">/docs</code> in die DB geschrieben. Bearbeitung in der UI kommt in einer späteren Phase.
         </p>
         <ul className="mt-3 text-sm text-muted space-y-1">
           <li>- <code className="text-accent">docs/persona.md</code> Stil, Themen, Tonalitaet</li>
           <li>- <code className="text-accent">docs/persona-meta.yaml</code> Name, Handle</li>
           <li>- <code className="text-accent">docs/mandates.yaml</code> was der Twin darf</li>
+          <li>- Bootstrap: <code className="text-accent">pnpm --filter @twin-lab/runtime twin:bootstrap &lt;name&gt;</code></li>
         </ul>
       </Section>
 
@@ -333,11 +401,7 @@ function Section({ title, children }: { title: string; children: React.ReactNode
 
 // Cascade über die bekannten Input-Shapes:
 //   - lastMessage / messages[]            → Chat-getriebene Capabilities
-//                                           (respond_to_chat, send_to_twin, …)
 //   - content                             → Bridge-eingehende Nachrichten
-//                                           (respond_to_twin_message)
-// So bleibt der Helper Capability-agnostisch und kommt mit neuen Capabilities
-// klar, solange sie eines dieser Felder befüllen.
 function extractLastMessage(entry: AuditEntry): string {
   const input = entry.input as {
     lastMessage?: string;

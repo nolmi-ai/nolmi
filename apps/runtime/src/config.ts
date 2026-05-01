@@ -40,12 +40,6 @@ export interface RuntimeConfig {
   migrationsDir: string;
   port: number;
   host: string;
-  /**
-   * Welcher Twin aus `twin_profiles` beim Boot geladen wird. Default `@markus`
-   * matched die existierende Bootstrap-Row. Phase 2.5 = ein Twin pro Prozess;
-   * Multi-Twin pro Runtime kommt später.
-   */
-  twinHandle: string;
 }
 
 export function loadRuntimeConfig(): RuntimeConfig {
@@ -60,7 +54,6 @@ export function loadRuntimeConfig(): RuntimeConfig {
     migrationsDir: resolve(WORKSPACE_ROOT, "apps/runtime/migrations"),
     port: parsePort(process.env.RUNTIME_PORT, 4000),
     host: process.env.RUNTIME_HOST?.trim() || "127.0.0.1",
-    twinHandle: process.env.TWIN_HANDLE?.trim() || "@markus",
   };
 }
 

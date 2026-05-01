@@ -1,5 +1,5 @@
 import Database from "better-sqlite3";
-import type { AuditRepository, RepositoryBundle } from "./types.js";
+import type { AuditListOpts, AuditRepository, RepositoryBundle } from "./types.js";
 import type { AuditEntry } from "@twin-lab/shared";
 
 // ─── SQLITE BUNDLE ───────────────────────────────────────────────────────────
@@ -28,11 +28,12 @@ class SqliteAuditRepository implements AuditRepository {
   async append(entry: AuditEntry): Promise<void> {
     this.db
       .prepare(
-        `INSERT INTO audit (id, timestamp, capability, mandate_id, status, data)
-         VALUES (?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO audit (id, twin_id, timestamp, capability, mandate_id, status, data)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         entry.id,
+        entry.twinId,
         entry.timestamp,
         entry.capability,
         entry.mandateId,
@@ -53,10 +54,13 @@ class SqliteAuditRepository implements AuditRepository {
       .run(updated.status, JSON.stringify(updated), updated.timestamp, id);
   }
 
-  async list(opts: { limit: number; offset?: number }): Promise<AuditEntry[]> {
-    const rows = this.db
-      .prepare("SELECT data FROM audit ORDER BY timestamp DESC LIMIT ? OFFSET ?")
-      .all(opts.limit, opts.offset ?? 0) as { data: string }[];
+  async list(opts: AuditListOpts): Promise<AuditEntry[]> {
+    const where = opts.twinId ? "WHERE twin_id = ?" : "";
+    const sql = `SELECT data FROM audit ${where} ORDER BY timestamp DESC LIMIT ? OFFSET ?`;
+    const params: unknown[] = [];
+    if (opts.twinId) params.push(opts.twinId);
+    params.push(opts.limit, opts.offset ?? 0);
+    const rows = this.db.prepare(sql).all(...params) as { data: string }[];
     return rows.map((r) => JSON.parse(r.data) as AuditEntry);
   }
 
@@ -67,18 +71,23 @@ class SqliteAuditRepository implements AuditRepository {
     return row ? (JSON.parse(row.data) as AuditEntry) : null;
   }
 
-  async findByInputField(field: string, value: string): Promise<AuditEntry | null> {
+  async findByInputField(
+    field: string,
+    value: string,
+    opts: { twinId?: string } = {},
+  ): Promise<AuditEntry | null> {
     // Pfad-Injection-Schutz: nur einfache Identifier zulassen, weil wir den
     // json_extract-Pfad als String konkatenieren müssen (SQLite akzeptiert
     // keinen Bind-Parameter im Pfad).
     if (!/^[a-zA-Z0-9_]+$/.test(field)) {
       throw new Error(`Invalid field name for findByInputField: ${field}`);
     }
-    const row = this.db
-      .prepare(
-        `SELECT data FROM audit WHERE json_extract(data, '$.input.${field}') = ? LIMIT 1`,
-      )
-      .get(value) as { data: string } | undefined;
+    const where = opts.twinId
+      ? `json_extract(data, '$.input.${field}') = ? AND twin_id = ?`
+      : `json_extract(data, '$.input.${field}') = ?`;
+    const sql = `SELECT data FROM audit WHERE ${where} LIMIT 1`;
+    const params: unknown[] = opts.twinId ? [value, opts.twinId] : [value];
+    const row = this.db.prepare(sql).get(...params) as { data: string } | undefined;
     return row ? (JSON.parse(row.data) as AuditEntry) : null;
   }
 }

@@ -1,41 +1,25 @@
 import "dotenv/config";
 import { mkdir } from "node:fs/promises";
 import { dirname } from "node:path";
-import type { Persona } from "@twin-lab/shared";
 import { createSqliteRepository } from "./repository/index.js";
-import { createLlmClient } from "./llm-client.js";
-import { formatLlmLabel } from "./llm-config.js";
-import { EventBus } from "./events/bus.js";
-import { AuditService } from "./audit/service.js";
-import { TwinService } from "./twin-service.js";
 import { createServer } from "./server.js";
-import { BridgeClient } from "./bridge/client.js";
-import { BridgeStream } from "./bridge/stream.js";
-import type { BridgeConfig } from "./bridge/types.js";
 import { loadRuntimeConfig } from "./config.js";
-import {
-  loadActiveTwinProfile,
-  TwinProfileNotAvailableError,
-} from "./twin-profile-loader.js";
+import { TwinServiceRegistry } from "./twin-service-registry.js";
+import { formatLlmLabel } from "./llm-config.js";
+import { TwinProfilesRepo } from "./twin-profiles-repo.js";
 
 // ─── BOOTSTRAP ───────────────────────────────────────────────────────────────
 //
-// Phase 2.5: Persona/Mandates/LLM-Config kommen jetzt aus `twin_profiles`,
-// nicht mehr aus Files+ENV. Welcher Twin geladen wird, bestimmt
-// `TWIN_HANDLE` (Default `@markus`).
-//
-// Bridge-URL/Token kommen ebenfalls aus dem Profil. Die alten
-// BRIDGE_URL/BRIDGE_TWIN_TOKEN/BRIDGE_TWIN_HANDLE-ENVs werden hier nicht
-// mehr gelesen (das Bootstrap-Script liest sie noch, um initial in die DB
-// zu schreiben).
+// Phase 2.5d: Multi-Twin pro Runtime. Alle aktiven Profile werden parallel
+// als TwinService + BridgeClient + BridgeStream geladen. Routing nach Handle
+// macht der Server.
 //
 // Boot-Sequenz:
-//   1. Config + DB
-//   2. Twin-Profil laden (oder Fail-Exit mit Bootstrap-Hinweis)
-//   3. Persona, LLM-Client, Bridge-Config aus Profil ableiten
-//   4. Services + Server starten
-//   5. Bridge-Client + Stream nach Server-Start (Logger verfügbar)
-//   6. Shutdown-Hooks
+//   1. Config + DB öffnen
+//   2. Server starten (für app.log — Bridges hängen sich daran)
+//   3. Registry: alle aktiven Twins laden (TwinService + Bridge pro Twin)
+//   4. Bridge-Inbox-Sync + Stream-Connect pro Twin
+//   5. Shutdown-Hooks für graceful disconnect
 
 async function main() {
   const config = loadRuntimeConfig();
@@ -45,100 +29,52 @@ async function main() {
   const repo = createSqliteRepository(config.dbPath);
   console.log(`[boot] DB: ${config.dbPath}`);
 
-  // 2. Twin-Profil
-  const profile = (() => {
-    try {
-      return loadActiveTwinProfile(repo.db, config.twinHandle);
-    } catch (err) {
-      if (err instanceof TwinProfileNotAvailableError) {
-        console.error(`[boot] ${err.message}`);
-        process.exit(1);
-      }
-      throw err;
-    }
-  })();
-  console.log(`[boot] Twin-Profil geladen aus DB: ${profile.handle} (${profile.twinId})`);
-  console.log(`[boot] Persona: ${profile.displayName}`);
-  console.log(`[boot] ${profile.mandates.length} Mandates aktiv`);
+  // 2. Aktive Profile zuerst zählen — wenn null, exit-1 mit Bootstrap-Hinweis
+  const profilesRepo = new TwinProfilesRepo(repo.db);
+  const activeProfiles = profilesRepo.list({ activeOnly: true });
+  if (activeProfiles.length === 0) {
+    console.error(
+      "[boot] Keine aktiven Twins in DB.\n" +
+        "Hinweis: Hast du 'pnpm --filter @twin-lab/runtime twin:bootstrap markus' ausgeführt?",
+    );
+    process.exit(1);
+  }
 
-  // 3a. LLM aus Profil
-  const model = createLlmClient(profile.llmConfig);
-  const modelLabel = formatLlmLabel(profile.llmConfig);
-  console.log(`[boot] LLM: ${modelLabel}`);
-
-  // 3b. Bridge-Config aus Profil (immer aktiv — Schema garantiert die Felder)
-  const bridgeConfig: BridgeConfig = {
-    url: profile.bridgeUrl,
-    handle: profile.handle,
-    token: profile.bridgeToken,
-  };
-  console.log(`[boot] Bridge: ${profile.handle} → ${profile.bridgeUrl}`);
-
-  // 3c. Persona-Objekt für TwinService bauen
-  const persona: Persona = {
-    name: profile.displayName,
-    handle: profile.handle.replace(/^@/, ""),
-    systemPrompt: profile.personaMd,
-    metadata: {},
-  };
-
-  // 4. Services
-  const bus = new EventBus();
-  const audit = new AuditService(repo.audit, bus);
-  const twin = new TwinService({
-    model,
-    modelLabel,
-    persona,
-    mandates: profile.mandates,
-    audit,
-    bus,
-    bridgeClient: null, // wird gleich gesetzt
+  // 3. Server (mit Logger)
+  const registry = new TwinServiceRegistry();
+  const app = await createServer({
+    audit: repo.audit,
+    registry,
   });
 
-  // 5. Server
-  const app = await createServer({ twin, audit: repo.audit, bus, profile });
-  await app.listen({ port: config.port, host: config.host });
-  console.log(`[boot] Runtime hört auf http://${config.host}:${config.port}`);
+  // 4. Registry mit allen aktiven Twins füllen
+  registry.loadAll({ db: repo.db, auditRepo: repo.audit, logger: app.log });
+  const summaries = registry.list();
 
-  // 6. Bridge Client + Stream
-  const bridgeClient = new BridgeClient(bridgeConfig, app.log);
-  twin.setBridgeClient(bridgeClient);
+  console.log(`[boot] ${summaries.length} Twin(s) aktiv:`);
+  for (const t of summaries) {
+    console.log(`  - ${t.handle} (${t.twinId})`);
+  }
 
-  let syncedCount = 0;
-  try {
-    const inbox = await bridgeClient.getInbox();
-    for (const msg of inbox) {
-      await twin.receiveBridgeMessage(msg);
-      syncedCount++;
-    }
+  // 5. Per-Twin LLM + Bridge-Konfig loggen, dann Bridges connecten
+  for (const t of summaries) {
+    const profile = activeProfiles.find((p) => p.handle === t.handle)!;
     console.log(
-      `[boot] Inbox-Sync: ${syncedCount} Nachricht(en) als Pending-Audits erfasst`,
-    );
-  } catch (err) {
-    app.log.error(
-      { err },
-      "[boot] Inbox-Sync fehlgeschlagen — Stream übernimmt Catch-up",
+      `[boot] ${t.handle}: LLM=${formatLlmLabel(profile.llmConfig)}, Bridge=${profile.bridgeUrl}`,
     );
   }
 
-  const bridgeStream = new BridgeStream(
-    bridgeConfig,
-    (msg) => {
-      twin.receiveBridgeMessage(msg).catch((err) => {
-        app.log.error(
-          { err, messageId: msg.id },
-          "[bridge:stream] receive fehlgeschlagen",
-        );
-      });
-    },
-    app.log,
-  );
-  bridgeStream.connect();
+  // 6. Listen
+  await app.listen({ port: config.port, host: config.host });
+  console.log(`[boot] Runtime hört auf http://${config.host}:${config.port}`);
 
-  // 7. Graceful Shutdown
+  // 7. Bridges starten (nach Server-Listen, damit Logger via app.log läuft)
+  await registry.startBridges(app.log);
+
+  // 8. Graceful Shutdown
   const shutdown = async (signal: string) => {
     console.log(`[shutdown] ${signal} empfangen — fahre runter`);
-    bridgeStream.disconnect();
+    await registry.shutdown();
     try {
       await app.close();
     } catch (err) {

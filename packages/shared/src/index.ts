@@ -57,6 +57,7 @@ export const AuditStatusSchema = z.enum([
 
 export const AuditEntrySchema = z.object({
   id: z.string(),
+  twinId: z.string().nullable(), // null nur für Legacy-Rows aus Pre-2.5d
   timestamp: z.string().datetime(),
   capability: z.string(),
   mandateId: z.string().nullable(), // null wenn keine Mandate-Übereinstimmung

@@ -5,7 +5,10 @@ import type { EventBus } from "../events/bus.js";
 
 // ─── AUDIT SERVICE ───────────────────────────────────────────────────────────
 //
-// Wrapper um das Audit-Repository: erzeugt IDs, schreibt Events auf den Bus.
+// Wrapper um das Audit-Repository: erzeugt IDs, stempelt twin_id, schreibt
+// Events auf den Bus. Eine Instanz pro Twin (Phase 2.5d Multi-Twin) — die
+// twin_id im Constructor wird auf alle neu angelegten Entries gestempelt.
+//
 // Jede Twin-Aktion durchläuft:
 //   start()    → status: pending oder approved
 //   complete() → status: executed (mit output)
@@ -13,13 +16,14 @@ import type { EventBus } from "../events/bus.js";
 //   reject()   → status: rejected (vom Mensch abgelehnt)
 //   block()    → status: blocked (Mandate-Verstoß)
 //
-// `repo` ist bewusst public, damit höhere Schichten (z.B. Twin-Service)
-// direkt lesen können, ohne den Service mit Read-Methoden zu überfrachten.
+// `repo` ist bewusst public, damit höhere Schichten direkt lesen können,
+// ohne den Service mit Read-Methoden zu überfrachten.
 
 export class AuditService {
   constructor(
     public readonly repo: AuditRepository,
     private bus: EventBus,
+    private readonly twinId: string,
   ) {}
 
   async start(opts: {
@@ -30,6 +34,7 @@ export class AuditService {
   }): Promise<AuditEntry> {
     const entry: AuditEntry = {
       id: `audit_${nanoid(12)}`,
+      twinId: this.twinId,
       timestamp: new Date().toISOString(),
       capability: opts.capability,
       mandateId: opts.mandateId,
@@ -95,6 +100,7 @@ export class AuditService {
   }): Promise<AuditEntry> {
     const entry: AuditEntry = {
       id: `audit_${nanoid(12)}`,
+      twinId: this.twinId,
       timestamp: new Date().toISOString(),
       capability: opts.capability,
       mandateId: null,
