@@ -5,8 +5,13 @@ dist
 .env.local
 data/*.db
 data/*.db-journal
+apps/bridge/data/*.db
+apps/bridge/data/*.db-journal
+apps/bridge/data/*.db-shm
+apps/bridge/data/*.db-wal
 *.log
 .DS_Store
 .turbo
 data/*.db-shm
 data/*.db-wal
+*.tsbuildinfo

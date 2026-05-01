@@ -10,6 +10,8 @@
     "lint": "pnpm -r lint",
     "typecheck": "pnpm -r typecheck",
     "db:init": "pnpm --filter @twin-lab/runtime db:init",
+    "bridge:dev": "pnpm --filter @twin-lab/bridge dev",
+    "bridge:db:init": "pnpm --filter @twin-lab/bridge db:init",
     "clean": "pnpm -r clean && rm -rf node_modules"
   },
   "devDependencies": {
