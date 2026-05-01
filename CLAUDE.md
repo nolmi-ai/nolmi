@@ -10,7 +10,7 @@ Code-Kommentare, Doku, Commit-Messages und User-facing Strings sind auf **Deutsc
 
 ```bash
 pnpm install                  # Dependencies (pnpm 9+ / Node 20+ Pflicht)
-pnpm db:init                  # SQL-Migrationen aus infra/migrations ausführen, data/twin.db anlegen
+pnpm db:init                  # SQL-Migrationen aus apps/runtime/migrations ausführen, data/twin.db anlegen
 pnpm dev                      # Runtime (:4000) + Web (:3000) parallel über pnpm -r
 pnpm build                    # alle Workspaces
 pnpm typecheck                # alle Workspaces (kein einzelner Lauf nötig — pro Workspace via pnpm --filter)
@@ -21,7 +21,7 @@ pnpm --filter @twin-lab/web dev        # nur Web starten
 
 Es gibt **keine Test-Suite**. Manuelles Smoke-Testing läuft über die UI (`/chat`, `/stream`, `/settings`) — siehe `docs/SETUP.md`.
 
-`pnpm db:init` ist idempotent (`CREATE TABLE IF NOT EXISTS`). Nach Schema-Änderung: neue SQL-Datei in `infra/migrations/` anlegen — der aktuelle Init-Script lädt nur `001_init.sql` hart kodiert (`apps/runtime/src/scripts/init-db.ts:21`).
+`pnpm db:init` ist idempotent (`CREATE TABLE IF NOT EXISTS`). Nach Schema-Änderung: neue SQL-Datei in `apps/runtime/migrations/` anlegen — Filename-Konvention `NNN_name.sql` mit zero-padded Präfix; der Runner lädt alle `.sql`-Files in lexikographischer Reihenfolge (`apps/runtime/src/scripts/init-db.ts`).
 
 ## Architektur — was beim Lesen einzelner Files nicht sofort sichtbar ist
 

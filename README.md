@@ -63,8 +63,6 @@ twin-lab/
 │   └── runtime/                Twin-Runtime (langlaufender Prozess)
 ├── packages/
 │   └── shared/                 Geteilte Types & Schemas
-├── infra/
-│   └── migrations/             SQL-Migrationen für SQLite
 └── docs/                       Persona, Mandates, Architektur-Notes
 ```
 

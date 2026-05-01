@@ -36,7 +36,8 @@ export interface RuntimeConfig {
   personaPath: string;
   personaMetaPath: string;
   mandatesPath: string;
-  migrationPath: string;
+  /** Verzeichnis mit allen SQL-Migrationen (`NNN_name.sql`, numerisch sortiert). */
+  migrationsDir: string;
   port: number;
   host: string;
 }
@@ -50,7 +51,7 @@ export function loadRuntimeConfig(): RuntimeConfig {
       "docs/persona-meta.yaml",
     ),
     mandatesPath: resolveWorkspacePath(process.env.MANDATES_PATH, "docs/mandates.yaml"),
-    migrationPath: resolve(WORKSPACE_ROOT, "infra/migrations/001_init.sql"),
+    migrationsDir: resolve(WORKSPACE_ROOT, "apps/runtime/migrations"),
     port: parsePort(process.env.RUNTIME_PORT, 4000),
     host: process.env.RUNTIME_HOST?.trim() || "127.0.0.1",
   };
