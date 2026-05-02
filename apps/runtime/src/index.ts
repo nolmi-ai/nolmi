@@ -61,6 +61,7 @@ async function main() {
     registry,
     profilesRepo,
     masterKey,
+    db: repo.db,
   });
 
   // 5. Registry mit allen aktiven Twins füllen — entschlüsselt API-Keys.

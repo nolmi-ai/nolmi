@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import type { TwinEvent } from "@twin-lab/shared";
 
-const RUNTIME_URL = process.env.NEXT_PUBLIC_RUNTIME_URL ?? "http://127.0.0.1:4000";
+const RUNTIME_URL = process.env.NEXT_PUBLIC_RUNTIME_URL ?? "http://localhost:4000";
 
 interface StreamItem {
   id: string;
@@ -18,7 +18,7 @@ export default function StreamPage() {
   const [connected, setConnected] = useState(false);
 
   useEffect(() => {
-    const source = new EventSource(`${RUNTIME_URL}/stream`);
+    const source = new EventSource(`${RUNTIME_URL}/stream`, { withCredentials: true });
     source.onopen = () => setConnected(true);
     source.onerror = () => setConnected(false);
     source.onmessage = (event) => {

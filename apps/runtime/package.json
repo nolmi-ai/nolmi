@@ -10,30 +10,36 @@
     "db:init": "tsx src/scripts/init-db.ts",
     "twin:bootstrap": "tsx src/scripts/bootstrap-twin.ts",
     "key:generate": "tsx src/scripts/generate-master-key.ts",
+    "session-secret:generate": "tsx src/scripts/generate-session-secret.ts",
+    "user:create": "tsx src/scripts/create-user.ts",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@twin-lab/shared": "workspace:*",
-    "better-sqlite3": "^11.3.0",
-    "dotenv": "^16.4.0",
-    "fastify": "^5.0.0",
-    "@fastify/cors": "^10.0.0",
-    "ai": "^6.0.0",
-    "@ai-sdk/openai": "^3.0.0",
     "@ai-sdk/anthropic": "^3.0.0",
     "@ai-sdk/google": "^3.0.0",
     "@ai-sdk/groq": "^3.0.0",
+    "@ai-sdk/openai": "^3.0.0",
+    "@fastify/cookie": "^11",
+    "@fastify/cors": "^10.0.0",
+    "@twin-lab/shared": "workspace:*",
+    "ai": "^6.0.0",
+    "bcryptjs": "^2.4.3",
+    "better-sqlite3": "^11.3.0",
+    "dotenv": "^16.4.0",
+    "eventsource": "^2.0.2",
+    "fastify": "^5.0.0",
+    "iron-session": "^8.0.0",
+    "nanoid": "^5.0.0",
     "ollama-ai-provider-v2": "^1.2.0",
     "yaml": "^2.5.0",
-    "zod": "^3.23.0",
-    "nanoid": "^5.0.0",
-    "eventsource": "^2.0.2"
+    "zod": "^3.23.0"
   },
   "devDependencies": {
-    "tsx": "^4.19.0",
-    "typescript": "^5.6.0",
+    "@types/bcryptjs": "^2.4.6",
     "@types/better-sqlite3": "^7.6.0",
+    "@types/eventsource": "^1.1.15",
     "@types/node": "^22.0.0",
-    "@types/eventsource": "^1.1.15"
+    "tsx": "^4.19.0",
+    "typescript": "^5.6.0"
   }
 }

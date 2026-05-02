@@ -4,7 +4,7 @@ import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import type { AuditEntry, ChatMessage } from "@twin-lab/shared";
 
-const RUNTIME_URL = process.env.NEXT_PUBLIC_RUNTIME_URL ?? "http://127.0.0.1:4000";
+const RUNTIME_URL = process.env.NEXT_PUBLIC_RUNTIME_URL ?? "http://localhost:4000";
 
 // Spiegelt das `/twins/:handle/profile`-Response-Schema vom Runtime.
 interface TwinProfileResponse {
@@ -67,7 +67,7 @@ function SettingsInner() {
   // Switcher den richtigen Wert zeigt.
   useEffect(() => {
     let cancelled = false;
-    fetch(`${RUNTIME_URL}/twins`)
+    fetch(`${RUNTIME_URL}/twins`, { credentials: "include" })
       .then((res) => {
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         return res.json() as Promise<{ twins: TwinSummary[] }>;
@@ -91,7 +91,7 @@ function SettingsInner() {
 
   const loadAudit = useCallback(async (handle: string) => {
     try {
-      const res = await fetch(`${RUNTIME_URL}/twins/${handle}/audit?limit=50`);
+      const res = await fetch(`${RUNTIME_URL}/twins/${handle}/audit?limit=50`, { credentials: "include" });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = (await res.json()) as { entries: AuditEntry[] };
       setAudit(data.entries);
@@ -102,7 +102,7 @@ function SettingsInner() {
 
   const loadPending = useCallback(async (handle: string) => {
     try {
-      const res = await fetch(`${RUNTIME_URL}/twins/${handle}/audit/pending`);
+      const res = await fetch(`${RUNTIME_URL}/twins/${handle}/audit/pending`, { credentials: "include" });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = (await res.json()) as { entries: AuditEntry[] };
       setPending(data.entries);
@@ -115,7 +115,7 @@ function SettingsInner() {
     setProfileLoading(true);
     setProfileError(null);
     try {
-      const res = await fetch(`${RUNTIME_URL}/twins/${handle}/profile`);
+      const res = await fetch(`${RUNTIME_URL}/twins/${handle}/profile`, { credentials: "include" });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = (await res.json()) as TwinProfileResponse;
       setProfile(data);
@@ -152,7 +152,7 @@ function SettingsInner() {
     try {
       const res = await fetch(
         `${RUNTIME_URL}/twins/${selectedHandle}/audit/${id}/approve`,
-        { method: "POST" },
+        { method: "POST", credentials: "include" },
       );
       if (!res.ok) {
         const body = await res.json().catch(() => ({ error: "Unknown error" }));
@@ -181,6 +181,7 @@ function SettingsInner() {
         `${RUNTIME_URL}/twins/${selectedHandle}/audit/${id}/reject`,
         {
           method: "POST",
+          credentials: "include",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ reason }),
         },

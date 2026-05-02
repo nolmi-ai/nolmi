@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 
-const RUNTIME_URL = process.env.NEXT_PUBLIC_RUNTIME_URL ?? "http://127.0.0.1:4000";
+const RUNTIME_URL = process.env.NEXT_PUBLIC_RUNTIME_URL ?? "http://localhost:4000";
 
 // Kleine Client-Komponente für den Footer: zeigt die aktuelle Twin-Anzahl
 // aus /twins. Bei Fehler oder noch-nicht-geladen: Fallback "multi-twin",
@@ -13,7 +13,7 @@ export function FooterMeta() {
 
   useEffect(() => {
     let cancelled = false;
-    fetch(`${RUNTIME_URL}/twins`)
+    fetch(`${RUNTIME_URL}/twins`, { credentials: "include" })
       .then((res) => (res.ok ? res.json() : Promise.reject(res.status)))
       .then((data: { twins: unknown[] }) => {
         if (!cancelled) setCount(data.twins.length);

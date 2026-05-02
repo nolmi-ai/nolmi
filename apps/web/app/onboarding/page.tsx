@@ -4,7 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 
-const RUNTIME_URL = process.env.NEXT_PUBLIC_RUNTIME_URL ?? "http://127.0.0.1:4000";
+const RUNTIME_URL = process.env.NEXT_PUBLIC_RUNTIME_URL ?? "http://localhost:4000";
 
 // ─── ONBOARDING WIZARD ──────────────────────────────────────────────────────
 //
@@ -66,6 +66,20 @@ const TOTAL_STEPS = STEP_LABELS.length; // 8
 
 export default function OnboardingPage() {
   const router = useRouter();
+
+  // Gate: bevor der Wizard rendert, muss ein Account existieren UND
+  // der User muss eingeloggt sein.
+  const [accountReady, setAccountReady] = useState(false);
+
+  if (!accountReady) {
+    return <AccountBlock onReady={() => setAccountReady(true)} />;
+  }
+
+  return <WizardInner router={router} />;
+}
+
+// Sub-Page für den eigentlichen Wizard-State, nachdem Account bestätigt ist.
+function WizardInner({ router }: { router: ReturnType<typeof useRouter> }) {
   const [step, setStep] = useState(0);
   const [pathChoice, setPathChoice] = useState<"hosted" | "self-hosted" | null>(null);
 
@@ -113,6 +127,7 @@ export default function OnboardingPage() {
     try {
       const res = await fetch(`${RUNTIME_URL}/onboarding/submit`, {
         method: "POST",
+        credentials: "include",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           persona,
@@ -196,6 +211,7 @@ export default function OnboardingPage() {
               try {
                 const res = await fetch(`${RUNTIME_URL}/onboarding/validate-api-key`, {
                   method: "POST",
+                  credentials: "include",
                   headers: { "Content-Type": "application/json" },
                   body: JSON.stringify({ provider: llmProvider, model: llmModel, apiKey }),
                 });
@@ -493,6 +509,7 @@ async function checkHandle(handle: string, setStatus: (s: HandleStatus) => void)
   try {
     const res = await fetch(
       `${RUNTIME_URL}/onboarding/check-handle?handle=${encodeURIComponent(handle)}`,
+      { credentials: "include" },
     );
     const body = (await res.json()) as
       | { available: true }
@@ -635,7 +652,7 @@ function PersonaTopicsBlock({
   const [existingTwins, setExistingTwins] = useState<{ handle: string; displayName: string }[]>([]);
 
   useEffect(() => {
-    fetch(`${RUNTIME_URL}/twins`)
+    fetch(`${RUNTIME_URL}/twins`, { credentials: "include" })
       .then((r) => r.json())
       .then((data: { twins: { handle: string; displayName: string }[] }) =>
         setExistingTwins(data.twins),
@@ -1126,5 +1143,324 @@ function GoodbyeScreen() {
         Zur Hauptseite
       </Link>
     </div>
+  );
+}
+
+// ─── BLOCK -1: ACCOUNT ──────────────────────────────────────────────────────
+//
+// Drei Modi, dynamisch je nach Session-State:
+//   eingeloggt    → "Eingeloggt als <email>", Button "Weiter zum Onboarding"
+//   nicht-login   → Toggle zwischen Login (default) und Register
+//
+// Wenn der Mount /auth/me erfolgreich aufruft, kennen wir die Email und
+// gehen direkt in den eingeloggt-Modus. Sonst Login-Form.
+
+interface MeData {
+  userId: string;
+  email: string;
+  displayName: string | null;
+}
+
+function AccountBlock({ onReady }: { onReady: () => void }) {
+  const [me, setMe] = useState<MeData | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [mode, setMode] = useState<"login" | "register">("login");
+
+  useEffect(() => {
+    let cancelled = false;
+    fetch(`${RUNTIME_URL}/auth/me`, { credentials: "include" })
+      .then((res) => (res.ok ? (res.json() as Promise<MeData>) : null))
+      .then((data) => {
+        if (!cancelled) {
+          setMe(data);
+          setLoading(false);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  if (loading) {
+    return <div className="max-w-sm mx-auto mt-12 text-sm text-muted">Lade…</div>;
+  }
+
+  // Mode B: bereits eingeloggt
+  if (me) {
+    return (
+      <div className="max-w-sm mx-auto space-y-5 mt-12">
+        <header className="space-y-1">
+          <h1 className="text-xl font-semibold text-text">Twin anlegen</h1>
+          <div className="text-xs text-muted">
+            Eingeloggt als <span className="text-text">{me.email}</span>
+          </div>
+        </header>
+        <button
+          onClick={onReady}
+          className="w-full px-4 py-2 border border-accent text-accent text-sm rounded hover:bg-accent hover:text-bg transition-colors"
+        >
+          Weiter zum Onboarding →
+        </button>
+        <button
+          onClick={async () => {
+            try {
+              await fetch(`${RUNTIME_URL}/auth/logout`, {
+                method: "POST",
+                credentials: "include",
+              });
+            } catch {
+              // egal — Hard-Reload kommt sowieso
+            }
+            // Hard-Reload statt setMe/setMode — Top-Nav (TwinSwitcher,
+            // FooterMeta) cached den /auth/me-Status. Voll-Mount triggert
+            // Re-Init mit gelöschtem Cookie.
+            window.location.href = window.location.pathname;
+          }}
+          className="w-full text-xs text-muted hover:text-warn transition-colors"
+        >
+          Anderer User? Logout
+        </button>
+      </div>
+    );
+  }
+
+  // Modes A + C
+  return (
+    <div className="max-w-sm mx-auto space-y-5 mt-12">
+      <header className="space-y-1">
+        <h1 className="text-xl font-semibold text-text">Twin anlegen</h1>
+        <div className="text-xs text-muted">
+          {mode === "register"
+            ? "Lege deinen Account an, um Twins zu erstellen."
+            : "Schon einen Account?"}
+        </div>
+      </header>
+
+      {mode === "register" ? (
+        <RegisterForm
+          onSuccess={() => {
+            // Hard-Reload statt setMe — Top-Nav muss /auth/me neu fetchen,
+            // damit Email + Logout-Button nach Register sofort sichtbar.
+            window.location.href = window.location.pathname;
+          }}
+          toggle={() => setMode("login")}
+        />
+      ) : (
+        <LoginForm
+          onSuccess={() => {
+            window.location.href = window.location.pathname;
+          }}
+          toggle={() => setMode("register")}
+        />
+      )}
+    </div>
+  );
+}
+
+function RegisterForm({
+  onSuccess,
+  toggle,
+}: {
+  onSuccess: (u: MeData) => void;
+  toggle: () => void;
+}) {
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [password2, setPassword2] = useState("");
+  const [displayName, setDisplayName] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const passwordOk = password.length >= 8 && password === password2;
+
+  async function submit(e: React.FormEvent) {
+    e.preventDefault();
+    if (!passwordOk) {
+      setError("Passwort min. 8 Zeichen und beide Felder müssen identisch sein");
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    try {
+      const res = await fetch(`${RUNTIME_URL}/auth/register`, {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          email,
+          password,
+          displayName: displayName.trim() || undefined,
+        }),
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(body.error ?? `HTTP ${res.status}`);
+      onSuccess(body as MeData);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Registrierung fehlgeschlagen");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <form onSubmit={submit} className="space-y-4">
+      <div>
+        <label className="block text-xs uppercase tracking-wider text-muted mb-1">
+          Email
+        </label>
+        <input
+          type="email"
+          value={email}
+          onChange={(e) => setEmail(e.target.value)}
+          autoComplete="email"
+          required
+          className="w-full bg-bg border border-border rounded px-3 py-2 text-sm text-text focus:outline-none focus:border-accent"
+        />
+      </div>
+      <div>
+        <label className="block text-xs uppercase tracking-wider text-muted mb-1">
+          Passwort (min. 8 Zeichen)
+        </label>
+        <input
+          type="password"
+          value={password}
+          onChange={(e) => setPassword(e.target.value)}
+          autoComplete="new-password"
+          required
+          minLength={8}
+          className="w-full bg-bg border border-border rounded px-3 py-2 text-sm text-text font-mono focus:outline-none focus:border-accent"
+        />
+      </div>
+      <div>
+        <label className="block text-xs uppercase tracking-wider text-muted mb-1">
+          Passwort wiederholen
+        </label>
+        <input
+          type="password"
+          value={password2}
+          onChange={(e) => setPassword2(e.target.value)}
+          autoComplete="new-password"
+          required
+          className="w-full bg-bg border border-border rounded px-3 py-2 text-sm text-text font-mono focus:outline-none focus:border-accent"
+        />
+      </div>
+      <div>
+        <label className="block text-xs uppercase tracking-wider text-muted mb-1">
+          Display-Name (optional)
+        </label>
+        <input
+          type="text"
+          value={displayName}
+          onChange={(e) => setDisplayName(e.target.value)}
+          className="w-full bg-bg border border-border rounded px-3 py-2 text-sm text-text focus:outline-none focus:border-accent"
+        />
+      </div>
+      {error && (
+        <div className="text-xs text-warn border border-warn rounded px-3 py-2">
+          {error}
+        </div>
+      )}
+      <button
+        type="submit"
+        disabled={busy || !passwordOk || !email}
+        className="w-full px-4 py-2 border border-accent text-accent text-sm rounded disabled:opacity-30 disabled:cursor-not-allowed hover:bg-accent hover:text-bg transition-colors"
+      >
+        {busy ? "Lege an…" : "Account anlegen"}
+      </button>
+      <button
+        type="button"
+        onClick={toggle}
+        className="w-full text-xs text-muted hover:text-text transition-colors"
+      >
+        Schon einen Account? Login
+      </button>
+    </form>
+  );
+}
+
+function LoginForm({
+  onSuccess,
+  toggle,
+}: {
+  onSuccess: (u: MeData) => void;
+  toggle: () => void;
+}) {
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function submit(e: React.FormEvent) {
+    e.preventDefault();
+    setBusy(true);
+    setError(null);
+    try {
+      const res = await fetch(`${RUNTIME_URL}/auth/login`, {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email, password }),
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(body.error ?? `HTTP ${res.status}`);
+      onSuccess(body as MeData);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Login fehlgeschlagen");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <form onSubmit={submit} className="space-y-4">
+      <div>
+        <label className="block text-xs uppercase tracking-wider text-muted mb-1">
+          Email
+        </label>
+        <input
+          type="email"
+          value={email}
+          onChange={(e) => setEmail(e.target.value)}
+          autoComplete="email"
+          required
+          className="w-full bg-bg border border-border rounded px-3 py-2 text-sm text-text focus:outline-none focus:border-accent"
+        />
+      </div>
+      <div>
+        <label className="block text-xs uppercase tracking-wider text-muted mb-1">
+          Passwort
+        </label>
+        <input
+          type="password"
+          value={password}
+          onChange={(e) => setPassword(e.target.value)}
+          autoComplete="current-password"
+          required
+          className="w-full bg-bg border border-border rounded px-3 py-2 text-sm text-text font-mono focus:outline-none focus:border-accent"
+        />
+      </div>
+      {error && (
+        <div className="text-xs text-warn border border-warn rounded px-3 py-2">
+          {error}
+        </div>
+      )}
+      <button
+        type="submit"
+        disabled={busy || !email || !password}
+        className="w-full px-4 py-2 border border-accent text-accent text-sm rounded disabled:opacity-30 disabled:cursor-not-allowed hover:bg-accent hover:text-bg transition-colors"
+      >
+        {busy ? "Login…" : "Login"}
+      </button>
+      <button
+        type="button"
+        onClick={toggle}
+        className="w-full text-xs text-muted hover:text-text transition-colors"
+      >
+        Noch keinen Account? Registrieren
+      </button>
+    </form>
   );
 }

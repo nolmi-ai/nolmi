@@ -1,7 +1,9 @@
-import Fastify, { type FastifyInstance, type FastifyReply } from "fastify";
+import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest } from "fastify";
 import cors from "@fastify/cors";
+import cookie from "@fastify/cookie";
 import { nanoid } from "nanoid";
 import { z } from "zod";
+import type Database from "better-sqlite3";
 import type { AuditRepository } from "./repository/types.js";
 import { ChatRequestSchema } from "@twin-lab/shared";
 import type { RegistryEntry, TwinServiceRegistry } from "./twin-service-registry.js";
@@ -15,7 +17,9 @@ import {
   registerHandleOnBridge,
   BridgeRegisterError,
 } from "./onboarding/bridge-register.js";
-import { getCurrentUser } from "./auth-stub.js";
+import { getCurrentUser } from "./auth/get-current-user.js";
+import { UsersRepo, UserAlreadyExistsError, type User } from "./auth/users-repo.js";
+import { destroySession, setSession } from "./auth/session.js";
 
 // ─── HTTP SERVER ─────────────────────────────────────────────────────────────
 //
@@ -49,6 +53,8 @@ export interface ServerDeps {
   profilesRepo: TwinProfilesRepo;
   /** Für /onboarding/submit: API-Key-Verschlüsselung. */
   masterKey: Buffer;
+  /** Für Auth + Owner-Checks: gemeinsame DB-Connection (UsersRepo etc.). */
+  db: Database.Database;
 }
 
 export async function createServer(deps: ServerDeps) {
@@ -58,6 +64,7 @@ export async function createServer(deps: ServerDeps) {
     origin: true,
     credentials: true,
   });
+  await app.register(cookie);
 
   // ─── Helpers ───────────────────────────────────────────────────────────────
 
@@ -71,6 +78,33 @@ export async function createServer(deps: ServerDeps) {
       return null;
     }
     return entry;
+  };
+
+  /**
+   * Owner-Gate für /twins/:handle/*-Routes. Prüft Reihenfolge:
+   *   1. Login → 401
+   *   2. Twin existiert → 404 (über requireEntry)
+   *   3. user.userId === twin.ownerUserId → 403
+   * Returns { entry, user } bei Erfolg, null wenn schon eine Antwort
+   * gesendet wurde (Caller muss dann nichts mehr tun).
+   */
+  const requireOwner = async (
+    request: FastifyRequest,
+    reply: FastifyReply,
+    handle: string,
+  ): Promise<{ entry: RegistryEntry; user: User } | null> => {
+    const user = await getCurrentUser(request, deps.db);
+    if (!user) {
+      reply.status(401).send({ error: "Login erforderlich" });
+      return null;
+    }
+    const entry = requireEntry(handle, reply);
+    if (!entry) return null;
+    if (entry.profile.ownerUserId !== user.userId) {
+      reply.status(403).send({ error: "Kein Zugriff auf diesen Twin" });
+      return null;
+    }
+    return { entry, user };
   };
 
   const profileToResponse = (entry: RegistryEntry) => {
@@ -106,8 +140,24 @@ export async function createServer(deps: ServerDeps) {
     twins: deps.registry.list().length,
   }));
 
-  // ─── Twin-Liste ────────────────────────────────────────────────────────────
-  app.get("/twins", async () => ({ twins: deps.registry.list() }));
+  // ─── Auth ──────────────────────────────────────────────────────────────────
+  registerAuthRoutes(app, deps);
+
+  // ─── Twin-Liste (gefiltert auf eigene Twins) ───────────────────────────────
+  app.get("/twins", async (request, reply) => {
+    const user = await getCurrentUser(request, deps.db);
+    if (!user) {
+      return reply.status(401).send({ error: "Login erforderlich" });
+    }
+    // Heute jeden Registry-Entry mit profile gegenchecken — bei wachsender
+    // Twin-Zahl per-User sollte das in TwinProfilesRepo eine Index-Query
+    // werden.
+    const owned = deps.registry.list().filter((summary) => {
+      const entry = deps.registry.getEntry(summary.handle);
+      return entry?.profile.ownerUserId === user.userId;
+    });
+    return { twins: owned };
+  });
 
   // ─── Onboarding ────────────────────────────────────────────────────────────
   registerOnboardingRoutes(app, deps);
@@ -116,8 +166,9 @@ export async function createServer(deps: ServerDeps) {
   app.get<{ Params: { handle: string } }>(
     "/twins/:handle/profile",
     async (request, reply) => {
-      const entry = requireEntry(request.params.handle, reply);
-      if (!entry) return;
+      const ctx = await requireOwner(request, reply, request.params.handle);
+      if (!ctx) return;
+      const { entry } = ctx;
       return profileToResponse(entry);
     },
   );
@@ -126,8 +177,9 @@ export async function createServer(deps: ServerDeps) {
   app.post<{ Params: { handle: string } }>(
     "/twins/:handle/chat",
     async (request, reply) => {
-      const entry = requireEntry(request.params.handle, reply);
-      if (!entry) return;
+      const ctx = await requireOwner(request, reply, request.params.handle);
+      if (!ctx) return;
+      const { entry } = ctx;
       const parsed = ChatRequestSchema.safeParse(request.body);
       if (!parsed.success) {
         return reply.status(400).send({ error: parsed.error.message });
@@ -145,8 +197,9 @@ export async function createServer(deps: ServerDeps) {
   app.get<{ Params: { handle: string }; Querystring: { limit?: string; offset?: string } }>(
     "/twins/:handle/audit",
     async (request, reply) => {
-      const entry = requireEntry(request.params.handle, reply);
-      if (!entry) return;
+      const ctx = await requireOwner(request, reply, request.params.handle);
+      if (!ctx) return;
+      const { entry } = ctx;
       const limit = Math.min(Number(request.query.limit ?? 50), 200);
       const offset = Number(request.query.offset ?? 0);
       const entries = await deps.audit.list({ limit, offset, twinId: entry.twinId });
@@ -158,8 +211,9 @@ export async function createServer(deps: ServerDeps) {
   app.get<{ Params: { handle: string } }>(
     "/twins/:handle/audit/pending",
     async (request, reply) => {
-      const entry = requireEntry(request.params.handle, reply);
-      if (!entry) return;
+      const ctx = await requireOwner(request, reply, request.params.handle);
+      if (!ctx) return;
+      const { entry } = ctx;
       // Pragmatisch: alle holen (200), in JS auf pending filtern. Bei
       // wachsendem Volumen besser eine WHERE status='pending'-Query im Repo.
       const entries = await deps.audit.list({ limit: 200, twinId: entry.twinId });
@@ -171,8 +225,9 @@ export async function createServer(deps: ServerDeps) {
   app.post<{ Params: { handle: string; id: string } }>(
     "/twins/:handle/audit/:id/approve",
     async (request, reply) => {
-      const entry = requireEntry(request.params.handle, reply);
-      if (!entry) return;
+      const ctx = await requireOwner(request, reply, request.params.handle);
+      if (!ctx) return;
+      const { entry } = ctx;
       const auditEntry = await deps.audit.get(request.params.id);
       if (!auditEntry || auditEntry.twinId !== entry.twinId) {
         return reply.status(404).send({ error: "Audit-Eintrag nicht für diesen Twin" });
@@ -190,8 +245,9 @@ export async function createServer(deps: ServerDeps) {
   app.post<{ Params: { handle: string; id: string }; Body: { reason?: string } }>(
     "/twins/:handle/audit/:id/reject",
     async (request, reply) => {
-      const entry = requireEntry(request.params.handle, reply);
-      if (!entry) return;
+      const ctx = await requireOwner(request, reply, request.params.handle);
+      if (!ctx) return;
+      const { entry } = ctx;
       const auditEntry = await deps.audit.get(request.params.id);
       if (!auditEntry || auditEntry.twinId !== entry.twinId) {
         return reply.status(404).send({ error: "Audit-Eintrag nicht für diesen Twin" });
@@ -211,14 +267,20 @@ export async function createServer(deps: ServerDeps) {
   app.get<{ Params: { handle: string } }>(
     "/twins/:handle/stream",
     async (request, reply) => {
-      const entry = requireEntry(request.params.handle, reply);
-      if (!entry) return;
+      const ctx = await requireOwner(request, reply, request.params.handle);
+      if (!ctx) return;
+      const { entry } = ctx;
 
+      // SSE-Header: Origin reflektieren (NICHT "*"), weil EventSource mit
+      // withCredentials sonst die Connection vom Browser geblockt wird —
+      // CORS-Spec verbietet Wildcard-Origin bei credentialed Requests.
+      const origin = request.headers.origin ?? "*";
       reply.raw.writeHead(200, {
         "Content-Type": "text/event-stream",
         "Cache-Control": "no-cache",
         Connection: "keep-alive",
-        "Access-Control-Allow-Origin": "*",
+        "Access-Control-Allow-Origin": origin,
+        "Access-Control-Allow-Credentials": "true",
       });
 
       const send = (event: unknown) => {
@@ -338,11 +400,15 @@ function registerLegacyAliases(
   app.get("/stream", async (request, reply) => {
     const entry = requireLegacyEntry(reply);
     if (!entry) return;
+    // Origin reflektieren statt "*", damit EventSource(withCredentials:true)
+    // nicht vom Browser geblockt wird (CORS verbietet Wildcard bei creds).
+    const origin = request.headers.origin ?? "*";
     reply.raw.writeHead(200, {
       "Content-Type": "text/event-stream",
       "Cache-Control": "no-cache",
       Connection: "keep-alive",
-      "Access-Control-Allow-Origin": "*",
+      "Access-Control-Allow-Origin": origin,
+      "Access-Control-Allow-Credentials": "true",
     });
     const send = (event: unknown) => {
       reply.raw.write(`data: ${JSON.stringify(event)}\n\n`);
@@ -428,8 +494,10 @@ function registerOnboardingRoutes(app: FastifyInstance, deps: ServerDeps) {
     },
   );
 
-  // ─── API-Key Validation ──────────────────────────────────────────────────
+  // ─── API-Key Validation (auth nötig) ────────────────────────────────────
   app.post("/onboarding/validate-api-key", async (request, reply) => {
+    const user = await getCurrentUser(request, deps.db);
+    if (!user) return reply.status(401).send({ error: "Login erforderlich" });
     const parsed = ValidateApiKeySchema.safeParse(request.body);
     if (!parsed.success) {
       return reply.status(400).send({ error: parsed.error.message });
@@ -442,8 +510,11 @@ function registerOnboardingRoutes(app: FastifyInstance, deps: ServerDeps) {
     return result;
   });
 
-  // ─── Submit ──────────────────────────────────────────────────────────────
+  // ─── Submit (auth nötig, owner_user_id = session.userId) ────────────────
   app.post("/onboarding/submit", async (request, reply) => {
+    const user = await getCurrentUser(request, deps.db);
+    if (!user) return reply.status(401).send({ error: "Login erforderlich" });
+
     const parsed = OnboardingSubmitSchema.safeParse(request.body);
     if (!parsed.success) {
       return reply.status(400).send({ error: parsed.error.message });
@@ -504,7 +575,6 @@ function registerOnboardingRoutes(app: FastifyInstance, deps: ServerDeps) {
     };
 
     // 6. INSERT — bei UNIQUE-Race wirft sqlite, fängt's der catch
-    const owner = getCurrentUser();
     const twinId = `twin_${nanoid(16)}`;
     try {
       const profile = deps.profilesRepo.insert({
@@ -516,7 +586,7 @@ function registerOnboardingRoutes(app: FastifyInstance, deps: ServerDeps) {
         llmConfig: storedLlmConfig,
         bridgeUrl,
         bridgeToken,
-        ownerUserId: owner?.userId ?? null,
+        ownerUserId: user.userId,
         isActive: true,
       });
       return reply.status(201).send({
@@ -545,6 +615,88 @@ function pickBridgeUrlForOnboarding(deps: ServerDeps): string {
     if (entry?.profile.bridgeUrl) return entry.profile.bridgeUrl;
   }
   return process.env.BRIDGE_URL?.trim() || "http://127.0.0.1:5100";
+}
+
+// ─── AUTH ROUTES ─────────────────────────────────────────────────────────────
+//
+// Email/Passwort-Login mit iron-session-Cookie. Bewusst keine Email-
+// Verifikation heute (kommt 2.5.5) und kein Rate-Limiting (Backlog #41).
+// Generic-Error-Strings bei Login, damit User-Enumeration nicht trivial ist.
+
+const EmailSchema = z.string().trim().toLowerCase().email();
+
+const RegisterSchema = z.object({
+  email: EmailSchema,
+  password: z.string().min(8, "Passwort muss mind. 8 Zeichen haben"),
+  displayName: z.string().trim().min(1).optional(),
+});
+
+const LoginSchema = z.object({
+  email: EmailSchema,
+  password: z.string().min(1),
+});
+
+function registerAuthRoutes(app: FastifyInstance, deps: ServerDeps) {
+  const usersRepo = new UsersRepo(deps.db);
+
+  app.post("/auth/register", async (request, reply) => {
+    const parsed = RegisterSchema.safeParse(request.body);
+    if (!parsed.success) {
+      return reply.status(400).send({ error: parsed.error.message });
+    }
+    try {
+      const user = usersRepo.create(
+        parsed.data.email,
+        parsed.data.password,
+        parsed.data.displayName,
+      );
+      await setSession(reply, { userId: user.userId });
+      return reply.status(201).send({
+        userId: user.userId,
+        email: user.email,
+        displayName: user.displayName,
+      });
+    } catch (err) {
+      if (err instanceof UserAlreadyExistsError) {
+        return reply.status(409).send({ error: err.message });
+      }
+      throw err;
+    }
+  });
+
+  app.post("/auth/login", async (request, reply) => {
+    const parsed = LoginSchema.safeParse(request.body);
+    if (!parsed.success) {
+      return reply.status(400).send({ error: parsed.error.message });
+    }
+    const user = usersRepo.verifyPassword(parsed.data.email, parsed.data.password);
+    if (!user) {
+      // Gleiche Fehlermeldung für "User nicht gefunden" und "Passwort
+      // falsch" — verhindert User-Enumeration via Login-Endpoint.
+      return reply.status(401).send({ error: "Email oder Passwort falsch" });
+    }
+    await setSession(reply, { userId: user.userId });
+    return {
+      userId: user.userId,
+      email: user.email,
+      displayName: user.displayName,
+    };
+  });
+
+  app.post("/auth/logout", async (_request, reply) => {
+    destroySession(reply);
+    return reply.status(204).send();
+  });
+
+  app.get("/auth/me", async (request, reply) => {
+    const user = await getCurrentUser(request, deps.db);
+    if (!user) return reply.status(401).send({ error: "Nicht eingeloggt" });
+    return {
+      userId: user.userId,
+      email: user.email,
+      displayName: user.displayName,
+    };
+  });
 }
 
 // ─── helpers ─────────────────────────────────────────────────────────────────

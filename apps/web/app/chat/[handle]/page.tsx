@@ -3,7 +3,7 @@
 import { use, useState } from "react";
 import type { ChatMessage } from "@twin-lab/shared";
 
-const RUNTIME_URL = process.env.NEXT_PUBLIC_RUNTIME_URL ?? "http://127.0.0.1:4000";
+const RUNTIME_URL = process.env.NEXT_PUBLIC_RUNTIME_URL ?? "http://localhost:4000";
 
 // Dynamische Chat-Route. URL-Form: /chat/@markus, /chat/@florian.
 // `params.handle` ist je nach Browser/Next-Version mal URL-decodiert, mal
@@ -34,6 +34,7 @@ export default function ChatPage({
     try {
       const res = await fetch(`${RUNTIME_URL}/twins/${handle}/chat`, {
         method: "POST",
+        credentials: "include",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ messages: next }),
       });

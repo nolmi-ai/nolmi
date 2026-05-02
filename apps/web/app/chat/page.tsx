@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 
-const RUNTIME_URL = process.env.NEXT_PUBLIC_RUNTIME_URL ?? "http://127.0.0.1:4000";
+const RUNTIME_URL = process.env.NEXT_PUBLIC_RUNTIME_URL ?? "http://localhost:4000";
 
 // Index-Route /chat: redirected zur Chat-Page des ersten aktiven Twins.
 // Client-seitig, weil wir die Twin-Liste vom Runtime brauchen — der ist
@@ -15,7 +15,7 @@ export default function ChatIndexPage() {
 
   useEffect(() => {
     let cancelled = false;
-    fetch(`${RUNTIME_URL}/twins`)
+    fetch(`${RUNTIME_URL}/twins`, { credentials: "include" })
       .then((res) => {
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         return res.json() as Promise<{ twins: Array<{ handle: string }> }>;
