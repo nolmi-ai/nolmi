@@ -1,6 +1,6 @@
 # Backlog Phase 2.5 und später
 
-Stand: 2. Mai 2026, mittags — nach Sub-Schritt 2.5.3 (Onboarding-Wizard) abgeschlossen. Heiko Gregor (@heiko) als dritter Twin via Wizard angelegt und Live-Chat-validiert.
+Stand: 2. Mai 2026, Abend — nach Sub-Schritt 2.5.4 (User-Auth) abgeschlossen. Drei bestehende Twins (Markus, Florian, Heiko) zu echten User-Accounts migriert, 1:1 Twin-Mapping. Browser-Tests grün.
 
 Format: Punkte mit Größe (S/M/L/XL) und Priorität (must/should/nice).
 
@@ -40,19 +40,30 @@ Geordnete Liste für die kommenden Sessions. Jeder Sub-Schritt ist abgeschlossen
 ### 2.5.3 — Onboarding-Flow Web-UI Wizard ✅
 **Abgeschlossen 2. Mai 2026 mittags.** Web-UI-Wizard mit 8 Schritten (Pfad-Wahl + 7 Konfigurations-Blöcke), strukturierte Persona-Felder, 3 Mandate-Templates, API-Key-Test-Call mit Live-Validation, atomarer DB-Insert. 6 neue Files (5 Backend-Onboarding-Module + 1 UI-Wizard-Page), 4 modifizierte Files. Heiko Gregor (@heiko) als erster externer User-Test erfolgreich angelegt und Live-Chat-validiert. +1789/-7. Bekannte UX-Limitationen siehe Items #37, #38, #39 unten.
 
-### 2.5.4 — User-Auth (Email/Passwort)
-**Größe:** L · **Zeitfenster:** 2-3 Sessions (~6-10h)
+### 2.5.4 — User-Auth (Email/Passwort) ✅
+**Abgeschlossen 2. Mai 2026 abends.** Migration 005 (users-Tabelle, bcrypt-gehashtes Passwort), iron-session via sealData/unsealData mit 7-Tage-Cookie, 4 Auth-Endpoints (register, login, logout, me), Owner-Check für alle `/twins/:handle/*`-Routes, Frontend-Middleware für Cookie-Presence, Login-Page mit `?next=`-Honor, Onboarding-Wizard erweitert um AccountBlock (3 Modi: Login/Register/Eingeloggt), Logout-Button im TwinSwitcher, CLI-Tools (`session-secret:generate`, `user:create`). Drei bestehende User migriert mit 1:1 Twin-Mapping:
 
-Heute: kein Auth-Layer. Phase 2.5.4:
-- `users`-Tabelle mit `email`, `password_hash`, `created_at`
-- Login-Form, Session-Cookie
-- `owner_user_id` in `twin_profiles` wird belegt
-- Twin-UI nur für Owner sichtbar (oder für explicit-shared Users)
-- Owner-Recognition im System-Prompt (Backlog #14 wird hier gefixt)
-- Approval-Routing: Pending-Anfragen gehen an `owner_user_id`, nicht an Beziehungs-Eintrag
-- Auth-Stub `getCurrentUser()` aus 2.5.3 wird durch echte Session-Logic ersetzt
+- markus.baier@harway.de → @markus
+- florian.ristig@harway.de → @florian
+- heiko.gregor@harway.de → @heiko
 
-Vorbedingung für Public-Deployment und für UX-Fixes #14, #38, #39.
+Verifiziert: 11/11 Browser-Tests grün. 22 Files, +1261/-155.
+
+Bug-Fixes während Verifikation: `@fastify/cookie` auf v11 (Fastify-5-Kompatibilität), `127.0.0.1 → localhost` durchgehend (Cookie-Origin-Trennung), Settings-Page `credentials: include` in `/twins`-Fetch, SSE/EventSource CORS-Wildcard durch Origin-Reflektion ersetzt, Auth-State-Übergänge nutzen `window.location.href` statt `router` (Hard-Nav), `/onboarding` aus `PROTECTED_PREFIXES` entfernt (AccountBlock ist public).
+
+NICHT in 2.5.4 enthalten: Owner-Modus im System-Prompt + Approval-Bypass für Owner-Chats — beides verschoben auf 2.5.4.1.
+
+### 2.5.4.1 — Owner-Modus + Approval-Bypass + Wartemeldung
+**Größe:** M · **Zeitfenster:** 1-2 Sessions (~4-6h)
+
+Mit 2.5.4 hat jeder Twin einen Owner. Owner-Chats brauchen einen anderen Modus als externe A2A-Anfragen — Owner können direkter und ohne Approval-Loop kommunizieren, externe Anfragen brauchen weiterhin den vollen Mandate-Check. Plus: wenn ein externes A2A reinkommt, soll die Wartemeldung als System-Antwort sichtbar sein, nicht nur als Backend-Status.
+
+Aufgaben:
+- Owner-Recognition im System-Prompt (löst Backlog #14): Twin weiß "der gerade chattet ist mein Owner Markus" und kann Mandate-Check umgehen
+- Approval-Bypass für Owner-Chats: `getCurrentUser` ergibt Owner → skip Mandate-Check, direkter Pass
+- Approval-Wartemeldung als System-Antwort (löst Backlog #38): wenn externes A2A wartet, sieht der Anfragende "Anfrage ist bei Markus zur Freigabe"
+
+Erste Frage am Anfang: beim Owner-Modus — soll der Twin die Owner-Identität explizit im Persona-Kontext haben (z.B. "Der User der dich gerade ansieht IST Markus") oder soll der Approval-Bypass nur technisch über die User-ID laufen, ohne Persona-Anpassung? Pragmatisch: nur technisch reicht für 2.5.4.1, Persona-Erweiterung kann separates Item sein.
 
 ### 2.5.5 — Notification-System für Pending
 **Größe:** M · **Zeitfenster:** 1-2 Sessions (~4-6h)
@@ -220,6 +231,26 @@ Nachteile: zusätzlicher LLM-Call vor jeder Antwort, mehr Latenz (~300-500ms), z
 Konzeptionell ist das ein Skill-System-Feature (Capability-Layer entscheidet, ob Skill ohne Approval ausführbar ist). Deshalb auf Phase 3 verschoben, nicht in 2.5.x.
 **Größe:** L · **Priorität:** should · **Aus:** 2.5.3 Heiko-Live-Test
 
+### 40. CSRF-Token für /auth/*-Endpoints — NEU aus 2.5.4
+Heute schützt nur `SameSite=Lax` auf dem Session-Cookie. Bei breiterem Deployment (echte Domain, eingebettete Iframes, Browser-Extensions, etc.) braucht es `@fastify/csrf` für tokenbasierten Schutz, um POST-CSRF-Angriffe zu blocken.
+**Größe:** M · **Priorität:** should · **Aus:** 2.5.4 Caveat #5
+
+### 41. Magic-Link Auth (passwordless) — NEU aus 2.5.4
+Alternative zu Email/Passwort: User gibt Email ein, kriegt Login-Link via Email zugeschickt. Vorteil: kein Passwort-Management, sicherer (kein Rainbow-Table-Risiko, kein Password-Reuse). Vorbedingung: Email-Versand aus 2.5.5. Markus' Frage vom 02.05: "Magic Link könnten wir für die Zukunft nochmal überlegen."
+**Größe:** L · **Priorität:** nice · **Aus:** 2.5.4 Architektur-Diskussion, blockt auf 2.5.5
+
+### 42. Rate-Limiting auf /auth/login — NEU aus 2.5.4
+Heute kein Rate-Limit. Bei breiterem Deployment Brute-Force-anfällig. `@fastify/rate-limit` mit konservativem Default (z.B. 5 Login-Versuche pro IP pro 15 Minuten), bei Treffer 429 mit Retry-After-Header. Plus per-Email-Tracking gegen distributed Brute-Force.
+**Größe:** S · **Priorität:** should · **Aus:** 2.5.4 Caveat #6
+
+### 43. Top-Nav auf /login + /onboarding versteckt — NEU aus 2.5.4
+Heute rendert die Top-Nav (TwinSwitcher + Logout + Tabs) auf jeder Page, auch `/login`. Auf der Login-Page erscheint dann "twins: HTTP 401" und "chat/stream/settings"-Tabs, die für nicht-eingeloggte User sinnlos sind. Frontend sollte Top-Nav für Public-Routes (`/login`, `/onboarding`) anders rendern oder ganz weglassen — am saubersten via Layout-Variante oder Conditional in `layout.tsx`.
+**Größe:** S · **Priorität:** should · **Aus:** 2.5.4 Live-Test, durchgängig sichtbar
+
+### 44. Self-Service-Password-Reset — NEU aus 2.5.4
+Florian und Heiko haben heute Platzhalter-Passworte von Markus per CLI bekommen. Es gibt aber keinen Weg für sie, das Passwort selbst zu ändern. CLI-Tool (`pnpm user:create` mit Update-Flag oder ein neues `user:reset-password`) reicht für heute, aber UI-Flow ("Passwort vergessen?" → Email-Link → Set-New-Password) wäre richtig. Vorbedingung: Email-Versand aus 2.5.5.
+**Größe:** M · **Priorität:** should · **Aus:** 2.5.4 Migration der drei bestehenden User, blockt auf 2.5.5
+
 ---
 
 ## Phase 3 — Memory + Skills + Tools
@@ -338,8 +369,34 @@ A2A wird zusätzlich gebaut, nicht statt. Eigene Bridge bleibt für Twin-Lab-spe
 
 ---
 
+## Lessons gelernt
+
+Sammlung an Erkenntnissen aus Live-Tests und Implementierungs-Bugs. Kurz, abstrakt, sofort anwendbar.
+
+### Lesson (2.5.4): Auth-State-Übergänge brauchen Hard-Navigation
+
+`router.push` / `router.replace` / `router.refresh` lassen Komponenten gemountet — Auth-State im React-`useState` überlebt die Navigation und ist stale. `window.location.href` triggert Full-Mount, neuer Auth-State garantiert konsistent. Phase-2.5-Lösung pragmatisch. Echte Lösungen für später: Context-Provider mit Invalidation, React Query mit Tag-Invalidation, Server-Components mit `cookies()`.
+
+### Lesson (2.5.4): CORS-Wildcard ist mit credentials inkompatibel
+
+Bei credentialed Requests (`fetch credentials:include`, `EventSource withCredentials:true`) muss der Server eine konkrete Origin-Adresse zurückgeben — nicht Wildcard `*`. Plus `Access-Control-Allow-Credentials: true`. Browser lehnen sonst Response ab. Trap besonders bei SSE: `reply.raw.writeHead` umgeht den `@fastify/cors`-Plugin, daher manuell setzen.
+
+### Lesson (2.5.4): Plugin-Major-Matching prüfen
+
+`@fastify/cookie@latest` war zur Zeit der Installation noch Fastify-4-kompatibel (v9). Bei Fastify-5-Setup explizit `^11` angeben. Generell: bei `pnpm add` für `@fastify/*`-Plugins die Compat-Range prüfen, nicht blindlings latest. Die Plugin-Major-Versionierung folgt der Fastify-Major-Versionierung, aber nicht 1:1 in der Versionsnummer.
+
+### Lesson (2.5.4): localhost vs. 127.0.0.1 sind verschiedene Origins
+
+Auch wenn beide auf 127.0.0.1 auflösen, behandelt der Browser sie für Cookies und CORS als verschiedene Origins. Cookies gesetzt unter `localhost:3000` werden bei einem Fetch gegen `127.0.0.1:4000` nicht mitgesendet. Konsistent eine Form durchziehen — bevorzugt `localhost`.
+
+### Wisdom (Markus, 2.5.4): Frontend-Public/Backend-Protected ist eine saubere Trennung
+
+Beispiel: `/onboarding` ist als Frontend-Route public (User soll Account anlegen können), aber `/onboarding/submit` + `/onboarding/validate-api-key` sind Backend-protected (brauchen Login). Die Trennung erlaubt UI-Flow ohne Pre-Login, sichert aber Datenmutation. Pattern lässt sich auf weitere Onboarding/Funnel-Pages übertragen.
+
+---
+
 ## Notiz für später
 
 Sammle weiter Punkte, die im Sparring auftauchen. Nicht jeder Punkt muss eine Phase werden — manches ist Polishing, manches ist Architektur. Die Aufteilung S/M/L/XL und must/should/nice hilft beim Priorisieren wenn die Liste lang wird.
 
-**Item-Dichte heute mittag:** 3 neue Items aus Sub-Schritt 2.5.3 (#37 Hot-Reload, #38 Approval-System-Text, #39 Klassifikator-Vorlauf), plus Schärfung von #14 (Owner-Recognition) nach Heiko-Live-Test, plus #19 als ENTSCHIEDEN markiert. Items insgesamt: 39 (von 36 heute morgen, von 32 gestern Abend, von 18 vor zwei Tagen).
+**Item-Dichte heute Abend:** 5 neue Items aus Sub-Schritt 2.5.4 (#40 CSRF, #41 Magic-Link, #42 Rate-Limit, #43 Top-Nav-versteckt, #44 Self-Service-PW-Reset), plus 2.5.4 als ✅ markiert, plus 2.5.4.1 als neuer Sub-Schritt eingeschoben (Owner-Modus + Approval-Bypass), plus 5 Lessons aus 2.5.4-Implementation. Items insgesamt: 44 (von 39 heute mittag, von 36 heute morgen, von 32 gestern Abend, von 18 vor zwei Tagen).
