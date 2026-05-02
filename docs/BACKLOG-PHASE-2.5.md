@@ -1,6 +1,6 @@
 # Backlog Phase 2.5 und später
 
-Stand: 2. Mai 2026, vormittags — nach Sub-Schritt 2.5.2e (Per-Twin LLM-Config + AES-256-GCM Verschlüsselung) abgeschlossen.
+Stand: 2. Mai 2026, mittags — nach Sub-Schritt 2.5.3 (Onboarding-Wizard) abgeschlossen. Heiko Gregor (@heiko) als dritter Twin via Wizard angelegt und Live-Chat-validiert.
 
 Format: Punkte mit Größe (S/M/L/XL) und Priorität (must/should/nice).
 
@@ -20,9 +20,13 @@ Wichtige Weichen, die geklärt sind — Referenz für alle weiteren Items:
 
 **Per-Twin Konfiguration als Pattern.** LLM-Config heute (mit AES-256-GCM-Verschlüsselung der API-Keys), Skill-Config in Phase 3, Channel-Config in Phase 4 — alle pro Twin, nicht pro Plattform. Konsistent mit Multi-Tenant-Vision.
 
-**Drei Deployment-Modelle:** Lokal (Self-Hosted), Hosted mit BYO-API-Key (verschlüsselt mit Server-Master-Key), Hosted mit System-API-Key (Premium-Abo). Onboarding-Wizard (2.5.3) wird drei Pfade haben.
+**Drei Deployment-Modelle:** Lokal (Self-Hosted), Hosted mit BYO-API-Key (verschlüsselt mit Server-Master-Key), Hosted mit System-API-Key (Premium-Abo). Onboarding-Wizard (2.5.3) bietet aktuell A+B, C kommt später mit Stripe-Anbindung.
 
 **A2A-Protokoll-Strategie:** Google A2A wird in Phase 4 oder 5 als Adapter-Schicht obendrauf gebaut, nicht als Ersatz für die interne Bridge. Ökosystem-Anbindung ohne Lock-In auf eigenes Protokoll.
+
+**Onboarding-Strategie:** Strukturierte Felder statt Markdown-Editor für non-tech-User. Persona-Markdown wird im Backend aus Form-Inputs generiert. Drei vorgefertigte Mandate-Templates (cautious/trusting/business) statt YAML-Editor. API-Key-Test-Call vor Submit, atomarer DB-Insert mit Verschlüsselung.
+
+**User-Auth ist Vorbedingung für mehrere UX-Fixes (NEU 2. Mai).** Live-Test mit Heiko-Twin hat gezeigt, dass Owner-Recognition (#14), Approval-Routing und Owner-aware Twin-Verhalten sich nur mit echten User-Identitäten sauber lösen lassen. 2.5.4 (User-Auth) ist deshalb Pflicht-Vorbedingung für 2.5.5 und 2.5.6, plus für die UX-Refinements aus 2.5.3.
 
 ---
 
@@ -31,12 +35,10 @@ Wichtige Weichen, die geklärt sind — Referenz für alle weiteren Items:
 Geordnete Liste für die kommenden Sessions. Jeder Sub-Schritt ist abgeschlossen testbar.
 
 ### 2.5.2e — Per-Twin LLM-Config aus DB ✅
-**Abgeschlossen 2. Mai 2026.** Encryption-Infrastruktur etabliert (AES-256-GCM, Master-Key in ENV), Per-Twin ENV-Override-Pattern (`<NAME>_LLM_*` mit Fallback auf `TWIN_LLM_*`), Bootstrap mit Verschlüsselung, Settings-UI mit API-Key-Maske + "verschlüsselt in DB"-Hinweis. 11 Files, +366/-40. Vorbereitung für Multi-Tenant-Hosting in 2.5.6.
+**Abgeschlossen 2. Mai 2026 vormittags.** Encryption-Infrastruktur etabliert (AES-256-GCM, Master-Key in ENV), Per-Twin ENV-Override-Pattern (`<NAME>_LLM_*` mit Fallback auf `TWIN_LLM_*`), Bootstrap mit Verschlüsselung, Settings-UI mit API-Key-Maske + "verschlüsselt in DB"-Hinweis. 11 Files, +366/-40. Vorbereitung für Multi-Tenant-Hosting in 2.5.6.
 
-### 2.5.3 — Onboarding-Flow Web-UI Wizard
-**Größe:** L · **Zeitfenster:** 2-3 Sessions (~6-10h)
-
-Neuer User soll Twin selbst bootstrappen — ohne Terminal. Web-UI-Wizard mit drei Pfaden (Lokal vs. Hosted-BYO vs. Hosted-System-Key). Für non-tech User: strukturierte Persona-Felder statt Markdown-Editor (Name, Rolle, Stil als Checkboxen, Themen als Tags), Mandate-Templates (4-5 vorgefertigte Sets statt YAML-Editor), LLM-Provider-Default mit optionalem User-API-Key, Bridge-Anbindung automatisch. Voraussetzung für Multi-Tenant-Vision.
+### 2.5.3 — Onboarding-Flow Web-UI Wizard ✅
+**Abgeschlossen 2. Mai 2026 mittags.** Web-UI-Wizard mit 8 Schritten (Pfad-Wahl + 7 Konfigurations-Blöcke), strukturierte Persona-Felder, 3 Mandate-Templates, API-Key-Test-Call mit Live-Validation, atomarer DB-Insert. 6 neue Files (5 Backend-Onboarding-Module + 1 UI-Wizard-Page), 4 modifizierte Files. Heiko Gregor (@heiko) als erster externer User-Test erfolgreich angelegt und Live-Chat-validiert. +1789/-7. Bekannte UX-Limitationen siehe Items #37, #38, #39 unten.
 
 ### 2.5.4 — User-Auth (Email/Passwort)
 **Größe:** L · **Zeitfenster:** 2-3 Sessions (~6-10h)
@@ -47,8 +49,10 @@ Heute: kein Auth-Layer. Phase 2.5.4:
 - `owner_user_id` in `twin_profiles` wird belegt
 - Twin-UI nur für Owner sichtbar (oder für explicit-shared Users)
 - Owner-Recognition im System-Prompt (Backlog #14 wird hier gefixt)
+- Approval-Routing: Pending-Anfragen gehen an `owner_user_id`, nicht an Beziehungs-Eintrag
+- Auth-Stub `getCurrentUser()` aus 2.5.3 wird durch echte Session-Logic ersetzt
 
-Vorbedingung für Public-Deployment.
+Vorbedingung für Public-Deployment und für UX-Fixes #14, #38, #39.
 
 ### 2.5.5 — Notification-System für Pending
 **Größe:** M · **Zeitfenster:** 1-2 Sessions (~4-6h)
@@ -57,6 +61,7 @@ Heute: Pending nur sichtbar wenn Settings-Page offen.
 - Browser-Notifications (Web Push API)
 - Email-Notifications via resend.com (Konto vorhanden)
 - Konfigurierbar pro Twin: welche Events triggern Notifications
+- Vorbedingung: 2.5.4 (User-Auth, weil Notification-Routing pro User)
 
 ### 2.5.6 — Production-Deployment Web auf VPS
 **Größe:** L · **Zeitfenster:** 1-2 Sessions (~4-6h)
@@ -69,13 +74,14 @@ Web-UI deploy unter `app.twin.harwayexperience.com`:
 - DB-Persistenz via Volume-Mount
 - ENV-Variablen für API-URLs (Bridge, etc.)
 - Master-Key in produktions-tauglichem Vault (nicht mehr in ENV-Datei)
+- Vorbedingung: 2.5.4 (User-Auth) für Public-Access-Kontrolle
 
 ---
 
 ## Phase 2.5 Total
 
-**Zeitfenster für Rest:** ~6-12h Arbeit auf 5-9 Sessions verteilt.
-**Realistisch bei 4h/Tag:** ~2 Wochen Kalenderzeit.
+**Zeitfenster für Rest:** ~10-16h Arbeit auf 5-7 Sessions verteilt.
+**Realistisch bei 4h/Tag:** ~1,5-2 Wochen Kalenderzeit.
 **Definition of Done für Phase 2.5:** Externer User kann sich registrieren, eigenen Twin onboarden, mit dem Twin chatten, Pending approven, Twin verleihen. Multi-Tenant-SaaS funktional unter `app.twin.harwayexperience.com`.
 
 ---
@@ -119,8 +125,8 @@ Aktuell wird die Persona bei jedem Boot überschrieben. Wenn du sie iterierst, v
 **Größe:** M · **Priorität:** nice · **Aus:** allgemeine Beobachtung
 
 ### 10. UI-Bearbeitung von Persona/Mandates
-In Phase 1 und 2 explizit ausgeschlossen — Files in `docs/` sind die Source of Truth. Phase 2.5.3 (Onboarding-Wizard) öffnet diese Tür wieder.
-**Größe:** L · **Priorität:** nice · **Aus:** Phase-1-Scope-Disziplin
+In Phase 1 und 2 explizit ausgeschlossen — Files in `docs/` sind die Source of Truth. Phase 2.5.3 (Onboarding-Wizard) hat den Initial-Setup gelöst, aber **nicht** die spätere Bearbeitung. Twin-User können heute ihre Persona/Mandates nur durch Re-Bootstrap oder direkte DB-Edits ändern.
+**Größe:** L · **Priorität:** should · **Aus:** Phase-1-Scope-Disziplin
 
 ### 11. Persona-Klarstellung: 1. Person vs. Stellvertreter-Sprech
 Twin spricht aktuell teilweise in dritter Person über Markus ("checke es bei Markus"). Klären, ob das gewünscht ist (zeigt klar: Twin ist nicht Markus selbst) oder ob er als "ich" konsistent für Markus sprechen soll. Verknüpft mit #14 (Owner-Recognition) — Stellvertreter-Sprech ist im A2A-Modus richtig, im Web-UI-Owner-Modus eher nicht.
@@ -132,27 +138,27 @@ Twin spricht aktuell teilweise in dritter Person über Markus ("checke es bei Ma
 
 ### 12. Anthropic-Persona Umlaut-Bug
 Claude (anthropic/claude-opus-4-7) generiert in Markus' Persona Antworten ohne Umlaute ("weiss" statt "weiß", "Gespraechen" statt "Gesprächen", "beschaeftigt" statt "beschäftigt"). Florian-Persona zeigt das Problem nicht durchgängig — Hypothese: Persona-Markdown-Sprache beeinflusst LLM-Output. Fix: Umlaut-Direktive explizit in `docs/persona.md` ergänzen ("Schreibe immer mit korrekten deutschen Umlauten ä/ö/ü/ß").
-**Größe:** S · **Priorität:** must · **Aus:** Sub-Schritt 2c/2d/2e Live-Tests
+**Größe:** S · **Priorität:** must · **Aus:** Sub-Schritt 2c/2d/2e/2.5.3 Live-Tests
 
 ### 13. metadata_json in twin_profiles ergänzen
 Aktuell hardcoded `{}` im Boot — Persona-Metadata (Verbindungen, Tags, etc.) hat keine DB-Spalte. Migration 005 für `metadata_json TEXT`-Spalte. Genutzt u.a. für Beziehungs-Mapping ("Florian ist Co-Founder von Markus").
 **Größe:** S · **Priorität:** should · **Aus:** Sub-Schritt 2c Caveat
 
-### 14. Owner-Recognition im System-Prompt — präzisiert nach 2e Live-Test
+### 14. Owner-Recognition im System-Prompt — präzisiert nach 2.5.3 Live-Test
 Twin behandelt aktuell jeden Web-UI-Chat als Fremder, auch wenn der Owner selbst chattet.
 
-Live-Test 1. Mai: Markus fragt "Wer bin ich für dich?" → Twin antwortet "Du bist jemand, der mit meinem Twin schreibt".
+Live-Test 2.5.3: Heiko-Twin antwortet "Diese Anfrage habe ich an **Markus** zur Freigabe weitergeleitet". Markus ist aber nicht Heikos Owner — der Twin hat aus seiner Persona-Beziehungs-Liste geraten und den ersten Eintrag als "Owner" interpretiert. Das ist konzeptionell falsch und verrät private Beziehungs-Informationen.
 
-Live-Test 2. Mai: Owner fragt im Web-UI "Was hast du heute morgen über Verschlüsselung gelernt?" → Twin antwortet im Stellvertreter-Modus ("Ich hab nicht Markus' Tagesablauf im Kopf, schreib ihn direkt an"). Konzeptionell falsch: Twin ist im Web-UI-Chat eigentlich im Owner-Assistant-Modus.
+Plus: Web-UI-Chat überspringt Approval-Flow für Markus (`requires_approval=false` in seinen Mandates), aber **nicht** für Heiko (`cautious`-Template hat `requires_approval=true`). Das ist die Logik wie spezifiziert, aber UX-mässig falsch — der Owner sollte mit seinem eigenen Twin chatten können ohne sich selbst approven zu müssen.
 
-Plus: Web-UI-Chat überspringt Approval-Flow komplett — was im Stellvertreter-Modus problematisch wäre, im Owner-Modus aber okay ist. Verknüpft mit #33 (Mandate-basierte Approval-Logik).
+Verknüpft mit #33 (Mandate-basierte Approval-Logik) und #38 (Approval-Wartemeldung als System-Antwort).
 
-Fix kommt mit User-Auth in 2.5.4: System-Prompt erweitert um "Du sprichst gerade mit deinem Owner @markus" wenn `req.user_id == twin.owner_user_id`.
-**Größe:** M · **Priorität:** should · **Aus:** Sub-Schritt 2c+2e Live-Tests, blockt auf 2.5.4
+Fix kommt mit User-Auth in 2.5.4: System-Prompt erweitert um "Du sprichst gerade mit deinem Owner @heiko" wenn `req.user_id == twin.owner_user_id`. Plus: Approval-Logic wird `req.user_id == twin.owner_user_id` als Bypass werten.
+**Größe:** M · **Priorität:** must · **Aus:** Sub-Schritt 2c+2e+2.5.3 Live-Tests, blockt auf 2.5.4
 
 ### 15. Footer-Text aktualisieren
-Footer zeigt noch "phase 1 · closed twin · läuft lokal". Ist heute durch Phase 2 + Phase 2.5d/2e überholt. Update auf "phase 2.5 · multi-twin · läuft lokal" oder dynamisch aus DB ("2 Twins aktiv · Bridge live · API-Keys verschlüsselt").
-**Größe:** S · **Priorität:** nice · **Aus:** Sub-Schritt 2γ Live-Test
+Footer zeigt noch "phase 1 · closed twin · läuft lokal". Ist heute durch Phase 2 + Phase 2.5e + 2.5.3 überholt. Update auf "phase 2.5 · multi-twin · läuft lokal" oder dynamisch aus DB ("3 Twins aktiv · Bridge live · API-Keys verschlüsselt").
+**Größe:** S · **Priorität:** nice · **Aus:** Sub-Schritt 2γ Live-Test, durchgängig sichtbar
 
 ### 16. Backward-Compat-Aliases entfernen
 Sub-Schritt 2d hat alte Pfade (`/chat`, `/twin-profile`, `/audit`, `/audit/pending`, etc.) als Aliases zu `/twins/@markus/...` umgeleitet. Sollte nach komplettem UI-Refresh-Cycle entfernt werden — sonst dauerhafter Tech-Debt.
@@ -164,14 +170,14 @@ Sub-Schritt 2d hat alte Pfade (`/chat`, `/twin-profile`, `/audit`, `/audit/pendi
 
 ### 18. @-Char in URLs decodieren bei Display-Output
 Chat-Header zeigt `%40florian` statt `@florian` (URL-encodierter `@`). Backend-Routes akzeptieren beides, aber UI-Display sollte decoded sein. Einmal `decodeURIComponent()` an den richtigen Stellen.
-**Größe:** S · **Priorität:** nice · **Aus:** Sub-Schritt 2d Live-Test
+**Größe:** S · **Priorität:** nice · **Aus:** Sub-Schritt 2d Live-Test, in 2.5.3 erneut sichtbar (Chat-Header zeigt "%40heiko")
 
 ### 19. Hermes Agent als Backend evaluieren — ENTSCHIEDEN
 Strategische Option, die geklärt wurde: **Nein.** Hybrid-Strategie — eigenes TypeScript-Backend mit Hermes-Inspirationen (Profile-Mechanismus, FTS5 Session Search, agentskills.io-Format). Begründung in Architektur-Entscheidungen oben.
 
 ### 33. Mandate-basierte Approval-Logik auch im Web-UI
-Heute: Web-UI-Chat überspringt Approval-Flow komplett, Twin antwortet direkt im Browser. A2A-Eingang nutzt Approval. Konzeptionell unklar: was, wenn Markus im Web-UI eine sensitive Antwort generieren lässt, die er sich nochmal anschauen will? Vorschlag: Mandates differenzieren `requires_approval` per Channel. RESPOND_TO_CHAT könnte für Owner-Chats `false`, für externe `true` sein. Verknüpft mit #14 (Owner-Recognition).
-**Größe:** M · **Priorität:** should · **Aus:** Live-Test 2.5.2e
+Heute: Web-UI-Chat überspringt Approval-Flow für Markus, aber blockt für Heiko (cautious). A2A-Eingang nutzt Approval. Konzeptionell unklar: was, wenn Markus im Web-UI eine sensitive Antwort generieren lässt, die er sich nochmal anschauen will? Vorschlag: Mandates differenzieren `requires_approval` per Channel. RESPOND_TO_CHAT könnte für Owner-Chats `false`, für externe `true` sein. Verknüpft mit #14 (Owner-Recognition).
+**Größe:** M · **Priorität:** should · **Aus:** Live-Test 2.5.2e, in 2.5.3 verstärkt sichtbar
 
 ### 34. Master-Key-Rotation CLI
 Heute: bei Verdacht auf Kompromittierung des Master-Keys oder regulärer Rotation muss manuell entschlüsselt und neu verschlüsselt werden. Sauber: CLI-Tool `pnpm key:rotate` das den alten Master-Key liest, alle `apiKeyEncrypted` entschlüsselt, mit neuem Key verschlüsselt, in DB schreibt. Out of scope für 2.5.2e.
@@ -180,6 +186,39 @@ Heute: bei Verdacht auf Kompromittierung des Master-Keys oder regulärer Rotatio
 ### 35. Provider-aware API-Key-Maskierung
 Heute: `maskApiKey` zeigt `sk-a…IgAA` für Anthropic-Keys (sk-ant-…) — Provider-Präfix wird abgeschnitten. Provider-Erkennung im Mask: `sk-ant-…IgAA` für Anthropic, `sk-…XYZ` für OpenAI, etc. Schöner für Debugging, leakt minimal mehr Bits. Konsistenz mit Bridge-Token-Mask überprüfen.
 **Größe:** S · **Priorität:** nice · **Aus:** 2.5.2e Caveat
+
+### 37. Hot-Reload für TwinServiceRegistry — NEU aus 2.5.3
+Heute: nach Onboarding-Submit muss `pnpm dev` neu gestartet werden, damit der neue Twin in der laufenden Runtime aktiv wird. Submit-Response trägt `requiresRestart: true`, Wizard redirected zu `/chat/<handle>`, dort scheitert Chat bis zum Restart.
+
+Implementation: `addTwin(twinId)`-Methode auf `TwinServiceRegistry`, die das Profil aus DB lädt, `buildEntry` macht, `bridgeStream.connect()` ruft, in die Map einträgt. Race-Conditions zu durchdenken (was wenn der gleiche Twin gleichzeitig per Wizard und ENV-Bootstrap angelegt wird — UNIQUE-Constraint fängt das DB-seitig ab, aber die in-Memory-Map muss das auch sauber handhaben).
+
+Konzeptionell straightforward — nicht in 2.5.3-Scope gewesen. Kann unabhängig vom Auth-Layer gebaut werden.
+**Größe:** M · **Priorität:** should · **Aus:** 2.5.3 Caveat #1
+
+### 38. Approval-Wartemeldung als System-Antwort statt LLM-Improvisation — NEU aus 2.5.3
+Heute: wenn ein Twin im Approval-Modus ist, generiert er trotzdem eine LLM-improvisierte Wartemeldung. Heiko hat geantwortet "Diese Anfrage habe ich an Markus zur Freigabe weitergeleitet" — falsch, weil Markus nicht sein Owner ist und der Twin den Namen aus der Beziehungs-Liste improvisiert hat.
+
+Fix: Approval-Wartemeldung wird NICHT vom LLM generiert, sondern ist ein System-Festtext wie "Diese Anfrage liegt zur Freigabe — du erhältst die Antwort, sobald sie freigegeben ist." Kein Owner-Name, kein UI-Verweis (Settings-Tab ist unsichtbar für Nicht-Owner).
+
+UI-mässig sollte die System-Antwort visuell anders dargestellt werden als eine echte Twin-Antwort — z.B. als graue Info-Box statt Twin-Sprechblase. Polish, nicht Architektur.
+
+Vorteile: eliminiert Improvisations-Risiko, schneller (kein LLM-Call), spart Kosten, klares Mental-Model für den Chat-Partner.
+**Größe:** S · **Priorität:** must · **Aus:** 2.5.3 Heiko-Live-Test
+
+### 39. Cautious-Mode mit Klassifikator-Vorlauf — Phase 3 — NEU aus 2.5.3
+Heute: cautious-Template hat `requires_approval=true` für RESPOND_TO_CHAT. Heißt: ALLE Chat-Anfragen gehen durch Approval, auch simple Smalltalk- oder Identitäts-Fragen wie "Wer bist du?". Das ist UX-mässig falsch — Selbstbeschreibung sollte ohne Approval beantwortbar sein.
+
+Lösung: bevor der Twin antwortet, ein billiger 50-Token-Klassifikator-Call:
+- A) Selbstbeschreibung/Begrüßung/Smalltalk → ohne Approval
+- B) Inhaltliche Anfrage, Vereinbarung, Empfehlung → Approval-Pfad
+- C) Sonstiges/unklar → Approval-Pfad (sicherer Default)
+
+Vorteile: robust gegen Formulierungs-Varianten, lernfähig, billig (~$0.0005 pro Klassifikator).
+
+Nachteile: zusätzlicher LLM-Call vor jeder Antwort, mehr Latenz (~300-500ms), zusätzliche Komplexität.
+
+Konzeptionell ist das ein Skill-System-Feature (Capability-Layer entscheidet, ob Skill ohne Approval ausführbar ist). Deshalb auf Phase 3 verschoben, nicht in 2.5.x.
+**Größe:** L · **Priorität:** should · **Aus:** 2.5.3 Heiko-Live-Test
 
 ---
 
@@ -208,7 +247,7 @@ Twin als MCP-Client, kann Tools von externen MCP-Servern nutzen. Standard-Compli
 **Größe:** L · **Priorität:** must · **Aus:** Skills-Strategie
 
 ### 25. Skill-System (4-Layer Capability/Tool/Skill/Mandate)
-Skill-Engine mit klarer Hierarchie: Capability (was kann der Twin), Tool (welche API/Lib), Skill (Markdown-File mit definierter Aktion), Mandate (was darf der Twin autonom). Vorbedingung für externe Tools.
+Skill-Engine mit klarer Hierarchie: Capability (was kann der Twin), Tool (welche API/Lib), Skill (Markdown-File mit definierter Aktion), Mandate (was darf der Twin autonom). Vorbedingung für externe Tools, plus Vorbedingung für #39 (Klassifikator-Vorlauf).
 **Größe:** XL · **Priorität:** must · **Aus:** Skills-Diskussion 1.5.
 
 ### 26. agentskills.io-Kompatibilität
@@ -264,6 +303,14 @@ Vorbedingungen: Phase 4 (Multi-Channel-Architektur), Mandate-Engine reif für ex
 ### Verknüpfung mit Items #1 und #2
 Items #1 (Twin-Konversationen als Threads) und #2 (Lokale Spiegelung des Bridge-Streams) sind eng verknüpft. Beide adressieren das Problem, dass aktuell Audit-Log und Konversations-Historie identisch sind. Empfehlung: zusammen in einer Phase angehen, frühestens Phase 3 nach Memory-Schichten.
 
+### Cluster Owner-Recognition (#14, #38, #33)
+Drei Items hängen zusammen und sollten in 2.5.4 koordiniert angegangen werden:
+- #14 Owner-Recognition: Twin weiß, wer sein Owner ist
+- #33 Mandate per Channel: Owner-Chat überspringt Approval, externe nicht
+- #38 Approval-Wartemeldung: kein improvisiertes Owner-Naming mehr
+
+Plus #39 (Klassifikator-Vorlauf) ist eine orthogonale Verbesserung in Phase 3.
+
 ---
 
 ## Strategische Optionen (Stand 2. Mai 2026)
@@ -295,4 +342,4 @@ A2A wird zusätzlich gebaut, nicht statt. Eigene Bridge bleibt für Twin-Lab-spe
 
 Sammle weiter Punkte, die im Sparring auftauchen. Nicht jeder Punkt muss eine Phase werden — manches ist Polishing, manches ist Architektur. Die Aufteilung S/M/L/XL und must/should/nice hilft beim Priorisieren wenn die Liste lang wird.
 
-**Item-Dichte heute morgen:** 3 neue Items aus Sub-Schritt 2.5.2e, plus eine Schärfung von #14 nach Live-Test, plus #36 aus A2A-Recherche. Plus #19 (Hermes) als ENTSCHIEDEN markiert. Items insgesamt: 36 (von 32 gestern Abend, von 18 vor zwei Tagen).
+**Item-Dichte heute mittag:** 3 neue Items aus Sub-Schritt 2.5.3 (#37 Hot-Reload, #38 Approval-System-Text, #39 Klassifikator-Vorlauf), plus Schärfung von #14 (Owner-Recognition) nach Heiko-Live-Test, plus #19 als ENTSCHIEDEN markiert. Items insgesamt: 39 (von 36 heute morgen, von 32 gestern Abend, von 18 vor zwei Tagen).
