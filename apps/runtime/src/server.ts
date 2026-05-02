@@ -1,8 +1,21 @@
 import Fastify, { type FastifyInstance, type FastifyReply } from "fastify";
 import cors from "@fastify/cors";
+import { nanoid } from "nanoid";
+import { z } from "zod";
 import type { AuditRepository } from "./repository/types.js";
 import { ChatRequestSchema } from "@twin-lab/shared";
 import type { RegistryEntry, TwinServiceRegistry } from "./twin-service-registry.js";
+import { TwinProfilesRepo } from "./twin-profiles-repo.js";
+import { encrypt } from "./crypto-utils.js";
+import { LLM_PROVIDERS, type StoredLlmConfig } from "./llm-config.js";
+import { buildPersonaMarkdown } from "./onboarding/persona-builder.js";
+import { loadMandateTemplate } from "./onboarding/mandate-templates.js";
+import { validateApiKey } from "./onboarding/api-key-validator.js";
+import {
+  registerHandleOnBridge,
+  BridgeRegisterError,
+} from "./onboarding/bridge-register.js";
+import { getCurrentUser } from "./auth-stub.js";
 
 // ─── HTTP SERVER ─────────────────────────────────────────────────────────────
 //
@@ -32,6 +45,10 @@ const LEGACY_HANDLE = "@markus";
 export interface ServerDeps {
   audit: AuditRepository;
   registry: TwinServiceRegistry;
+  /** Für /onboarding-Endpoints: Handle-Lookup + neuer Twin-Insert. */
+  profilesRepo: TwinProfilesRepo;
+  /** Für /onboarding/submit: API-Key-Verschlüsselung. */
+  masterKey: Buffer;
 }
 
 export async function createServer(deps: ServerDeps) {
@@ -91,6 +108,9 @@ export async function createServer(deps: ServerDeps) {
 
   // ─── Twin-Liste ────────────────────────────────────────────────────────────
   app.get("/twins", async () => ({ twins: deps.registry.list() }));
+
+  // ─── Onboarding ────────────────────────────────────────────────────────────
+  registerOnboardingRoutes(app, deps);
 
   // ─── Profil ────────────────────────────────────────────────────────────────
   app.get<{ Params: { handle: string } }>(
@@ -337,6 +357,194 @@ function registerLegacyAliases(
       unsubscribe();
     });
   });
+}
+
+// ─── ONBOARDING ──────────────────────────────────────────────────────────────
+//
+// Drei Endpoints für den Wizard:
+//   GET  /onboarding/check-handle?handle=@x   → { available, suggestions? }
+//   POST /onboarding/validate-api-key         → { valid, reason? }
+//   POST /onboarding/submit                   → 201 { twinId, handle }
+//
+// Submit ist NICHT in einer DB-Transaktion gewrappt — der Bridge-Call zwischen
+// Validation und INSERT macht das nicht sinnvoll. Race-Behandlung: kollidiert
+// jemand zwischen check-handle und Submit, liefert die Bridge 409 oder das
+// UNIQUE-Constraint von twin_profiles wirft. Beides wird abgefangen.
+//
+// Hot-Reload für neuen Twin in laufende Registry: NICHT implementiert in
+// 2.5.3 (Backlog #37). Nach Submit muss `pnpm dev` neu gestartet werden,
+// damit der neue Twin live wird.
+
+const PersonaInputSchema = z.object({
+  fullName: z.string().min(1),
+  handle: z.string().regex(/^@[a-z0-9_-]+$/),
+  role: z.string().min(1),
+  tone: z.array(z.enum(["direct", "polite", "casual", "formal"])).min(1),
+  pronoun: z.enum(["du", "sie", "context-dependent"]),
+  preferences: z.array(z.enum(["no-emojis", "no-platitudes", "short-answers"])),
+  topics: z.array(z.string().min(1)).min(1),
+  relationships: z.array(z.object({ name: z.string(), description: z.string() })),
+});
+
+const OnboardingSubmitSchema = z.object({
+  persona: PersonaInputSchema,
+  mandateTemplate: z.enum(["cautious", "trusting", "business"]),
+  llmConfig: z.object({
+    provider: z.enum(LLM_PROVIDERS),
+    model: z.string().min(1),
+    apiKey: z.string().min(1),
+  }),
+});
+
+const ValidateApiKeySchema = z.object({
+  provider: z.enum(LLM_PROVIDERS),
+  model: z.string().min(1),
+  apiKey: z.string().min(1),
+});
+
+function registerOnboardingRoutes(app: FastifyInstance, deps: ServerDeps) {
+  // ─── Handle-Uniqueness ───────────────────────────────────────────────────
+  app.get<{ Querystring: { handle?: string } }>(
+    "/onboarding/check-handle",
+    async (request, reply) => {
+      const raw = request.query.handle?.trim();
+      if (!raw || !/^@[a-z0-9_-]+$/.test(raw)) {
+        return reply.status(400).send({
+          error:
+            "handle muss '@<name>' sein (Kleinbuchstaben, Ziffern, _ und -)",
+        });
+      }
+      const existing = deps.profilesRepo.findByHandle(raw);
+      if (!existing) return { available: true };
+
+      // Drei einfache Suggestions: Suffix -2, -3, -4 — solange frei.
+      const base = raw;
+      const suggestions: string[] = [];
+      for (let i = 2; i <= 4 && suggestions.length < 3; i++) {
+        const candidate = `${base}-${i}`;
+        if (!deps.profilesRepo.findByHandle(candidate)) suggestions.push(candidate);
+      }
+      return { available: false, suggestions };
+    },
+  );
+
+  // ─── API-Key Validation ──────────────────────────────────────────────────
+  app.post("/onboarding/validate-api-key", async (request, reply) => {
+    const parsed = ValidateApiKeySchema.safeParse(request.body);
+    if (!parsed.success) {
+      return reply.status(400).send({ error: parsed.error.message });
+    }
+    const result = await validateApiKey(
+      parsed.data.provider,
+      parsed.data.apiKey,
+      parsed.data.model,
+    );
+    return result;
+  });
+
+  // ─── Submit ──────────────────────────────────────────────────────────────
+  app.post("/onboarding/submit", async (request, reply) => {
+    const parsed = OnboardingSubmitSchema.safeParse(request.body);
+    if (!parsed.success) {
+      return reply.status(400).send({ error: parsed.error.message });
+    }
+    const { persona, mandateTemplate, llmConfig } = parsed.data;
+
+    // 1. Defensive Handle-Check (UNIQUE catched es spätestens, aber 409
+    //    früh ist freundlicher).
+    if (deps.profilesRepo.findByHandle(persona.handle)) {
+      return reply.status(409).send({
+        error: `Handle '${persona.handle}' ist bereits vergeben`,
+      });
+    }
+
+    // 2. API-Key validieren
+    const validation = await validateApiKey(
+      llmConfig.provider,
+      llmConfig.apiKey,
+      llmConfig.model,
+    );
+    if (!validation.valid) {
+      return reply.status(400).send({
+        error: `API-Key ungültig: ${validation.reason}`,
+      });
+    }
+
+    // 3. Bridge-Handle registrieren
+    let bridgeToken: string;
+    const bridgeUrl = pickBridgeUrlForOnboarding(deps);
+    try {
+      const result = await registerHandleOnBridge({
+        bridgeUrl,
+        handle: persona.handle,
+        displayName: persona.fullName,
+      });
+      bridgeToken = result.token;
+    } catch (err) {
+      const status = err instanceof BridgeRegisterError ? err.status : 502;
+      const msg = err instanceof Error ? err.message : String(err);
+      return reply.status(status === 409 ? 409 : 502).send({
+        error: `Bridge-Registrierung fehlgeschlagen: ${msg}`,
+      });
+    }
+
+    // 4. Persona-MD bauen + Mandates laden
+    const personaMd = buildPersonaMarkdown(persona);
+    const mandates = loadMandateTemplate(mandateTemplate);
+
+    // 5. API-Key verschlüsseln — trim aus dem gleichen Grund wie im
+    // Validator (Copy-Paste-Whitespace würde sonst persistiert und der
+    // Live-Chat scheitert später mit "invalid x-api-key").
+    const trimmedKey = llmConfig.apiKey.trim();
+    const storedLlmConfig: StoredLlmConfig = {
+      provider: llmConfig.provider,
+      model: llmConfig.model,
+      apiKeyEncrypted: encrypt(trimmedKey, deps.masterKey),
+      apiKeySource: "user",
+    };
+
+    // 6. INSERT — bei UNIQUE-Race wirft sqlite, fängt's der catch
+    const owner = getCurrentUser();
+    const twinId = `twin_${nanoid(16)}`;
+    try {
+      const profile = deps.profilesRepo.insert({
+        twinId,
+        handle: persona.handle,
+        displayName: persona.fullName,
+        personaMd,
+        mandates,
+        llmConfig: storedLlmConfig,
+        bridgeUrl,
+        bridgeToken,
+        ownerUserId: owner?.userId ?? null,
+        isActive: true,
+      });
+      return reply.status(201).send({
+        twinId: profile.twinId,
+        handle: profile.handle,
+        // Hot-Reload kommt in Backlog #37 — bis dahin brauchts Restart.
+        requiresRestart: true,
+      });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      return reply.status(500).send({
+        error: `DB-Insert fehlgeschlagen: ${msg}`,
+      });
+    }
+  });
+}
+
+/**
+ * Heute: Bridge-URL kommt aus dem ersten existierenden Twin, oder Fallback
+ * auf localhost. Sauberer wäre ein eigenes ENV/Config — Backlog.
+ */
+function pickBridgeUrlForOnboarding(deps: ServerDeps): string {
+  const first = deps.registry.list()[0];
+  if (first) {
+    const entry = deps.registry.getEntry(first.handle);
+    if (entry?.profile.bridgeUrl) return entry.profile.bridgeUrl;
+  }
+  return process.env.BRIDGE_URL?.trim() || "http://127.0.0.1:5100";
 }
 
 // ─── helpers ─────────────────────────────────────────────────────────────────

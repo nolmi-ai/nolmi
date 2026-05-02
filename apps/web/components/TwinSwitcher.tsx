@@ -69,14 +69,34 @@ export function TwinSwitcher() {
   if (error) {
     return <span className="text-xs text-warn">twins: {error}</span>;
   }
+  // Empty-State: kein Twin vorhanden → einziger Call-to-Action ist Onboarding.
   if (twins.length === 0) {
-    return <span className="text-xs text-muted">…</span>;
+    return (
+      <a
+        href="/onboarding"
+        className="text-xs text-accent hover:underline"
+      >
+        + Twin anlegen
+      </a>
+    );
   }
+
+  // "+ neuer Twin"-Sentinel im Dropdown — clickt der User darauf, navigieren
+  // wir zu /onboarding statt zur Twin-Page.
+  const NEW_TWIN_SENTINEL = "__new__";
+
+  const onChange = (value: string) => {
+    if (value === NEW_TWIN_SENTINEL) {
+      router.push("/onboarding");
+      return;
+    }
+    navigateTo(value);
+  };
 
   return (
     <select
       value={currentHandle || twins[0]?.handle || ""}
-      onChange={(e) => navigateTo(e.target.value)}
+      onChange={(e) => onChange(e.target.value)}
       className="bg-bg border border-border text-text text-xs rounded px-2 py-1 font-mono focus:outline-none focus:border-accent"
       aria-label="Twin auswählen"
     >
@@ -85,6 +105,10 @@ export function TwinSwitcher() {
           {t.displayName} ({t.handle})
         </option>
       ))}
+      <option disabled value="">
+        ────────
+      </option>
+      <option value={NEW_TWIN_SENTINEL}>+ Neuer Twin…</option>
     </select>
   );
 }

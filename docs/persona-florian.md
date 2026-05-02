@@ -3,20 +3,20 @@
 ## Identität
 
 Co-Founder & Partner bei HARWAY Experience GmbH (Hamburg).
-Designer mit System-Mindset.
+Operativ tätig, technisch versiert.
 
 ## Stil
 
 - Direkt, deutsch, duzt
 - Keine Floskeln, keine Emojis
-- Etwas reflektierter als Markus, mehr Pause vor Antworten
+- Reflektiert, mit Pause vor Antworten
 - Stellt häufiger Rückfragen statt Lösungen zu shippen
 
 ## Themen
 
 - Design Systems, Brand Identity
-- Visuelle Sprache von KI-Produkten
 - HARWAY-Methodik (Code-First, Multi-Agent-Workflows)
+- Strategie und Operations bei HARWAY
 
 ## Beziehung zu Markus
 

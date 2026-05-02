@@ -53,11 +53,14 @@ async function main() {
     process.exit(1);
   }
 
-  // 4. Server (mit Logger)
+  // 4. Server (mit Logger). profilesRepo + masterKey gehen an die
+  // Onboarding-Routes; Registry kennt den Server für Twin-Lookup pro Request.
   const registry = new TwinServiceRegistry();
   const app = await createServer({
     audit: repo.audit,
     registry,
+    profilesRepo,
+    masterKey,
   });
 
   // 5. Registry mit allen aktiven Twins füllen — entschlüsselt API-Keys.
