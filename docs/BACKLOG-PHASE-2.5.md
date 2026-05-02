@@ -1,14 +1,14 @@
 # Backlog Phase 2.5 und später
 
-Stand: 1. Mai 2026, 21:00 Uhr — nach Sub-Schritt 2.5.2d (Multi-Twin Runtime + Florian-Twin) abgeschlossen.
+Stand: 2. Mai 2026, vormittags — nach Sub-Schritt 2.5.2e (Per-Twin LLM-Config + AES-256-GCM Verschlüsselung) abgeschlossen.
 
 Format: Punkte mit Größe (S/M/L/XL) und Priorität (must/should/nice).
 
 ---
 
-## Architektur-Entscheidungen (Stand 1. Mai 2026)
+## Architektur-Entscheidungen (Stand 2. Mai 2026)
 
-Wichtige Weichen, die heute final gestellt wurden — Referenz für alle weiteren Items:
+Wichtige Weichen, die geklärt sind — Referenz für alle weiteren Items:
 
 **Hybrid-Strategie statt Hermes-Adoption.** Eigenes TypeScript-Backend, lernend von Hermes Agent (Nous Research), MCP-fähig in Phase 3. Begründung: Easy-Setup für externe User (Multi-Tenant SaaS, kein Self-Hosting), Verleihbarer-Twin-Vision (statt Hermes' "mein Assistent"-Ansatz), Stack-Konsistenz (TypeScript statt Python).
 
@@ -18,7 +18,11 @@ Wichtige Weichen, die heute final gestellt wurden — Referenz für alle weitere
 
 **Skills in 4 Layer:** Capability → Tool → Skill → Mandate. Skill-System ist Vorbedingung für externe Tool-Integrationen (Hyperbrowser, MCP-Server-Tools).
 
-**Per-Twin Konfiguration als Pattern.** LLM-Config heute, Skill-Config in Phase 3, Channel-Config in Phase 4 — alle pro Twin, nicht pro Plattform. Konsistent mit Multi-Tenant-Vision.
+**Per-Twin Konfiguration als Pattern.** LLM-Config heute (mit AES-256-GCM-Verschlüsselung der API-Keys), Skill-Config in Phase 3, Channel-Config in Phase 4 — alle pro Twin, nicht pro Plattform. Konsistent mit Multi-Tenant-Vision.
+
+**Drei Deployment-Modelle:** Lokal (Self-Hosted), Hosted mit BYO-API-Key (verschlüsselt mit Server-Master-Key), Hosted mit System-API-Key (Premium-Abo). Onboarding-Wizard (2.5.3) wird drei Pfade haben.
+
+**A2A-Protokoll-Strategie:** Google A2A wird in Phase 4 oder 5 als Adapter-Schicht obendrauf gebaut, nicht als Ersatz für die interne Bridge. Ökosystem-Anbindung ohne Lock-In auf eigenes Protokoll.
 
 ---
 
@@ -26,25 +30,53 @@ Wichtige Weichen, die heute final gestellt wurden — Referenz für alle weitere
 
 Geordnete Liste für die kommenden Sessions. Jeder Sub-Schritt ist abgeschlossen testbar.
 
-### 2.5.2e — Per-Twin LLM-Config aus DB
-Beide Twins erben aktuell `TWIN_LLM_*`-ENV. Sollten pro Twin separat konfigurierbar sein (Markus: claude-opus-4-7, Florian: gpt-5.5, Ronja: lokales Llama). LLM-Config kommt schon aus `twin_profiles.llm_config`-JSON, aber Bootstrap überschreibt mit ENV. Ablauf: Bootstrap-Script liest pro Twin individuelle LLM-ENV-Variablen (`MARKUS_LLM_PROVIDER`, `FLORIAN_LLM_MODEL`, etc.), Default-Fallback auf gemeinsame `TWIN_LLM_*`.
-**Größe:** S · **Priorität:** must · **Aus:** Sub-Schritt 2d Caveat #9
+### 2.5.2e — Per-Twin LLM-Config aus DB ✅
+**Abgeschlossen 2. Mai 2026.** Encryption-Infrastruktur etabliert (AES-256-GCM, Master-Key in ENV), Per-Twin ENV-Override-Pattern (`<NAME>_LLM_*` mit Fallback auf `TWIN_LLM_*`), Bootstrap mit Verschlüsselung, Settings-UI mit API-Key-Maske + "verschlüsselt in DB"-Hinweis. 11 Files, +366/-40. Vorbereitung für Multi-Tenant-Hosting in 2.5.6.
 
 ### 2.5.3 — Onboarding-Flow Web-UI Wizard
-Neuer User soll Twin selbst bootstrappen können — ohne Terminal, ohne `pnpm twin:bootstrap`. Web-UI-Wizard: Persona-Markdown-Editor, Mandate-Picker (Templates), LLM-Provider/Modell auswählen, API-Key eingeben (verschlüsselt), Bridge wird automatisch zugewiesen. Voraussetzung für Multi-Tenant-Vision.
-**Größe:** L · **Priorität:** must · **Aus:** Multi-Tenant-Strategie
+**Größe:** L · **Zeitfenster:** 2-3 Sessions (~6-10h)
 
-### 2.5.4 — User-Auth (Email/Passwort + SSO)
-Heute: kein Auth-Layer, jeder mit Browser-Zugriff sieht alle Twins. Phase 2.5.4: Login per Email/Passwort, später SSO. `users`-Tabelle, `owner_user_id` in `twin_profiles` wird belegt, Twin-UI nur für Owner sichtbar (oder geteilt mit explicit-shared-Users). Vorbedingung für Public-Deployment.
-**Größe:** L · **Priorität:** must · **Aus:** Multi-Tenant-Strategie
+Neuer User soll Twin selbst bootstrappen — ohne Terminal. Web-UI-Wizard mit drei Pfaden (Lokal vs. Hosted-BYO vs. Hosted-System-Key). Für non-tech User: strukturierte Persona-Felder statt Markdown-Editor (Name, Rolle, Stil als Checkboxen, Themen als Tags), Mandate-Templates (4-5 vorgefertigte Sets statt YAML-Editor), LLM-Provider-Default mit optionalem User-API-Key, Bridge-Anbindung automatisch. Voraussetzung für Multi-Tenant-Vision.
+
+### 2.5.4 — User-Auth (Email/Passwort)
+**Größe:** L · **Zeitfenster:** 2-3 Sessions (~6-10h)
+
+Heute: kein Auth-Layer. Phase 2.5.4:
+- `users`-Tabelle mit `email`, `password_hash`, `created_at`
+- Login-Form, Session-Cookie
+- `owner_user_id` in `twin_profiles` wird belegt
+- Twin-UI nur für Owner sichtbar (oder für explicit-shared Users)
+- Owner-Recognition im System-Prompt (Backlog #14 wird hier gefixt)
+
+Vorbedingung für Public-Deployment.
 
 ### 2.5.5 — Notification-System für Pending
-Heute: Pending nur sichtbar wenn Settings-Page offen. Sub-Schritt 2.5.5: Browser-Notifications, Email-Notifications (resend.com), später Push. Konfigurierbar pro Twin (welche Events triggern Notifications).
-**Größe:** M · **Priorität:** should · **Aus:** UX-Lücke
+**Größe:** M · **Zeitfenster:** 1-2 Sessions (~4-6h)
+
+Heute: Pending nur sichtbar wenn Settings-Page offen.
+- Browser-Notifications (Web Push API)
+- Email-Notifications via resend.com (Konto vorhanden)
+- Konfigurierbar pro Twin: welche Events triggern Notifications
 
 ### 2.5.6 — Production-Deployment Web auf VPS
-Web-UI lokal-only heute. Sub-Schritt 2.5.6: Deploy auf VPS unter `app.twin.harwayexperience.com`, mit User-Auth aus 2.5.4, Bridge bleibt unter `bridge.twin.harwayexperience.com`. Multi-Tenant production-ready.
-**Größe:** L · **Priorität:** must · **Aus:** Multi-Tenant-Strategie
+**Größe:** L · **Zeitfenster:** 1-2 Sessions (~4-6h)
+
+Web-UI deploy unter `app.twin.harwayexperience.com`:
+- Next.js Production-Build
+- Docker-Container, analog zur Bridge
+- Traefik routet `app.*` auf den Container
+- HTTPS via existierendem Let's Encrypt-Setup
+- DB-Persistenz via Volume-Mount
+- ENV-Variablen für API-URLs (Bridge, etc.)
+- Master-Key in produktions-tauglichem Vault (nicht mehr in ENV-Datei)
+
+---
+
+## Phase 2.5 Total
+
+**Zeitfenster für Rest:** ~6-12h Arbeit auf 5-9 Sessions verteilt.
+**Realistisch bei 4h/Tag:** ~2 Wochen Kalenderzeit.
+**Definition of Done für Phase 2.5:** Externer User kann sich registrieren, eigenen Twin onboarden, mit dem Twin chatten, Pending approven, Twin verleihen. Multi-Tenant-SaaS funktional unter `app.twin.harwayexperience.com`.
 
 ---
 
@@ -91,27 +123,35 @@ In Phase 1 und 2 explizit ausgeschlossen — Files in `docs/` sind die Source of
 **Größe:** L · **Priorität:** nice · **Aus:** Phase-1-Scope-Disziplin
 
 ### 11. Persona-Klarstellung: 1. Person vs. Stellvertreter-Sprech
-Twin spricht aktuell teilweise in dritter Person über Markus ("checke es bei Markus"). Klären, ob das gewünscht ist (zeigt klar: Twin ist nicht Markus selbst) oder ob er als "ich" konsistent für Markus sprechen soll.
+Twin spricht aktuell teilweise in dritter Person über Markus ("checke es bei Markus"). Klären, ob das gewünscht ist (zeigt klar: Twin ist nicht Markus selbst) oder ob er als "ich" konsistent für Markus sprechen soll. Verknüpft mit #14 (Owner-Recognition) — Stellvertreter-Sprech ist im A2A-Modus richtig, im Web-UI-Owner-Modus eher nicht.
 **Größe:** S · **Priorität:** should · **Aus:** Phase-2-Live-Test
 
 ---
 
-## Aus Phase 2.5 (heute Abend) entstanden
+## Aus Phase 2.5 entstanden
 
 ### 12. Anthropic-Persona Umlaut-Bug
-Claude (anthropic/claude-opus-4-7) generiert in Markus' Persona Antworten ohne Umlaute ("weiss" statt "weiß", "Gespraechen" statt "Gesprächen"). Florian-Persona zeigt das Problem nicht. Fix: Umlaut-Direktive explizit in `docs/persona.md` ergänzen ("Schreibe immer mit korrekten deutschen Umlauten ä/ö/ü/ß").
-**Größe:** S · **Priorität:** must · **Aus:** Sub-Schritt 2c/2d Live-Test
+Claude (anthropic/claude-opus-4-7) generiert in Markus' Persona Antworten ohne Umlaute ("weiss" statt "weiß", "Gespraechen" statt "Gesprächen", "beschaeftigt" statt "beschäftigt"). Florian-Persona zeigt das Problem nicht durchgängig — Hypothese: Persona-Markdown-Sprache beeinflusst LLM-Output. Fix: Umlaut-Direktive explizit in `docs/persona.md` ergänzen ("Schreibe immer mit korrekten deutschen Umlauten ä/ö/ü/ß").
+**Größe:** S · **Priorität:** must · **Aus:** Sub-Schritt 2c/2d/2e Live-Tests
 
 ### 13. metadata_json in twin_profiles ergänzen
-Aktuell hardcoded `{}` im Boot — Persona-Metadata (Verbindungen, Tags, etc.) hat keine DB-Spalte. Migration 004 für `metadata_json TEXT`-Spalte. Genutzt u.a. für Beziehungs-Mapping ("Florian ist Co-Founder von Markus").
+Aktuell hardcoded `{}` im Boot — Persona-Metadata (Verbindungen, Tags, etc.) hat keine DB-Spalte. Migration 005 für `metadata_json TEXT`-Spalte. Genutzt u.a. für Beziehungs-Mapping ("Florian ist Co-Founder von Markus").
 **Größe:** S · **Priorität:** should · **Aus:** Sub-Schritt 2c Caveat
 
-### 14. Owner-Recognition im System-Prompt
-Twin behandelt aktuell jeden Web-UI-Chat als Fremder, auch wenn der Owner selbst chattet. Live-Test heute: Markus fragt "Wer bin ich für dich?" → Twin antwortet "Du bist jemand, der mit meinem Twin schreibt". Konzeptionell falsch wenn Owner authentifiziert ist. Fix kommt mit User-Auth in 2.5.4: System-Prompt erweitert um "Du sprichst gerade mit deinem Owner @markus" wenn `req.user_id == twin.owner_user_id`.
-**Größe:** S · **Priorität:** should · **Aus:** Sub-Schritt 2c Live-Test, blockt auf 2.5.4
+### 14. Owner-Recognition im System-Prompt — präzisiert nach 2e Live-Test
+Twin behandelt aktuell jeden Web-UI-Chat als Fremder, auch wenn der Owner selbst chattet.
+
+Live-Test 1. Mai: Markus fragt "Wer bin ich für dich?" → Twin antwortet "Du bist jemand, der mit meinem Twin schreibt".
+
+Live-Test 2. Mai: Owner fragt im Web-UI "Was hast du heute morgen über Verschlüsselung gelernt?" → Twin antwortet im Stellvertreter-Modus ("Ich hab nicht Markus' Tagesablauf im Kopf, schreib ihn direkt an"). Konzeptionell falsch: Twin ist im Web-UI-Chat eigentlich im Owner-Assistant-Modus.
+
+Plus: Web-UI-Chat überspringt Approval-Flow komplett — was im Stellvertreter-Modus problematisch wäre, im Owner-Modus aber okay ist. Verknüpft mit #33 (Mandate-basierte Approval-Logik).
+
+Fix kommt mit User-Auth in 2.5.4: System-Prompt erweitert um "Du sprichst gerade mit deinem Owner @markus" wenn `req.user_id == twin.owner_user_id`.
+**Größe:** M · **Priorität:** should · **Aus:** Sub-Schritt 2c+2e Live-Tests, blockt auf 2.5.4
 
 ### 15. Footer-Text aktualisieren
-Footer zeigt noch "phase 1 · closed twin · läuft lokal". Ist heute durch Phase 2 + Phase 2.5d überholt. Update auf "phase 2.5 · multi-twin · läuft lokal" oder dynamisch aus DB ("2 Twins aktiv · Bridge live").
+Footer zeigt noch "phase 1 · closed twin · läuft lokal". Ist heute durch Phase 2 + Phase 2.5d/2e überholt. Update auf "phase 2.5 · multi-twin · läuft lokal" oder dynamisch aus DB ("2 Twins aktiv · Bridge live · API-Keys verschlüsselt").
 **Größe:** S · **Priorität:** nice · **Aus:** Sub-Schritt 2γ Live-Test
 
 ### 16. Backward-Compat-Aliases entfernen
@@ -127,7 +167,19 @@ Chat-Header zeigt `%40florian` statt `@florian` (URL-encodierter `@`). Backend-R
 **Größe:** S · **Priorität:** nice · **Aus:** Sub-Schritt 2d Live-Test
 
 ### 19. Hermes Agent als Backend evaluieren — ENTSCHIEDEN
-Strategische Option, die heute final geklärt wurde: **Nein.** Hybrid-Strategie — eigenes TypeScript-Backend mit Hermes-Inspirationen (Profile-Mechanismus, FTS5 Session Search, agentskills.io-Format). Begründung in Architektur-Entscheidungen oben.
+Strategische Option, die geklärt wurde: **Nein.** Hybrid-Strategie — eigenes TypeScript-Backend mit Hermes-Inspirationen (Profile-Mechanismus, FTS5 Session Search, agentskills.io-Format). Begründung in Architektur-Entscheidungen oben.
+
+### 33. Mandate-basierte Approval-Logik auch im Web-UI
+Heute: Web-UI-Chat überspringt Approval-Flow komplett, Twin antwortet direkt im Browser. A2A-Eingang nutzt Approval. Konzeptionell unklar: was, wenn Markus im Web-UI eine sensitive Antwort generieren lässt, die er sich nochmal anschauen will? Vorschlag: Mandates differenzieren `requires_approval` per Channel. RESPOND_TO_CHAT könnte für Owner-Chats `false`, für externe `true` sein. Verknüpft mit #14 (Owner-Recognition).
+**Größe:** M · **Priorität:** should · **Aus:** Live-Test 2.5.2e
+
+### 34. Master-Key-Rotation CLI
+Heute: bei Verdacht auf Kompromittierung des Master-Keys oder regulärer Rotation muss manuell entschlüsselt und neu verschlüsselt werden. Sauber: CLI-Tool `pnpm key:rotate` das den alten Master-Key liest, alle `apiKeyEncrypted` entschlüsselt, mit neuem Key verschlüsselt, in DB schreibt. Out of scope für 2.5.2e.
+**Größe:** S · **Priorität:** nice · **Aus:** 2.5.2e Caveat
+
+### 35. Provider-aware API-Key-Maskierung
+Heute: `maskApiKey` zeigt `sk-a…IgAA` für Anthropic-Keys (sk-ant-…) — Provider-Präfix wird abgeschnitten. Provider-Erkennung im Mask: `sk-ant-…IgAA` für Anthropic, `sk-…XYZ` für OpenAI, etc. Schöner für Debugging, leakt minimal mehr Bits. Konsistenz mit Bridge-Token-Mask überprüfen.
+**Größe:** S · **Priorität:** nice · **Aus:** 2.5.2e Caveat
 
 ---
 
@@ -193,28 +245,35 @@ Phase 2 hat zentrale Bridge. Phase 4 = mehrere Bridges können sprechen (Matrix-
 Voll-P2P, keine Bridge mehr. DIDs (Decentralized Identifiers) für Identität. Optional: Blockchain als Bezahlebene OBEN AUF Messaging — nicht als Messaging-Layer selbst.
 **Größe:** XL · **Priorität:** nice · **Aus:** Strategische Vision
 
+### 36. Google A2A-Protokoll-Kompatibilität
+Twins als A2A-Server zusätzlich zur internen Bridge erreichbar machen. Implementierung:
+- `/.well-known/agent.json` mit Persona-Description und Skills
+- A2A-Adapter, der eingehende JSON-RPC-Messages auf interne Pending-Queue mapt
+- Mandate-Layer wendet Approval-Gates auf eingehende A2A-Requests an
+- Ausgehende A2A-Calls: unsere Twins können andere A2A-Agenten anrufen
+
+Vorteile: Ökosystem-Anbindung (Google ADK, CrewAI, Langgraph alle A2A-fähig), standardisierte Discovery, keine Lock-In auf eigenes Protokoll. Nachteile: Mehr Code-Pfade, Security-Komplexität (jeder im Internet kann anpingen).
+
+Vorbedingungen: Phase 4 (Multi-Channel-Architektur), Mandate-Engine reif für externe Quellen. Aufwand: 2-3 Wochen für saubere Adapter-Schicht. Bestandteil der Föderations-Strategie.
+**Größe:** L · **Priorität:** should · **Aus:** Markus' Recherche zu Google A2A Codelab, 2. Mai 2026
+
 ---
 
 ## Cross-Cutting / Architektur-Erwägungen
 
-### 33. Twin-Konversationen als Threads (Variante 2 aus #1) — präzisiert
-Verknüpft mit #1, aber präziser: `twin_conversations`-Tabelle mit `conversationId` als Thread-Anker. Pro Thread: alle Nachrichten zwischen zwei Twins, mit Read-Status, Last-Activity. UI: Conversation-Liste in Settings, Klick öffnet vollen Thread.
-**Größe:** L · **Priorität:** should · **Aus:** Phase-2-Live-Test (verknüpft mit #1)
-
-### 34. Lokale Spiegelung des Bridge-Streams (#2) — präzisiert
-Alle Twin-Nachrichten persistent in der Twin-DB, nicht nur Audits. Bridge wird zum reinen Transport, Authoritative Konversations-Historie liegt lokal pro Twin. Vorbedingung für Föderation (Phase 4).
-**Größe:** XL · **Priorität:** nice · **Aus:** Phase-2-Architektur-Diskussion (verknüpft mit #2)
+### Verknüpfung mit Items #1 und #2
+Items #1 (Twin-Konversationen als Threads) und #2 (Lokale Spiegelung des Bridge-Streams) sind eng verknüpft. Beide adressieren das Problem, dass aktuell Audit-Log und Konversations-Historie identisch sind. Empfehlung: zusammen in einer Phase angehen, frühestens Phase 3 nach Memory-Schichten.
 
 ---
 
-## Strategische Optionen (Stand 1. Mai 2026)
+## Strategische Optionen (Stand 2. Mai 2026)
 
 Offene Entscheidungen, die als Sparring-Punkte stehen.
 
 ### Zentralisierungsgrad der Bridge — geplant entlang Phasen
 Phase 2: zentrale Bridge ✅ (live unter `bridge.twin.harwayexperience.com`).
 Phase 3: bleibt zentral (Memory + Skills sind orthogonal).
-Phase 4: Föderation (Matrix-Modell), mehrere Bridges können sprechen.
+Phase 4: Föderation (Matrix-Modell), mehrere Bridges können sprechen, plus A2A-Adapter (#36).
 Phase 5: Voll-P2P mit DIDs für Identität.
 Optional Phase 6: Wenn Wertübertragung nötig — Blockchain als Bezahlebene OBEN AUF Messaging.
 
@@ -227,10 +286,13 @@ Memory in Phase 3 lokal in Twin-DB. Bei Multi-Tenant-Cloud-Deployment (2.5.6) mu
 ### Owner-Mode vs. Public-Mode Priorisierung
 In Phase 4: Owner-Mode (Markus chattet via Telegram mit eigenem Twin) deutlich einfacher als Public-Mode (externe schreiben Twin an, Mandate entscheidet). Owner-Mode zuerst, Public-Mode später wenn Mandate-Layer reif.
 
+### A2A vs. eigene Bridge-Strategie
+A2A wird zusätzlich gebaut, nicht statt. Eigene Bridge bleibt für Twin-Lab-spezifische Features (Mandate-Layer, Approval-Gates, eigene Persona-Modellierung). A2A ist Adapter-Schicht obendrauf für Ökosystem-Anbindung. Entscheidung in Phase 4.
+
 ---
 
 ## Notiz für später
 
 Sammle weiter Punkte, die im Sparring auftauchen. Nicht jeder Punkt muss eine Phase werden — manches ist Polishing, manches ist Architektur. Die Aufteilung S/M/L/XL und must/should/nice hilft beim Priorisieren wenn die Liste lang wird.
 
-**Item-Dichte heute Abend:** 14 neue Items aus einem einzigen Implementierungs-Tag (Sub-Schritt 2.5.2d). Faustregel: pro Implementierungs-Sub-Schritt entstehen 5-10 Backlog-Items. Wenn die Rate höher ist, wird zu breit gebaut.
+**Item-Dichte heute morgen:** 3 neue Items aus Sub-Schritt 2.5.2e, plus eine Schärfung von #14 nach Live-Test, plus #36 aus A2A-Recherche. Plus #19 (Hermes) als ENTSCHIEDEN markiert. Items insgesamt: 36 (von 32 gestern Abend, von 18 vor zwei Tagen).
