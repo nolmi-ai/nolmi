@@ -66,6 +66,10 @@ export async function createServer(deps: ServerDeps) {
         provider: p.llmConfig.provider,
         model: p.llmConfig.model,
         baseUrl: p.llmConfig.baseUrl ?? null,
+        // API-Key wird NIE im Klartext zurückgegeben; nur die Maske aus dem
+        // beim Boot einmal entschlüsselten Wert + die Source.
+        apiKeyMasked: entry.llmDisplay.apiKeyMasked,
+        apiKeySource: entry.llmDisplay.apiKeySource,
       },
       bridge: {
         url: p.bridgeUrl,

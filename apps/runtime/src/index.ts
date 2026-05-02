@@ -5,8 +5,8 @@ import { createSqliteRepository } from "./repository/index.js";
 import { createServer } from "./server.js";
 import { loadRuntimeConfig } from "./config.js";
 import { TwinServiceRegistry } from "./twin-service-registry.js";
-import { formatLlmLabel } from "./llm-config.js";
 import { TwinProfilesRepo } from "./twin-profiles-repo.js";
+import { EncryptionKeyMissingError, loadMasterKey } from "./crypto-utils.js";
 
 // ─── BOOTSTRAP ───────────────────────────────────────────────────────────────
 //
@@ -25,11 +25,24 @@ async function main() {
   const config = loadRuntimeConfig();
   await mkdir(dirname(config.dbPath), { recursive: true });
 
-  // 1. DB
+  // 1. Master-Key — Runtime weigert sich zu starten ohne. Vor DB, weil ein
+  // fehlender Key sofort Exit ist, ohne dass wir andere Ressourcen anfassen.
+  let masterKey: Buffer;
+  try {
+    masterKey = loadMasterKey();
+  } catch (err) {
+    if (err instanceof EncryptionKeyMissingError) {
+      console.error(`[boot] ${err.message}`);
+      process.exit(1);
+    }
+    throw err;
+  }
+
+  // 2. DB
   const repo = createSqliteRepository(config.dbPath);
   console.log(`[boot] DB: ${config.dbPath}`);
 
-  // 2. Aktive Profile zuerst zählen — wenn null, exit-1 mit Bootstrap-Hinweis
+  // 3. Aktive Profile zuerst zählen — wenn null, exit-1 mit Bootstrap-Hinweis
   const profilesRepo = new TwinProfilesRepo(repo.db);
   const activeProfiles = profilesRepo.list({ activeOnly: true });
   if (activeProfiles.length === 0) {
@@ -40,15 +53,17 @@ async function main() {
     process.exit(1);
   }
 
-  // 3. Server (mit Logger)
+  // 4. Server (mit Logger)
   const registry = new TwinServiceRegistry();
   const app = await createServer({
     audit: repo.audit,
     registry,
   });
 
-  // 4. Registry mit allen aktiven Twins füllen
-  registry.loadAll({ db: repo.db, auditRepo: repo.audit, logger: app.log });
+  // 5. Registry mit allen aktiven Twins füllen — entschlüsselt API-Keys.
+  // Decrypt-Fehler (falscher Master-Key, korrupter Eintrag) werfen mit klarer
+  // Diagnose pro Twin; main()-Catch macht exit-1.
+  registry.loadAll({ db: repo.db, auditRepo: repo.audit, logger: app.log, masterKey });
   const summaries = registry.list();
 
   console.log(`[boot] ${summaries.length} Twin(s) aktiv:`);
@@ -56,22 +71,24 @@ async function main() {
     console.log(`  - ${t.handle} (${t.twinId})`);
   }
 
-  // 5. Per-Twin LLM + Bridge-Konfig loggen, dann Bridges connecten
+  // 6. Per-Twin LLM + Bridge-Konfig loggen (API-Key maskiert), dann Bridges
   for (const t of summaries) {
-    const profile = activeProfiles.find((p) => p.handle === t.handle)!;
+    const entry = registry.getEntry(t.handle)!;
     console.log(
-      `[boot] ${t.handle}: LLM=${formatLlmLabel(profile.llmConfig)}, Bridge=${profile.bridgeUrl}`,
+      `[boot] ${t.handle}: LLM=${entry.llmDisplay.label}, ` +
+        `API-Key=${entry.llmDisplay.apiKeyMasked}, ` +
+        `Bridge=${entry.profile.bridgeUrl}`,
     );
   }
 
-  // 6. Listen
+  // 7. Listen
   await app.listen({ port: config.port, host: config.host });
   console.log(`[boot] Runtime hört auf http://${config.host}:${config.port}`);
 
-  // 7. Bridges starten (nach Server-Listen, damit Logger via app.log läuft)
+  // 8. Bridges starten (nach Server-Listen, damit Logger via app.log läuft)
   await registry.startBridges(app.log);
 
-  // 8. Graceful Shutdown
+  // 9. Graceful Shutdown
   const shutdown = async (signal: string) => {
     console.log(`[shutdown] ${signal} empfangen — fahre runter`);
     await registry.shutdown();

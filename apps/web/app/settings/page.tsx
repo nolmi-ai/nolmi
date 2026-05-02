@@ -15,6 +15,8 @@ interface TwinProfileResponse {
     provider: string;
     model: string;
     baseUrl: string | null;
+    apiKeyMasked: string;
+    apiKeySource: "user" | "system";
   };
   bridge: {
     url: string;
@@ -463,6 +465,23 @@ function ProfileBody({ profile }: { profile: TwinProfileResponse }) {
             {profile.llmConfig.baseUrl}
           </div>
         )}
+      </Row>
+
+      <Row label="API-Key">
+        <div className="space-y-0.5">
+          <div className="text-text font-mono text-xs">
+            {profile.llmConfig.apiKeyMasked}
+          </div>
+          <div className="text-xs text-muted">
+            Quelle:{" "}
+            <span className="text-text">
+              {profile.llmConfig.apiKeySource === "user" ? "User" : "System"}
+            </span>
+            <span className="ml-2 text-[10px] uppercase tracking-wider text-muted">
+              verschlüsselt in DB
+            </span>
+          </div>
+        </div>
       </Row>
 
       <Row label="Bridge">

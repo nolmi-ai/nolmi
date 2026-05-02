@@ -8,7 +8,16 @@ import { EventBus } from "./events/bus.js";
 import { BridgeClient } from "./bridge/client.js";
 import { BridgeStream } from "./bridge/stream.js";
 import { createLlmClient } from "./llm-client.js";
-import { formatLlmLabel } from "./llm-config.js";
+import {
+  formatLlmLabel,
+  type ApiKeySource,
+  type TwinLlmConfig,
+} from "./llm-config.js";
+import {
+  decrypt,
+  EncryptionDecryptError,
+  maskApiKey,
+} from "./crypto-utils.js";
 import type { AuditRepository } from "./repository/types.js";
 import type { BridgeConfig } from "./bridge/types.js";
 
@@ -29,6 +38,16 @@ export interface RegistryEntry {
   displayName: string;
   /** Volles Profil — gecached beim Boot, für Read-only-Endpoints. */
   profile: TwinProfile;
+  /**
+   * Beim Boot einmal entschlüsselt + gecached. Plaintext-API-Key bleibt
+   * NICHT hier liegen (steckt im LanguageModel-Closure). Hier nur das, was
+   * Server für die UI ausgeben darf.
+   */
+  llmDisplay: {
+    label: string; // "anthropic/claude-opus-4-7"
+    apiKeyMasked: string; // "sk-an…xyz1"
+    apiKeySource: ApiKeySource;
+  };
   service: TwinService;
   bus: EventBus;
   bridgeClient: BridgeClient;
@@ -53,12 +72,13 @@ export class TwinServiceRegistry {
     db: Database.Database;
     auditRepo: AuditRepository;
     logger: FastifyBaseLogger;
+    masterKey: Buffer;
   }): void {
     const profilesRepo = new TwinProfilesRepo(opts.db);
     const profiles = profilesRepo.list({ activeOnly: true });
 
     for (const profile of profiles) {
-      const entry = this.buildEntry(profile, opts.auditRepo, opts.logger);
+      const entry = this.buildEntry(profile, opts.auditRepo, opts.logger, opts.masterKey);
       this.entries.set(profile.handle, entry);
     }
   }
@@ -125,6 +145,7 @@ export class TwinServiceRegistry {
     profile: TwinProfile,
     auditRepo: AuditRepository,
     logger: FastifyBaseLogger,
+    masterKey: Buffer,
   ): RegistryEntry {
     const bus = new EventBus();
     const audit = new AuditService(auditRepo, bus, profile.twinId);
@@ -136,8 +157,35 @@ export class TwinServiceRegistry {
       metadata: {},
     };
 
-    const model = createLlmClient(profile.llmConfig);
-    const modelLabel = formatLlmLabel(profile.llmConfig);
+    // API-Key entschlüsseln. Tampering / falscher Master-Key wirft hier mit
+    // klarer Diagnose; index.ts fängt das und exit-1't mit Twin-Handle.
+    if (!profile.llmConfig.apiKeyEncrypted) {
+      throw new Error(
+        `Twin '${profile.handle}' hat keinen apiKeyEncrypted im Profil. ` +
+          `Re-Bootstrap nötig: 'pnpm --filter @twin-lab/runtime twin:bootstrap ${profile.handle.replace(/^@/, "")}'`,
+      );
+    }
+    let apiKey: string;
+    try {
+      apiKey = decrypt(profile.llmConfig.apiKeyEncrypted, masterKey);
+    } catch (err) {
+      if (err instanceof EncryptionDecryptError) {
+        throw new Error(
+          `Twin '${profile.handle}': API-Key konnte nicht entschlüsselt werden — ${err.message}. ` +
+            `Master-Key falsch oder Profil korrupt? Re-Bootstrap mit korrektem TWIN_LAB_ENCRYPTION_KEY.`,
+        );
+      }
+      throw err;
+    }
+
+    const runtimeLlmConfig: TwinLlmConfig = {
+      provider: profile.llmConfig.provider,
+      model: profile.llmConfig.model,
+      apiKey,
+      baseUrl: profile.llmConfig.baseUrl,
+    };
+    const model = createLlmClient(runtimeLlmConfig);
+    const modelLabel = formatLlmLabel(runtimeLlmConfig);
 
     const bridgeConfig: BridgeConfig = {
       url: profile.bridgeUrl,
@@ -175,6 +223,11 @@ export class TwinServiceRegistry {
       handle: profile.handle,
       displayName: profile.displayName,
       profile,
+      llmDisplay: {
+        label: modelLabel,
+        apiKeyMasked: maskApiKey(apiKey),
+        apiKeySource: profile.llmConfig.apiKeySource,
+      },
       service,
       bus,
       bridgeClient,

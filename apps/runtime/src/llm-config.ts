@@ -25,12 +25,43 @@ export interface TwinLlmConfig {
   baseUrl?: string; // bei Ollama der API-Endpoint; bei anderen optional
 }
 
-export function loadTwinLlmConfig(): TwinLlmConfig {
-  const provider = parseProvider(process.env.TWIN_LLM_PROVIDER);
-  const model = process.env.TWIN_LLM_MODEL?.trim() || defaultModelFor(provider);
-  const apiKey = pickApiKey(provider);
-  const baseUrl = process.env.TWIN_LLM_BASE_URL?.trim() || undefined;
+/**
+ * Storage-Form des LLM-Configs in `twin_profiles.llm_config`. Unterscheidet
+ * sich von `TwinLlmConfig` an einer Stelle: statt Klartext-`apiKey` steht hier
+ * `apiKeyEncrypted` (Format aus crypto-utils: iv:tag:ct base64). Decrypt
+ * passiert im Boot-Pfad über `decryptLlmConfig`.
+ */
+export type ApiKeySource = "user" | "system";
+
+export interface StoredLlmConfig {
+  provider: LlmProvider;
+  model: string;
+  apiKeyEncrypted?: string;
+  apiKeySource: ApiKeySource;
+  baseUrl?: string;
+}
+
+/**
+ * Liest LlmConfig aus ENV. Wenn `twinName` gesetzt: per-Twin Override über
+ * `<NAME>_LLM_PROVIDER`/`_MODEL`/`_API_KEY`/`_BASE_URL`, mit Fallback auf
+ * die globalen `TWIN_LLM_*`-Variablen. Wird vom Bootstrap genutzt — der
+ * Runtime-Boot liest stattdessen aus `twin_profiles.llm_config`.
+ */
+export function loadTwinLlmConfig(twinName?: string): TwinLlmConfig {
+  const provider = parseProvider(envWithTwinFallback("LLM_PROVIDER", twinName));
+  const model =
+    envWithTwinFallback("LLM_MODEL", twinName) || defaultModelFor(provider);
+  const apiKey = pickApiKey(provider, twinName);
+  const baseUrl = envWithTwinFallback("LLM_BASE_URL", twinName) || undefined;
   return { provider, model, apiKey, baseUrl };
+}
+
+function envWithTwinFallback(suffix: string, twinName?: string): string | undefined {
+  if (twinName) {
+    const explicit = process.env[`${twinName.toUpperCase()}_${suffix}`]?.trim();
+    if (explicit) return explicit;
+  }
+  return process.env[`TWIN_${suffix}`]?.trim() || undefined;
 }
 
 /**
@@ -56,10 +87,11 @@ function parseProvider(raw: string | undefined): LlmProvider {
   );
 }
 
-function pickApiKey(provider: LlmProvider): string | undefined {
-  const explicit = process.env.TWIN_LLM_API_KEY?.trim();
+function pickApiKey(provider: LlmProvider, twinName?: string): string | undefined {
+  // Per-Twin Override hat Priorität, dann TWIN_LLM_API_KEY, dann
+  // provider-spezifische Legacy-Vars (Backward-Compat).
+  const explicit = envWithTwinFallback("LLM_API_KEY", twinName);
   if (explicit) return explicit;
-  // Backward-Compat — provider-spezifische Legacy-Vars
   if (provider === "openai") return process.env.OPENAI_API_KEY?.trim() || undefined;
   if (provider === "anthropic") return process.env.ANTHROPIC_API_KEY?.trim() || undefined;
   return undefined;

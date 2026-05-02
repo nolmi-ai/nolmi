@@ -1,6 +1,6 @@
 import type Database from "better-sqlite3";
 import type { Mandate } from "@twin-lab/shared";
-import type { TwinLlmConfig } from "./llm-config.js";
+import type { StoredLlmConfig } from "./llm-config.js";
 
 // ─── TWIN PROFILES REPOSITORY ────────────────────────────────────────────────
 //
@@ -17,7 +17,7 @@ export interface TwinProfile {
   displayName: string;
   personaMd: string;
   mandates: Mandate[];
-  llmConfig: TwinLlmConfig;
+  llmConfig: StoredLlmConfig;
   bridgeUrl: string;
   bridgeToken: string;
   ownerUserId: string | null;
@@ -178,7 +178,7 @@ function rowToProfile(row: TwinProfileRow): TwinProfile {
     displayName: row.display_name,
     personaMd: row.persona_md,
     mandates: JSON.parse(row.mandates_json) as Mandate[],
-    llmConfig: JSON.parse(row.llm_config) as TwinLlmConfig,
+    llmConfig: JSON.parse(row.llm_config) as StoredLlmConfig,
     bridgeUrl: row.bridge_url,
     bridgeToken: row.bridge_token,
     ownerUserId: row.owner_user_id,

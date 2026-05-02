@@ -6,7 +6,12 @@ import { nanoid } from "nanoid";
 import { loadRuntimeConfig, WORKSPACE_ROOT } from "../config.js";
 import { loadPersona } from "../persona/loader.js";
 import { loadMandatesFromYaml } from "../mandates/service.js";
-import { loadTwinLlmConfig, formatLlmLabel } from "../llm-config.js";
+import {
+  loadTwinLlmConfig,
+  formatLlmLabel,
+  type StoredLlmConfig,
+} from "../llm-config.js";
+import { encrypt, loadMasterKey, maskApiKey } from "../crypto-utils.js";
 import { TwinProfilesRepo, type TwinProfile } from "../twin-profiles-repo.js";
 
 // ─── BOOTSTRAP TWIN ──────────────────────────────────────────────────────────
@@ -27,8 +32,10 @@ import { TwinProfilesRepo, type TwinProfile } from "../twin-profiles-repo.js";
 //   - Bridge-Handle ENV n='markus' → BRIDGE_TWIN_HANDLE
 //                       sonst       → BRIDGE_<N_UPPER>_HANDLE
 //   - Bridge-Token ENV  analog
-//   - LLM-Config        TWIN_LLM_PROVIDER/MODEL/API_KEY/BASE_URL — gleich für
-//                       alle Twins in 2.5; pro-Twin-LLM später, wenn nötig
+//   - LLM-Config        per-Twin: <NAME>_LLM_PROVIDER/MODEL/API_KEY/BASE_URL,
+//                       Fallback auf TWIN_LLM_*; API-Key wird AES-256-GCM
+//                       verschlüsselt mit TWIN_LAB_ENCRYPTION_KEY in DB
+//                       gespeichert (Plaintext nie in DB).
 //
 // Idempotent: existiert ein Twin mit dem gleichen Handle, werden alle Felder
 // überschrieben (außer twin_id, created_at, owner_user_id).
@@ -62,10 +69,28 @@ async function main() {
   // 2. Mandates aus YAML (gleiche Datei für alle Twins in 2.5)
   const mandates = await loadMandatesFromYaml(config.mandatesPath);
 
-  // 3. LLM-Konfig aus ENV — gleich für alle Twins in 2.5
-  const llmConfig = loadTwinLlmConfig();
+  // 3. LLM-Konfig aus ENV — per-Twin Override mit Fallback auf TWIN_LLM_*
+  const llmConfig = loadTwinLlmConfig(name);
+  if (!llmConfig.apiKey) {
+    const upperName = name.toUpperCase();
+    throw new Error(
+      `Kein API-Key für Twin '${name}' gefunden. ` +
+        `Setze ${upperName}_LLM_API_KEY (per-Twin) oder TWIN_LLM_API_KEY (global) in .env.`,
+    );
+  }
 
-  // 4. Bridge-Konfig aus name-spezifischen ENVs
+  // 4. Master-Key laden, API-Key verschlüsseln — wirft bei fehlendem
+  // Master-Key mit klarer Bootstrap-Hinweis.
+  const masterKey = loadMasterKey();
+  const storedLlmConfig: StoredLlmConfig = {
+    provider: llmConfig.provider,
+    model: llmConfig.model,
+    apiKeyEncrypted: encrypt(llmConfig.apiKey, masterKey),
+    apiKeySource: "user",
+    baseUrl: llmConfig.baseUrl,
+  };
+
+  // 5. Bridge-Konfig aus name-spezifischen ENVs
   const bridgeHandleVar =
     name === "markus" ? "BRIDGE_TWIN_HANDLE" : `BRIDGE_${name.toUpperCase()}_HANDLE`;
   const bridgeTokenVar =
@@ -89,13 +114,13 @@ async function main() {
     );
   }
 
-  // 5. DB öffnen + Repo
+  // 6. DB öffnen + Repo
   const db = new Database(config.dbPath);
   db.pragma("journal_mode = WAL");
   db.pragma("foreign_keys = ON");
   const repo = new TwinProfilesRepo(db);
 
-  // 6. Upsert
+  // 7. Upsert
   const existing = repo.findByHandle(handle);
   let result: TwinProfile;
   let action: "INSERT" | "UPDATE";
@@ -106,7 +131,7 @@ async function main() {
       displayName: personaMeta.name,
       personaMd,
       mandates,
-      llmConfig,
+      llmConfig: storedLlmConfig,
       bridgeUrl,
       bridgeToken,
       isActive: true,
@@ -119,7 +144,7 @@ async function main() {
       displayName: personaMeta.name,
       personaMd,
       mandates,
-      llmConfig,
+      llmConfig: storedLlmConfig,
       bridgeUrl,
       bridgeToken,
       ownerUserId: null,
@@ -130,9 +155,12 @@ async function main() {
   db.close();
 
   console.log(
-    `[bootstrap] ${action} Twin ${handle} in DB: ID=${result.twinId}, ` +
-      `Mandates=${mandates.length}, Provider=${formatLlmLabel(llmConfig)}, ` +
-      `Bridge=${bridgeUrl}`,
+    `[bootstrap] ${action} Twin ${handle}\n` +
+      `              ID:       ${result.twinId}\n` +
+      `              Mandates: ${mandates.length}\n` +
+      `              Provider: ${formatLlmLabel(llmConfig)}\n` +
+      `              API-Key:  ${maskApiKey(llmConfig.apiKey)} (verschlüsselt)\n` +
+      `              Bridge:   ${bridgeUrl}`,
   );
 }
 
