@@ -371,9 +371,14 @@ export class TwinService {
     messages: ChatMessage[],
     extraSystem?: string,
   ): Promise<{ content: string; metadata: Record<string, unknown> }> {
-    const system = extraSystem
-      ? `${extraSystem}\n\n${persona.systemPrompt}`
-      : persona.systemPrompt;
+    // Drei Schichten, Reihenfolge bewusst:
+    //   1. extraSystem (situativer Bridge-Kontext, optional)
+    //   2. persona.systemPrompt (wer der Twin ist)
+    //   3. LANGUAGE_DIRECTIVE (Anti-"weiss"-statt-"weiß", gilt für alle Twins)
+    // Direktive ans Ende, weil LLMs den letzten System-Block stärker gewichten.
+    const system = [extraSystem, persona.systemPrompt, LANGUAGE_DIRECTIVE]
+      .filter(Boolean)
+      .join("\n\n");
 
     const result = await generateText({
       model: this.deps.model,
@@ -474,6 +479,20 @@ export class TwinService {
 }
 
 // ─── helpers (modul-lokal) ───────────────────────────────────────────────────
+
+// Globale Sprach-Direktive — wird an JEDE Persona-System-Prompt angehängt,
+// unabhängig von Twin oder Modell. Anlass: Anthropic-Modelle haben in mehreren
+// Live-Tests Umlaut-Ersatz produziert ("weiss" statt "weiß", "beschaeftigt"
+// statt "beschäftigt") trotz deutschsprachiger Persona. Diese Direktive zentral,
+// damit kein Persona-File oder DB-Eintrag angepasst werden muss.
+const LANGUAGE_DIRECTIVE = `
+## Sprache
+
+Schreibe immer mit korrekten deutschen Umlauten (ä, ö, ü, ß).
+Niemals "ae", "oe", "ue" oder "ss" als Ersatz verwenden.
+Auch nicht "ae" für Eigennamen wie "Bär" oder Begriffe wie
+"beschäftigt", "Größe", "schön".
+`.trim();
 
 function extractMessages(entry: { input: Record<string, unknown> }, key: string): ChatMessage[] {
   const value = entry.input[key];

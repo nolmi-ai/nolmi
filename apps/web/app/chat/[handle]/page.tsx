@@ -6,16 +6,17 @@ import type { ChatMessage } from "@twin-lab/shared";
 const RUNTIME_URL = process.env.NEXT_PUBLIC_RUNTIME_URL ?? "http://127.0.0.1:4000";
 
 // Dynamische Chat-Route. URL-Form: /chat/@markus, /chat/@florian.
-// `params.handle` kommt URL-decoded aus Next.js — also "@markus", nicht
-// "%40markus". Beim fetch lassen wir es ebenfalls roh, weil "@" in URL-Pfaden
-// erlaubt ist (RFC 3986).
-
+// `params.handle` ist je nach Browser/Next-Version mal URL-decodiert, mal
+// nicht — defensiv decoden, damit der Header "@markus" zeigt und nicht
+// "%40markus". Beim fetch nutzen wir den decodierten Wert; Fastify
+// matched `:handle` gegen "@markus" wie auch gegen "%40markus".
 export default function ChatPage({
   params,
 }: {
   params: Promise<{ handle: string }>;
 }) {
-  const { handle } = use(params);
+  const raw = use(params).handle;
+  const handle = safeDecode(raw);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
@@ -135,4 +136,14 @@ function Bubble({ role, content }: { role: ChatMessage["role"]; content: string 
       </div>
     </div>
   );
+}
+
+// Defensive URL-Decoding: bei kaputten Sequenzen lieber das Raw zurückgeben
+// als zu crashen (decodeURIComponent wirft bei "% ohne valid hex").
+function safeDecode(raw: string): string {
+  try {
+    return decodeURIComponent(raw);
+  } catch {
+    return raw;
+  }
 }

@@ -2,6 +2,7 @@ import "./globals.css";
 import Link from "next/link";
 import { Suspense, type ReactNode } from "react";
 import { TwinSwitcher } from "../components/TwinSwitcher";
+import { FooterMeta } from "../components/FooterMeta";
 
 export const metadata = {
   title: "twin-lab",
@@ -37,7 +38,7 @@ export default function RootLayout({ children }: { children: ReactNode }) {
           {children}
         </main>
         <footer className="border-t border-border px-6 py-3 text-xs text-muted">
-          phase 1 · closed twin · läuft lokal
+          phase 2.5 · <FooterMeta /> · läuft lokal
         </footer>
       </body>
     </html>
