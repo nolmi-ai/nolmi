@@ -344,9 +344,25 @@ Heute: ChatLayout nutzt `h-[calc(100vh-65px)]`. Auf Safari iOS (und älteren Mob
 Aktuell: monospace, schwarz-weiß-grün, sehr functional. Konzeptionell stimmig zum „Lab"-Charakter, aber spätestens bei Multi-Tenant-Public-Launch (nach 2.5.6) wird die Frage akut: wie soll twin-lab aussehen für externe User? Eigene Brand-Identity entwickeln (Logo, Farben, Typografie-Hierarchie), Header-Komponente neu konzipieren, Page-Templates strukturieren, Conversation-Bubble-Designs polishen. Vorbereitung: Mood-Boards, Inspiration sammeln. Empfohlen mit Florian zusammen (Designer). Trigger: vor Phase 2.5.6 oder nach.
 **Größe:** XL · **Priorität:** should · **Aus:** UX-Diskussion 3. Mai (Option-3-Reizfrage)
 
-### 59. Bridge `/messages/:id/sender` ohne Auth — NEU 3. Mai 2026 nachmittags
-Sender-Lookup-Endpoint ist nicht authentifiziert (Kommentar im Code: "Heute kein Auth (Bridge ist localhost). Wenn die Bridge mal öffentlich wird: Token-Check oder Owner-Scope einbauen"). Mit dem Production-Deploy aus #45 ist die Bridge öffentlich. Heute kein akuter Schmerz: Message-IDs sind 16-char nanoid (95 Bit Entropie), nicht ratbar. Geleakt würde nur `fromHandle`/`toHandle`/`createdAt`, kein Content. Aber: vor 2.5.6 (Web-Production-Deploy) absichern. Endpoint sollte authentifizieren und nur antworten, wenn der einloggende Twin entweder `from` oder `to` der angefragten Message ist. Plus: 404 statt 403 bei Fremd-Messages, damit kein Existence-Leak.
-**Größe:** S · **Priorität:** should · **Aus:** #45 Code-Review
+### 59. Bridge `/messages/:id/sender` mit Auth + Owner-Scope ✅
+**Abgeschlossen 3. Mai 2026 abends.** Drei Schichten Schutz: 
+`requireTwinAuth`-preHandler (existierender Hook, identisch zu 
+`/messages` und `/messages/conversation`), Format-Check vor DB-Query 
+(`MESSAGE_ID_REGEX = /^msg_[A-Za-z0-9_-]{16}$/` → 400 bei kaputter ID), 
+Owner-Scope (`from === callerHandle || to === callerHandle` → sonst 
+404, identische Body wie „existiert nicht" gegen Existence-Leak). 
+Code-Kommentar an Route auf neuen Stand gebracht.
+
+`BridgeClient.lookupSender` (apps/runtime/src/bridge/client.ts:100+152) 
+sendete den Bearer-Token bereits mit über `this.headers()` — 
+keine Client-Änderung nötig, Reply-Detection läuft post-Deploy weiter.
+
+Verifikation: sechs Curl-Cases gegen lokale Bridge (Sender-Side, 
+Recipient-Side, Owner-Scope-Block, nicht-existent, kaputte ID, kein 
+Token) plus manueller A2A-Reply-Loop für End-to-End Reply-Detection. 
+1 File, +24/-7. 
+
+Vorbedingung 2.5.6 erfüllt (zusammen mit #60).
 
 ### 60. Bridge-Register-Endpoint ohne Auth ✅
 **Abgeschlossen 3. Mai 2026 abends.** Single-Token-Allowlist via 
@@ -554,6 +570,27 @@ Der Plan hatte bewusst eine "Pre-Flight Checks (auf VPS, ohne was zu ändern)"-P
 ### Lesson (#45): Volume-Labels verraten Vergangenes
 
 Volume-Label `com.docker.compose.project: docker` plus `bridge_data` zeigte: ehemaliges Setup lag in einem `docker/`-Verzeichnis, nicht in einem app-spezifischen Folder. Das ist bei Docker-Compose der Default, wenn Project-Name nicht explizit gesetzt wird. Lehre: bei neuem Setup immer `name:` top-level im Compose-File setzen, sonst werden Container und Volumes mit dem Verzeichnis-Namen geprefixt — was bei Umzug oder Re-Deploy für Verwirrung sorgt.
+
+### Lesson (#59): Briefings sollten Backlog-Annahmen explizit machen
+
+Briefing für Claude Code formulierte „End-to-End Reply-Detection 
+funktioniert" als Akzeptanzkriterium und verwies auf das Trust-Flow-
+Skript. Das Skript hat aber laut Backlog-Item #46 false-negative bei 
+Step 6 — was Claude Code nicht wissen konnte. Bei Briefings für 
+isolierte Code-Sessions: bekannte Test-Skript-Limits explizit 
+erwähnen, sonst wird ein false-negative-Skript als Verifikation 
+genommen.
+
+### Lesson (#59): Existence-Leak vs. Debug-Freundlichkeit ist eine 
+bewusste Entscheidung
+
+`/messages/:id/ack` (Zeile 244-261) gibt 403 bei nicht-für-dich, 
+404 bei nicht-existent — klassisches REST, debug-freundlich, leakt 
+Existence. `/messages/:id/sender` gibt jetzt 404 für beide Fälle — 
+identische Body, kein Existence-Leak. Trade-off bewusst getroffen 
+beim sensitiveren Endpoint. Generelle Lehre: Konsistenz innerhalb 
+einer App ist nicht immer das richtige Ziel — die Schutz-
+Anforderungen entscheiden, nicht das Pattern.
 
 ---
 

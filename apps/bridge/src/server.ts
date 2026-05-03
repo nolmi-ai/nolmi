@@ -38,6 +38,10 @@ export interface ServerDeps {
   registerToken: string | null;
 }
 
+// Format-Check für Message-IDs: msg_<nanoid(16)>. Verhindert DB-Lookups mit
+// Garbage-IDs und liefert ehrliche 400 statt 404.
+const MESSAGE_ID_REGEX = /^msg_[A-Za-z0-9_-]{16}$/;
+
 export async function createServer(deps: ServerDeps) {
   const app = Fastify({ logger: true });
 
@@ -186,13 +190,29 @@ export async function createServer(deps: ServerDeps) {
   // mit `inReplyTo` auf eine eigene zuvor gesendete Message verweist. Bei
   // Treffer: kein neuer Mandate-Check, sondern reply-received-Audit.
   //
-  // Heute kein Auth (Bridge ist localhost). Wenn die Bridge mal öffentlich
-  // wird: Token-Check oder Owner-Scope einbauen (Backlog).
+  // Auth + Owner-Scope (#59): Endpoint ist auf der Production-Bridge öffentlich
+  // erreichbar. Drei Schutzschichten:
+  //   1. requireTwinAuth — gültiger Bridge-Bearer-Token Pflicht
+  //   2. ID-Format-Regex früh — kaputte IDs liefern 400 ohne DB-Hit
+  //   3. Owner-Scope — Antwort nur, wenn der einloggende Twin from oder to ist;
+  //      Existence-Block (Message gibt's nicht) und Scope-Block (gibt's, aber
+  //      nicht für dich) liefern dieselbe 404, damit ein Angreifer keine
+  //      Existenz-Information mitnehmen kann.
   app.get<{ Params: { id: string } }>(
     "/messages/:id/sender",
+    { preHandler: auth },
     async (request, reply) => {
+      if (!MESSAGE_ID_REGEX.test(request.params.id)) {
+        return reply.status(400).send({ error: "ID-Format ungültig" });
+      }
+      const callerHandle = request.twin!.handle;
       const message = deps.messages.get(request.params.id);
-      if (!message) {
+      const isParticipant =
+        !!message &&
+        (message.fromHandle === callerHandle || message.toHandle === callerHandle);
+      if (!message || !isParticipant) {
+        // Identische Antwort für „existiert nicht" und „nicht beteiligt" —
+        // sonst wäre die Existenz einer Message-ID schon ein Info-Leak.
         return reply.status(404).send({ error: "Nachricht nicht gefunden" });
       }
       return {
