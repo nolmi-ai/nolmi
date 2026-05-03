@@ -148,7 +148,7 @@ function WizardInner({ router }: { router: ReturnType<typeof useRouter> }) {
   }
 
   return (
-    <div className="max-w-2xl mx-auto space-y-8">
+    <div className="max-w-2xl mx-auto px-6 py-8 space-y-8">
       <header className="space-y-2">
         <h1 className="text-xl font-semibold text-text">Twin anlegen</h1>
         <div className="text-xs text-muted">
@@ -1113,7 +1113,7 @@ function ReviewRow({
 
 function GoodbyeScreen() {
   return (
-    <div className="max-w-xl mx-auto space-y-6 mt-12">
+    <div className="max-w-xl mx-auto px-6 space-y-6 mt-12">
       <h1 className="text-xl font-semibold text-text">Self-Hosted</h1>
       <p className="text-sm text-muted leading-relaxed">
         Für die selbst-gehostete Variante: hol dir den Code, leg deine eigene
@@ -1185,13 +1185,13 @@ function AccountBlock({ onReady }: { onReady: () => void }) {
   }, []);
 
   if (loading) {
-    return <div className="max-w-sm mx-auto mt-12 text-sm text-muted">Lade…</div>;
+    return <div className="max-w-sm mx-auto px-6 mt-12 text-sm text-muted">Lade…</div>;
   }
 
   // Mode B: bereits eingeloggt
   if (me) {
     return (
-      <div className="max-w-sm mx-auto space-y-5 mt-12">
+      <div className="max-w-sm mx-auto px-6 space-y-5 mt-12">
         <header className="space-y-1">
           <h1 className="text-xl font-semibold text-text">Twin anlegen</h1>
           <div className="text-xs text-muted">
@@ -1229,7 +1229,7 @@ function AccountBlock({ onReady }: { onReady: () => void }) {
 
   // Modes A + C
   return (
-    <div className="max-w-sm mx-auto space-y-5 mt-12">
+    <div className="max-w-sm mx-auto px-6 space-y-5 mt-12">
       <header className="space-y-1">
         <h1 className="text-xl font-semibold text-text">Twin anlegen</h1>
         <div className="text-xs text-muted">

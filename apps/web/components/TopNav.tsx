@@ -7,15 +7,19 @@ import type { TwinEvent } from "@twin-lab/shared";
 
 const RUNTIME_URL = process.env.NEXT_PUBLIC_RUNTIME_URL ?? "http://localhost:4000";
 
-// ─── TOP-NAV (2.5.4.3) ───────────────────────────────────────────────────────
+// ─── TOP-NAV ─────────────────────────────────────────────────────────────────
 //
-// Header-Navigation: chat | inbox | stream | settings.
+// Header-Navigation: chat | inbox | stream.
+//
+// Settings ist seit dem Profil-Menu-Refactor (2.5.4.4) nur noch über das
+// Profil-Dropdown rechts erreichbar — Settings ist Account-/Konfig-Stuff,
+// nicht Tab-Navigation.
 //
 // Inbox-Badge zeigt den Pending-Count des aktuell ausgewählten Twins. Der
 // Handle wird aus der URL abgeleitet (Path bei /chat/<h>, Query bei
-// /inbox?twin=, /settings?twin=, /stream?twin=). Live-Updates über SSE:
-// pending-added → +1, pending-resolved → -1. Beim Handle-Wechsel wird die
-// Subscription neu aufgebaut.
+// /inbox?twin=, /stream?twin=). Live-Updates über SSE: pending-added → +1,
+// pending-resolved → -1. Beim Handle-Wechsel wird die Subscription neu
+// aufgebaut.
 
 interface TwinSummary {
   twinId: string;
@@ -142,9 +146,6 @@ export function TopNav() {
       </Link>
       <Link href="/stream" className="hover:text-text transition-colors">
         stream
-      </Link>
-      <Link href="/settings" className="hover:text-text transition-colors">
-        settings
       </Link>
     </nav>
   );

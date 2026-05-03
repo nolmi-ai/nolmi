@@ -37,7 +37,7 @@ export default function StreamPage() {
   }, []);
 
   return (
-    <div className="space-y-6">
+    <div className="max-w-[1200px] mx-auto w-full px-6 py-8 space-y-6">
       <div className="flex items-center justify-between">
         <h1 className="text-xl font-semibold text-text">Stream</h1>
         <div

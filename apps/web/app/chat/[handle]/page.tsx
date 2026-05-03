@@ -5,26 +5,89 @@ import type { ChatMessage, TwinEvent } from "@twin-lab/shared";
 
 const RUNTIME_URL = process.env.NEXT_PUBLIC_RUNTIME_URL ?? "http://localhost:4000";
 
-// ─── CHAT-PAGE 2.5.4.3 ─────────────────────────────────────────────────────
+// Threshold in px: User gilt als "unten", wenn er weniger als so viel vom
+// Bottom-Rand entfernt ist. Liegt etwas oberhalb der typischen Bubble-Höhe,
+// damit der "war-unten"-State auch greift, wenn gerade eine neue Nachricht
+// das Layout ein paar Pixel verschoben hat.
+const SCROLL_BOTTOM_THRESHOLD_PX = 100;
+
+/**
+ * Hält das Scrollverhalten des Chat-Viewports konsistent:
+ *   - Beim Wechsel von `switchKey` (z.B. neue Conversation): hartes Scroll
+ *     auf Bottom, damit der User immer bei der aktuellsten Nachricht startet.
+ *   - Bei jeder neuen Nachricht: sanftes Scroll auf Bottom — aber nur, wenn
+ *     der User zuvor schon (nahe) am Bottom war. Wer hochgescrollt liest,
+ *     soll nicht beim Reinkommen einer neuen Reply weggerissen werden.
+ *
+ * Genutzt von DirectChat und A2AChat. Liefert die Refs + onScroll-Handler,
+ * die der Caller an Container und Bottom-Sentinel hängt.
+ */
+function useAutoScroll(messageCount: number, switchKey: string) {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const bottomRef = useRef<HTMLDivElement>(null);
+  const wasAtBottomRef = useRef(true);
+  const switchedRef = useRef(true);
+  const lastSwitchKeyRef = useRef(switchKey);
+
+  // Switch-Key-Änderung markieren — nächster Render scrollt hart.
+  if (lastSwitchKeyRef.current !== switchKey) {
+    lastSwitchKeyRef.current = switchKey;
+    switchedRef.current = true;
+    wasAtBottomRef.current = true;
+  }
+
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+    if (switchedRef.current) {
+      // Hart auf Bottom — kein animiertes Scrollen, weil das beim
+      // Conversation-Open ablenkend wirkt.
+      el.scrollTop = el.scrollHeight;
+      switchedRef.current = false;
+      wasAtBottomRef.current = true;
+      return;
+    }
+    if (wasAtBottomRef.current && bottomRef.current) {
+      bottomRef.current.scrollIntoView({ behavior: "smooth", block: "end" });
+    }
+  }, [messageCount, switchKey]);
+
+  const onScroll = useCallback(() => {
+    const el = containerRef.current;
+    if (!el) return;
+    const distance = el.scrollHeight - el.scrollTop - el.clientHeight;
+    wasAtBottomRef.current = distance < SCROLL_BOTTOM_THRESHOLD_PX;
+  }, []);
+
+  return { containerRef, bottomRef, onScroll };
+}
+
+// ─── CHAT-PAGE (2.5.4.5) ─────────────────────────────────────────────────────
 //
-// Zwei-Spalten-Layout: links Sidebar mit Conversations, rechts entweder
-// Direct-Chat (Owner → eigener Twin) oder A2A-Conversation (Owner → ein
-// anderer Twin, via Bridge).
+// Full-Viewport-Layout mit permanent angedockter Sidebar links und Conversation
+// rechts. Sidebar scrollt intern bei vielen Konversationen, Conversation-Header
+// und Input bleiben fix — Verlauf ist der einzige scrollbare Bereich.
 //
-// 2.5.4.3-Änderungen:
-//   - Conversation-View baut auf Bridge-Messages-DB (symmetrisch — beide
-//     Seiten sehen denselben Verlauf), angereichert mit lokalem Audit-Wissen.
-//   - System-Messages bekommen eigenes Styling (zentriert, italic, transparent).
-//   - Sent vs. received deutlich visuell unterscheidbar (Position + Heading).
-//   - mark-read mit Verzögerung: Indicator verschwindet erst nach ~700ms im
-//     View, danach wird die Conversation-Liste neu geladen → Sidebar-Counter
-//     aktualisiert sich konsistent.
+//   ┌────────────┬──────────────────────────────────────┐
+//   │ Sidebar    │ Conversation-Header (fix)            │
+//   │ (w-72)     ├──────────────────────────────────────┤
+//   │            │ Verlauf (scrollbar, flex-1)          │
+//   │            ├──────────────────────────────────────┤
+//   │            │ Input (fix unten)                    │
+//   └────────────┴──────────────────────────────────────┘
+//
+// Trust-Status pro Partner kommt aus /twins/:handle/trust und wird in den
+// Conversation-Header gereicht (Indikator "vertraut").
 
 interface ConversationItem {
   partnerHandle: string;
   partnerDisplayName: string | null;
   lastMessageAt: string;
   unreadCount: number;
+}
+
+interface TrustEntry {
+  trustedHandle: string;
 }
 
 // Spiegelt MergedMessage aus apps/runtime/src/audit/conversation-merge.ts
@@ -50,20 +113,12 @@ export default function ChatPage({
 }) {
   const raw = use(params).handle;
   const handle = safeDecode(raw);
-
-  return (
-    <div className="space-y-4">
-      <div className="flex items-baseline gap-3">
-        <h1 className="text-xl font-semibold text-text">Chat</h1>
-        <span className="text-xs text-muted font-mono">{handle}</span>
-      </div>
-      <ChatLayout handle={handle} />
-    </div>
-  );
+  return <ChatLayout handle={handle} />;
 }
 
 function ChatLayout({ handle }: { handle: string }) {
   const [conversations, setConversations] = useState<ConversationItem[]>([]);
+  const [trustedSet, setTrustedSet] = useState<Set<string>>(new Set());
   const [selection, setSelection] = useState<Selection>({ kind: "direct" });
   const [showNewModal, setShowNewModal] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -81,9 +136,27 @@ function ChatLayout({ handle }: { handle: string }) {
     }
   }, [handle]);
 
+  // Trust-Liste einmal pro Twin-Wechsel — ändert sich nur durch User-Aktion,
+  // kein Polling nötig.
+  const loadTrusts = useCallback(async () => {
+    try {
+      const res = await fetch(`${RUNTIME_URL}/twins/${handle}/trust`, {
+        credentials: "include",
+      });
+      if (!res.ok) return;
+      const body = (await res.json()) as { trusts: TrustEntry[] };
+      setTrustedSet(
+        new Set(body.trusts.map((t) => t.trustedHandle.toLowerCase())),
+      );
+    } catch {
+      // Trust-Fetch ist nice-to-have für den Indikator — kein Blocker.
+    }
+  }, [handle]);
+
   useEffect(() => {
     loadConversations();
-  }, [loadConversations]);
+    loadTrusts();
+  }, [loadConversations, loadTrusts]);
 
   // SSE: live updates wenn neue Replies reinkommen.
   useEffect(() => {
@@ -111,40 +184,51 @@ function ChatLayout({ handle }: { handle: string }) {
     setSelection({ kind: "a2a", partner });
   };
 
-  return (
-    <div className="flex flex-col md:flex-row gap-4 min-h-[600px]">
-      <aside className="md:w-[280px] md:flex-shrink-0">
-        <Sidebar
-          handle={handle}
-          conversations={conversations}
-          selection={selection}
-          onSelect={setSelection}
-          onNew={() => setShowNewModal(true)}
-        />
-        {error && (
-          <div className="mt-2 text-xs text-warn border border-warn/40 rounded px-3 py-2">
-            {error}
-          </div>
-        )}
-      </aside>
+  const activePartnerInfo =
+    selection.kind === "a2a"
+      ? conversations.find(
+          (c) => c.partnerHandle.toLowerCase() === selection.partner.toLowerCase(),
+        )
+      : null;
+  const partnerDisplayName = activePartnerInfo?.partnerDisplayName ?? null;
+  const partnerIsTrusted =
+    selection.kind === "a2a" &&
+    trustedSet.has(selection.partner.toLowerCase());
 
-      <main className="flex-1 min-w-0">
+  return (
+    // Fixe Höhe = Viewport minus AppHeader (~65px). overflow-hidden klemmt
+    // alle internen Bereiche sauber ein — die Page selbst scrollt nie, nur
+    // Sidebar-Liste und Conversation-Verlauf. AppFooter ist auf /chat-Routes
+    // ausgeblendet, sonst würde er die Höhen-Rechnung kippen.
+    <div className="h-[calc(100vh-65px)] flex flex-row overflow-hidden">
+      <Sidebar
+        handle={handle}
+        conversations={conversations}
+        selection={selection}
+        onSelect={setSelection}
+        onNew={() => setShowNewModal(true)}
+        sidebarError={error}
+      />
+
+      <section className="flex-1 flex flex-col min-w-0 min-h-0">
+        <ConversationHeader
+          handle={handle}
+          selection={selection}
+          partnerDisplayName={partnerDisplayName}
+          partnerIsTrusted={partnerIsTrusted}
+        />
         {selection.kind === "direct" ? (
           <DirectChat handle={handle} />
         ) : (
           <A2AChat
             handle={handle}
             partner={selection.partner}
-            partnerDisplayName={
-              conversations.find(
-                (c) => c.partnerHandle.toLowerCase() === selection.partner.toLowerCase(),
-              )?.partnerDisplayName ?? null
-            }
+            partnerDisplayName={partnerDisplayName}
             onMessageSent={loadConversations}
             onMarkedRead={loadConversations}
           />
         )}
-      </main>
+      </section>
 
       {showNewModal && (
         <NewConversationModal
@@ -152,6 +236,56 @@ function ChatLayout({ handle }: { handle: string }) {
           onClose={() => setShowNewModal(false)}
           onCreated={handleNewConversation}
         />
+      )}
+    </div>
+  );
+}
+
+// ─── Conversation-Header (fix oben über dem Verlauf) ────────────────────────
+
+function ConversationHeader({
+  handle,
+  selection,
+  partnerDisplayName,
+  partnerIsTrusted,
+}: {
+  handle: string;
+  selection: Selection;
+  partnerDisplayName: string | null;
+  partnerIsTrusted: boolean;
+}) {
+  if (selection.kind === "direct") {
+    return (
+      <div className="h-16 px-6 border-b border-border bg-surface flex items-center gap-3 flex-shrink-0">
+        <div className="flex-1 min-w-0">
+          <div className="text-sm font-semibold text-text truncate">
+            Mit deinem Twin
+          </div>
+          <div className="text-xs text-muted font-mono truncate">{handle}</div>
+        </div>
+        <span className="text-[10px] uppercase tracking-wider text-muted border border-border rounded px-2 py-0.5">
+          direct chat
+        </span>
+      </div>
+    );
+  }
+  const label = partnerDisplayName ?? selection.partner;
+  return (
+    <div className="px-6 py-3 border-b border-border bg-surface flex items-center gap-3">
+      <div className="flex-1 min-w-0">
+        <div className="text-sm font-semibold text-text truncate">{label}</div>
+        <div className="text-xs text-muted font-mono truncate">
+          {selection.partner}
+        </div>
+      </div>
+      {partnerIsTrusted && (
+        <span
+          className="inline-flex items-center gap-1 text-[10px] uppercase tracking-wider text-accent border border-accent/40 rounded px-2 py-0.5"
+          title="Dieser Twin ist in deiner Vertrauten-Liste"
+        >
+          <span aria-hidden="true">✓</span>
+          vertraut
+        </span>
       )}
     </div>
   );
@@ -165,84 +299,100 @@ function Sidebar({
   selection,
   onSelect,
   onNew,
+  sidebarError,
 }: {
   handle: string;
   conversations: ConversationItem[];
   selection: Selection;
   onSelect: (s: Selection) => void;
   onNew: () => void;
+  sidebarError: string | null;
 }) {
   return (
-    <div className="bg-surface border border-border rounded p-3 space-y-2 sticky top-4">
-      <div className="text-xs uppercase tracking-wider text-muted px-1 mb-1">
-        Konversationen
+    // Drei vertikale Slots — Höhen exakt parallel zum Conversation-Bereich:
+    //   h-16  Header     (matched mit ConversationHeader rechts)
+    //   flex-1 Liste     (scrollt intern bei vielen Konversationen)
+    //   h-20  Footer-Slot (matched mit Conversation-Input rechts)
+    // min-h-0 + overflow-hidden auf der Liste sind nötig, damit der innere
+    // Scroll greift statt die Sidebar zu vergrößern.
+    <aside className="w-72 flex-shrink-0 border-r border-border bg-surface flex flex-col">
+      <div className="h-16 px-4 border-b border-border flex items-center flex-shrink-0">
+        <div className="text-xs uppercase tracking-wider text-muted">
+          Konversationen
+        </div>
       </div>
 
-      <button
-        onClick={() => onSelect({ kind: "direct" })}
-        className={`w-full text-left px-3 py-2 rounded border transition-colors ${
-          selection.kind === "direct"
-            ? "border-accent bg-bg"
-            : "border-border hover:border-accent/40"
-        }`}
-      >
-        <div className="text-sm text-text">Mit meinem Twin</div>
-        <div className="text-xs text-muted">Direct-Chat ({handle})</div>
-      </button>
+      <div className="flex-1 min-h-0 overflow-y-auto p-2 space-y-1">
+        <button
+          onClick={() => onSelect({ kind: "direct" })}
+          className={`w-full text-left px-3 py-2 rounded border transition-colors ${
+            selection.kind === "direct"
+              ? "border-accent bg-bg"
+              : "border-transparent hover:border-accent/40 hover:bg-bg/40"
+          }`}
+        >
+          <div className="text-sm text-text">Mit meinem Twin</div>
+          <div className="text-xs text-muted">Direct-Chat ({handle})</div>
+        </button>
 
-      <div className="border-t border-border my-2" />
-
-      {conversations.length === 0 ? (
-        <div className="text-xs text-muted px-1 py-2">
-          Noch keine A2A-Konversationen.
-        </div>
-      ) : (
-        conversations.map((c) => {
-          const isActive =
-            selection.kind === "a2a" &&
-            selection.partner.toLowerCase() === c.partnerHandle.toLowerCase();
-          return (
-            <button
-              key={c.partnerHandle}
-              onClick={() => onSelect({ kind: "a2a", partner: c.partnerHandle })}
-              className={`w-full text-left px-3 py-2 rounded border transition-colors ${
-                isActive
-                  ? "border-accent bg-bg"
-                  : "border-border hover:border-accent/40"
-              }`}
-            >
-              <div className="flex items-center justify-between gap-2">
-                <div className="text-sm text-text truncate">
-                  {c.partnerDisplayName ?? c.partnerHandle}
+        {conversations.length === 0 ? (
+          <div className="text-xs text-muted px-3 py-3">
+            Noch keine A2A-Konversationen.
+          </div>
+        ) : (
+          conversations.map((c) => {
+            const isActive =
+              selection.kind === "a2a" &&
+              selection.partner.toLowerCase() === c.partnerHandle.toLowerCase();
+            return (
+              <button
+                key={c.partnerHandle}
+                onClick={() => onSelect({ kind: "a2a", partner: c.partnerHandle })}
+                className={`w-full text-left px-3 py-2 rounded border transition-colors ${
+                  isActive
+                    ? "border-accent bg-bg"
+                    : "border-transparent hover:border-accent/40 hover:bg-bg/40"
+                }`}
+              >
+                <div className="flex items-center justify-between gap-2">
+                  <div className="text-sm text-text truncate">
+                    {c.partnerDisplayName ?? c.partnerHandle}
+                  </div>
+                  {c.unreadCount > 0 && (
+                    <span
+                      className="inline-block w-2 h-2 rounded-full bg-warn flex-shrink-0"
+                      title={`${c.unreadCount} ungelesen`}
+                      aria-label={`${c.unreadCount} ungelesene Antworten`}
+                    />
+                  )}
                 </div>
-                {c.unreadCount > 0 && (
-                  <span
-                    className="inline-block w-2 h-2 rounded-full bg-warn flex-shrink-0"
-                    title={`${c.unreadCount} ungelesen`}
-                    aria-label={`${c.unreadCount} ungelesene Antworten`}
-                  />
-                )}
-              </div>
-              <div className="text-xs text-muted font-mono truncate">
-                {c.partnerHandle}
-              </div>
-              <div className="text-[11px] text-muted mt-0.5">
-                {formatRelative(c.lastMessageAt)}
-              </div>
-            </button>
-          );
-        })
-      )}
+                <div className="text-xs text-muted font-mono truncate">
+                  {c.partnerHandle}
+                </div>
+                <div className="text-[11px] text-muted mt-0.5">
+                  {formatRelative(c.lastMessageAt)}
+                </div>
+              </button>
+            );
+          })
+        )}
 
-      <div className="border-t border-border my-2" />
+        {sidebarError && (
+          <div className="text-xs text-warn border border-warn/40 rounded px-3 py-2 mt-2">
+            {sidebarError}
+          </div>
+        )}
+      </div>
 
-      <button
-        onClick={onNew}
-        className="w-full px-3 py-2 text-sm border border-accent text-accent rounded hover:bg-accent hover:text-bg transition-colors"
-      >
-        + Neue Konversation
-      </button>
-    </div>
+      <div className="h-20 px-3 border-t border-border flex items-center flex-shrink-0">
+        <button
+          onClick={onNew}
+          className="w-full px-3 py-2 text-sm border border-accent text-accent rounded hover:bg-accent hover:text-bg transition-colors"
+        >
+          + Neue Konversation
+        </button>
+      </div>
+    </aside>
   );
 }
 
@@ -253,6 +403,10 @@ function DirectChat({ handle }: { handle: string }) {
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const { containerRef, bottomRef, onScroll } = useAutoScroll(
+    messages.length,
+    `direct:${handle}`,
+  );
 
   async function send() {
     if (!input.trim() || busy) return;
@@ -299,27 +453,36 @@ function DirectChat({ handle }: { handle: string }) {
   }
 
   return (
-    <div className="bg-surface border border-border rounded h-full min-h-[400px] flex flex-col">
-      <div className="px-4 py-3 border-b border-border">
-        <div className="text-sm text-text">Direct-Chat mit deinem Twin</div>
-        <div className="text-xs text-muted font-mono">{handle}</div>
+    // Verlauf: flex-1 + min-h-0 + overflow-y-auto — nur dieser Bereich scrollt.
+    // Innerer max-w-3xl-Wrapper begrenzt die Lese-Breite, sonst werden Messages
+    // über den ganzen Conversation-Bereich gestreckt (>1500px sind unlesbar).
+    // Input: h-20 fix — match zum Sidebar-Footer für visuelle Konsistenz.
+    <>
+      <div
+        ref={containerRef}
+        onScroll={onScroll}
+        className="flex-1 min-h-0 overflow-y-auto px-6 py-4"
+      >
+        <div className="max-w-3xl mx-auto space-y-4">
+          {messages.length === 0 ? (
+            <div className="text-muted text-sm">
+              Noch keine Nachrichten. Schreib unten eine Frage.
+            </div>
+          ) : (
+            messages.map((m, i) => (
+              <Bubble key={i} role={m.role} content={m.content} />
+            ))
+          )}
+          {busy && <div className="text-xs text-accent">twin denkt nach…</div>}
+          {error && (
+            <div className="text-xs text-warn border border-warn/40 rounded px-3 py-2">
+              {error}
+            </div>
+          )}
+          <div ref={bottomRef} />
+        </div>
       </div>
-      <div className="flex-1 p-4 space-y-4 overflow-y-auto max-h-[60vh]">
-        {messages.length === 0 ? (
-          <div className="text-muted text-sm">
-            Noch keine Nachrichten. Schreib unten eine Frage.
-          </div>
-        ) : (
-          messages.map((m, i) => <Bubble key={i} role={m.role} content={m.content} />)
-        )}
-        {busy && <div className="text-xs text-accent">twin denkt nach…</div>}
-        {error && (
-          <div className="text-xs text-warn border border-warn/40 rounded px-3 py-2">
-            {error}
-          </div>
-        )}
-      </div>
-      <div className="border-t border-border p-3 flex gap-2">
+      <div className="h-20 border-t border-border bg-surface px-6 py-3 flex items-center gap-2 flex-shrink-0">
         <textarea
           value={input}
           onChange={(e) => setInput(e.target.value)}
@@ -330,7 +493,7 @@ function DirectChat({ handle }: { handle: string }) {
             }
           }}
           placeholder="Frage an den Twin… (Enter zum senden, Shift+Enter für Zeilenumbruch)"
-          className="flex-1 bg-bg border border-border rounded px-3 py-2 text-sm text-text resize-none focus:outline-none focus:border-accent"
+          className="flex-1 h-full bg-bg border border-border rounded px-3 py-2 text-sm text-text resize-none focus:outline-none focus:border-accent"
           rows={2}
         />
         <button
@@ -341,7 +504,7 @@ function DirectChat({ handle }: { handle: string }) {
           send
         </button>
       </div>
-    </div>
+    </>
   );
 }
 
@@ -361,6 +524,7 @@ function A2AChat({
 }: {
   handle: string;
   partner: string;
+  /** Wird in den Bubble-Headings als Sender-Label genutzt (z.B. "FLORIAN"). */
   partnerDisplayName: string | null;
   onMessageSent: () => void;
   /** Triggert Sidebar-Reload nach mark-read, damit der unread-Counter sinkt. */
@@ -371,6 +535,10 @@ function A2AChat({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const markedRef = useRef<Set<string>>(new Set());
+  const { containerRef, bottomRef, onScroll } = useAutoScroll(
+    messages.length,
+    `a2a:${partner}`,
+  );
 
   const load = useCallback(async () => {
     try {
@@ -487,32 +655,37 @@ function A2AChat({
   const partnerLabel = (partnerDisplayName ?? partner).toUpperCase();
 
   return (
-    <div className="bg-surface border border-border rounded h-full min-h-[400px] flex flex-col">
-      <div className="px-4 py-3 border-b border-border">
-        <div className="text-sm text-text">{partnerDisplayName ?? partner}</div>
-        <div className="text-xs text-muted font-mono">{partner}</div>
+    // Aufbau identisch zu DirectChat: scroll-Verlauf mit max-w-3xl-Wrapper,
+    // h-20 Input — gleiche Höhen wie Sidebar-Slots.
+    <>
+      <div
+        ref={containerRef}
+        onScroll={onScroll}
+        className="flex-1 min-h-0 overflow-y-auto px-6 py-4"
+      >
+        <div className="max-w-3xl mx-auto space-y-3">
+          {messages.length === 0 ? (
+            <div className="text-muted text-sm">
+              Noch keine Nachrichten in dieser Konversation.
+            </div>
+          ) : (
+            messages.map((m) => (
+              <ConversationBubble
+                key={m.bridgeMessageId}
+                message={m}
+                partnerLabel={partnerLabel}
+              />
+            ))
+          )}
+          {error && (
+            <div className="text-xs text-warn border border-warn/40 rounded px-3 py-2">
+              {error}
+            </div>
+          )}
+          <div ref={bottomRef} />
+        </div>
       </div>
-      <div className="flex-1 p-4 space-y-3 overflow-y-auto max-h-[60vh]">
-        {messages.length === 0 ? (
-          <div className="text-muted text-sm">
-            Noch keine Nachrichten in dieser Konversation.
-          </div>
-        ) : (
-          messages.map((m) => (
-            <ConversationBubble
-              key={m.bridgeMessageId}
-              message={m}
-              partnerLabel={partnerLabel}
-            />
-          ))
-        )}
-        {error && (
-          <div className="text-xs text-warn border border-warn/40 rounded px-3 py-2">
-            {error}
-          </div>
-        )}
-      </div>
-      <div className="border-t border-border p-3 flex gap-2">
+      <div className="h-20 border-t border-border bg-surface px-6 py-3 flex items-center gap-2 flex-shrink-0">
         <textarea
           value={input}
           onChange={(e) => setInput(e.target.value)}
@@ -523,7 +696,7 @@ function A2AChat({
             }
           }}
           placeholder={`Nachricht an ${partner}…`}
-          className="flex-1 bg-bg border border-border rounded px-3 py-2 text-sm text-text resize-none focus:outline-none focus:border-accent"
+          className="flex-1 h-full bg-bg border border-border rounded px-3 py-2 text-sm text-text resize-none focus:outline-none focus:border-accent"
           rows={2}
         />
         <button
@@ -534,7 +707,7 @@ function A2AChat({
           {busy ? "..." : "send"}
         </button>
       </div>
-    </div>
+    </>
   );
 }
 
@@ -652,20 +825,21 @@ function NewConversationModal({
 
 function Bubble({ role, content }: { role: ChatMessage["role"]; content: string }) {
   const isUser = role === "user";
+  // ml-auto / mr-auto positioniert die Bubble innerhalb des max-w-3xl-
+  // Wrappers — User rechts, Twin-Antwort links. max-w-[70%] verhindert,
+  // dass eine kurze Message die volle Wrapper-Breite einnimmt.
   return (
-    <div className={`flex ${isUser ? "justify-end" : "justify-start"}`}>
-      <div
-        className={`max-w-[80%] px-3 py-2 rounded text-sm leading-relaxed whitespace-pre-wrap ${
-          isUser
-            ? "bg-bg border border-border text-text"
-            : "bg-surface border border-accent/40 text-text"
-        }`}
-      >
-        <div className="text-[10px] text-muted uppercase tracking-wider mb-1">
-          {isUser ? "du" : "twin"}
-        </div>
-        {content}
+    <div
+      className={`max-w-[70%] px-3 py-2 rounded text-sm leading-relaxed whitespace-pre-wrap ${
+        isUser
+          ? "ml-auto bg-bg border border-border text-text"
+          : "mr-auto bg-surface border border-accent/40 text-text"
+      }`}
+    >
+      <div className="text-[10px] text-muted uppercase tracking-wider mb-1">
+        {isUser ? "du" : "twin"}
       </div>
+      {content}
     </div>
   );
 }
@@ -681,50 +855,47 @@ function ConversationBubble({
   // o.ä. erkennbar, nicht als Konversations-Inhalt.
   if (message.messageType === "system") {
     return (
-      <div className="flex justify-center">
-        <div className="max-w-[80%] px-3 py-2 text-xs text-muted italic opacity-70 text-center whitespace-pre-wrap">
-          <div className="text-[10px] uppercase tracking-wider mb-1 not-italic opacity-80">
-            System
-          </div>
-          {message.content}
+      <div className="max-w-[70%] mx-auto px-3 py-2 text-xs text-muted italic opacity-70 text-center whitespace-pre-wrap">
+        <div className="text-[10px] uppercase tracking-wider mb-1 not-italic opacity-80">
+          System
         </div>
+        {message.content}
       </div>
     );
   }
 
   const isSent = message.direction === "sent";
   // Bewusst kontrastierende Bubbles: sent in akzentfarbener Border, received
-  // mit dezenter Standard-Border — visuell klar, wer geschrieben hat.
+  // mit dezenter Standard-Border — visuell klar, wer geschrieben hat. Plus
+  // ml-auto/mr-auto innerhalb des max-w-3xl-Wrappers oben.
+  const sideClass = isSent ? "ml-auto" : "mr-auto";
   const bubbleClasses = isSent
     ? "bg-bg border border-accent/60 text-text"
     : "bg-surface border border-border text-text";
   const heading = isSent ? "DU" : partnerLabel;
   const isReply = message.inReplyTo !== null;
   // Pending-Hinweis bei eingehender, noch nicht freigegebener Anfrage.
-  const isPending =
-    !isSent && message.auditStatus === "pending";
+  const isPending = !isSent && message.auditStatus === "pending";
 
   return (
-    <div className={`flex ${isSent ? "justify-end" : "justify-start"}`}>
-      <div
-        className={`max-w-[80%] px-3 py-2 rounded text-sm leading-relaxed whitespace-pre-wrap ${bubbleClasses}`}
-      >
-        <div className="text-[10px] text-muted uppercase tracking-wider mb-1 flex items-center gap-2">
-          <span className={isSent ? "text-accent" : "text-text"}>{heading}</span>
-          {isReply && (
-            <span className="text-muted normal-case" title="Antwort auf vorherige Nachricht">
-              ↩ reply
-            </span>
-          )}
-          {isPending && (
-            <span className="text-warn normal-case">wartet auf Freigabe</span>
-          )}
-          <span className="ml-auto normal-case text-muted">
-            {formatTime(message.createdAt)}
+    <div
+      className={`max-w-[70%] px-3 py-2 rounded text-sm leading-relaxed whitespace-pre-wrap ${sideClass} ${bubbleClasses}`}
+    >
+      <div className="text-[10px] text-muted uppercase tracking-wider mb-1 flex items-center gap-2">
+        <span className={isSent ? "text-accent" : "text-text"}>{heading}</span>
+        {isReply && (
+          <span className="text-muted normal-case" title="Antwort auf vorherige Nachricht">
+            ↩ reply
           </span>
-        </div>
-        {message.content}
+        )}
+        {isPending && (
+          <span className="text-warn normal-case">wartet auf Freigabe</span>
+        )}
+        <span className="ml-auto normal-case text-muted">
+          {formatTime(message.createdAt)}
+        </span>
       </div>
+      {message.content}
     </div>
   );
 }

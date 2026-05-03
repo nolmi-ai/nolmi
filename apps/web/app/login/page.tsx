@@ -58,7 +58,7 @@ function LoginInner() {
   }
 
   return (
-    <div className="max-w-sm mx-auto space-y-6 mt-12">
+    <div className="max-w-sm mx-auto space-y-6 mt-12 px-6">
       <header className="space-y-1">
         <h1 className="text-xl font-semibold text-text">twin-lab</h1>
         <div className="text-xs text-muted">Login</div>

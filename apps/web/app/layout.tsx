@@ -1,9 +1,7 @@
 import "./globals.css";
-import Link from "next/link";
-import { Suspense, type ReactNode } from "react";
-import { TwinSwitcher } from "../components/TwinSwitcher";
-import { TopNav } from "../components/TopNav";
-import { FooterMeta } from "../components/FooterMeta";
+import { type ReactNode } from "react";
+import { AppHeader } from "../components/AppHeader";
+import { AppFooter } from "../components/AppFooter";
 
 export const metadata = {
   title: "twin-lab",
@@ -14,25 +12,13 @@ export default function RootLayout({ children }: { children: ReactNode }) {
   return (
     <html lang="de">
       <body className="min-h-screen flex flex-col">
-        <header className="border-b border-border px-6 py-4 flex items-center justify-between gap-4">
-          <Link href="/" className="text-text font-semibold tracking-tight">
-            twin-lab
-          </Link>
-          <div className="flex items-center gap-6">
-            <Suspense fallback={<span className="text-xs text-muted">…</span>}>
-              <TwinSwitcher />
-            </Suspense>
-            <Suspense fallback={<span className="text-xs text-muted">nav…</span>}>
-              <TopNav />
-            </Suspense>
-          </div>
-        </header>
-        <main className="flex-1 px-6 py-8 max-w-4xl mx-auto w-full">
-          {children}
-        </main>
-        <footer className="border-t border-border px-6 py-3 text-xs text-muted">
-          phase 2.5 · <FooterMeta /> · läuft lokal
-        </footer>
+        <AppHeader />
+        {/* main hat bewusst keinen max-w / mx-auto / px mehr — jede Page
+         * setzt ihren Container selbst (PageContainer für Standard-Pages,
+         * Full-Viewport für Chat). flex-1 + min-h-0 reicht aus, damit
+         * Children mit h-full den verfügbaren Platz nutzen können. */}
+        <main className="flex-1 min-h-0 flex flex-col">{children}</main>
+        <AppFooter />
       </body>
     </html>
   );

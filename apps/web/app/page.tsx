@@ -15,5 +15,5 @@ export default function HomePage() {
   useEffect(() => {
     router.replace("/chat");
   }, [router]);
-  return <div className="text-sm text-muted">Lade…</div>;
+  return <div className="px-6 py-8 text-sm text-muted">Lade…</div>;
 }

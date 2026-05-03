@@ -38,7 +38,11 @@ export default function ChatIndexPage() {
   }, [router]);
 
   if (error) {
-    return <div className="text-sm text-warn">Konnte Twin-Liste nicht laden: {error}</div>;
+    return (
+      <div className="px-6 py-8 text-sm text-warn">
+        Konnte Twin-Liste nicht laden: {error}
+      </div>
+    );
   }
-  return <div className="text-sm text-muted">Lade aktiven Twin…</div>;
+  return <div className="px-6 py-8 text-sm text-muted">Lade aktiven Twin…</div>;
 }

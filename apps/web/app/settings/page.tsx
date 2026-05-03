@@ -216,7 +216,7 @@ function SettingsInner() {
   }
 
   return (
-    <div className="space-y-8">
+    <div className="max-w-[1200px] mx-auto w-full px-6 py-8 space-y-8">
       <div className="flex items-baseline gap-3">
         <h1 className="text-xl font-semibold text-text">Settings</h1>
         {selectedHandle && (

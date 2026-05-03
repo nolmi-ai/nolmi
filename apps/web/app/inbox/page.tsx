@@ -188,7 +188,7 @@ function InboxInner() {
     .slice(0, 5);
 
   return (
-    <div className="space-y-8">
+    <div className="max-w-[1200px] mx-auto w-full px-6 py-8 space-y-8">
       <div className="flex items-baseline gap-3">
         <h1 className="text-xl font-semibold text-text">Inbox</h1>
         {selectedHandle && (
