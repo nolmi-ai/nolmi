@@ -35,6 +35,11 @@ export interface AuditRepository {
     value: string,
     opts?: { twinId?: string },
   ): Promise<AuditEntry | null>;
+  /**
+   * Setzt read_at = now für einen Audit-Eintrag. Idempotent: wenn bereits
+   * gelesen, wird der Timestamp NICHT überschrieben (erste-Lesung gewinnt).
+   */
+  markRead(id: string): Promise<void>;
 }
 
 export interface RepositoryBundle {

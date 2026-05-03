@@ -70,13 +70,13 @@ export function TwinSwitcher() {
     window.location.href = "/login";
   }
 
-  // Aktuellen Handle aus URL ableiten — Chat aus Path, Settings aus Query.
+  // Aktuellen Handle aus URL ableiten — Chat aus Path, Settings/Inbox aus Query.
   const currentHandle = useMemo(() => {
     if (pathname.startsWith("/chat/")) {
       const seg = pathname.split("/")[2];
       return seg ? decodeURIComponent(seg) : "";
     }
-    if (pathname.startsWith("/settings")) {
+    if (pathname.startsWith("/settings") || pathname.startsWith("/inbox")) {
       return searchParams.get("twin") ?? "";
     }
     return "";
@@ -91,6 +91,12 @@ export function TwinSwitcher() {
       const params = new URLSearchParams(searchParams.toString());
       params.set("twin", handle);
       router.push(`/settings?${params.toString()}`);
+      return;
+    }
+    if (pathname.startsWith("/inbox")) {
+      const params = new URLSearchParams(searchParams.toString());
+      params.set("twin", handle);
+      router.push(`/inbox?${params.toString()}`);
       return;
     }
     router.push(`/chat/${handle}`);

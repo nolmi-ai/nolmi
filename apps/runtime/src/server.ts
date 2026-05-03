@@ -5,7 +5,7 @@ import { nanoid } from "nanoid";
 import { z } from "zod";
 import type Database from "better-sqlite3";
 import type { AuditRepository } from "./repository/types.js";
-import { ChatRequestSchema } from "@twin-lab/shared";
+import { ChatRequestSchema, type AuditEntry } from "@twin-lab/shared";
 import type { RegistryEntry, TwinServiceRegistry } from "./twin-service-registry.js";
 import { TwinProfilesRepo } from "./twin-profiles-repo.js";
 import { encrypt } from "./crypto-utils.js";
@@ -20,6 +20,16 @@ import {
 import { getCurrentUser } from "./auth/get-current-user.js";
 import { UsersRepo, UserAlreadyExistsError, type User } from "./auth/users-repo.js";
 import { destroySession, setSession } from "./auth/session.js";
+import {
+  TrustRepo,
+  TrustAlreadyExistsError,
+  TrustNotFoundError,
+} from "./trust/trust-repo.js";
+import {
+  mergeAuditIntoBridgeMessages,
+  type MergedMessage,
+} from "./audit/conversation-merge.js";
+import { BridgeClient } from "./bridge/client.js";
 
 // ─── HTTP SERVER ─────────────────────────────────────────────────────────────
 //
@@ -55,6 +65,8 @@ export interface ServerDeps {
   masterKey: Buffer;
   /** Für Auth + Owner-Checks: gemeinsame DB-Connection (UsersRepo etc.). */
   db: Database.Database;
+  /** Für /twins/:handle/trust* — geteilte Instanz mit der Registry. */
+  trustRepo: TrustRepo;
 }
 
 export async function createServer(deps: ServerDeps) {
@@ -179,19 +191,30 @@ export async function createServer(deps: ServerDeps) {
     async (request, reply) => {
       const ctx = await requireOwner(request, reply, request.params.handle);
       if (!ctx) return;
-      const { entry } = ctx;
+      const { entry, user } = ctx;
       const parsed = ChatRequestSchema.safeParse(request.body);
       if (!parsed.success) {
         return reply.status(400).send({ error: parsed.error.message });
       }
       try {
-        return await entry.service.chat(parsed.data.messages);
+        // requesterUserId triggert den Owner-Bypass im TwinService — heute
+        // immer der Owner (requireOwner stellt das sicher), aber explizit
+        // weiterzureichen ist robuster, falls die Route mal aufgemacht wird.
+        return await entry.service.chat(parsed.data.messages, {
+          requesterUserId: user.userId,
+        });
       } catch (err) {
         const msg = err instanceof Error ? err.message : "Unknown error";
         return reply.status(500).send({ error: msg });
       }
     },
   );
+
+  // ─── Trust-Relationships ───────────────────────────────────────────────────
+  registerTrustRoutes(app, deps, requireOwner);
+
+  // ─── A2A-Conversations (2.5.4.2) ──────────────────────────────────────────
+  registerConversationRoutes(app, deps, requireOwner);
 
   // ─── Audit-Liste ───────────────────────────────────────────────────────────
   app.get<{ Params: { handle: string }; Querystring: { limit?: string; offset?: string } }>(
@@ -238,6 +261,22 @@ export async function createServer(deps: ServerDeps) {
         const msg = err instanceof Error ? err.message : "Unknown error";
         return reply.status(400).send({ error: msg });
       }
+    },
+  );
+
+  // ─── Mark-Read (für reply-received Indicator in der Sidebar) ─────────────
+  app.post<{ Params: { handle: string; id: string } }>(
+    "/twins/:handle/audit/:id/mark-read",
+    async (request, reply) => {
+      const ctx = await requireOwner(request, reply, request.params.handle);
+      if (!ctx) return;
+      const { entry } = ctx;
+      const auditEntry = await deps.audit.get(request.params.id);
+      if (!auditEntry || auditEntry.twinId !== entry.twinId) {
+        return reply.status(404).send({ error: "Audit-Eintrag nicht für diesen Twin" });
+      }
+      await deps.audit.markRead(auditEntry.id);
+      return { ok: true };
     },
   );
 
@@ -697,6 +736,443 @@ function registerAuthRoutes(app: FastifyInstance, deps: ServerDeps) {
       displayName: user.displayName,
     };
   });
+}
+
+// ─── TRUST ROUTES ────────────────────────────────────────────────────────────
+//
+// Phase 2.5.4.1: Owner verwaltet die Trust-Liste seines Twins. Alle drei
+// Routes Owner-gated. POST validiert, dass der trustedHandle in der Bridge
+// existiert (Tippfehler-Schutz) und dass es kein Self-Trust ist (kein DB-
+// Eintrag, aber 200 mit Hinweis — Self-Trust hat sowieso keinen Effekt, weil
+// receiveBridgeMessage nie eine eigene Nachricht empfängt).
+
+const TrustAddSchema = z.object({
+  trustedHandle: z.string().regex(/^@[a-z0-9_-]+$/),
+  note: z.string().max(500).optional(),
+});
+
+function registerTrustRoutes(
+  app: FastifyInstance,
+  deps: ServerDeps,
+  requireOwner: (
+    request: FastifyRequest,
+    reply: FastifyReply,
+    handle: string,
+  ) => Promise<{ entry: RegistryEntry; user: User } | null>,
+) {
+  // Liste
+  app.get<{ Params: { handle: string } }>(
+    "/twins/:handle/trust",
+    async (request, reply) => {
+      const ctx = await requireOwner(request, reply, request.params.handle);
+      if (!ctx) return;
+      const trusts = deps.trustRepo.list(ctx.entry.twinId);
+      return { trusts };
+    },
+  );
+
+  // Add
+  app.post<{ Params: { handle: string } }>(
+    "/twins/:handle/trust",
+    async (request, reply) => {
+      const ctx = await requireOwner(request, reply, request.params.handle);
+      if (!ctx) return;
+      const { entry, user } = ctx;
+      const parsed = TrustAddSchema.safeParse(request.body);
+      if (!parsed.success) {
+        return reply.status(400).send({ error: parsed.error.message });
+      }
+      const { trustedHandle, note } = parsed.data;
+      const normalized = trustedHandle.toLowerCase();
+
+      // Self-Trust: still ignorieren. Kein DB-Eintrag, kein Audit, aber
+      // 200 mit Hinweis — UI kann die Meldung anzeigen, ohne dass es als
+      // Fehler durchgeht.
+      if (normalized === entry.handle.toLowerCase()) {
+        return reply.status(200).send({
+          ignored: true,
+          reason: "Self-Trust hat keinen Effekt — eigene Anfragen sind ohnehin Owner-Direct.",
+        });
+      }
+
+      // Bridge-Lookup: existiert der Handle? Wir nutzen GET /twins der Bridge
+      // (auth-protected mit unserem Bridge-Token) und checken die Liste. So
+      // schützen wir vor Tippfehlern wie @floran statt @florian.
+      const knownHandles = await fetchBridgeHandles(entry).catch((err) => {
+        request.log.warn({ err }, "[trust] Bridge-Handle-Lookup fehlgeschlagen");
+        return null;
+      });
+      if (knownHandles === null) {
+        return reply.status(502).send({
+          error: "Bridge ist gerade nicht erreichbar — Handle konnte nicht validiert werden.",
+        });
+      }
+      if (!knownHandles.has(normalized)) {
+        return reply.status(400).send({
+          error: "Diesen Handle kennt die Bridge nicht. Tippfehler? Oder noch nicht registriert?",
+          code: "HANDLE_NOT_REGISTERED",
+        });
+      }
+
+      try {
+        const trust = deps.trustRepo.add(entry.twinId, normalized, user.userId, note);
+        // Audit-Trace, damit der Owner im Log sieht, wann Trust gesetzt wurde.
+        await deps.audit.append({
+          id: `audit_${nanoid(12)}`,
+          twinId: entry.twinId,
+          timestamp: new Date().toISOString(),
+          capability: "trust-added",
+          mandateId: null,
+          status: "executed",
+          input: { trustedHandle: normalized, note: trust.note },
+          output: { trustId: trust.trustId },
+          reason: null,
+        });
+        return reply.status(201).send({
+          trustId: trust.trustId,
+          trustedHandle: trust.trustedHandle,
+          note: trust.note,
+          createdAt: trust.createdAt,
+        });
+      } catch (err) {
+        if (err instanceof TrustAlreadyExistsError) {
+          return reply.status(409).send({
+            error: "Schon in deiner Vertrauten-Liste.",
+            code: "TRUST_ALREADY_EXISTS",
+          });
+        }
+        throw err;
+      }
+    },
+  );
+
+  // Remove
+  app.delete<{ Params: { handle: string; trustId: string } }>(
+    "/twins/:handle/trust/:trustId",
+    async (request, reply) => {
+      const ctx = await requireOwner(request, reply, request.params.handle);
+      if (!ctx) return;
+      const { entry } = ctx;
+
+      // Sicherstellen, dass die Trust-Row zum richtigen Twin gehört —
+      // sonst könnte ein Owner mit /twins/@own/trust/:id einen fremden
+      // Trust löschen, wenn er die ID kennt.
+      const existing = deps.trustRepo.findById(request.params.trustId);
+      if (!existing || existing.twinId !== entry.twinId) {
+        return reply.status(404).send({ error: "Trust-Eintrag nicht für diesen Twin" });
+      }
+
+      try {
+        deps.trustRepo.remove(existing.trustId);
+        await deps.audit.append({
+          id: `audit_${nanoid(12)}`,
+          twinId: entry.twinId,
+          timestamp: new Date().toISOString(),
+          capability: "trust-removed",
+          mandateId: null,
+          status: "executed",
+          input: { trustedHandle: existing.trustedHandle, trustId: existing.trustId },
+          output: null,
+          reason: null,
+        });
+        return reply.status(204).send();
+      } catch (err) {
+        if (err instanceof TrustNotFoundError) {
+          return reply.status(404).send({ error: err.message });
+        }
+        throw err;
+      }
+    },
+  );
+}
+
+// ─── CONVERSATION ROUTES (2.5.4.3) ───────────────────────────────────────────
+//
+// Symmetrische A2A-Conversations: Bridge-Messages sind die Source-of-Truth für
+// den Verlauf, das lokale Audit-Log reichert nur an (Capability, Status,
+// Read-State). Damit sehen beide Seiten denselben chronologischen Verlauf —
+// vorher zog jede Seite nur ihre eigenen Audits, was zu Asymmetrie führte
+// (Markus sah 5 Messages, Florian nur 1).
+//
+// Conversations-Liste: aus Bridge-Verlauf aggregiert (Partner = jeder Handle,
+// mit dem wir Nachrichten ausgetauscht haben). Unread-Count zählt lokale
+// reply-received-Audits ohne read_at.
+
+const SendSchema = z.object({
+  content: z.string().min(1).max(8000),
+  /** Wenn die Conversation-View in einem Thread antwortet: id der Original-
+   *  Message. Empfänger nutzt das für Reply-Detection — kein neuer Pending. */
+  inReplyTo: z.string().nullable().optional(),
+});
+
+interface ConversationItem {
+  partnerHandle: string;
+  partnerDisplayName: string | null;
+  lastMessageAt: string;
+  unreadCount: number;
+}
+
+function registerConversationRoutes(
+  app: FastifyInstance,
+  deps: ServerDeps,
+  requireOwner: (
+    request: FastifyRequest,
+    reply: FastifyReply,
+    handle: string,
+  ) => Promise<{ entry: RegistryEntry; user: User } | null>,
+) {
+  // GET /twins/:handle/conversations — Übersicht
+  //
+  // Aggregiert alle Bridge-Partner: jeder Handle, mit dem wir mindestens eine
+  // Bridge-Message ausgetauscht haben. lastMessageAt aus Bridge, unreadCount
+  // aus lokalen reply-received-Audits ohne read_at (gemerged via
+  // bridgeMessageId).
+  app.get<{ Params: { handle: string } }>(
+    "/twins/:handle/conversations",
+    async (request, reply) => {
+      const ctx = await requireOwner(request, reply, request.params.handle);
+      if (!ctx) return;
+      const { entry } = ctx;
+
+      const bridgeClient = bridgeClientFor(entry);
+      let bridgePartners = new Map<string, { lastAt: string }>();
+      let displayNames: Map<string, string> | null = null;
+
+      // Bridge-Down → wir liefern leere Liste statt 502, damit die UI nicht
+      // beim ersten Render bricht. UI soll error-tolerant sein; Owner sieht
+      // dann halt keine Conversations, kann aber settings + Direct-Chat
+      // weiter benutzen.
+      try {
+        const allMessages = await fetchAllBridgeConversations(entry, bridgeClient);
+        bridgePartners = aggregateBridgePartners(allMessages, entry.handle);
+        displayNames = await fetchBridgeDisplayNames(entry).catch(() => null);
+      } catch (err) {
+        request.log.warn({ err }, "[conversations] Bridge-Fetch fehlgeschlagen");
+      }
+
+      // Unread-Count: lokale reply-received-Audits, die noch kein read_at
+      // haben. Wir gruppieren die nach fromHandle und matchen das auf die
+      // Bridge-Partner-Map.
+      const audits = await deps.audit.list({ limit: 1000, twinId: entry.twinId });
+      const unreadByPartner = countUnreadRepliesByPartner(audits);
+
+      const conversations: ConversationItem[] = [];
+      for (const [partner, info] of bridgePartners) {
+        conversations.push({
+          partnerHandle: partner,
+          partnerDisplayName: displayNames?.get(partner) ?? null,
+          lastMessageAt: info.lastAt,
+          unreadCount: unreadByPartner.get(partner) ?? 0,
+        });
+      }
+      conversations.sort((a, b) => b.lastMessageAt.localeCompare(a.lastMessageAt));
+      return { conversations };
+    },
+  );
+
+  // GET /twins/:handle/conversations/:partnerHandle — chronologischer Thread
+  //
+  // Bridge-Verlauf zwischen uns und partner, angereichert mit lokalem Audit-
+  // Wissen (capability, status, readAt). Symmetrisch — beide Seiten sehen
+  // denselben Verlauf.
+  app.get<{ Params: { handle: string; partnerHandle: string } }>(
+    "/twins/:handle/conversations/:partnerHandle",
+    async (request, reply) => {
+      const ctx = await requireOwner(request, reply, request.params.handle);
+      if (!ctx) return;
+      const { entry } = ctx;
+      const partner = decodeURIComponent(request.params.partnerHandle).toLowerCase();
+
+      const bridgeClient = bridgeClientFor(entry);
+      let bridgeMessages: Awaited<ReturnType<typeof bridgeClient.getConversationMessages>> = [];
+      try {
+        bridgeMessages = await bridgeClient.getConversationMessages(partner);
+      } catch (err) {
+        request.log.warn(
+          { err, partner },
+          "[conversations] Bridge-Conversation-Fetch fehlgeschlagen",
+        );
+        return reply.status(502).send({
+          error: "Bridge nicht erreichbar — Conversation konnte nicht geladen werden.",
+        });
+      }
+
+      const audits = await deps.audit.list({ limit: 1000, twinId: entry.twinId });
+      const merged: MergedMessage[] = mergeAuditIntoBridgeMessages(
+        bridgeMessages,
+        audits,
+        entry.handle,
+      );
+      return { partnerHandle: partner, messages: merged };
+    },
+  );
+
+  // POST /twins/:handle/conversations/:partnerHandle/send — Owner-Direct-Send
+  app.post<{
+    Params: { handle: string; partnerHandle: string };
+    Body: { content?: string; inReplyTo?: string | null };
+  }>(
+    "/twins/:handle/conversations/:partnerHandle/send",
+    async (request, reply) => {
+      const ctx = await requireOwner(request, reply, request.params.handle);
+      if (!ctx) return;
+      const { entry } = ctx;
+      const partner = decodeURIComponent(request.params.partnerHandle).toLowerCase();
+      const parsed = SendSchema.safeParse(request.body);
+      if (!parsed.success) {
+        return reply.status(400).send({ error: parsed.error.message });
+      }
+      if (partner === entry.handle.toLowerCase()) {
+        return reply.status(400).send({ error: "Selbst-Senden nicht erlaubt" });
+      }
+
+      // Bridge-Handle-Validation, gleicher Pfad wie bei Trust-Add. Verhindert
+      // Tippfehler-Sends an nicht existierende Empfänger.
+      const knownHandles = await fetchBridgeHandles(entry).catch(() => null);
+      if (knownHandles === null) {
+        return reply.status(502).send({
+          error: "Bridge nicht erreichbar — Empfänger konnte nicht validiert werden.",
+        });
+      }
+      if (!knownHandles.has(partner)) {
+        return reply.status(400).send({
+          error: "Diesen Handle kennt die Bridge nicht.",
+          code: "HANDLE_NOT_REGISTERED",
+        });
+      }
+
+      try {
+        const result = await entry.service.ownerDirectSend({
+          toHandle: partner,
+          content: parsed.data.content,
+          inReplyTo: parsed.data.inReplyTo ?? null,
+        });
+        return reply.status(201).send({
+          messageId: result.messageId,
+          auditId: result.auditId,
+          sentAt: result.sentAt,
+        });
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : "Unknown error";
+        return reply.status(500).send({ error: msg });
+      }
+    },
+  );
+}
+
+/**
+ * Baut einen ad-hoc BridgeClient für einen Twin-Entry. Nutzt die im Profil
+ * hinterlegte Bridge-URL + Token. Kein Caching nötig — die HTTP-Calls sind
+ * stateless, der Aufruf ist günstig.
+ */
+function bridgeClientFor(entry: RegistryEntry): BridgeClient {
+  return new BridgeClient({
+    url: entry.profile.bridgeUrl,
+    handle: entry.handle,
+    token: entry.profile.bridgeToken,
+  });
+}
+
+/**
+ * Holt sich für jeden bekannten Bridge-Partner den Conversation-Verlauf.
+ * Im Phase-2-Setup haben wir keinen "list my conversations"-Endpoint — wir
+ * nehmen die Twin-Liste der Bridge und fragen pro Handle.
+ *
+ * Optimierung später: dedizierter /conversations-Endpoint in der Bridge,
+ * der per Sender alle Partner mit lastMessageAt ausspuckt.
+ */
+async function fetchAllBridgeConversations(
+  entry: RegistryEntry,
+  client: BridgeClient,
+): Promise<{ partner: string; createdAt: string }[]> {
+  // Twin-Liste der Bridge holen (Reuse fetchBridgeHandles — gleiche Auth).
+  const knownHandles = await fetchBridgeHandles(entry);
+  const ownLower = entry.handle.toLowerCase();
+  const partners = [...knownHandles].filter((h) => h !== ownLower);
+
+  // Pro Partner Bridge-Messages holen. Sequentielle Promise.all reicht für
+  // die paar Twins der Phase 2; bei wachsendem Volumen → Bridge-Endpoint
+  // mit Server-seitiger Aggregation.
+  const results = await Promise.all(
+    partners.map(async (p) => {
+      try {
+        const msgs = await client.getConversationMessages(p);
+        return msgs.map((m) => ({ partner: p, createdAt: m.createdAt }));
+      } catch {
+        return [];
+      }
+    }),
+  );
+  return results.flat();
+}
+
+function aggregateBridgePartners(
+  entries: { partner: string; createdAt: string }[],
+  ownHandle: string,
+): Map<string, { lastAt: string }> {
+  const ownLower = ownHandle.toLowerCase();
+  const map = new Map<string, { lastAt: string }>();
+  for (const { partner, createdAt } of entries) {
+    if (partner === ownLower) continue;
+    const cur = map.get(partner);
+    if (!cur) {
+      map.set(partner, { lastAt: createdAt });
+    } else if (createdAt > cur.lastAt) {
+      cur.lastAt = createdAt;
+    }
+  }
+  return map;
+}
+
+function countUnreadRepliesByPartner(audits: AuditEntry[]): Map<string, number> {
+  const map = new Map<string, number>();
+  for (const e of audits) {
+    if (e.capability !== "reply-received") continue;
+    if ((e.readAt ?? null) !== null) continue;
+    const from = (e.input as { fromHandle?: string }).fromHandle?.toLowerCase();
+    if (!from) continue;
+    map.set(from, (map.get(from) ?? 0) + 1);
+  }
+  return map;
+}
+
+/**
+ * Display-Name-Lookup über Bridge GET /twins. Liefert Map handle→displayName.
+ * Bei Bridge-Down: Caller fängt das und liefert null zurück.
+ */
+async function fetchBridgeDisplayNames(entry: RegistryEntry): Promise<Map<string, string>> {
+  const url = `${entry.profile.bridgeUrl}/twins`;
+  const res = await fetch(url, {
+    method: "GET",
+    headers: { Authorization: `Bearer ${entry.profile.bridgeToken}` },
+  });
+  if (!res.ok) throw new Error(`Bridge GET /twins → HTTP ${res.status}`);
+  const body = (await res.json()) as { twins: { handle: string; displayName: string }[] };
+  const map = new Map<string, string>();
+  for (const t of body.twins) {
+    map.set(t.handle.toLowerCase(), t.displayName);
+  }
+  return map;
+}
+
+/**
+ * Holt die Liste registrierter Handles von der Bridge per GET /twins. Auth
+ * mit dem Bridge-Token des fragenden Twins — jeder Twin darf das, weil das
+ * eine öffentliche Discovery-Funktion ist.
+ *
+ * Returns ein Set von normalisierten Handle-Strings (lowercase).
+ */
+async function fetchBridgeHandles(entry: RegistryEntry): Promise<Set<string>> {
+  const url = `${entry.profile.bridgeUrl}/twins`;
+  const res = await fetch(url, {
+    method: "GET",
+    headers: { Authorization: `Bearer ${entry.profile.bridgeToken}` },
+  });
+  if (!res.ok) {
+    throw new Error(`Bridge GET /twins → HTTP ${res.status}`);
+  }
+  const body = (await res.json()) as { twins: { handle: string }[] };
+  return new Set(body.twins.map((t) => t.handle.toLowerCase()));
 }
 
 // ─── helpers ─────────────────────────────────────────────────────────────────

@@ -2,6 +2,7 @@ import "./globals.css";
 import Link from "next/link";
 import { Suspense, type ReactNode } from "react";
 import { TwinSwitcher } from "../components/TwinSwitcher";
+import { TopNav } from "../components/TopNav";
 import { FooterMeta } from "../components/FooterMeta";
 
 export const metadata = {
@@ -21,17 +22,9 @@ export default function RootLayout({ children }: { children: ReactNode }) {
             <Suspense fallback={<span className="text-xs text-muted">…</span>}>
               <TwinSwitcher />
             </Suspense>
-            <nav className="flex gap-6 text-sm text-muted">
-              <Link href="/chat" className="hover:text-text transition-colors">
-                chat
-              </Link>
-              <Link href="/stream" className="hover:text-text transition-colors">
-                stream
-              </Link>
-              <Link href="/settings" className="hover:text-text transition-colors">
-                settings
-              </Link>
-            </nav>
+            <Suspense fallback={<span className="text-xs text-muted">nav…</span>}>
+              <TopNav />
+            </Suspense>
           </div>
         </header>
         <main className="flex-1 px-6 py-8 max-w-4xl mx-auto w-full">

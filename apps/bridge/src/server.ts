@@ -2,7 +2,8 @@ import Fastify from "fastify";
 import cors from "@fastify/cors";
 import type { TwinsRepo } from "./twins-repo.js";
 import { TwinAlreadyExistsError } from "./twins-repo.js";
-import type { MessagesRepo } from "./messages-repo.js";
+import type { MessagesRepo, MessageType } from "./messages-repo.js";
+import { MESSAGE_TYPES } from "./messages-repo.js";
 import type { DeliveryHub } from "./delivery.js";
 import { requireTwinAuth } from "./auth.js";
 
@@ -86,7 +87,14 @@ export async function createServer(deps: ServerDeps) {
   });
 
   // ─── Nachricht senden ──────────────────────────────────────────────────────
-  app.post<{ Body: { to?: string; content?: string; inReplyTo?: string | null } }>(
+  app.post<{
+    Body: {
+      to?: string;
+      content?: string;
+      inReplyTo?: string | null;
+      messageType?: string;
+    };
+  }>(
     "/messages",
     { preHandler: auth },
     async (request, reply) => {
@@ -94,6 +102,7 @@ export async function createServer(deps: ServerDeps) {
       const to = request.body?.to?.trim();
       const content = request.body?.content;
       const inReplyTo = request.body?.inReplyTo ?? null;
+      const rawType = request.body?.messageType;
 
       if (!to || typeof content !== "string" || content.length === 0) {
         return reply.status(400).send({
@@ -104,6 +113,16 @@ export async function createServer(deps: ServerDeps) {
         return reply.status(400).send({
           error: "Selbst-Nachrichten sind nicht erlaubt",
         });
+      }
+      // CHECK-Constraint geht in SQLite-ALTER nicht — App-Validation hier.
+      let messageType: MessageType = "twin";
+      if (rawType !== undefined) {
+        if (!MESSAGE_TYPES.includes(rawType as MessageType)) {
+          return reply.status(400).send({
+            error: `messageType muss einer von [${MESSAGE_TYPES.join(", ")}] sein`,
+          });
+        }
+        messageType = rawType as MessageType;
       }
       const recipient = deps.twins.getByHandle(to);
       if (!recipient) {
@@ -121,12 +140,62 @@ export async function createServer(deps: ServerDeps) {
         toHandle: to,
         content,
         inReplyTo,
+        messageType,
       });
 
       // Best-Effort Push. Ack kommt separat über POST /messages/:id/ack.
       deps.delivery.push(to, { type: "message", payload: message });
 
       return reply.status(202).send({ ok: true, messageId: message.id });
+    },
+  );
+
+  // ─── Sender-Lookup (für Reply-Detection im Receiver-Runtime) ───────────────
+  //
+  // Empfänger-Twin braucht das, um zu prüfen, ob eine eingehende Nachricht
+  // mit `inReplyTo` auf eine eigene zuvor gesendete Message verweist. Bei
+  // Treffer: kein neuer Mandate-Check, sondern reply-received-Audit.
+  //
+  // Heute kein Auth (Bridge ist localhost). Wenn die Bridge mal öffentlich
+  // wird: Token-Check oder Owner-Scope einbauen (Backlog).
+  app.get<{ Params: { id: string } }>(
+    "/messages/:id/sender",
+    async (request, reply) => {
+      const message = deps.messages.get(request.params.id);
+      if (!message) {
+        return reply.status(404).send({ error: "Nachricht nicht gefunden" });
+      }
+      return {
+        id: message.id,
+        fromHandle: message.fromHandle,
+        toHandle: message.toHandle,
+        createdAt: message.createdAt,
+      };
+    },
+  );
+
+  // ─── Conversation-Verlauf zwischen zwei Handles (2.5.4.3) ────────────────
+  //
+  // Symmetrische View: beide Seiten sehen denselben chronologischen Bridge-
+  // Verlauf. Auth via Bearer-Token; der einloggende Twin muss einer der beiden
+  // Conversation-Partner sein, sonst 403 (verhindert Schnüffeln in fremde
+  // Conversations).
+  //
+  // me kommt aus dem Auth-Token (request.twin.handle); with als Query-Param.
+  app.get<{ Querystring: { with?: string } }>(
+    "/messages/conversation",
+    { preHandler: auth },
+    async (request, reply) => {
+      const me = request.twin!.handle;
+      const partner = request.query.with?.trim();
+      if (!partner) {
+        return reply.status(400).send({ error: "Query-Param 'with' ist Pflicht" });
+      }
+      if (partner === me) {
+        return reply.status(400).send({ error: "Selbst-Conversation nicht erlaubt" });
+      }
+      const messages = deps.messages.listConversation(me, partner);
+      return { messages };
     },
   );
 

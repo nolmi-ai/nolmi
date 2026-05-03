@@ -20,6 +20,7 @@ import {
 } from "./crypto-utils.js";
 import type { AuditRepository } from "./repository/types.js";
 import type { BridgeConfig } from "./bridge/types.js";
+import type { TrustRepo } from "./trust/trust-repo.js";
 
 // ─── TWIN SERVICE REGISTRY ──────────────────────────────────────────────────
 //
@@ -73,12 +74,19 @@ export class TwinServiceRegistry {
     auditRepo: AuditRepository;
     logger: FastifyBaseLogger;
     masterKey: Buffer;
+    trustRepo: TrustRepo;
   }): void {
     const profilesRepo = new TwinProfilesRepo(opts.db);
     const profiles = profilesRepo.list({ activeOnly: true });
 
     for (const profile of profiles) {
-      const entry = this.buildEntry(profile, opts.auditRepo, opts.logger, opts.masterKey);
+      const entry = this.buildEntry(
+        profile,
+        opts.auditRepo,
+        opts.logger,
+        opts.masterKey,
+        opts.trustRepo,
+      );
       this.entries.set(profile.handle, entry);
     }
   }
@@ -146,6 +154,7 @@ export class TwinServiceRegistry {
     auditRepo: AuditRepository,
     logger: FastifyBaseLogger,
     masterKey: Buffer,
+    trustRepo: TrustRepo,
   ): RegistryEntry {
     const bus = new EventBus();
     const audit = new AuditService(auditRepo, bus, profile.twinId);
@@ -196,6 +205,7 @@ export class TwinServiceRegistry {
 
     const service = new TwinService({
       twinId: profile.twinId,
+      ownerUserId: profile.ownerUserId,
       model,
       modelLabel,
       audit,
@@ -203,6 +213,7 @@ export class TwinServiceRegistry {
       persona,
       mandates: profile.mandates,
       bridgeClient,
+      trustRepo,
     });
 
     const bridgeStream = new BridgeStream(

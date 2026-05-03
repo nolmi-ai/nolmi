@@ -45,6 +45,14 @@ export class AuditService {
     };
     await this.repo.append(entry);
     this.bus.emit({ type: "audit.created", payload: entry });
+    // 2.5.4.3: gezieltes Event für Inbox-Badge — nur bei tatsächlichem Pending,
+    // damit das Frontend nicht jeden audit.created auf Status filtern muss.
+    if (entry.status === "pending") {
+      this.bus.emit({
+        type: "pending-added",
+        payload: { auditId: entry.id, capability: entry.capability },
+      });
+    }
     return entry;
   }
 
@@ -60,6 +68,7 @@ export class AuditService {
     };
     await this.repo.update(id, updated);
     this.bus.emit({ type: "audit.updated", payload: updated });
+    this.maybeResolvePending(existing.status, updated);
     return updated;
   }
 
@@ -75,6 +84,7 @@ export class AuditService {
     };
     await this.repo.update(id, updated);
     this.bus.emit({ type: "audit.updated", payload: updated });
+    this.maybeResolvePending(existing.status, updated);
     return updated;
   }
 
@@ -90,7 +100,25 @@ export class AuditService {
     };
     await this.repo.update(id, updated);
     this.bus.emit({ type: "audit.updated", payload: updated });
+    this.maybeResolvePending(existing.status, updated);
     return updated;
+  }
+
+  /**
+   * Sendet pending-resolved nur, wenn der Eintrag VORHER pending war.
+   * Verhindert Phantom-Decrements: ein executed→failed darf den Inbox-Badge
+   * nicht doppelt verändern, weil der Eintrag nie als pending gezählt wurde.
+   */
+  private maybeResolvePending(prevStatus: AuditStatus, updated: AuditEntry): void {
+    if (prevStatus !== "pending") return;
+    this.bus.emit({
+      type: "pending-resolved",
+      payload: { auditId: updated.id, status: updated.status },
+    });
+  }
+
+  async markRead(id: string): Promise<void> {
+    await this.repo.markRead(id);
   }
 
   async block(opts: {

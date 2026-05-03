@@ -1,5 +1,5 @@
 import type { FastifyBaseLogger } from "fastify";
-import type { BridgeConfig, BridgeMessage } from "./types.js";
+import type { BridgeConfig, BridgeMessage, BridgeMessageType } from "./types.js";
 
 // ─── BRIDGE HTTP CLIENT ──────────────────────────────────────────────────────
 //
@@ -36,10 +36,14 @@ export class BridgeClient {
     to: string;
     content: string;
     inReplyTo?: string | null;
+    /** Default "twin". "system" markiert Wartemeldung/Reject — Empfänger
+     *  filtert das raus und beantwortet nicht (Loop-Schutz). */
+    messageType?: BridgeMessageType;
   }): Promise<{ messageId: string }> {
     const endpoint = "/messages";
+    const messageType = opts.messageType ?? "twin";
     this.logger?.info(
-      { to: opts.to, inReplyTo: opts.inReplyTo ?? null },
+      { to: opts.to, inReplyTo: opts.inReplyTo ?? null, messageType },
       "[bridge] sendMessage",
     );
     const res = await fetch(`${this.config.url}${endpoint}`, {
@@ -49,6 +53,7 @@ export class BridgeClient {
         to: opts.to,
         content: opts.content,
         inReplyTo: opts.inReplyTo ?? null,
+        messageType,
       }),
     });
     if (!res.ok) throw await this.toError(res, endpoint);
@@ -67,7 +72,69 @@ export class BridgeClient {
     });
     if (!res.ok) throw await this.toError(res, endpoint);
     const body = (await res.json()) as { messages: BridgeMessage[] };
-    return body.messages;
+    // Defensive: alte Bridge-Versionen liefern messageType evtl. nicht.
+    // Default-Mapping auf "twin" damit Type-Property garantiert existiert.
+    return body.messages.map((m) => ({
+      ...m,
+      messageType: m.messageType === "system" ? "system" : "twin",
+    }));
+  }
+
+  /**
+   * Holt zu einer messageId den ursprünglichen Absender. Genutzt für
+   * Reply-Detection (2.5.4.2): wenn eine eingehende Nachricht inReplyTo-set
+   * hat und der Sender der referenzierten Nachricht WIR sind, ist die neue
+   * Nachricht eine Antwort, kein neuer Anfrage-Trigger.
+   *
+   * Returns null bei 404 (Original-Message gibt's in der Bridge nicht mehr —
+   * ältere Conversation, gelöscht, ...). Network-Errors werfen — das Calling
+   * Code (`receiveBridgeMessage`) entscheidet, ob es failsafe weitermachen
+   * will oder nicht.
+   */
+  async lookupSender(
+    messageId: string,
+  ): Promise<{ fromHandle: string; toHandle: string; createdAt: string } | null> {
+    const endpoint = `/messages/${messageId}/sender`;
+    const res = await fetch(`${this.config.url}${endpoint}`, {
+      method: "GET",
+      headers: this.headers(),
+    });
+    if (res.status === 404) return null;
+    if (!res.ok) throw await this.toError(res, endpoint);
+    const body = (await res.json()) as {
+      id: string;
+      fromHandle: string;
+      toHandle: string;
+      createdAt: string;
+    };
+    return {
+      fromHandle: body.fromHandle,
+      toHandle: body.toHandle,
+      createdAt: body.createdAt,
+    };
+  }
+
+  /**
+   * Holt den vollen Bridge-Verlauf zwischen uns und `partner`. Beide
+   * Richtungen, chronologisch ASC. Genutzt von 2.5.4.3 für symmetrische
+   * Conversation-View, sodass beide Seiten dieselben Messages sehen.
+   *
+   * Auth über unseren Twin-Token — die Bridge gibt nur Conversations zurück,
+   * an denen wir selbst Teilnehmer sind.
+   */
+  async getConversationMessages(partner: string): Promise<BridgeMessage[]> {
+    const endpoint = `/messages/conversation?with=${encodeURIComponent(partner)}`;
+    this.logger?.info({ partner }, "[bridge] getConversationMessages");
+    const res = await fetch(`${this.config.url}${endpoint}`, {
+      method: "GET",
+      headers: this.headers(),
+    });
+    if (!res.ok) throw await this.toError(res, endpoint);
+    const body = (await res.json()) as { messages: BridgeMessage[] };
+    return body.messages.map((m) => ({
+      ...m,
+      messageType: m.messageType === "system" ? "system" : "twin",
+    }));
   }
 
   async acknowledge(messageId: string): Promise<void> {

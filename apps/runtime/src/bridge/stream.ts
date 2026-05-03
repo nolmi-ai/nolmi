@@ -94,7 +94,16 @@ export class BridgeStream {
     switch (event.type) {
       case "message":
         if (event.payload?.id) {
-          this.onMessage(event.payload);
+          // Defensive Normalisierung — alte Bridge-Versionen ohne 002-Migration
+          // schicken messageType evtl. gar nicht. Gleiche Logik wie in
+          // getInbox(); ohne sie würde TypeScript "messageType" als undefined
+          // sehen und der TwinService könnte den Loop-Filter nicht greifen.
+          const normalized = {
+            ...event.payload,
+            messageType:
+              event.payload.messageType === "system" ? "system" : "twin",
+          } as const;
+          this.onMessage(normalized);
         } else {
           this.logger?.warn({ event }, "[bridge:stream] message ohne payload.id");
         }

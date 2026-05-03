@@ -10,12 +10,21 @@ import type { Db } from "./db.js";
 // Liefer-Semantik bewusst empfänger-getrieben: SSE-Push ist nur Best-Effort,
 // die Wahrheit über Zustellung steht in der Tabelle.
 
+// "twin"   → normale Konversations-Nachricht zwischen zwei Twins.
+// "system" → Statusinfo (Wartemeldung, Reject-Hinweis), die der empfangende
+//            Twin NICHT als Anfrage beantworten soll. Der Receiver-Runtime
+//            filtert diese Nachrichten und logged sie nur.
+export type MessageType = "twin" | "system";
+
+export const MESSAGE_TYPES: readonly MessageType[] = ["twin", "system"] as const;
+
 export interface Message {
   id: string;
   fromHandle: string;
   toHandle: string;
   content: string;
   inReplyTo: string | null;
+  messageType: MessageType;
   createdAt: string;
   deliveredAt: string | null;
 }
@@ -26,6 +35,7 @@ interface MessageRow {
   to_handle: string;
   content: string;
   in_reply_to: string | null;
+  message_type: string;
   created_at: string;
   delivered_at: string | null;
 }
@@ -38,6 +48,7 @@ export class MessagesRepo {
     toHandle: string;
     content: string;
     inReplyTo: string | null;
+    messageType?: MessageType;
   }): Message {
     const message: Message = {
       id: `msg_${nanoid(16)}`,
@@ -45,14 +56,15 @@ export class MessagesRepo {
       toHandle: opts.toHandle,
       content: opts.content,
       inReplyTo: opts.inReplyTo,
+      messageType: opts.messageType ?? "twin",
       createdAt: new Date().toISOString(),
       deliveredAt: null,
     };
     this.db
       .prepare(
         `INSERT INTO messages
-           (id, from_handle, to_handle, content, in_reply_to, created_at, delivered_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+           (id, from_handle, to_handle, content, in_reply_to, message_type, created_at, delivered_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         message.id,
@@ -60,6 +72,7 @@ export class MessagesRepo {
         message.toHandle,
         message.content,
         message.inReplyTo,
+        message.messageType,
         message.createdAt,
         message.deliveredAt,
       );
@@ -102,15 +115,34 @@ export class MessagesRepo {
       .run(new Date().toISOString(), id);
     return result.changes > 0;
   }
+
+  // Liefert den vollen Bridge-Verlauf zwischen zwei Handles (beide Richtungen),
+  // chronologisch ASC. Genutzt von GET /messages/conversation für die
+  // symmetrische Conversation-View — beide Seiten sehen dasselbe.
+  listConversation(handleA: string, handleB: string): Message[] {
+    const rows = this.db
+      .prepare(
+        `SELECT * FROM messages
+         WHERE (from_handle = ? AND to_handle = ?)
+            OR (from_handle = ? AND to_handle = ?)
+         ORDER BY created_at ASC`,
+      )
+      .all(handleA, handleB, handleB, handleA) as MessageRow[];
+    return rows.map(rowToMessage);
+  }
 }
 
 function rowToMessage(row: MessageRow): Message {
+  // Defensive: bei Legacy-Rows ohne message_type (theoretisch, weil DEFAULT
+  // 'twin' beim ALTER greift) fallen wir auf "twin" zurück.
+  const type: MessageType = row.message_type === "system" ? "system" : "twin";
   return {
     id: row.id,
     fromHandle: row.from_handle,
     toHandle: row.to_handle,
     content: row.content,
     inReplyTo: row.in_reply_to,
+    messageType: type,
     createdAt: row.created_at,
     deliveredAt: row.delivered_at,
   };

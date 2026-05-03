@@ -6,6 +6,7 @@ import type { EventBus } from "./events/bus.js";
 import type { BridgeClient } from "./bridge/client.js";
 import { BridgeError } from "./bridge/client.js";
 import type { BridgeMessage } from "./bridge/types.js";
+import type { TrustRepo } from "./trust/trust-repo.js";
 
 // ─── TWIN SERVICE ────────────────────────────────────────────────────────────
 //
@@ -13,21 +14,28 @@ import type { BridgeMessage } from "./bridge/types.js";
 // hier die folgenden Schritte:
 //
 //   1. Capability Detection      → was will der User vom Twin?
-//   2. Mandate-Check              → darf der Twin das überhaupt?
-//   3. Escalation-Check           → läuft die Aktion auto oder pending?
-//   4. Audit-Eintrag (start)      → was wird gerade getan, mit welchem Mandate?
-//   5. Provider-Call (oder skip)  → bei pending: erst nach Approval
-//   6. Audit-Eintrap (complete)   → das Ergebnis wird festgehalten
+//   2. Trust-Level (2.5.4.1)     → Owner / Trusted-Twin / External
+//   3. Mandate-Check              → nur bei External; Owner & Trusted bypassen
+//   4. Escalation-Check           → läuft die Aktion auto oder pending?
+//   5. Audit-Eintrag (start)      → mit Trust-Bypass-Marker, falls zutreffend
+//   6. Provider-Call (oder skip)  → bei pending: erst nach Approval
+//   7. Audit-Eintrag (complete)   → das Ergebnis wird festgehalten
 //
-// Phase 2 ergänzt zwei Bridge-Capabilities:
-//   - send_to_twin            → ausgehende Nachricht an anderen Twin
-//   - respond_to_twin_message → eingehende Bridge-Nachricht beantworten
-// Beide laufen IMMER über always_pending: kein Twin schreibt einem anderen
-// Twin ohne explizite Approval.
+// Trust-Levels (2.5.4.1):
+//   - Owner    → der eingeloggte User ist Owner des Twins
+//                → Bypass für Chat-Capabilities (respond_to_chat, drafts,
+//                  summaries). send_to_twin bleibt mandate-gated, weil das
+//                  ein extern-sichtbarer Bridge-Send ist.
+//   - Trusted  → der Bridge-Absender steht in der Trust-Liste des Twins
+//                → Bypass für respond_to_twin_message; direkte Antwort an
+//                  die Bridge ohne Approval-Schritt.
+//   - External → alle anderen → Mandate-Check wie bisher.
 
 export interface TwinServiceDeps {
   /** Twin-ID aus dem Profil, für Audit-Filter und Logs. */
   twinId: string;
+  /** Owner-User-ID — Basis für die Owner-Trust-Stufe. */
+  ownerUserId: string | null;
   /** Vercel-AI-SDK-LanguageModel — siehe `llm-client.ts`. */
   model: LanguageModel;
   /** Kompaktes Label "<provider>/<model>", landet in Audit-Metadata. */
@@ -39,6 +47,8 @@ export interface TwinServiceDeps {
   /** Mandates kommen aus `twin_profiles.mandates_json` als in-memory Array. */
   mandates: Mandate[];
   bridgeClient?: BridgeClient | null;
+  /** Trust-Repository — Hot-Path bei jedem eingehenden Bridge-Call. */
+  trustRepo: TrustRepo;
 }
 
 export interface ApproveResult {
@@ -47,6 +57,11 @@ export interface ApproveResult {
   reply?: string;
   sentMessageId?: string;
   targetHandle?: string;
+}
+
+/** Optional: wer hat den Chat ausgelöst (für Owner-Bypass). */
+export interface ChatRequestContext {
+  requesterUserId?: string;
 }
 
 export class TwinService {
@@ -63,12 +78,27 @@ export class TwinService {
 
   async chat(
     messages: ChatMessage[],
+    ctx: ChatRequestContext = {},
   ): Promise<{ message: ChatMessage | null; auditId: string; pending: boolean }> {
     // 1. Capability detecten
     const lastUser = messages.at(-1)?.content ?? "";
     const detection = detectCapability(lastUser);
 
-    // 2. Mandate-Check
+    // 2. Trust-Level: Owner-Bypass nur für non-Bridge-Capabilities. Ein
+    // send_to_twin-Aufruf hat extern-sichtbaren Side-Effect — den lassen wir
+    // bewusst weiter mandate-gated, auch beim Owner. Approval ist hier eine
+    // Tippfehler-Bremse, kein Vertrauens-Gate.
+    const isOwner =
+      !!ctx.requesterUserId &&
+      this.deps.ownerUserId !== null &&
+      ctx.requesterUserId === this.deps.ownerUserId;
+    const ownerBypass = isOwner && detection.capability !== "send_to_twin";
+
+    if (ownerBypass) {
+      return this.runOwnerDirect(detection.capability, messages, lastUser);
+    }
+
+    // 3. Mandate-Check (External-Pfad — Owner-Bypass schon oben abgehandelt)
     const check = checkMandate(this.deps.mandates, detection.capability);
     if (!check.allowed) {
       const blocked = await this.deps.audit.block({
@@ -92,10 +122,10 @@ export class TwinService {
 
     const persona = this.deps.persona;
 
-    // 3. Escalation-Check: läuft auto oder bleibt pending?
+    // 4. Escalation-Check: läuft auto oder bleibt pending?
     const isPending = check.mandate?.escalation === "always_pending";
 
-    // 4. Audit öffnen — Capability-spezifischer Input.
+    // 5. Audit öffnen — Capability-spezifischer Input.
     const baseInput: Record<string, unknown> = {
       messages,
       lastMessage: lastUser,
@@ -116,7 +146,7 @@ export class TwinService {
       return { message: null, auditId: audit.id, pending: true };
     }
 
-    // 5. Auto: direkt zum Modell
+    // 6. Auto: direkt zum Modell
     this.deps.bus.emit({ type: "twin.thinking", payload: { capability: detection.capability } });
     try {
       const reply = await this.runModel(persona, messages);
@@ -138,11 +168,111 @@ export class TwinService {
     }
   }
 
+  // ─── Owner-Bypass ──────────────────────────────────────────────────────────
+  //
+  // Wenn der eingeloggte User Owner des Twins ist, antwortet der Twin direkt
+  // ohne Mandate-Check. Audit-Capability "owner-direct" (statt der Original-
+  // Capability), `originalCapability` im input für Trace-Zwecke.
+
+  private async runOwnerDirect(
+    originalCapability: string,
+    messages: ChatMessage[],
+    lastUser: string,
+  ): Promise<{ message: ChatMessage; auditId: string; pending: false }> {
+    const audit = await this.deps.audit.start({
+      capability: "owner-direct",
+      mandateId: null,
+      input: {
+        messages,
+        lastMessage: lastUser,
+        originalCapability,
+      },
+      // Konsistent mit trusted-bypass / owner-direct-send: kein Approval-
+      // Workflow, der Bypass läuft direkt — daher "executed" als initial.
+      // complete() überschreibt nach erfolgreichem Modell-Call ohnehin.
+      initialStatus: "executed",
+    });
+
+    this.deps.bus.emit({
+      type: "twin.thinking",
+      payload: { capability: "owner-direct" },
+    });
+    try {
+      const reply = await this.runModel(this.deps.persona, messages);
+      await this.deps.audit.complete(audit.id, {
+        reply: reply.content,
+        providerMetadata: reply.metadata,
+      });
+      this.deps.bus.emit({ type: "twin.idle", payload: {} });
+      return {
+        message: { role: "assistant", content: reply.content },
+        auditId: audit.id,
+        pending: false,
+      };
+    } catch (err) {
+      await this.failWithReason(audit.id, err);
+      throw err;
+    }
+  }
+
+  // ─── Owner-Direct-Send (User-initiierte A2A) ──────────────────────────────
+  //
+  // Wird von POST /twins/:handle/conversations/:partnerHandle/send aufgerufen.
+  // Owner ist eingeloggt, hat selbst getippt — kein Mandate-Check, kein
+  // Approval-Loop. Direkter Bridge-Send mit messageType="twin".
+  //
+  // inReplyTo optional: in der Conversation-View setzt das Frontend das auf
+  // die letzte empfangene Nachricht, damit der Empfänger das via Reply-
+  // Detection als Antwort erkennt und keinen neuen Pending erzeugt.
+
+  async ownerDirectSend(opts: {
+    toHandle: string;
+    content: string;
+    inReplyTo?: string | null;
+  }): Promise<{ messageId: string; auditId: string; sentAt: string }> {
+    if (!this.deps.bridgeClient) {
+      throw new Error("Bridge-Modus ist nicht aktiv — owner-direct-send nicht möglich");
+    }
+    const sentAt = new Date().toISOString();
+    const audit = await this.deps.audit.start({
+      capability: "owner-direct-send",
+      mandateId: null,
+      input: {
+        toHandle: opts.toHandle,
+        content: opts.content,
+        inReplyTo: opts.inReplyTo ?? null,
+        sentAt,
+      },
+      // Konsistent mit trusted-bypass / owner-direct: kein Approval-Workflow,
+      // Owner hat selbst getippt — daher "executed" als initial. complete()
+      // überschreibt nach erfolgreichem Bridge-Send ohnehin.
+      initialStatus: "executed",
+    });
+    try {
+      const sent = await this.deps.bridgeClient.sendMessage({
+        to: opts.toHandle,
+        content: opts.content,
+        inReplyTo: opts.inReplyTo ?? null,
+      });
+      await this.deps.audit.complete(audit.id, {
+        sentMessageId: sent.messageId,
+        targetHandle: opts.toHandle,
+      });
+      return { messageId: sent.messageId, auditId: audit.id, sentAt };
+    } catch (err) {
+      await this.failWithReason(audit.id, err);
+      throw err;
+    }
+  }
+
   // ─── Bridge-Empfang ────────────────────────────────────────────────────────
   //
   // Wird sowohl vom Inbox-Sync beim Boot als auch live vom SSE-Stream
-  // aufgerufen. Erzeugt einen Pending-Audit pro Bridge-Nachricht, ackt die
-  // Nachricht bei der Bridge und benachrichtigt die UI per EventBus.
+  // aufgerufen. Drei Pfade:
+  //   - Trusted-Twin → direkter LLM-Call + Bridge-Antwort, audit "trusted-bypass"
+  //   - External + Mandate-pending → Pending-Audit + System-Wartemeldung an
+  //     Bridge-Absender, echte Antwort kommt nach Approval
+  //   - External + auto / kein Mandate → wie bisher (bzw. block)
   //
   // Idempotent: gleiche bridgeMessageId → silent return.
 
@@ -162,11 +292,97 @@ export class TwinService {
       return;
     }
 
+    // 1. messageType-Filter (2.5.4.1.1): System-Nachrichten — also Wartemeldung
+    // oder Reject-Hinweis vom Gegenüber — werden NICHT beantwortet. Würden wir
+    // antworten, gäbe es einen Pingpong-Loop ("Anfrage zur Freigabe…" ↔
+    // "Anfrage zur Freigabe…"). Wir loggen sie nur fürs Audit-Trail und ackn.
+    if (msg.messageType === "system") {
+      await this.deps.audit.start({
+        capability: "system-message-received",
+        mandateId: null,
+        input: {
+          bridgeMessageId: msg.id,
+          fromHandle: msg.fromHandle,
+          content: msg.content,
+          inReplyTo: msg.inReplyTo,
+        },
+        initialStatus: "executed",
+      });
+      await this.safeAck(msg.id);
+      this.deps.bus.emit({
+        type: "bridge.message.received",
+        payload: { auditId: msg.id, fromHandle: msg.fromHandle },
+      });
+      return;
+    }
+
+    // 2. Reply-Detection (2.5.4.2): wenn die Nachricht inReplyTo-set hat
+    // UND die referenzierte Original-Message von uns gesendet wurde, ist die
+    // neue Nachricht eine Antwort. Kein Mandate-Check, kein neuer Pending —
+    // sondern reply-received-Audit + SSE-Event für die Sidebar.
+    //
+    // Failsafe: bei Bridge-Lookup-Fehler (Network down etc.) loggen wir und
+    // fallen auf den TrustLevel-Pfad zurück. Lieber doppelt verarbeiten als
+    // eine echte Anfrage fälschlich verschlucken.
+    if (msg.inReplyTo) {
+      let originalSender: { fromHandle: string } | null = null;
+      let lookupFailed = false;
+      try {
+        originalSender = await this.deps.bridgeClient.lookupSender(msg.inReplyTo);
+      } catch (err) {
+        lookupFailed = true;
+        const reason = err instanceof Error ? err.message : String(err);
+        console.warn(
+          `[twin] lookupSender(${msg.inReplyTo}) fehlgeschlagen: ${reason} — failsafe auf TrustLevel-Pfad`,
+        );
+      }
+      if (
+        !lookupFailed &&
+        originalSender &&
+        originalSender.fromHandle.toLowerCase() ===
+          this.deps.bridgeClient.handle.toLowerCase()
+      ) {
+        // Antwort auf eine Message von uns → reply-received.
+        const audit = await this.deps.audit.start({
+          capability: "reply-received",
+          mandateId: null,
+          input: {
+            bridgeMessageId: msg.id,
+            fromHandle: msg.fromHandle,
+            content: msg.content,
+            inReplyTo: msg.inReplyTo,
+            receivedAt: new Date().toISOString(),
+          },
+          initialStatus: "executed",
+        });
+        await this.safeAck(msg.id);
+        this.deps.bus.emit({
+          type: "reply-received",
+          payload: {
+            auditId: audit.id,
+            partnerHandle: msg.fromHandle,
+            content: msg.content,
+          },
+        });
+        return;
+      }
+      // Sonst: lookup === null oder fromHandle !== uns → fällt durch zum
+      // normalen Pfad. Auch bei lookupFailed: failsafe weiter.
+    }
+
+    // 3. Trust-Level checken — Hot-Path-Lookup über (twin_id, trusted_handle).
+    const trusted = this.deps.trustRepo.isTrusted(this.deps.twinId, msg.fromHandle);
+    if (trusted) {
+      await this.handleTrustedBridgeMessage(msg);
+      return;
+    }
+
+    // 2. External: Mandate-Check wie bisher.
     const check = checkMandate(this.deps.mandates, "respond_to_twin_message");
-    // Auch ohne Mandate erfassen wir die Nachricht — als blocked. So sieht der
-    // User im Audit-Log, dass jemand geschrieben hat, kann aber nicht antworten
-    // ohne erst das Mandate zu setzen.
     if (!check.allowed) {
+      // Auch ohne Mandate erfassen wir die Nachricht — als blocked. So sieht
+      // der User im Audit-Log, dass jemand geschrieben hat, kann aber nicht
+      // antworten ohne erst das Mandate zu setzen.
       await this.deps.audit.block({
         capability: "respond_to_twin_message",
         input: {
@@ -200,13 +416,25 @@ export class TwinService {
       type: "bridge.message.received",
       payload: { auditId: audit.id, fromHandle: msg.fromHandle },
     });
+
+    // 3. Wartemeldung an Absender — transparent, dass eine Approval läuft.
+    // Kein Throw bei Bridge-Fehler — Pending-Audit bleibt valide, Owner kann
+    // weiterhin approven; die Wartemeldung ist Komfort, nicht Pflicht.
+    await this.sendSystemMessage({
+      toHandle: msg.fromHandle,
+      inReplyTo: msg.id,
+      reasonCode: "pending-wait",
+      content: this.composeWaitMessage(),
+      relatedAuditId: audit.id,
+    });
   }
 
   // ─── Approve & Reject ──────────────────────────────────────────────────────
   //
   // Werden vom Server-Layer aufgerufen, wenn der Mensch in Settings auf
   // Approve oder Reject klickt. Verhalten je nach Capability unterschiedlich:
-  //   - respond_to_twin_message → Modell antwortet, Reply geht über Bridge
+  //   - respond_to_twin_message → Modell antwortet, Reply geht über Bridge;
+  //     bei Reject: System-Antwort "nicht freigegeben" über die Bridge
   //   - send_to_twin            → Modell formuliert, Nachricht geht über Bridge
   //   - sonst (z.B. draft_…)    → Modell antwortet, Reply landet im Audit
 
@@ -235,10 +463,23 @@ export class TwinService {
     if (entry.status !== "pending") {
       throw new Error(`Audit ${auditId} is not pending (status: ${entry.status})`);
     }
-    // Reject ist Capability-agnostisch: bei respond_to_twin_message wird
-    // bewusst KEINE Notification an den Absender geschickt — der andere Twin
-    // sieht einfach keine Antwort. (Phase 2.5 ggf. optionaler Decline-Hinweis.)
     await this.deps.audit.reject(auditId, reason);
+
+    // Bei eingehenden A2A-Anfragen: System-Antwort an den Absender, damit der
+    // andere Twin nicht im Dunkeln bleibt. Send_to_twin-Rejects bleiben
+    // weiterhin still — da war noch keine Bridge-Nachricht raus.
+    if (entry.capability === "respond_to_twin_message") {
+      const input = entry.input as { fromHandle?: string; bridgeMessageId?: string };
+      if (input.fromHandle && this.deps.bridgeClient) {
+        await this.sendSystemMessage({
+          toHandle: input.fromHandle,
+          inReplyTo: input.bridgeMessageId ?? null,
+          reasonCode: "rejected",
+          content: this.composeRejectMessage(),
+          relatedAuditId: auditId,
+        });
+      }
+    }
   }
 
   // ─── Approve-Branches ──────────────────────────────────────────────────────
@@ -322,11 +563,7 @@ export class TwinService {
     // das Modell nur die aktuelle Message und antwortet kontextlos.
     const thread = await this.buildBridgeThread(entry, input.fromHandle);
 
-    const contextHint =
-      `Du führst gerade eine Konversation mit dem Twin ${input.fromHandle} über die Bridge.\n` +
-      `Beziehe dich auf den Verlauf. Wenn der andere Twin auf eine deiner früheren\n` +
-      `Nachrichten antwortet, geh konkret darauf ein — frag nicht nach dem Worum-geht's,\n` +
-      `das weißt du selbst.`;
+    const contextHint = this.bridgeContextHint(input.fromHandle);
 
     this.deps.bus.emit({ type: "twin.thinking", payload: { capability: entry.capability } });
     try {
@@ -353,6 +590,155 @@ export class TwinService {
       await this.failWithReason(entry.id, err);
       throw err;
     }
+  }
+
+  // ─── Trusted-Bypass ────────────────────────────────────────────────────────
+  //
+  // Trusted-Twin hat eine Bridge-Nachricht geschickt: keine Pending-Phase,
+  // kein Mandate-Check. Wir bauen den Konversations-Thread wie im normalen
+  // Approve-Pfad, generieren die Antwort und schicken sie sofort zurück.
+  // Audit-Capability "trusted-bypass", damit sichtbar bleibt, dass die
+  // Antwort ohne Approval rausging.
+
+  private async handleTrustedBridgeMessage(msg: BridgeMessage): Promise<void> {
+    if (!this.deps.bridgeClient) {
+      throw new Error("handleTrustedBridgeMessage ohne aktiven BridgeClient");
+    }
+
+    const audit = await this.deps.audit.start({
+      capability: "trusted-bypass",
+      mandateId: null,
+      input: {
+        bridgeMessageId: msg.id,
+        fromHandle: msg.fromHandle,
+        content: msg.content,
+        inReplyTo: msg.inReplyTo,
+        // Trace, welche Capability der External-Pfad gewählt hätte.
+        originalCapability: "respond_to_twin_message",
+      },
+      // Konsistent mit owner-direct-send / system-message: kein Approval-
+      // Workflow, der Bypass ist direkt — daher "executed" als initial. Nach
+      // erfolgreichem Modell-Call überschreibt complete() ohnehin auf "executed".
+      initialStatus: "executed",
+    });
+
+    await this.safeAck(msg.id);
+    this.deps.bus.emit({
+      type: "bridge.message.received",
+      payload: { auditId: audit.id, fromHandle: msg.fromHandle },
+    });
+
+    const thread = await this.buildBridgeThread(audit, msg.fromHandle);
+    const contextHint = this.bridgeContextHint(msg.fromHandle);
+
+    this.deps.bus.emit({
+      type: "twin.thinking",
+      payload: { capability: "trusted-bypass" },
+    });
+    try {
+      const reply = await this.runModel(this.deps.persona, thread, contextHint);
+      const sent = await this.deps.bridgeClient.sendMessage({
+        to: msg.fromHandle,
+        content: reply.content,
+        inReplyTo: msg.id,
+      });
+      await this.deps.audit.complete(audit.id, {
+        reply: reply.content,
+        sentMessageId: sent.messageId,
+        targetHandle: msg.fromHandle,
+        providerMetadata: reply.metadata,
+      });
+      this.deps.bus.emit({ type: "twin.idle", payload: {} });
+    } catch (err) {
+      await this.failWithReason(audit.id, err);
+      // Bewusst kein Re-Throw: Stream-Konsument soll nicht crashen, nur
+      // gelogged + Audit failed.
+    }
+  }
+
+  // ─── System-Antworten (Wartemeldung / Reject-Hinweis) ──────────────────────
+  //
+  // Schickt eine Bridge-Nachricht im Namen des Twins, markiert sie aber im
+  // Audit-Log als "system-message" mit reasonCode. Bridge-Schema bleibt
+  // unverändert — die Markierung lebt nur im Audit-Trail des Senders.
+
+  private async sendSystemMessage(opts: {
+    toHandle: string;
+    inReplyTo: string | null;
+    reasonCode: "pending-wait" | "rejected";
+    content: string;
+    relatedAuditId: string;
+  }): Promise<void> {
+    if (!this.deps.bridgeClient) return;
+
+    let sentMessageId: string | null = null;
+    let sendError: string | null = null;
+    try {
+      const sent = await this.deps.bridgeClient.sendMessage({
+        to: opts.toHandle,
+        content: opts.content,
+        inReplyTo: opts.inReplyTo,
+        // 2.5.4.1.1: explizit als System markieren, damit der Empfänger nicht
+        // mit einer eigenen Wartemeldung antwortet (Loop-Schutz).
+        messageType: "system",
+      });
+      sentMessageId = sent.messageId;
+    } catch (err) {
+      sendError = err instanceof Error ? err.message : String(err);
+      console.warn(
+        `[twin] sendSystemMessage (${opts.reasonCode}) an ${opts.toHandle} fehlgeschlagen: ${sendError}`,
+      );
+    }
+
+    const audit = await this.deps.audit.start({
+      capability: "system-message",
+      mandateId: null,
+      input: {
+        reasonCode: opts.reasonCode,
+        toHandle: opts.toHandle,
+        content: opts.content,
+        inReplyTo: opts.inReplyTo,
+        relatedAuditId: opts.relatedAuditId,
+      },
+      initialStatus: sendError ? "failed" : "executed",
+    });
+
+    if (sendError) {
+      await this.deps.audit.fail(audit.id, sendError);
+    } else if (sentMessageId) {
+      await this.deps.audit.complete(audit.id, {
+        sentMessageId,
+        toHandle: opts.toHandle,
+      });
+    }
+  }
+
+  private composeWaitMessage(): string {
+    const ownerName = this.ownerDisplayName();
+    return `Eine Anfrage ist bei ${ownerName} zur Freigabe. Sobald er draufschaut, kommt eine echte Antwort.`;
+  }
+
+  private composeRejectMessage(): string {
+    const ownerName = this.ownerDisplayName();
+    return `${ownerName} hat diese Anfrage nicht freigegeben. Falls dringend, kontaktiere ihn direkt.`;
+  }
+
+  /**
+   * Display-Name für System-Antworten. Heute fallback auf Persona-Name —
+   * sobald wir den User-Display-Name pro Twin im Service-Deps haben, kann das
+   * hier dynamisch überschrieben werden.
+   */
+  private ownerDisplayName(): string {
+    return this.deps.persona.name || this.deps.persona.handle;
+  }
+
+  private bridgeContextHint(fromHandle: string): string {
+    return (
+      `Du führst gerade eine Konversation mit dem Twin ${fromHandle} über die Bridge.\n` +
+      `Beziehe dich auf den Verlauf. Wenn der andere Twin auf eine deiner früheren\n` +
+      `Nachrichten antwortet, geh konkret darauf ein — frag nicht nach dem Worum-geht's,\n` +
+      `das weißt du selbst.`
+    );
   }
 
   // ─── private helpers ─────────────────────────────────────────────────────
@@ -403,6 +789,8 @@ export class TwinService {
    *     → eigene gesendete Nachricht (assistant)
    *   - respond_to_twin_message executed mit input.fromHandle === fromHandle
    *     → eingehende Nachricht (user) + unsere Antwort darauf (assistant)
+   *   - trusted-bypass executed mit input.fromHandle === fromHandle
+   *     → wie respond_to_twin_message, nur ohne Pending-Phase gewesen
    *
    * Sortierung chronologisch nach Audit-Timestamp; Limit 5 vorherige Einträge,
    * danach die aktuelle Nachricht — macht zusammen genau 6 Messages
@@ -431,7 +819,10 @@ export class TwinService {
         continue;
       }
 
-      if (e.capability === "respond_to_twin_message") {
+      if (
+        e.capability === "respond_to_twin_message" ||
+        e.capability === "trusted-bypass"
+      ) {
         const inp = e.input as { fromHandle?: string; content?: string };
         if (inp.fromHandle !== fromHandle) continue;
         const out = e.output as { reply?: string } | null;

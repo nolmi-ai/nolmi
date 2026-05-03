@@ -65,6 +65,11 @@ export const AuditEntrySchema = z.object({
   input: z.record(z.string(), z.unknown()),
   output: z.record(z.string(), z.unknown()).nullable(),
   reason: z.string().nullable(), // Begründung bei rejected/blocked
+  // 2.5.4.2: nur für 'reply-received' (und ggf. künftig andere Inbox-Typen)
+  // gesetzt. NULL = noch nie gelesen, ISO-Timestamp = vom Owner via UI
+  // bestätigt. Backward-compat: alte Rows haben das Feld nicht — Repository
+  // mappt fehlende Spalte auf null.
+  readAt: z.string().datetime().nullable().optional(),
 });
 
 export type AuditEntry = z.infer<typeof AuditEntrySchema>;
@@ -101,6 +106,31 @@ export const TwinEventSchema = z.discriminatedUnion("type", [
     payload: z.object({
       auditId: z.string(),
       fromHandle: z.string(),
+    }),
+  }),
+  z.object({
+    type: z.literal("reply-received"),
+    payload: z.object({
+      auditId: z.string(),
+      partnerHandle: z.string(),
+      content: z.string(),
+    }),
+  }),
+  // 2.5.4.3: gezielte Events für die Inbox-Badge — kein voller Audit-Reload
+  // mehr nötig, das Frontend kann den Counter inkrementell halten.
+  z.object({
+    type: z.literal("pending-added"),
+    payload: z.object({
+      auditId: z.string(),
+      capability: z.string(),
+    }),
+  }),
+  z.object({
+    type: z.literal("pending-resolved"),
+    payload: z.object({
+      auditId: z.string(),
+      // executed | rejected | failed | blocked — Endstatus nach der Resolution
+      status: AuditStatusSchema,
     }),
   }),
 ]);

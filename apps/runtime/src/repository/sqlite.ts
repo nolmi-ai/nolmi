@@ -56,19 +56,24 @@ class SqliteAuditRepository implements AuditRepository {
 
   async list(opts: AuditListOpts): Promise<AuditEntry[]> {
     const where = opts.twinId ? "WHERE twin_id = ?" : "";
-    const sql = `SELECT data FROM audit ${where} ORDER BY timestamp DESC LIMIT ? OFFSET ?`;
+    // 2.5.4.2: read_at als separate SQL-Spalte (nicht in JSON), via SELECT
+    // gemerged. Backward-compat: Spalte fehlt vor Migration 007 → null.
+    const sql = `SELECT data, read_at FROM audit ${where} ORDER BY timestamp DESC LIMIT ? OFFSET ?`;
     const params: unknown[] = [];
     if (opts.twinId) params.push(opts.twinId);
     params.push(opts.limit, opts.offset ?? 0);
-    const rows = this.db.prepare(sql).all(...params) as { data: string }[];
-    return rows.map((r) => JSON.parse(r.data) as AuditEntry);
+    const rows = this.db.prepare(sql).all(...params) as {
+      data: string;
+      read_at: string | null;
+    }[];
+    return rows.map((r) => mergeReadAt(r));
   }
 
   async get(id: string): Promise<AuditEntry | null> {
-    const row = this.db.prepare("SELECT data FROM audit WHERE id = ?").get(id) as
-      | { data: string }
-      | undefined;
-    return row ? (JSON.parse(row.data) as AuditEntry) : null;
+    const row = this.db
+      .prepare("SELECT data, read_at FROM audit WHERE id = ?")
+      .get(id) as { data: string; read_at: string | null } | undefined;
+    return row ? mergeReadAt(row) : null;
   }
 
   async findByInputField(
@@ -85,9 +90,27 @@ class SqliteAuditRepository implements AuditRepository {
     const where = opts.twinId
       ? `json_extract(data, '$.input.${field}') = ? AND twin_id = ?`
       : `json_extract(data, '$.input.${field}') = ?`;
-    const sql = `SELECT data FROM audit WHERE ${where} LIMIT 1`;
+    const sql = `SELECT data, read_at FROM audit WHERE ${where} LIMIT 1`;
     const params: unknown[] = opts.twinId ? [value, opts.twinId] : [value];
-    const row = this.db.prepare(sql).get(...params) as { data: string } | undefined;
-    return row ? (JSON.parse(row.data) as AuditEntry) : null;
+    const row = this.db.prepare(sql).get(...params) as
+      | { data: string; read_at: string | null }
+      | undefined;
+    return row ? mergeReadAt(row) : null;
   }
+
+  async markRead(id: string): Promise<void> {
+    // Erste-Lesung gewinnt: nur setzen, wenn read_at noch NULL. So ist die
+    // Methode safe-to-call, wenn das Frontend die mark-read-Anfrage doppelt
+    // sendet (z.B. bei zwei parallelen Tabs).
+    this.db
+      .prepare(
+        "UPDATE audit SET read_at = ? WHERE id = ? AND read_at IS NULL",
+      )
+      .run(new Date().toISOString(), id);
+  }
+}
+
+function mergeReadAt(row: { data: string; read_at: string | null }): AuditEntry {
+  const entry = JSON.parse(row.data) as AuditEntry;
+  return { ...entry, readAt: row.read_at };
 }

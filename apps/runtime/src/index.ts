@@ -6,6 +6,7 @@ import { createServer } from "./server.js";
 import { loadRuntimeConfig } from "./config.js";
 import { TwinServiceRegistry } from "./twin-service-registry.js";
 import { TwinProfilesRepo } from "./twin-profiles-repo.js";
+import { TrustRepo } from "./trust/trust-repo.js";
 import { EncryptionKeyMissingError, loadMasterKey } from "./crypto-utils.js";
 
 // ─── BOOTSTRAP ───────────────────────────────────────────────────────────────
@@ -55,19 +56,29 @@ async function main() {
 
   // 4. Server (mit Logger). profilesRepo + masterKey gehen an die
   // Onboarding-Routes; Registry kennt den Server für Twin-Lookup pro Request.
+  // trustRepo wird sowohl von Server-Routes (/twins/:handle/trust) als auch
+  // vom TwinService (Trust-Bypass-Check) genutzt — eine Instanz, geteilt.
   const registry = new TwinServiceRegistry();
+  const trustRepo = new TrustRepo(repo.db);
   const app = await createServer({
     audit: repo.audit,
     registry,
     profilesRepo,
     masterKey,
     db: repo.db,
+    trustRepo,
   });
 
   // 5. Registry mit allen aktiven Twins füllen — entschlüsselt API-Keys.
   // Decrypt-Fehler (falscher Master-Key, korrupter Eintrag) werfen mit klarer
   // Diagnose pro Twin; main()-Catch macht exit-1.
-  registry.loadAll({ db: repo.db, auditRepo: repo.audit, logger: app.log, masterKey });
+  registry.loadAll({
+    db: repo.db,
+    auditRepo: repo.audit,
+    logger: app.log,
+    masterKey,
+    trustRepo,
+  });
   const summaries = registry.list();
 
   console.log(`[boot] ${summaries.length} Twin(s) aktiv:`);

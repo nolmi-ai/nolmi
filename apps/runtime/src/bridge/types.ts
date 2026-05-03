@@ -3,12 +3,23 @@
 // Shape der Bridge-API aus Sicht des Runtime. Bewusst eng: nur die Felder, die
 // der Twin tatsächlich braucht — kein 1:1-Spiegelbild der Bridge-Tabellen.
 
+// "twin"   → normale Konversations-Nachricht (Default).
+// "system" → Statusinfo (Wartemeldung, Reject), die der Empfänger NICHT
+//            beantworten soll. Bridge-Schema seit 2.5.4.1.1.
+export type BridgeMessageType = "twin" | "system";
+
 export interface BridgeMessage {
   id: string;             // msg_<nanoid>
   fromHandle: string;     // z.B. "@florian"
   toHandle: string;       // z.B. "@markus"
   content: string;
   inReplyTo: string | null;
+  /**
+   * Bei alten Bridge-Versionen ohne 002-Migration kann das Feld fehlen — der
+   * Client mappt das defensiv auf "twin", damit ein Mix von alten und neuen
+   * Messages funktional bleibt.
+   */
+  messageType: BridgeMessageType;
   createdAt: string;      // ISO timestamp
 }
 
