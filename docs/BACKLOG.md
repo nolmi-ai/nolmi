@@ -285,9 +285,12 @@ Florian und Heiko haben heute Platzhalter-Passworte von Markus per CLI bekommen.
 
 ## Aus Phase 2.5.4.1-3 entstanden
 
-### 45. Bridge-Production-Sync nach 2.5.4.x
-Production-Bridge auf VPS (`bridge.twin.harwayexperience.com`) ist seit 1. Mai unverändert (Pre-2.5.4.1, ohne `message_type`-Spalte, ohne Sender-Lookup-Endpoint, ohne neue Conversation-Endpoints). Vor dem ersten echten Multi-Maschinen-Setup oder spätestens vor Phase 2.5.6 (Web-Production-Deployment) müssen alle Migrations + Endpoint-Erweiterungen auf VPS-Bridge deployed werden. Plus: Twin-Profile in DB von `localhost:5100` auf Production-URL umstellen, per ENV-Variable schaltbar zwischen lokal und Production.
-**Größe:** M · **Priorität:** must · **Aus:** 2.5.4.1-3 Implementation, Multi-Maschinen-Architektur-Klärung 3. Mai
+### 45. Bridge-Production-Sync nach 2.5.4.x ✅
+**Abgeschlossen 3. Mai 2026 nachmittags.** Production-Bridge unter `bridge.twin.harwayexperience.com` neu deployed — altes Setup vom 1. Mai war abgeräumt (Container gelöscht, Volume jungfräulich mit 0 Messages und Stub-Twins). Sauberer Neustart statt Migration: altes Volume + Image entfernt, frisches Setup unter `/docker/twin-lab-bridge/` mit eigenem `docker-compose.yml` (Project-Name `twin-lab-bridge`, Volume `twin-lab-bridge-data`, hängt am `traefik-proxy`-Network). Image gebaut aus `apps/bridge/Dockerfile`, DB initialisiert mit Migrations 001 + 002 (`message_type`-Spalte aus 2.5.4.1.1 inklusive), drei Twins frisch registriert (Markus Johannes Baier, Florian Ristig, Heiko Gregor). Traefik-Routing via Docker-Labels, Let's Encrypt-Cert beim ersten Hit ausgestellt, Health-Check via HTTPS in 2ms. Token-Werte in Passwort-Manager.
+
+NICHT erledigt in diesem Sub-Schritt: lokale Twin-Profile auf Production-Bridge umstellen — bleibt bei `localhost:5100`. Production-Web-App in 2.5.6 wird beim Bootstrap eigene Profile mit Production-Bridge-URL und neuen Tokens anlegen.
+
+Während Deployment aufgefallen, neu im Backlog: #59-#62 unten.
 
 ### 46. Test-Skript Step 6+7 reparieren
 `test-trust-flow.ts` Step 6 (Sender-Side Reply-Detection) und Step 7 (Read-Marker) sind heute false-negative — Skript prüft `reply-received` auf der falschen Seite oder mit zu engem Setup. Live-Test 2.5.4.2 hat Reply-Detection verifiziert (10:52 Audit nach Florian-Approval), aber Skript-Setup simuliert nur Trusted-Bypass-Pfad ohne echte Reply-Sequenz mit Mandate-Approval-Loop. Skript braucht Erweiterung: Florian sendet → Markus' Twin antwortet (über Trusted-Bypass) → Florian empfängt Antwort mit `inReplyTo` → prüfen, ob Florian-seitig `reply-received`-Audit entsteht.
@@ -340,6 +343,22 @@ Heute: ChatLayout nutzt `h-[calc(100vh-65px)]`. Auf Safari iOS (und älteren Mob
 ### 58. Visual Design + Brand-Iteration für twin-lab — NEU 3. Mai 2026 nachmittags
 Aktuell: monospace, schwarz-weiß-grün, sehr functional. Konzeptionell stimmig zum „Lab"-Charakter, aber spätestens bei Multi-Tenant-Public-Launch (nach 2.5.6) wird die Frage akut: wie soll twin-lab aussehen für externe User? Eigene Brand-Identity entwickeln (Logo, Farben, Typografie-Hierarchie), Header-Komponente neu konzipieren, Page-Templates strukturieren, Conversation-Bubble-Designs polishen. Vorbereitung: Mood-Boards, Inspiration sammeln. Empfohlen mit Florian zusammen (Designer). Trigger: vor Phase 2.5.6 oder nach.
 **Größe:** XL · **Priorität:** should · **Aus:** UX-Diskussion 3. Mai (Option-3-Reizfrage)
+
+### 59. Bridge `/messages/:id/sender` ohne Auth — NEU 3. Mai 2026 nachmittags
+Sender-Lookup-Endpoint ist nicht authentifiziert (Kommentar im Code: "Heute kein Auth (Bridge ist localhost). Wenn die Bridge mal öffentlich wird: Token-Check oder Owner-Scope einbauen"). Mit dem Production-Deploy aus #45 ist die Bridge öffentlich. Heute kein akuter Schmerz: Message-IDs sind 16-char nanoid (95 Bit Entropie), nicht ratbar. Geleakt würde nur `fromHandle`/`toHandle`/`createdAt`, kein Content. Aber: vor 2.5.6 (Web-Production-Deploy) absichern. Endpoint sollte authentifizieren und nur antworten, wenn der einloggende Twin entweder `from` oder `to` der angefragten Message ist. Plus: 404 statt 403 bei Fremd-Messages, damit kein Existence-Leak.
+**Größe:** S · **Priorität:** should · **Aus:** #45 Code-Review
+
+### 60. Bridge-Register-Endpoint ohne Auth — NEU 3. Mai 2026 nachmittags
+`POST /twins/register` ist heute offen — jeder weltweit kann einen neuen Handle anlegen, sobald die Bridge online ist. Bei Multi-Tenant-Vision in 2.5.6 ist das gewollt (User onboarden eigene Twins), aber davor: Spam-Risiko, theoretisch könnte jemand 1000 Müll-Twins anlegen und die DB fluten. Lösung-Optionen: Allowlist-Token in ENV (nur wer den Token hat, kann registrieren), Rate-Limit auf Register-Endpoint, oder Register-Approval-Queue. Allowlist-Token ist die billigste Lösung für Phase 2.5, kompatibel mit Onboarding-Wizard in 2.5.6.
+**Größe:** S · **Priorität:** must · **Aus:** #45 Production-Deploy
+
+### 61. Bridge-Image hat kein wget/curl für Healthcheck — NEU 3. Mai 2026 nachmittags
+`docker compose exec bridge wget ...` schlägt fehl, weil `wget` im node:20-alpine-Image nicht da ist (heute mit Node-Fetch umgangen). Für Healthcheck-Direktiven in `docker-compose.yml` (HEALTHCHECK-Stanza) wäre `wget` oder `curl` praktisch. Lösung: entweder `apk add --no-cache wget` im Runner-Stage (~1 MB Image-Größe), oder Healthcheck via `node -e "fetch(...)"` als CMD im Dockerfile. Letzteres ist sauberer (kein zusätzliches Tool im Production-Image).
+**Größe:** S · **Priorität:** nice · **Aus:** #45 Verifikation
+
+### 62. Bridge-Container OOM-Risiko — NEU 3. Mai 2026 nachmittags
+Alter Bridge-Container vom 1. Mai war mit Exit-Code 137 abgeschossen (SIGKILL durch OOM-Killer oder externes Stop, vor 6h). Konkrete Ursache nicht ermittelbar (Container heute weg). Falls neue Bridge unter Last das gleiche Problem zeigt: Memory-Limits in Compose setzen (`deploy.resources.limits.memory: 256M`), better-sqlite3 ist eigentlich speicherarm, aber Node-Heap kann unter Last wachsen. Zur Sicherheit Monitoring etablieren — `docker stats` periodisch oder einen einfachen Memory-Logger im Bridge-Code für lange Laufzeiten.
+**Größe:** S · **Priorität:** nice · **Aus:** #45 Forensik des alten Containers
 
 ---
 
@@ -514,6 +533,18 @@ Bisherige Chats lebten ohne Projekt-Kontext, mit Memory aus allgemeinem HARWAY-A
 ### Lesson (Test-Skripte): Test-Setups müssen den primären User-Flow simulieren
 
 `test-trust-flow.ts` testet drei Vertrauensstufen, aber simuliert keinen kompletten Reply-Cycle (Send → Approval → Reply mit `inReplyTo`). Reply-Detection wurde dadurch im Skript nicht testbar, obwohl im Live-Test (manuell via Browser) verifiziert. Generelle Lehre: Test-Skripte sollten zuerst den Hauptpfad abdecken, nicht synthetische Edge-Cases. Plus: false-negative im Test-Skript ist schlimmer als kein Test, weil es Vertrauen in Funktionalität untergräbt.
+
+### Lesson (#45): STAND.md-Drift gegen Realität ist real
+
+STAND.md sagte "Production-Bridge live", die Realität war "Container weg, Volume jungfräulich, Setup nicht aufgeräumt". Drei Tage Drift haben gereicht. Vermutlich am 1. Mai testweise gebaut, dann abgeräumt, im STAND-File aber als "live" stehen gelassen — oder umgekehrt: STAND-File geschrieben, dann Container gestoppt und vergessen zu aktualisieren. Lehre: vor jeder Phase einen Sanity-Check gegen die echte Welt machen, nicht nur gegen das, was STAND-Files behaupten. Konkret bei #45: 5 Minuten Pre-Flight-Check (`docker ps`, `curl /health`) hätte uns 30 Minuten Falsch-Annahmen erspart. Pattern für die Zukunft: am Anfang jedes neuen Sub-Schritts ein einseitiger "Reality-Check"-Block, der prüft was die Annahmen aus STAND/Backlog tatsächlich sagen.
+
+### Lesson (#45): Reine Lese-Befehle vor jeder Aktion zahlen sich aus
+
+Der Plan hatte bewusst eine "Pre-Flight Checks (auf VPS, ohne was zu ändern)"-Phase, bevor irgendwas gelöscht oder gebaut wurde. Hat sich gelohnt: ohne diesen Schritt hätten wir versucht, eine "existierende" Bridge zu migrieren, die gar nicht existiert. Generelles Pattern: Ein Sub-Schritt teilt sich immer in (1) Sicht holen, (2) Plan schreiben, (3) Aktion. Nicht (1) und (3) zusammenwerfen, auch wenn der Plan kurz ist.
+
+### Lesson (#45): Volume-Labels verraten Vergangenes
+
+Volume-Label `com.docker.compose.project: docker` plus `bridge_data` zeigte: ehemaliges Setup lag in einem `docker/`-Verzeichnis, nicht in einem app-spezifischen Folder. Das ist bei Docker-Compose der Default, wenn Project-Name nicht explizit gesetzt wird. Lehre: bei neuem Setup immer `name:` top-level im Compose-File setzen, sonst werden Container und Volumes mit dem Verzeichnis-Namen geprefixt — was bei Umzug oder Re-Deploy für Verwirrung sorgt.
 
 ---
 
