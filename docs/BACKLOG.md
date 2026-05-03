@@ -385,6 +385,40 @@ kommt mit 2.5.6 (Web-App).
 Alter Bridge-Container vom 1. Mai war mit Exit-Code 137 abgeschossen (SIGKILL durch OOM-Killer oder externes Stop, vor 6h). Konkrete Ursache nicht ermittelbar (Container heute weg). Falls neue Bridge unter Last das gleiche Problem zeigt: Memory-Limits in Compose setzen (`deploy.resources.limits.memory: 256M`), better-sqlite3 ist eigentlich speicherarm, aber Node-Heap kann unter Last wachsen. Zur Sicherheit Monitoring etablieren — `docker stats` periodisch oder einen einfachen Memory-Logger im Bridge-Code für lange Laufzeiten.
 **Größe:** S · **Priorität:** nice · **Aus:** #45 Forensik des alten Containers
 
+### 63. CLI-Tool `twin:set-api-key` für API-Key-Rotation ✅
+**Abgeschlossen 3. Mai 2026 abends.** Auslöser: Anthropic-API-Key 
+rotiert, Settings-UI hat kein Edit-Feld für API-Keys. Neues CLI-Tool 
+`pnpm --filter @twin-lab/runtime twin:set-api-key <handle>`: Master-
+Key-Check zuerst (Fail-Fast vor User-Prompt), masked Stdin-Input mit 
+`setRawMode` für Backspace und Ctrl-C, `validateApiKey()` aus 
+`onboarding/api-key-validator.ts` (1-Token-Test gegen Provider), 
+AES-256-GCM-Verschlüsselung mit Master-Key, `TwinProfilesRepo.update` 
+für DB-Write. Provider und Model bleiben fix — nur der Key wird 
+ersetzt.
+
+Pattern angelehnt an existierende CLI-Tools (`session-secret:generate`, 
+`user:create`). Caveat: Runtime-Restart nötig, weil Boot den 
+entschlüsselten Key in der Registry cached. Hot-Reload wäre eigene 
+Komplexität — Backlog-würdig falls je gebraucht.
+
+Verifikation: drei lokale Twins (Markus, Florian, Heiko) auf neuen 
+Key umgestellt, Browser-Chat-Test pro Twin grün. 2 Files, +191. 
+Commit `8783d97`.
+
+Verwandt mit #10 (UI-Bearbeitung von Persona/Mandates) und #34 
+(Master-Key-Rotation CLI).
+
+### 64. VPS-Git-Auth via Deploy-Key oder PAT statt Password — NEU 3. Mai 2026 abends
+Heute: `git pull` auf `/docker/twin-lab-bridge/repo/` fragt User+Password 
+für GitHub. Funktioniert, aber GitHub deprekiert classic Password-Auth 
+für git-over-HTTPS schrittweise weiter, plus es nervt bei jedem Deploy. 
+Vor 2.5.6 (Web-App-Deploy) auf Deploy-Key (read-only SSH-Key spezifisch 
+für dieses Repo) oder Personal Access Token wechseln. PAT ist einfacher, 
+Deploy-Key ist sicherer (read-only auf ein Repo statt user-wide). Mit 
+2.5.6 kommt eine zweite VPS-Repo-Instanz dazu — einmal sauber gemacht, 
+beide Setups profitieren.
+**Größe:** S · **Priorität:** should · **Aus:** #59 Production-Deploy
+
 ---
 
 ## Phase 3 — Memory + Skills + Tools
@@ -592,12 +626,45 @@ beim sensitiveren Endpoint. Generelle Lehre: Konsistenz innerhalb
 einer App ist nicht immer das richtige Ziel — die Schutz-
 Anforderungen entscheiden, nicht das Pattern.
 
+### Lesson (#59 Production): Vorher/Nachher-Curl macht Auth-Deploys 
+verifizierbar
+
+Vor dem Deploy: `curl -i $BRIDGE/messages/$ID/sender` ohne Token → 
+404 (alter Stand, keine Auth). Nach dem Deploy: identisches Curl → 
+401 (neuer Stand, Auth aktiv). Das eine Curl-Paar ist der härteste 
+End-to-End-Beweis, dass der neue Code wirklich live ist — härter als 
+„Container restart hat geklappt" oder „Logs sehen okay aus". Bei 
+jedem Auth-Hardening-Deploy künftig diesen Vorher/Nachher-Snapshot 
+machen, dann hat man's schwarz auf weiß.
+
+### Lesson (#63): Settings-UI-Lücken werden plötzlich Pflicht
+
+API-Key-Edit war im Backlog als „später" verbucht (#10 UI-Bearbeitung 
+von Persona/Mandates) — bis ein revokter Key das „später" zu „jetzt 
+sofort" gemacht hat. Lehre: bei Sub-Schritten, die externe Credentials 
+in Klartext oder verschlüsselt persistieren, muss es entweder UI-Edit 
+geben oder ein klar dokumentierter CLI-Pfad. Sonst ist man im Notfall 
+gezwungen, ein Tool unter Druck zu bauen. Nächstes Mal beim Persistieren 
+sensibler Werte: gleich überlegen, wie Rotation aussieht.
+
+### Lesson (Workflow): Ein Sub-Schritt mit zwei Commits ist okay, 
+aber getrennt halten
+
+Tag 4 Abend hatte zwei verwandte aber konzeptionell getrennte 
+Änderungen — #59 Bridge-Auth und #63 CLI-Tool für Key-Rotation. 
+Beide an einem Abend gemacht, zwei separate Commits (`7662dad` für 
+#59, `8783d97` für #63). Sauberer als ein gemeinsamer „Tag 4 Abend"-
+Commit, weil `git log --grep "#59"` nur den Auth-Code zeigt, nicht 
+das CLI-Tool. Pattern für künftige Mehrfach-Sub-Schritte: trotz 
+zeitlicher Nähe getrennt committen, wenn sie unterschiedliche 
+Backlog-Items betreffen.
+
 ---
 
 ## Notiz für später
 
 Sammle weiter Punkte, die im Sparring auftauchen. Nicht jeder Punkt muss eine Phase werden — manches ist Polishing, manches ist Architektur. Die Aufteilung S/M/L/XL und must/should/nice hilft beim Priorisieren wenn die Liste lang wird.
 
-**Item-Dichte 3. Mai 2026 ende:** 14 neue Items aus Tag 4 (#45 Bridge-Production-Sync, #46 Test-Skript-Reparatur, #47 Reply-Marker-Bug, #48 Conversations-Roundtrip, #49 Mark-Read-Delay-Config, #50 Sidebar-Polling, #51 DisplayName-Cache, #52 read_at im UI, #53 Conversations löschen/archivieren, #54 Header-Höhe als CSS-Variable, #55 Mobile-Layout, #56 Textarea Auto-Grow, #57 100dvh, #58 Visual-Design-Iteration). Plus 4 Sub-Schritte (2.5.4.1, 2.5.4.1.1, 2.5.4.2, 2.5.4.3) als ✅ markiert. Plus 8 Lessons aus Implementation und Bug-Hunts. Items insgesamt: 58 (von 44 vorgestern). 
+**Item-Dichte 3. Mai 2026 ende:** 16 neue Items aus Tag 4 (#45 Bridge-Production-Sync, #46 Test-Skript-Reparatur, #47 Reply-Marker-Bug, #48 Conversations-Roundtrip, #49 Mark-Read-Delay-Config, #50 Sidebar-Polling, #51 DisplayName-Cache, #52 read_at im UI, #53 Conversations löschen/archivieren, #54 Header-Höhe als CSS-Variable, #55 Mobile-Layout, #56 Textarea Auto-Grow, #57 100dvh, #58 Visual-Design-Iteration, #63 set-api-key CLI ✅, #64 VPS-Git-Auth). Plus 4 Sub-Schritte (2.5.4.1, 2.5.4.1.1, 2.5.4.2, 2.5.4.3) als ✅ markiert, plus #45, #59, #60, #63 als ✅. Plus 12 Lessons aus Implementation, Bug-Hunts und Production-Deploys. Items insgesamt: 60.
 
-**Was als Nächstes ansteht:** 2.5.5 (Notification-System) und 2.5.6 (Production-Web-Deployment). Plus Bridge-Production-Sync (#45) vor 2.5.6.
+**Was als Nächstes ansteht:** 2.5.6 (Production-Web-Deployment) als nächster Sub-Schritt — alle Vorbedingungen erfüllt (#45 Bridge-Sync ✅, #59 Sender-Auth ✅, #60 Register-Auth ✅). Vor 2.5.6 noch #64 VPS-Git-Auth lösen. 2.5.5 (Notifications) bleibt verschoben, bis Schmerzen sichtbar werden.
