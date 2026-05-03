@@ -31,13 +31,27 @@ async function main() {
   const messages = new MessagesRepo(db);
   const delivery = new DeliveryHub();
 
-  const app = await createServer({ twins, messages, delivery });
+  // Register-Allowlist-Token: ohne ENV läuft die Bridge weiter, aber
+  // /twins/register antwortet mit 503. Bewusst fail-closed — ein offener
+  // Register-Endpoint auf der Production-Bridge ist kein akzeptabler Default.
+  const registerToken = process.env.BRIDGE_REGISTER_TOKEN?.trim() || null;
+  if (!registerToken) {
+    console.warn(
+      "[boot] WARN BRIDGE_REGISTER_TOKEN ist nicht gesetzt — POST /twins/register ist deaktiviert.\n" +
+        "       Setze BRIDGE_REGISTER_TOKEN in der ENV, um neue Twins registrieren zu können.",
+    );
+  }
+
+  const app = await createServer({ twins, messages, delivery, registerToken });
   const port = Number(process.env.BRIDGE_PORT ?? 5100);
   const host = process.env.BRIDGE_HOST ?? "127.0.0.1";
 
   await app.listen({ port, host });
   console.log(`[boot] Bridge hört auf http://${host}:${port}`);
   console.log(`[boot] DB: ${dbPath} (${twins.list().length} registrierte Twins)`);
+  console.log(
+    `[boot] Register-Endpoint: ${registerToken ? "geschützt (Token aktiv)" : "DEAKTIVIERT (kein Token)"}`,
+  );
 }
 
 main().catch((err) => {

@@ -348,9 +348,18 @@ Aktuell: monospace, schwarz-weiß-grün, sehr functional. Konzeptionell stimmig 
 Sender-Lookup-Endpoint ist nicht authentifiziert (Kommentar im Code: "Heute kein Auth (Bridge ist localhost). Wenn die Bridge mal öffentlich wird: Token-Check oder Owner-Scope einbauen"). Mit dem Production-Deploy aus #45 ist die Bridge öffentlich. Heute kein akuter Schmerz: Message-IDs sind 16-char nanoid (95 Bit Entropie), nicht ratbar. Geleakt würde nur `fromHandle`/`toHandle`/`createdAt`, kein Content. Aber: vor 2.5.6 (Web-Production-Deploy) absichern. Endpoint sollte authentifizieren und nur antworten, wenn der einloggende Twin entweder `from` oder `to` der angefragten Message ist. Plus: 404 statt 403 bei Fremd-Messages, damit kein Existence-Leak.
 **Größe:** S · **Priorität:** should · **Aus:** #45 Code-Review
 
-### 60. Bridge-Register-Endpoint ohne Auth — NEU 3. Mai 2026 nachmittags
-`POST /twins/register` ist heute offen — jeder weltweit kann einen neuen Handle anlegen, sobald die Bridge online ist. Bei Multi-Tenant-Vision in 2.5.6 ist das gewollt (User onboarden eigene Twins), aber davor: Spam-Risiko, theoretisch könnte jemand 1000 Müll-Twins anlegen und die DB fluten. Lösung-Optionen: Allowlist-Token in ENV (nur wer den Token hat, kann registrieren), Rate-Limit auf Register-Endpoint, oder Register-Approval-Queue. Allowlist-Token ist die billigste Lösung für Phase 2.5, kompatibel mit Onboarding-Wizard in 2.5.6.
-**Größe:** S · **Priorität:** must · **Aus:** #45 Production-Deploy
+### 60. Bridge-Register-Endpoint ohne Auth ✅
+**Abgeschlossen 3. Mai 2026 abends.** Single-Token-Allowlist via 
+`BRIDGE_REGISTER_TOKEN`-ENV. Fail-closed: ohne ENV ist Register-
+Endpoint deaktiviert (503). Mit ENV: Header `X-Register-Token` 
+muss matchen, Constant-time-Compare via `crypto.timingSafeEqual`. 
+Lokale `.env` mit `local-dev-token` (Symlink-Pattern wie 
+`apps/runtime/.env`), Production-VPS mit Token aus 
+`openssl rand -hex 32`, in `/docker/twin-lab-bridge/.env` plus 
+Compose-environment-Block. Boot-Log differenziert klar zwischen 
+"DEAKTIVIERT (kein Token)" und "geschützt (Token aktiv)". 
+Vorbedingung 2.5.6 erfüllt. Migration zu `/docker/shared.env` 
+kommt mit 2.5.6 (Web-App).
 
 ### 61. Bridge-Image hat kein wget/curl für Healthcheck — NEU 3. Mai 2026 nachmittags
 `docker compose exec bridge wget ...` schlägt fehl, weil `wget` im node:20-alpine-Image nicht da ist (heute mit Node-Fetch umgangen). Für Healthcheck-Direktiven in `docker-compose.yml` (HEALTHCHECK-Stanza) wäre `wget` oder `curl` praktisch. Lösung: entweder `apk add --no-cache wget` im Runner-Stage (~1 MB Image-Größe), oder Healthcheck via `node -e "fetch(...)"` als CMD im Dockerfile. Letzteres ist sauberer (kein zusätzliches Tool im Production-Image).

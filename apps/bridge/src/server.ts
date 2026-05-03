@@ -1,5 +1,7 @@
 import Fastify from "fastify";
 import cors from "@fastify/cors";
+import { Buffer } from "node:buffer";
+import { timingSafeEqual } from "node:crypto";
 import type { TwinsRepo } from "./twins-repo.js";
 import { TwinAlreadyExistsError } from "./twins-repo.js";
 import type { MessagesRepo, MessageType } from "./messages-repo.js";
@@ -11,6 +13,7 @@ import { requireTwinAuth } from "./auth.js";
 //
 // Endpoints:
 //   POST /twins/register             → neuen Twin anlegen, Token vergeben
+//                                       (Allowlist via X-Register-Token)
 //   GET  /twins                      → alle Twins listen (auth)
 //   POST /messages                   → Nachricht an anderen Twin senden (auth)
 //   GET  /messages/inbox?since=...   → ungelieferte Nachrichten holen (auth)
@@ -24,6 +27,15 @@ export interface ServerDeps {
   twins: TwinsRepo;
   messages: MessagesRepo;
   delivery: DeliveryHub;
+  /**
+   * Allowlist-Token für POST /twins/register. null → Endpoint deaktiviert
+   * (alle Calls 503). Wenn gesetzt: Caller muss `X-Register-Token`-Header
+   * mit exakt diesem Wert mitsenden, sonst 401.
+   *
+   * Fail-closed: Bridge wird ohne ENV nicht offen erreichbar — Boot-Warning
+   * im index.ts macht das laut.
+   */
+  registerToken: string | null;
 }
 
 export async function createServer(deps: ServerDeps) {
@@ -45,9 +57,27 @@ export async function createServer(deps: ServerDeps) {
   }));
 
   // ─── Register ──────────────────────────────────────────────────────────────
+  // Allowlist-Schutz via X-Register-Token-Header. Generische Fehlermeldung —
+  // kein Hinweis darauf, ob der Header fehlt oder falsch ist.
   app.post<{ Body: { handle?: string; displayName?: string } }>(
     "/twins/register",
     async (request, reply) => {
+      if (deps.registerToken === null) {
+        request.log.warn(
+          { ip: request.ip },
+          "[register] abgelehnt — Endpoint ist disabled (BRIDGE_REGISTER_TOKEN nicht gesetzt)",
+        );
+        return reply.status(503).send({ error: "registration disabled" });
+      }
+      const provided = request.headers["x-register-token"];
+      if (!isValidRegisterToken(provided, deps.registerToken)) {
+        request.log.warn(
+          { ip: request.ip, hasHeader: provided !== undefined },
+          "[register] abgelehnt — Token fehlt oder ungültig",
+        );
+        return reply.status(401).send({ error: "registration not allowed" });
+      }
+
       const handle = request.body?.handle?.trim();
       const displayName = request.body?.displayName?.trim();
       if (!handle || !displayName) {
@@ -267,4 +297,21 @@ export async function createServer(deps: ServerDeps) {
   });
 
   return app;
+}
+
+// ─── Register-Token-Vergleich ───────────────────────────────────────────────
+//
+// Konstant-zeitlicher String-Vergleich, damit ein Angreifer nicht über die
+// Antwort-Zeit byte-für-byte den korrekten Token erraten kann. Buffer müssen
+// gleich lang sein — ungleiche Längen vorab ablehnen, sonst wirft
+// timingSafeEqual.
+function isValidRegisterToken(
+  provided: string | string[] | undefined,
+  expected: string,
+): boolean {
+  if (typeof provided !== "string" || provided.length === 0) return false;
+  const a = Buffer.from(provided);
+  const b = Buffer.from(expected);
+  if (a.length !== b.length) return false;
+  return timingSafeEqual(a, b);
 }
