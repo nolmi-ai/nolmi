@@ -28,6 +28,14 @@ Wichtige Weichen, die geklärt sind — Referenz für alle weiteren Items:
 
 **User-Auth ist Vorbedingung für mehrere UX-Fixes (NEU 2. Mai).** Live-Test mit Heiko-Twin hat gezeigt, dass Owner-Recognition (#14), Approval-Routing und Owner-aware Twin-Verhalten sich nur mit echten User-Identitäten sauber lösen lassen. 2.5.4 (User-Auth) ist deshalb Pflicht-Vorbedingung für 2.5.5 und 2.5.6, plus für die UX-Refinements aus 2.5.3.
 
+**Trust-Layer als Vorbedingung für Multi-User-Realität (NEU 3. Mai).** Mit User-Auth aus 2.5.4 hat jeder Twin einen Owner. Aber daraus ergibt sich konzeptionell ein Cluster aus drei Vertrauensstufen: Owner-Direct (kein Mandate-Check), Trusted-Twin (kein Mandate-Check, audit `trusted-bypass`), External (Mandate-Check, System-Wartemeldung). Das System ist in 2.5.4.1 gebaut, mit `trust_relationships`-Tabelle, Trust-Repo, Settings-UI-Block. Plus eine subtile Designentscheidung: Owner-Bypass gilt **nicht** für `send_to_twin` — sonst würde Tippfehler im Owner-Chat eine Bridge-Nachricht ohne Approval rausschicken. Sicherheits-Trade-off zugunsten von Approval-Gate auch für Owner.
+
+**Reply-Detection als Backbone für A2A-Symmetrie (NEU 3. Mai).** A2A-Konversationen brauchen ein Konzept von „diese Antwort ist Reply auf eine vorherige Anfrage von uns, kein neuer Mandate-Check". Implementierung in 2.5.4.2: Bridge speichert `in_reply_to`, neuer Bridge-Endpoint `GET /messages/:id/sender` für Sender-Lookup, Twin-Service prüft `inReplyTo` + Lookup → wenn Original-Sender = wir, dann Audit `reply-received` ohne Mandate. Plus Conversation-View aus Bridge-Messages-DB statt aus lokalen Audits — symmetrische Sicht auf beiden Seiten der Konversation.
+
+**Inbox vs. Settings als konzeptionelle Trennung (NEU 3. Mai).** Settings-Page mischte Konfiguration (Persona, Mandates, Trust) mit Aktivität (Pending, Approvals, Audit). Reorganisation in 2.5.4.3: neue `/inbox`-Page mit Pending-Approvals + Letzte Approvals + Audit-Log. Settings nur noch Twin-Profil + Vertraute Twins + Persona-Hilfe. Plus Top-Nav-Tab mit Live-Badge (Pending-Count via SSE-Events `pending-added` / `pending-resolved`).
+
+**Status-Konsistenz als Audit-Reporting-Hygiene (NEU 3. Mai).** Drei Bypass-Pfade (`owner-direct`, `owner-direct-send`, `trusted-bypass`) verwendeten initial `status: "approved"`, was semantisch falsch ist (kein Approval-Workflow gefunden). Heute auf `"executed"` korrigiert. Mandate-Check-Pfad behält `"approved"` — dort ist das semantisch korrekt (Mandate-Check ist passiert und positiv ausgegangen).
+
 ---
 
 ## Phase 2.5 — Konkrete nächste Sub-Schritte
@@ -53,17 +61,39 @@ Bug-Fixes während Verifikation: `@fastify/cookie` auf v11 (Fastify-5-Kompatibil
 
 NICHT in 2.5.4 enthalten: Owner-Modus im System-Prompt + Approval-Bypass für Owner-Chats — beides verschoben auf 2.5.4.1.
 
-### 2.5.4.1 — Owner-Modus + Approval-Bypass + Wartemeldung
-**Größe:** M · **Zeitfenster:** 1-2 Sessions (~4-6h)
+### 2.5.4.1 — Owner-Modus + Trusted-Twins + Wartemeldung ✅
+**Abgeschlossen 3. Mai 2026 vormittags.** Drei Vertrauensstufen für eingehende Anfragen implementiert: Owner-Direct (User eingeloggt + Owner → kein Mandate-Check, audit `owner-direct`/`owner-direct-send`), Trusted-Twin (in Trust-Liste → kein Mandate-Check, audit `trusted-bypass`), External (Mandate-Check wie bisher, plus System-Wartemeldung an Anfrager).
 
-Mit 2.5.4 hat jeder Twin einen Owner. Owner-Chats brauchen einen anderen Modus als externe A2A-Anfragen — Owner können direkter und ohne Approval-Loop kommunizieren, externe Anfragen brauchen weiterhin den vollen Mandate-Check. Plus: wenn ein externes A2A reinkommt, soll die Wartemeldung als System-Antwort sichtbar sein, nicht nur als Backend-Status.
+Migration 006 (`trust_relationships` mit `twin_id`, `trusted_handle`, `note`, `created_at`, `created_by_user_id`, UNIQUE-Constraint). Trust-Repo mit add/remove/list/findById/isTrusted. Trust-Routes (GET/POST/DELETE `/twins/:handle/trust`). Owner-Bypass in `chat()`-Methode, Trusted-Bypass in `receiveBridgeMessage()`. Settings-UI-Block „Vertraute Twins" mit Add/Remove. Test-Skript `test-trust-flow.ts` mit 5 Steps. Löst Backlog #14 (Owner-Recognition) und #38 (System-Wartemeldung).
 
-Aufgaben:
-- Owner-Recognition im System-Prompt (löst Backlog #14): Twin weiß "der gerade chattet ist mein Owner Markus" und kann Mandate-Check umgehen
-- Approval-Bypass für Owner-Chats: `getCurrentUser` ergibt Owner → skip Mandate-Check, direkter Pass
-- Approval-Wartemeldung als System-Antwort (löst Backlog #38): wenn externes A2A wartet, sieht der Anfragende "Anfrage ist bei Markus zur Freigabe"
+Wichtige Designentscheidung: Owner-Bypass gilt nicht für `send_to_twin` — bleibt mandate-gated, sonst würde Tippfehler im Owner-Chat eine Bridge-Nachricht ohne Approval rausschicken.
 
-Erste Frage am Anfang: beim Owner-Modus — soll der Twin die Owner-Identität explizit im Persona-Kontext haben (z.B. "Der User der dich gerade ansieht IST Markus") oder soll der Approval-Bypass nur technisch über die User-ID laufen, ohne Persona-Anpassung? Pragmatisch: nur technisch reicht für 2.5.4.1, Persona-Erweiterung kann separates Item sein.
+### 2.5.4.1.1 — Bridge-Schema-Hotfix für Loop-Bug ✅
+**Abgeschlossen 3. Mai 2026 vormittags.** Live-Test 2.5.4.1 zeigte Infinite-Loop: Wartemeldungen wurden über Bridge gesendet, aber Bridge-Schema hatte kein Feld zur Markierung als System-Message. Empfänger-Twin behandelte Wartemeldung wie neue Anfrage → eigene Wartemeldung zurück → Endlos-Loop. 25+ Audits in 280ms.
+
+Migration 002 (Bridge): `message_type TEXT NOT NULL DEFAULT 'twin'` plus Index. Bridge-Init-Script auf `schema_migrations`-Tracker umgebaut mit Backward-Compat-Stempel für 001_init.sql. MessageType-Validation in POST `/messages`. Twin-Service-Filter: empfangene `messageType==="system"` → audit `system-message-received`, kein LLM-Call, kein Mandate-Check. Verifiziert: 11 Audits statt 25, alle Loop-Detection-Schwellen unterschritten.
+
+### 2.5.4.2 — Reply-Detection + A2A-Konversations-UI ✅
+**Abgeschlossen 3. Mai 2026 mittags.** Konzeptionelles Loch: wenn @markus auf @florian-Anfrage antwortet, kommt Antwort bei @florian an und triggerte vorher einen NEUEN Mandate-Check. Florian's Settings füllten sich mit „Pendings", die eigentlich Antworten auf seine eigenen Anfragen waren.
+
+Migration 007 (`read_at`-Spalte in audit + Partial-Index für unread). Bridge-Endpoint GET `/messages/:id/sender` für Sender-Lookup (zur Reply-Detection). BridgeClient.lookupSender (404→null, sonst throw). Reply-Detection-Block in `receiveBridgeMessage`: wenn `inReplyTo` gesetzt UND `lookupSender(inReplyTo).fromHandle === unser eigener Handle` → audit `reply-received`, kein Mandate-Check, SSE-Event `reply-received`.
+
+Plus Conversation-Endpoint umgebaut: liest jetzt aus Bridge-Messages-DB statt aus lokalen Audits, reichert mit Audit-Metadaten an (capability, status, readAt). Symmetrische Konversations-Sicht auf beiden Seiten. Helper `mergeAuditIntoBridgeMessages` in `audit/conversation-merge.ts` (neu).
+
+Chat-Page komplett-Rewrite: Sidebar mit Conversations-Liste (Direct-Chat als erster Eintrag, dann A2A-Partner), Conversation-View rechts, Modal „Neue Konversation". `ownerDirectSend` für User-initiierte A2A ohne Mandate-Check. Read-Tracking via `markRead` + 700ms-Delay-Fix für Sidebar-Indicator. SSE-Subscription auf `reply-received`-Events plus 5s-Polling als Backup.
+
+Live-verifiziert um 10:52 mit Reply-Detection-Audit nach Florian-Approval (35 Sek nach Markus-Send).
+
+### 2.5.4.3 — Inbox + Settings-Reorganisation + Conversation-Symmetrie ✅
+**Abgeschlossen 3. Mai 2026 nachmittags.** Settings-Page-Konzeptproblem: mischte Konfiguration (Persona, Mandates, Trust) mit Aktivität (Pending, Approvals, Audit). Plus drei UI-Bugs aus 2.5.4.2 Live-Test: Sidebar-Indicator unzuverlässig, Direction-Render zeigt alle Messages als „DU", Conversation-Asymmetrie (Florian sieht weniger Messages als Markus).
+
+Neue `/inbox`-Page (`apps/web/app/inbox/page.tsx`) mit drei Sektionen: Pending-Approvals (chronologisch), Letzte Approvals (mit „In Zwischenablage kopieren"), Audit-Log. Auth-protected via Middleware. Top-Nav-Komponente extrahiert (`apps/web/components/TopNav.tsx`) mit `chat | inbox | stream | settings`-Tabs plus Live-Badge mit Pending-Count via SSE-Events `pending-added` / `pending-resolved` (neu in `audit/service.ts`).
+
+Settings-Page gekürzt: nur Twin-Profil, Vertraute Twins, Persona-und-Mandates-Hilfe. Conversation-View neu: Bridge-Messages mit klarer Direction-Differenzierung (DU rechts, Partner-Display-Name links, System zentriert kursiv). Mark-Read-Delay 700ms hartcodiert vor mark-read-Fire. Plus Status-Konsistenz-Fix: `owner-direct`, `owner-direct-send`, `trusted-bypass` von initial `"approved"` auf `"executed"` (Mandate-Check-Pfad behält `"approved"`).
+
+Live-Tests: Top-Nav mit Badge funktioniert, Inbox sauber strukturiert, Settings sauber gekürzt, Conversation-Symmetrie verifiziert (Florian sieht jetzt vollen Verlauf inklusive System-Messages), Sidebar-Indicator zeigt roten Punkt.
+
+28 Files, +3401/-368. Single-Tag-Commit `f67a7a0`.
 
 ### 2.5.5 — Notification-System für Pending
 **Größe:** M · **Zeitfenster:** 1-2 Sessions (~4-6h)
@@ -253,6 +283,42 @@ Florian und Heiko haben heute Platzhalter-Passworte von Markus per CLI bekommen.
 
 ---
 
+## Aus Phase 2.5.4.1-3 entstanden
+
+### 45. Bridge-Production-Sync nach 2.5.4.x
+Production-Bridge auf VPS (`bridge.twin.harwayexperience.com`) ist seit 1. Mai unverändert (Pre-2.5.4.1, ohne `message_type`-Spalte, ohne Sender-Lookup-Endpoint, ohne neue Conversation-Endpoints). Vor dem ersten echten Multi-Maschinen-Setup oder spätestens vor Phase 2.5.6 (Web-Production-Deployment) müssen alle Migrations + Endpoint-Erweiterungen auf VPS-Bridge deployed werden. Plus: Twin-Profile in DB von `localhost:5100` auf Production-URL umstellen, per ENV-Variable schaltbar zwischen lokal und Production.
+**Größe:** M · **Priorität:** must · **Aus:** 2.5.4.1-3 Implementation, Multi-Maschinen-Architektur-Klärung 3. Mai
+
+### 46. Test-Skript Step 6+7 reparieren
+`test-trust-flow.ts` Step 6 (Sender-Side Reply-Detection) und Step 7 (Read-Marker) sind heute false-negative — Skript prüft `reply-received` auf der falschen Seite oder mit zu engem Setup. Live-Test 2.5.4.2 hat Reply-Detection verifiziert (10:52 Audit nach Florian-Approval), aber Skript-Setup simuliert nur Trusted-Bypass-Pfad ohne echte Reply-Sequenz mit Mandate-Approval-Loop. Skript braucht Erweiterung: Florian sendet → Markus' Twin antwortet (über Trusted-Bypass) → Florian empfängt Antwort mit `inReplyTo` → prüfen, ob Florian-seitig `reply-received`-Audit entsteht.
+**Größe:** M · **Priorität:** should · **Aus:** 2.5.4.2 + 2.5.4.3 Test-Skript-Output
+
+### 47. Reply-Marker bei Approval-Antworten manchmal fehlend
+Conversation-View zeigt Reply-Marker (`↩ reply`) nicht zuverlässig bei allen Approval-Antworten — z.B. die „Wieder ein Test"-Antwort um 13:45 in Florian's View ohne Marker, obwohl konzeptionell Reply auf vorherige Test-Message. Hypothese: Backend setzt `inReplyTo` korrekt, aber Frontend-Render verschluckt es bei bestimmten Pfaden. Vermutlich Edge-Case in `mergeAuditIntoBridgeMessages` oder in der Render-Conditional, die zwischen `reply-received` und `respond_to_twin_message` unterscheidet.
+**Größe:** S · **Priorität:** nice · **Aus:** 2.5.4.3 Live-Test
+
+### 48. Conversations-List Bridge-Roundtrip pro Partner
+`fetchAllBridgeConversations` ruft `getConversationMessages` für jeden bekannten Bridge-Twin in Schleife. Bei vielen Twins teuer. Lösung: dedizierter Bridge-Endpoint `/conversations` mit Server-Aggregation, der eine Liste aller Partner mit `lastMessageAt` zurückgibt, statt N Roundtrips.
+**Größe:** M · **Priorität:** nice · **Aus:** 2.5.4.3 Caveat #1
+
+### 49. Mark-Read-Delay konfigurierbar
+Aktuell 700ms hartcodiert in `chat/[handle]/page.tsx` als `MARK_READ_DELAY_MS`-Konstante. Falls UX-Feedback zu langsam/schnell kommt, oder unterschiedliche Geschwindigkeiten je nach Conversation-Typ (Direct-Chat vs. A2A) gewollt, sollte das in eine Twin-Config oder als Settings-Option ausziehbar sein.
+**Größe:** S · **Priorität:** nice · **Aus:** 2.5.4.3 Caveat #3
+
+### 50. Sidebar-Polling für Reconnect-Robustheit
+SSE-Reconnect der Chat-Page funktioniert automatisch, aber wenn Connection lange weg ist und Reply-Events durchrauschen, wird die Sidebar erst beim nächsten manuellen Reload oder neuem Reply-Event aktualisiert. A2A-View hat 5s-Polling als Backstop, Direct-Chat und Sidebar nicht. Lösung: globaler Reconnect-Trigger der `loadConversations` neu aufruft, oder Sidebar-Polling alle 30s als Fallback.
+**Größe:** S · **Priorität:** nice · **Aus:** 2.5.4.2 Caveat
+
+### 51. DisplayName-Cache mit kurzer TTL
+Bei jedem GET `/conversations` macht der Server einen Bridge-Roundtrip pro Partner für DisplayName-Lookup. Bei Bridge-Down: `partnerDisplayName=null`, Fallback auf Handle. Cache wäre einfach machbar — z.B. In-Memory-Map mit 60s-TTL pro Handle.
+**Größe:** S · **Priorität:** nice · **Aus:** 2.5.4.2 Caveat
+
+### 52. read_at im Audit-Log-UI sichtbar machen
+Mark-Read setzt `read_at`-Spalte, aber Audit-Log-UI im Inbox zeigt das heute nicht an. Optional: kleiner Indikator in der Audit-Log-Tabelle, z.B. „gelesen 5 Min nach Empfang" als Spalte oder Tooltip. Polish, nicht Architektur.
+**Größe:** S · **Priorität:** nice · **Aus:** 2.5.4.2 Caveat
+
+---
+
 ## Phase 3 — Memory + Skills + Tools
 
 Memory-Schichten und Skill-System. Vor Phase 4. Aufwand-Cluster.
@@ -393,10 +459,44 @@ Auch wenn beide auf 127.0.0.1 auflösen, behandelt der Browser sie für Cookies 
 
 Beispiel: `/onboarding` ist als Frontend-Route public (User soll Account anlegen können), aber `/onboarding/submit` + `/onboarding/validate-api-key` sind Backend-protected (brauchen Login). Die Trennung erlaubt UI-Flow ohne Pre-Login, sichert aber Datenmutation. Pattern lässt sich auf weitere Onboarding/Funnel-Pages übertragen.
 
+### Lesson (2.5.4.1.1): Bridge-Schema braucht Message-Type-Markierung von Anfang an
+
+Wenn Bridge mehrere Message-Typen transportiert (Twin-Antworten, System-Wartemeldungen, ggf. später Acknowledgments), muss der Typ im Schema explizit sein. Sonst behandeln Empfänger jede Message gleich, was zu Loops führt: Wartemeldung → Empfänger sieht neue Anfrage → Wartemeldung zurück → Loop. Migration 002 hat das nachträglich gefixt, aber bei Schema-Design sollte Message-Typ-Feld immer drin sein, auch wenn aktuell nur ein Typ existiert. Konzeptionell: Bridge ist Transport-Schicht, Transport-Schicht muss Payload-Typ kennen.
+
+### Lesson (2.5.4.2): Reply-Detection braucht persistente Sender-Information
+
+Reply-Detection im Twin-Service kann nicht aus dem aktuellen Message-Payload allein entscheiden, ob eine Message eine Reply ist. `inReplyTo` zeigt nur auf eine Message-ID — wer die ursprüngliche Message gesendet hat, weiß nur die Bridge. Heißt: Reply-Detection braucht einen Lookup-Endpoint auf der Bridge (`GET /messages/:id/sender`). Generelle Lehre: Twin-zu-Twin-Logic ist nicht autark — Bridge ist mehr als Transport, sie ist auch Identitäts-Authority für vergangene Messages.
+
+### Lesson (2.5.4.2): User-initiierte erste Send-Message ohne inReplyTo bricht Reply-Detection nicht, aber den Symmetrie-Sinn
+
+Beim ersten Modal-Send von Markus an Florian gibt es kein `inReplyTo`. Florian's Twin sieht das als neue Anfrage, triggert Mandate-Check oder Trusted-Bypass. Das ist konzeptionell richtig (User startet bewusst Konversation), aber bedeutet: erste Send eines neuen Konversations-Threads geht durch Approval-Flow, alle Folgen-Messages sind Replies. Kein Bug, aber Designentscheidung mit Konsequenz. Plus: bei Trust kein Issue, weil Trusted-Twin direkt durchgeht.
+
+### Lesson (2.5.4.3): UI-Reorganisation lohnt sich, wenn konzeptionelle Trennung schief ist
+
+Settings-Page mischte Konfiguration und Aktivität. Reorganisation in zwei Pages (`/settings` für Konfig, `/inbox` für Aktivität) hat den Code nicht nur sauberer gemacht, sondern auch die Mental-Models klarer: Settings ist „was ich konfiguriere", Inbox ist „was ich erledige". Verschieben kostet 1-2 Stunden, aber rettet Wochen an „warum liegt das hier"-Frust später.
+
+### Lesson (Status-Konsistenz): 5-Minuten-Quick-Fixes lohnen sich vor Backlog-Items
+
+Status-Konsistenz-Fix (`approved` → `executed` für drei Bypass-Pfade) hätte ein Backlog-Item werden können. Statt dessen direkt gefixt, plus typecheck plus Frontend-Filter-Audit — 15 Minuten total. Backlog-Items mit „kosmetische Verbesserung" sind Tech-Debt, der nie angegangen wird, weil immer wichtigere Sachen anstehen. Wenn ein Fix in einer Datei mit klarer Reichweite ist und keine Testing-Reichweite hat, ist „direkt fixen" robuster als „Backlog-Item, machen wir später".
+
+### Lesson (Workflow): Pro Sub-Schritt ein eigenes Chat-Fenster
+
+Heute drei Sub-Schritte plus mehrere Bug-Hunts in einem Chat-Fenster. Output: Chat wurde so lang, dass Logs nicht mehr sauber teilbar waren, plus Memory-Drift bei längeren Sessions. Saubere Lehre: ein Sub-Schritt → ein Chat-Fenster, am Ende Commit + Backlog-Update. Beim nächsten Sub-Schritt frischer Chat. Plus pro Bug-Hunt-Session, die länger als 30 Min wird, separates Fenster.
+
+### Lesson (Workflow): Komplexe Multi-Phase-Projekte brauchen ein eigenes Claude-Projekt
+
+Bisherige Chats lebten ohne Projekt-Kontext, mit Memory aus allgemeinem HARWAY-Account. Ergebnis: bei jedem neuen Chat musste ich rekonstruieren, wo wir stehen. Plus Memory-Drift (Production-Bridge-Architektur war nicht aktiv abrufbar heute Vormittag). Lösung: eigenes Claude-Projekt „twin-lab" mit Roadmap, Backlog, Persona-Files, STAND.md hochgeladen. Memory-Trennung, Project Knowledge, sauberer Chat-Cut pro Sub-Schritt. Fünfzehn Minuten Setup, danach jede Session 30+ Minuten gespart.
+
+### Lesson (Test-Skripte): Test-Setups müssen den primären User-Flow simulieren
+
+`test-trust-flow.ts` testet drei Vertrauensstufen, aber simuliert keinen kompletten Reply-Cycle (Send → Approval → Reply mit `inReplyTo`). Reply-Detection wurde dadurch im Skript nicht testbar, obwohl im Live-Test (manuell via Browser) verifiziert. Generelle Lehre: Test-Skripte sollten zuerst den Hauptpfad abdecken, nicht synthetische Edge-Cases. Plus: false-negative im Test-Skript ist schlimmer als kein Test, weil es Vertrauen in Funktionalität untergräbt.
+
 ---
 
 ## Notiz für später
 
 Sammle weiter Punkte, die im Sparring auftauchen. Nicht jeder Punkt muss eine Phase werden — manches ist Polishing, manches ist Architektur. Die Aufteilung S/M/L/XL und must/should/nice hilft beim Priorisieren wenn die Liste lang wird.
 
-**Item-Dichte heute Abend:** 5 neue Items aus Sub-Schritt 2.5.4 (#40 CSRF, #41 Magic-Link, #42 Rate-Limit, #43 Top-Nav-versteckt, #44 Self-Service-PW-Reset), plus 2.5.4 als ✅ markiert, plus 2.5.4.1 als neuer Sub-Schritt eingeschoben (Owner-Modus + Approval-Bypass), plus 5 Lessons aus 2.5.4-Implementation. Items insgesamt: 44 (von 39 heute mittag, von 36 heute morgen, von 32 gestern Abend, von 18 vor zwei Tagen).
+**Item-Dichte 3. Mai 2026 nachmittags:** 8 neue Items aus Sub-Schritten 2.5.4.1, 2.5.4.1.1, 2.5.4.2, 2.5.4.3 (#45 Bridge-Production-Sync, #46 Test-Skript-Reparatur, #47 Reply-Marker-Bug, #48 Conversations-Roundtrip, #49 Mark-Read-Delay-Config, #50 Sidebar-Polling, #51 DisplayName-Cache, #52 read_at im UI). Plus 2.5.4.1, 2.5.4.1.1, 2.5.4.2, 2.5.4.3 als ✅ markiert. Plus 8 Lessons aus heutigen Implementations- und Bug-Hunt-Sessions. Items insgesamt: 52 (von 44 gestern Abend, von 39 vorgestern mittag). 
+
+**Was als Nächstes ansteht:** 2.5.5 (Notification-System) und 2.5.6 (Production-Web-Deployment). Plus Bridge-Production-Sync als #45 vor 2.5.6.
