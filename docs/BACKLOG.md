@@ -317,6 +317,30 @@ Bei jedem GET `/conversations` macht der Server einen Bridge-Roundtrip pro Partn
 Mark-Read setzt `read_at`-Spalte, aber Audit-Log-UI im Inbox zeigt das heute nicht an. Optional: kleiner Indikator in der Audit-Log-Tabelle, z.B. „gelesen 5 Min nach Empfang" als Spalte oder Tooltip. Polish, nicht Architektur.
 **Größe:** S · **Priorität:** nice · **Aus:** 2.5.4.2 Caveat
 
+### 53. Conversations löschen/archivieren — NEU 3. Mai 2026 nachmittags
+Aktuell: Konversationen in der Sidebar bleiben dauerhaft sichtbar. Bei vielen A2A-Partnern oder nach abgeschlossenen Projekten unübersichtlich. Plus: nach Test-Sessions sammeln sich Test-Konversationen, die man weghaben will. Implementation: `archived_at` und `deleted_at`-Spalten in einem `conversations`-Tabelle ODER pro Audit-Eintrag flaggen. UI: Hover-Action oder Rechtsklick-Menü mit „archivieren" und „löschen". Plus: archivierte Konversationen in separater „Archiv"-Sicht wieder einsehbar (löschen ist endgültig). Konzeptionelle Frage: was passiert mit Bridge-Messages, wenn beide Seiten archivieren? Bridge bleibt unverändert, jeder Twin entscheidet lokal über Sichtbarkeit.
+**Größe:** M · **Priorität:** should · **Aus:** UX-Diskussion 3. Mai
+
+### 54. Header-Höhe als CSS-Variable statt hartcodiert — NEU 3. Mai 2026 nachmittags
+Heute: `h-[calc(100vh-65px)]` in ChatLayout setzt voraus, dass AppHeader exakt 65px hoch ist. Wenn AppHeader-Style sich ändert (Padding, Button-Höhen), muss die Konstante mitziehen. Sauberer: CSS-Variable `--app-header-height: 65px` im `:root` setzen, sowohl AppHeader als auch ChatLayout nutzen. Plus: bei Mobile-Layout-Anpassungen (Backlog #56) könnte die Höhe variieren — CSS-Variable macht das responsive einfach.
+**Größe:** S · **Priorität:** nice · **Aus:** UX-Iteration 3. Mai (Layout-Fix)
+
+### 55. Mobile-Layout für Chat-Page (Sidebar-Toggle/Collapse) — NEU 3. Mai 2026 nachmittags
+Heute: Chat-Layout fest auf Desktop-Breite optimiert. Sidebar w-72 (288px) belegt auf Mobile fast die halbe Bildschirmbreite, Conversation wird sehr eng. Plus: Top-Nav mit Brand + 3 Tabs + Switcher + Avatar nebeneinander bricht bei <768px. Lösung: Sidebar als Off-Canvas-Drawer mit Toggle-Button, Top-Nav mit Hamburger-Menü oder Tabs als Bottom-Nav. Pattern wie WhatsApp-Web oder Slack-Mobile. Vorbedingung: Visual-Design-Iteration (#59).
+**Größe:** L · **Priorität:** should · **Aus:** UX-Iteration 3. Mai (Layout-Fix Caveat)
+
+### 56. Textarea Auto-Grow mit Cap im Conversation-Input — NEU 3. Mai 2026 nachmittags
+Heute: Textarea im Conversation-Input ist fix h-20 (80px), bei längeren Eingaben scrollt sie intern. Bei mehrzeiligen Antworten umständlich, weil User nicht den ganzen Text sieht. Lösung: Auto-Grow mit Cap — Textarea wächst mit Inhalt bis 3-4 Zeilen, dann scrollt sie intern weiter. Container-Höhe muss flexibel sein, oder Textarea overlay'd den Verlauf-Bereich. Pattern wie Slack/Discord — Input wächst nach oben, Verlauf rutscht entsprechend hoch.
+**Größe:** S · **Priorität:** nice · **Aus:** UX-Iteration 3. Mai (Layout-Fix Caveat)
+
+### 57. 100dvh statt 100vh für Mobile-Browser-Kompatibilität — NEU 3. Mai 2026 nachmittags
+Heute: ChatLayout nutzt `h-[calc(100vh-65px)]`. Auf Safari iOS (und älteren Mobile-Browsern) berücksichtigt 100vh die dynamische Toolbar nicht — Conversation-Input könnte unter den Address-Bar gequetscht werden. Lösung: `100dvh` (dynamic viewport height) — wird von modernen Browsern korrekt berechnet. Backwards-Compatibility: `min-h-[100vh] min-h-[100dvh]` als Fallback. Vermutlich gehört zur Mobile-Layout-Iteration (#56).
+**Größe:** S · **Priorität:** nice · **Aus:** UX-Iteration 3. Mai (Layout-Fix Caveat)
+
+### 58. Visual Design + Brand-Iteration für twin-lab — NEU 3. Mai 2026 nachmittags
+Aktuell: monospace, schwarz-weiß-grün, sehr functional. Konzeptionell stimmig zum „Lab"-Charakter, aber spätestens bei Multi-Tenant-Public-Launch (nach 2.5.6) wird die Frage akut: wie soll twin-lab aussehen für externe User? Eigene Brand-Identity entwickeln (Logo, Farben, Typografie-Hierarchie), Header-Komponente neu konzipieren, Page-Templates strukturieren, Conversation-Bubble-Designs polishen. Vorbereitung: Mood-Boards, Inspiration sammeln. Empfohlen mit Florian zusammen (Designer). Trigger: vor Phase 2.5.6 oder nach.
+**Größe:** XL · **Priorität:** should · **Aus:** UX-Diskussion 3. Mai (Option-3-Reizfrage)
+
 ---
 
 ## Phase 3 — Memory + Skills + Tools
@@ -497,6 +521,6 @@ Bisherige Chats lebten ohne Projekt-Kontext, mit Memory aus allgemeinem HARWAY-A
 
 Sammle weiter Punkte, die im Sparring auftauchen. Nicht jeder Punkt muss eine Phase werden — manches ist Polishing, manches ist Architektur. Die Aufteilung S/M/L/XL und must/should/nice hilft beim Priorisieren wenn die Liste lang wird.
 
-**Item-Dichte 3. Mai 2026 nachmittags:** 8 neue Items aus Sub-Schritten 2.5.4.1, 2.5.4.1.1, 2.5.4.2, 2.5.4.3 (#45 Bridge-Production-Sync, #46 Test-Skript-Reparatur, #47 Reply-Marker-Bug, #48 Conversations-Roundtrip, #49 Mark-Read-Delay-Config, #50 Sidebar-Polling, #51 DisplayName-Cache, #52 read_at im UI). Plus 2.5.4.1, 2.5.4.1.1, 2.5.4.2, 2.5.4.3 als ✅ markiert. Plus 8 Lessons aus heutigen Implementations- und Bug-Hunt-Sessions. Items insgesamt: 52 (von 44 gestern Abend, von 39 vorgestern mittag). 
+**Item-Dichte 3. Mai 2026 ende:** 14 neue Items aus Tag 4 (#45 Bridge-Production-Sync, #46 Test-Skript-Reparatur, #47 Reply-Marker-Bug, #48 Conversations-Roundtrip, #49 Mark-Read-Delay-Config, #50 Sidebar-Polling, #51 DisplayName-Cache, #52 read_at im UI, #53 Conversations löschen/archivieren, #54 Header-Höhe als CSS-Variable, #55 Mobile-Layout, #56 Textarea Auto-Grow, #57 100dvh, #58 Visual-Design-Iteration). Plus 4 Sub-Schritte (2.5.4.1, 2.5.4.1.1, 2.5.4.2, 2.5.4.3) als ✅ markiert. Plus 8 Lessons aus Implementation und Bug-Hunts. Items insgesamt: 58 (von 44 vorgestern). 
 
-**Was als Nächstes ansteht:** 2.5.5 (Notification-System) und 2.5.6 (Production-Web-Deployment). Plus Bridge-Production-Sync als #45 vor 2.5.6.
+**Was als Nächstes ansteht:** 2.5.5 (Notification-System) und 2.5.6 (Production-Web-Deployment). Plus Bridge-Production-Sync (#45) vor 2.5.6.
