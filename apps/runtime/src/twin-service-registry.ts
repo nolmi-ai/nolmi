@@ -61,21 +61,36 @@ export interface TwinSummary {
   displayName: string;
 }
 
+interface RegistryDeps {
+  db: Database.Database;
+  auditRepo: AuditRepository;
+  logger: FastifyBaseLogger;
+  masterKey: Buffer;
+  trustRepo: TrustRepo;
+}
+
 export class TwinServiceRegistry {
   private readonly entries = new Map<string, RegistryEntry>();
+  /**
+   * Wird in {@link loadAll} gesetzt. {@link addTwin} braucht dieselben Deps,
+   * um Hot-Loads zur Laufzeit aufzubauen.
+   */
+  private deps: RegistryDeps | null = null;
+  /**
+   * Mutex pro twinId für parallele {@link addTwin}-Aufrufe. Verhindert,
+   * dass derselbe Twin bei zwei zeitgleichen Adds zwei Mal gebuildet wird
+   * (zwei BridgeStreams = doppelte Inbox-Empfänger).
+   */
+  private readonly pendingAdds = new Map<string, Promise<void>>();
 
   /**
    * Lädt alle aktiven Twins aus `twin_profiles`. Pro Twin wird die volle
    * Service-Stack (EventBus + Audit + TwinService + Bridge) konstruiert.
    * Inbox-Sync und Stream-Connect passieren danach in {@link startBridges}.
+   * Speichert die Deps für spätere {@link addTwin}-Aufrufe (Hot-Reload).
    */
-  loadAll(opts: {
-    db: Database.Database;
-    auditRepo: AuditRepository;
-    logger: FastifyBaseLogger;
-    masterKey: Buffer;
-    trustRepo: TrustRepo;
-  }): void {
+  loadAll(opts: RegistryDeps): void {
+    this.deps = opts;
     const profilesRepo = new TwinProfilesRepo(opts.db);
     const profiles = profilesRepo.list({ activeOnly: true });
 
@@ -89,6 +104,99 @@ export class TwinServiceRegistry {
       );
       this.entries.set(profile.handle, entry);
     }
+  }
+
+  /**
+   * Lädt einen einzelnen Twin zur Laufzeit nach (Onboarding-Submit). Erwartet,
+   * dass das Profil bereits in `twin_profiles` steht. Idempotent: ist der
+   * Twin bereits in der Registry, no-op. Atomisch: parallele Aufrufe für
+   * dieselbe twinId teilen sich die in-flight Promise.
+   *
+   * Bei Erfolg: Inbox-Sync + Bridge-Stream sind verbunden, Twin ist über
+   * {@link getByHandle} verfügbar. Bei Fehler: keine Mutation der entries-Map.
+   */
+  async addTwin(twinId: string): Promise<void> {
+    if (!this.deps) {
+      throw new Error(
+        "[registry] addTwin: Registry nicht initialisiert — loadAll() muss vorher gelaufen sein",
+      );
+    }
+
+    // Idempotenz — Twin schon in Map? entries ist nach handle indiziert,
+    // also über alle iterieren. Bei aktuellen Größenordnungen (3 Twins)
+    // ist das null Aufwand; bei 100+ wäre ein twinId-Index sinnvoll.
+    for (const entry of this.entries.values()) {
+      if (entry.twinId === twinId) {
+        this.deps.logger.debug(
+          { twinId, handle: entry.handle },
+          "[registry] addTwin: Twin ist bereits geladen — no-op",
+        );
+        return;
+      }
+    }
+
+    // Mutex — schon ein Add für diese twinId in flight?
+    const inflight = this.pendingAdds.get(twinId);
+    if (inflight) return inflight;
+
+    const promise = this.doAddTwin(twinId);
+    this.pendingAdds.set(twinId, promise);
+    try {
+      await promise;
+    } finally {
+      this.pendingAdds.delete(twinId);
+    }
+  }
+
+  private async doAddTwin(twinId: string): Promise<void> {
+    const deps = this.deps!;
+    const profilesRepo = new TwinProfilesRepo(deps.db);
+    const profile = profilesRepo.findById(twinId);
+    if (!profile) {
+      throw new Error(`[registry] addTwin: Twin-Profil ${twinId} nicht in DB`);
+    }
+
+    const entry = this.buildEntry(
+      profile,
+      deps.auditRepo,
+      deps.logger,
+      deps.masterKey,
+      deps.trustRepo,
+    );
+
+    // Inbox-Sync analog zu {@link startBridges} — Sync-Fehler sind nicht
+    // tödlich, der Stream übernimmt Catch-up.
+    let synced = 0;
+    try {
+      const inbox = await entry.bridgeClient.getInbox();
+      for (const msg of inbox) {
+        await entry.service.receiveBridgeMessage(msg);
+        synced++;
+      }
+      deps.logger.info(
+        { handle: entry.handle, synced },
+        "[registry] Inbox-Sync nach Hot-Load",
+      );
+    } catch (err) {
+      deps.logger.error(
+        { err, handle: entry.handle },
+        "[registry] Inbox-Sync nach Hot-Load fehlgeschlagen — Stream übernimmt Catch-up",
+      );
+    }
+
+    entry.bridgeStream.connect();
+
+    // Erst nach erfolgreichem buildEntry + Stream-Connect in Map eintragen,
+    // damit Konsumenten keinen halb-aufgebauten Twin sehen.
+    this.entries.set(profile.handle, entry);
+    deps.logger.info(
+      { handle: profile.handle, twinId },
+      `[registry] Twin ${profile.handle} hot-loaded`,
+    );
+    deps.logger.info(
+      { handle: profile.handle },
+      `[registry] Bridge-Connection für ${profile.handle} aktiv`,
+    );
   }
 
   /**

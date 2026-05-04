@@ -43,15 +43,15 @@ async function main() {
   const repo = createSqliteRepository(config.dbPath);
   console.log(`[boot] DB: ${config.dbPath}`);
 
-  // 3. Aktive Profile zuerst zählen — wenn null, exit-1 mit Bootstrap-Hinweis
+  // 3. Aktive Profile zählen — leere DB ist seit Hot-Reload (#37) kein Crash
+  // mehr, sondern Onboarding-only-Modus: Server hört, Registry bleibt leer
+  // bis zum ersten erfolgreichen /onboarding/submit.
   const profilesRepo = new TwinProfilesRepo(repo.db);
   const activeProfiles = profilesRepo.list({ activeOnly: true });
   if (activeProfiles.length === 0) {
-    console.error(
-      "[boot] Keine aktiven Twins in DB.\n" +
-        "Hinweis: Hast du 'pnpm --filter @twin-lab/runtime twin:bootstrap markus' ausgeführt?",
+    console.warn(
+      "[boot] Server läuft im Onboarding-only-Modus. Erster Twin via /onboarding.",
     );
-    process.exit(1);
   }
 
   // 4. Server (mit Logger). profilesRepo + masterKey gehen an die

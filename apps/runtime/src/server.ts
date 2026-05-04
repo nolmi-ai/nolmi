@@ -615,8 +615,9 @@ function registerOnboardingRoutes(app: FastifyInstance, deps: ServerDeps) {
 
     // 6. INSERT — bei UNIQUE-Race wirft sqlite, fängt's der catch
     const twinId = `twin_${nanoid(16)}`;
+    let profile;
     try {
-      const profile = deps.profilesRepo.insert({
+      profile = deps.profilesRepo.insert({
         twinId,
         handle: persona.handle,
         displayName: persona.fullName,
@@ -628,16 +629,36 @@ function registerOnboardingRoutes(app: FastifyInstance, deps: ServerDeps) {
         ownerUserId: user.userId,
         isActive: true,
       });
-      return reply.status(201).send({
-        twinId: profile.twinId,
-        handle: profile.handle,
-        // Hot-Reload kommt in Backlog #37 — bis dahin brauchts Restart.
-        requiresRestart: true,
-      });
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       return reply.status(500).send({
         error: `DB-Insert fehlgeschlagen: ${msg}`,
+      });
+    }
+
+    // 7. Hot-Reload (#37) — Twin direkt in die Registry einklinken, damit
+    // der Wizard-Redirect zu /chat/<handle> ohne Runtime-Restart funktioniert.
+    // Bei Hot-Load-Fehler: Profil bleibt in DB, User bekommt 201 mit
+    // ehrlichem Restart-Hinweis (Restart hilft, weil loadAll() das Profil
+    // dann beim Boot picked).
+    try {
+      await deps.registry.addTwin(profile.twinId);
+      return reply.status(201).send({
+        twinId: profile.twinId,
+        handle: profile.handle,
+        requiresRestart: false,
+      });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      app.log.error(
+        { err, twinId: profile.twinId, handle: profile.handle },
+        "[onboarding] Hot-Load fehlgeschlagen — Profil ist in DB, Restart hilft",
+      );
+      return reply.status(201).send({
+        twinId: profile.twinId,
+        handle: profile.handle,
+        requiresRestart: true,
+        hotLoadError: msg,
       });
     }
   });
