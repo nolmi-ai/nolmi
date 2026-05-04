@@ -25,9 +25,20 @@ export async function registerHandleOnBridge(opts: {
   displayName: string;
 }): Promise<{ token: string }> {
   const url = `${opts.bridgeUrl.replace(/\/$/, "")}/twins/register`;
+  // BRIDGE_REGISTER_TOKEN ist seit #60 Pflicht für /twins/register. Trim
+  // gegen versehentlichen ENV-Whitespace (Lesson aus 2.5.4). Wenn unset
+  // oder leer: Header weglassen — funktioniert weiter gegen ungeschützte
+  // Bridges, läuft in Production aber gegen 401.
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+  };
+  const registerToken = process.env.BRIDGE_REGISTER_TOKEN?.trim();
+  if (registerToken) {
+    headers["X-Register-Token"] = registerToken;
+  }
   const res = await fetch(url, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers,
     body: JSON.stringify({
       handle: opts.handle,
       displayName: opts.displayName,
