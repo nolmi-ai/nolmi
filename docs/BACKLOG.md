@@ -1,6 +1,6 @@
 # Backlog Phase 2.5 und später
 
-Stand: 2. Mai 2026, Abend — nach Sub-Schritt 2.5.4 (User-Auth) abgeschlossen. Drei bestehende Twins (Markus, Florian, Heiko) zu echten User-Accounts migriert, 1:1 Twin-Mapping. Browser-Tests grün.
+Stand: 4. Mai 2026, Abend — Phase 2.5 zu ~95% durch. 2.5.6 (Production-Web-Deployment) abgeschlossen, drei User und Twins live unter `app.twin.harwayexperience.com`. Nur 2.5.5 (Notifications) bleibt offen, bewusst verschoben bis Schmerz sichtbar wird.
 
 Format: Punkte mit Größe (S/M/L/XL) und Priorität (must/should/nice).
 
@@ -35,6 +35,16 @@ Wichtige Weichen, die geklärt sind — Referenz für alle weiteren Items:
 **Inbox vs. Settings als konzeptionelle Trennung (NEU 3. Mai).** Settings-Page mischte Konfiguration (Persona, Mandates, Trust) mit Aktivität (Pending, Approvals, Audit). Reorganisation in 2.5.4.3: neue `/inbox`-Page mit Pending-Approvals + Letzte Approvals + Audit-Log. Settings nur noch Twin-Profil + Vertraute Twins + Persona-Hilfe. Plus Top-Nav-Tab mit Live-Badge (Pending-Count via SSE-Events `pending-added` / `pending-resolved`).
 
 **Status-Konsistenz als Audit-Reporting-Hygiene (NEU 3. Mai).** Drei Bypass-Pfade (`owner-direct`, `owner-direct-send`, `trusted-bypass`) verwendeten initial `status: "approved"`, was semantisch falsch ist (kein Approval-Workflow gefunden). Heute auf `"executed"` korrigiert. Mandate-Check-Pfad behält `"approved"` — dort ist das semantisch korrekt (Mandate-Check ist passiert und positiv ausgegangen).
+
+**Container-zu-Container-Hop statt Public-URL (NEU 4. Mai).** Production-Setup hat Bridge auf eigener Subdomain plus Web-Runtime auf eigener Subdomain — beide auf demselben VPS, beide hinter Traefik. Naive Annahme: Web-Runtime ruft Bridge via Public-URL `https://bridge.twin.harwayexperience.com`. Realität: viele VPS-Provider blocken Hairpin-NAT (Container darf nicht an seine eigene Public-IP), Connect-Timeout. Lösung: beide Container im `traefik-proxy`-Network, interne Calls via Container-Name als Hostname (`http://twin-lab-bridge:5100`). Schneller (kein TLS-Overhead), zuverlässig (kein Hairpin), spart Bandbreite. Generelles Pattern für Multi-Container-Setups auf einem Host.
+
+**NEXT_PUBLIC-Vars zur Build-Zeit, nicht zur Runtime (NEU 4. Mai).** Next inlined `NEXT_PUBLIC_*`-Variablen ins Client-Bundle beim Build. Compose-`environment:`-Block setzt sie zur Runtime, kommt zu spät — Bundle hat dann hartcodierte Default-URLs aus dem Code. Pattern: ARG/ENV im Dockerfile-Builder-Stage, plus `--build-arg` beim `docker build`. README dokumentiert den Aufruf für Production-Builds. Kein Compose-Trick, keine Runtime-Override.
+
+**Cookie-Domain als ENV-getriebener Quick-Fix (NEU 4. Mai).** Cross-Subdomain-Setup (Web auf `app.*`, Backend auf `runtime.*`) braucht Session-Cookie auf Parent-Domain `.twin.harwayexperience.com`. Implementiert via zwei ENVs (`SESSION_COOKIE_DOMAIN`, `SESSION_COOKIE_SECURE`) mit konservativen Defaults — lokal HTTP ohne Domain bleibt unverändert. Sauberere Variante: Reverse-Proxy-Architektur (Same-Origin) eliminiert das Problem strukturell. Backlog #65 für später, kein Blocker.
+
+**Bridge-DB-Cleanup als Production-Bootstrap-Schritt (NEU 4. Mai).** Wenn Bridge schon vor dem Web-Stack existiert (Tag 4 Bridge-Sync-Test mit alten Handles) und die neue Web-Runtime mit eigener leerer DB startet, kollidiert das Onboarding (Bridge meldet „Handle existiert bereits"). Cleanup-Pfad: alte Handles via Volume-Mount löschen, dann neu registrieren. Pattern für künftige Re-Bootstraps oder Migrations.
+
+**packages/shared braucht eigenes dist/ für Production-Container (NEU 4. Mai).** Lokal funktionierte `main: "src/index.ts"` durch tsx und Next-dev-Auflösung. Production-Container-Node ohne tsx-Loader brach mit ERR_UNKNOWN_FILE_EXTENSION. Pattern: shared baut explizit nach `dist/`, `package.json` zeigt mit main/types/exports darauf, `files: ["dist"]` für pnpm-deploy. Plus predev-Hook in jeder App, damit lokale Entwicklung weiter ohne manuellen Build-Schritt funktioniert. Dockerfiles bauen shared explizit vor App-Build.
 
 ---
 
@@ -104,26 +114,43 @@ Heute: Pending nur sichtbar wenn Settings-Page offen.
 - Konfigurierbar pro Twin: welche Events triggern Notifications
 - Vorbedingung: 2.5.4 (User-Auth, weil Notification-Routing pro User)
 
-### 2.5.6 — Production-Deployment Web auf VPS
-**Größe:** L · **Zeitfenster:** 1-2 Sessions (~4-6h)
+### 2.5.6 — Production-Deployment Web auf VPS ✅
+**Abgeschlossen 4. Mai 2026 abends.** Web-UI deployed unter `app.twin.harwayexperience.com`, Runtime unter `runtime.twin.harwayexperience.com`, Bridge weiterhin unter `bridge.twin.harwayexperience.com`. Drei User registriert, drei Twins hot-geladen ohne Container-Restart. Multi-Tenant-SaaS funktional — externer User kann sich registrieren, Twin onboarden, chatten.
 
-Web-UI deploy unter `app.twin.harwayexperience.com`:
-- Next.js Production-Build
-- Docker-Container, analog zur Bridge
-- Traefik routet `app.*` auf den Container
-- HTTPS via existierendem Let's Encrypt-Setup
-- DB-Persistenz via Volume-Mount
-- ENV-Variablen für API-URLs (Bridge, etc.)
-- Master-Key in produktions-tauglichem Vault (nicht mehr in ENV-Datei)
-- Vorbedingung: 2.5.4 (User-Auth) für Public-Access-Kontrolle
+Sechs Sub-Phasen, alle in einem Tag:
+
+**Phase A — Code-Artefakte (`bdde263`).** apps/runtime/Dockerfile (Multi-Stage analog Bridge), apps/web/Dockerfile (Next-Standalone), `next.config.mjs` mit `output: "standalone"`, docker/twin-lab-web/{docker-compose.yml,.env.example,README.md}. Web-Image baute initial nicht durch.
+
+**Phase A.1 — Suspense-Boundary für Nav-Komponenten (`85f664e`).** AppHeader und AppFooter in `<Suspense fallback={null}>` gewrapped (Pattern a, Wrap am Verbraucher in layout.tsx). Static-Generation für 10 Pages grün, Web-Image baut. Plus Dockerfile-Fix: COPY-Zeile für nicht-existentes `apps/web/public/` entfernt.
+
+**Phase A.2 — Production-Build für packages/shared (`79e3ae0`).** `packages/shared` zeigte mit `main` auf Source-TS, brach im Production-Container mit ERR_UNKNOWN_FILE_EXTENSION. Build-Script ergänzt, `main`/`types`/`exports` auf `dist/`, predev-Hook in apps/runtime und apps/web baut shared automatisch beim ersten `pnpm dev`. Dockerfiles bauen shared explizit vor App-Build.
+
+**Phase A.3 — Hot-Reload für TwinServiceRegistry (`a4f1465`).** Boot-Code akzeptiert leere DB als gültigen Onboarding-only-Modus (statt `process.exit(1)`). Plus `addTwin(twinId)`-Methode auf der Registry, idempotent und atomisch via pendingAdds-Mutex. Onboarding-Submit ruft addTwin nach DB-Insert, `requiresRestart: false` zurück. **Backlog #37 abgeschlossen.**
+
+**Phase A.4 — NEXT_PUBLIC_RUNTIME_URL als Build-ARG (`758058e`).** Next inlined NEXT_PUBLIC_*-Vars zur Build-Zeit. Compose-environment kommt zu spät — Bundle hatte hartcodiert `localhost:4000`. Dockerfile mit ARG/ENV vor dem Web-Build, README dokumentiert `--build-arg`-Aufruf.
+
+**Phase A.5 — Cookie-Domain + Secure-Flag aus ENV (`f94ae0d`).** Cross-Subdomain-Setup scheiterte am Cookie ohne Domain-Attribut. Zwei neue ENVs (`SESSION_COOKIE_DOMAIN`, `SESSION_COOKIE_SECURE`) mit konservativem Default — lokal HTTP ohne Domain bleibt unverändert. Production: `Domain=.twin.harwayexperience.com; Secure`.
+
+Plus drei Production-Aktionen ohne Code-Commit:
+- Wizard-Vorbereitungen vor Phase A: ENV-Bridge-URL (`a5b14a9`) und Register-Token-Header im Onboarding-Caller (`13cc70a`)
+- Bridge-DB-Cleanup von alten Handles vom 3. Mai
+- Bridge-URL für interne Calls auf `http://twin-lab-bridge:5100` (Container-zu-Container statt Hairpin)
+
+**Caveats:**
+- Cookie-Domain als Quick-Fix (Backlog #65 für saubere Reverse-Proxy-Architektur)
+- Drei User-Passwörter vom Production-Onboarding sollten in Passwort-Manager
+- Florian und Heiko: Self-Service-Password-Reset nicht möglich (Backlog #44)
+- Login-Curls mit Production-Passwort in Shell-History — bei Bedarf bereinigen
 
 ---
 
-## Phase 2.5 Total
+## Phase 2.5 Total — Status
 
-**Zeitfenster für Rest:** ~10-16h Arbeit auf 5-7 Sessions verteilt.
-**Realistisch bei 4h/Tag:** ~1,5-2 Wochen Kalenderzeit.
-**Definition of Done für Phase 2.5:** Externer User kann sich registrieren, eigenen Twin onboarden, mit dem Twin chatten, Pending approven, Twin verleihen. Multi-Tenant-SaaS funktional unter `app.twin.harwayexperience.com`.
+**Abgeschlossen:** 2.5.1, 2.5.2 (a-e), 2.5.3, 2.5.4 (inkl. .1/.1.1/.2/.3), 2.5.6.
+**Verschoben:** 2.5.5 (Notifications) — bewusst, bis Schmerz sichtbar wird. Inbox-Badge plus drei Power-User vorm Browser reicht heute.
+**Definition of Done für Phase 2.5 erreicht:** Externer User kann sich registrieren, eigenen Twin onboarden, mit dem Twin chatten, Pending approven, Twin verleihen. Multi-Tenant-SaaS funktional unter `app.twin.harwayexperience.com`.
+
+Phase 2.5 als Ganzes ist damit faktisch abgeschlossen. 2.5.5 wird bei Bedarf nachgezogen, ist aber kein Blocker für Phase 3.
 
 ---
 
@@ -185,17 +212,14 @@ Claude (anthropic/claude-opus-4-7) generiert in Markus' Persona Antworten ohne U
 Aktuell hardcoded `{}` im Boot — Persona-Metadata (Verbindungen, Tags, etc.) hat keine DB-Spalte. Migration 005 für `metadata_json TEXT`-Spalte. Genutzt u.a. für Beziehungs-Mapping ("Florian ist Co-Founder von Markus").
 **Größe:** S · **Priorität:** should · **Aus:** Sub-Schritt 2c Caveat
 
-### 14. Owner-Recognition im System-Prompt — präzisiert nach 2.5.3 Live-Test
-Twin behandelt aktuell jeden Web-UI-Chat als Fremder, auch wenn der Owner selbst chattet.
+### 14. Owner-Recognition im System-Prompt — präzisiert nach 2.5.3 Live-Test ✅
+**Abgeschlossen 2. Mai (2.5.4) + 4. Mai (Production-Verifizierung).** Twin behandelte aktuell jeden Web-UI-Chat als Fremder, auch wenn der Owner selbst chattet.
 
-Live-Test 2.5.3: Heiko-Twin antwortet "Diese Anfrage habe ich an **Markus** zur Freigabe weitergeleitet". Markus ist aber nicht Heikos Owner — der Twin hat aus seiner Persona-Beziehungs-Liste geraten und den ersten Eintrag als "Owner" interpretiert. Das ist konzeptionell falsch und verrät private Beziehungs-Informationen.
+Live-Test 2.5.3: Heiko-Twin antwortet "Diese Anfrage habe ich an **Markus** zur Freigabe weitergeleitet". Markus ist aber nicht Heikos Owner — der Twin hat aus seiner Persona-Beziehungs-Liste geraten und den ersten Eintrag als "Owner" interpretiert.
 
-Plus: Web-UI-Chat überspringt Approval-Flow für Markus (`requires_approval=false` in seinen Mandates), aber **nicht** für Heiko (`cautious`-Template hat `requires_approval=true`). Das ist die Logik wie spezifiziert, aber UX-mässig falsch — der Owner sollte mit seinem eigenen Twin chatten können ohne sich selbst approven zu müssen.
+Plus: Web-UI-Chat überspringt Approval-Flow für Markus (`requires_approval=false` in seinen Mandates), aber **nicht** für Heiko (`cautious`-Template hat `requires_approval=true`). Owner sollte mit eigenem Twin chatten können ohne sich selbst approven zu müssen.
 
-Verknüpft mit #33 (Mandate-basierte Approval-Logik) und #38 (Approval-Wartemeldung als System-Antwort).
-
-Fix kommt mit User-Auth in 2.5.4: System-Prompt erweitert um "Du sprichst gerade mit deinem Owner @heiko" wenn `req.user_id == twin.owner_user_id`. Plus: Approval-Logic wird `req.user_id == twin.owner_user_id` als Bypass werten.
-**Größe:** M · **Priorität:** must · **Aus:** Sub-Schritt 2c+2e+2.5.3 Live-Tests, blockt auf 2.5.4
+Fix in 2.5.4: System-Prompt erweitert um Owner-Erkennung via `req.user_id == twin.owner_user_id`. Approval-Logic mit Bypass für Owner. Production-Verifizierung in 2.5.6: drei Owner haben mit eigenen Twins gechattet, keine Pending-Approvals, korrekte Persona-Adressierung.
 
 ### 15. Footer-Text aktualisieren
 Footer zeigt noch "phase 1 · closed twin · läuft lokal". Ist heute durch Phase 2 + Phase 2.5e + 2.5.3 überholt. Update auf "phase 2.5 · multi-twin · läuft lokal" oder dynamisch aus DB ("3 Twins aktiv · Bridge live · API-Keys verschlüsselt").
@@ -228,13 +252,12 @@ Heute: bei Verdacht auf Kompromittierung des Master-Keys oder regulärer Rotatio
 Heute: `maskApiKey` zeigt `sk-a…IgAA` für Anthropic-Keys (sk-ant-…) — Provider-Präfix wird abgeschnitten. Provider-Erkennung im Mask: `sk-ant-…IgAA` für Anthropic, `sk-…XYZ` für OpenAI, etc. Schöner für Debugging, leakt minimal mehr Bits. Konsistenz mit Bridge-Token-Mask überprüfen.
 **Größe:** S · **Priorität:** nice · **Aus:** 2.5.2e Caveat
 
-### 37. Hot-Reload für TwinServiceRegistry — NEU aus 2.5.3
-Heute: nach Onboarding-Submit muss `pnpm dev` neu gestartet werden, damit der neue Twin in der laufenden Runtime aktiv wird. Submit-Response trägt `requiresRestart: true`, Wizard redirected zu `/chat/<handle>`, dort scheitert Chat bis zum Restart.
+### 37. Hot-Reload für TwinServiceRegistry ✅
+**Abgeschlossen 4. Mai 2026 (2.5.6 Phase A.3, Commit `a4f1465`).** Vorher: nach Onboarding-Submit musste `pnpm dev` neu gestartet werden, damit der neue Twin in der laufenden Runtime aktiv wird. Submit-Response trug `requiresRestart: true`, Wizard redirected zu `/chat/<handle>`, dort scheiterte Chat bis zum Restart.
 
-Implementation: `addTwin(twinId)`-Methode auf `TwinServiceRegistry`, die das Profil aus DB lädt, `buildEntry` macht, `bridgeStream.connect()` ruft, in die Map einträgt. Race-Conditions zu durchdenken (was wenn der gleiche Twin gleichzeitig per Wizard und ENV-Bootstrap angelegt wird — UNIQUE-Constraint fängt das DB-seitig ab, aber die in-Memory-Map muss das auch sauber handhaben).
+Implementation: Boot-Code akzeptiert leere DB als gültigen Onboarding-only-Modus (statt `process.exit(1)`). `addTwin(twinId)`-Methode auf TwinServiceRegistry, idempotent und atomisch via `pendingAdds`-Mutex (Map<twinId, Promise<void>>). Onboarding-Submit ruft addTwin nach DB-Insert, `requiresRestart: false`. Race-Conditions abgefangen via Mutex.
 
-Konzeptionell straightforward — nicht in 2.5.3-Scope gewesen. Kann unabhängig vom Auth-Layer gebaut werden.
-**Größe:** M · **Priorität:** should · **Aus:** 2.5.3 Caveat #1
+Production-Verifizierung in 2.5.6: drei User registriert, drei Twins hot-geladen ohne Container-Restart.
 
 ### 38. Approval-Wartemeldung als System-Antwort statt LLM-Improvisation — NEU aus 2.5.3
 Heute: wenn ein Twin im Approval-Modus ist, generiert er trotzdem eine LLM-improvisierte Wartemeldung. Heiko hat geantwortet "Diese Anfrage habe ich an Markus zur Freigabe weitergeleitet" — falsch, weil Markus nicht sein Owner ist und der Twin den Namen aus der Beziehungs-Liste improvisiert hat.
@@ -429,6 +452,74 @@ Deploy-Key nutzen (Monorepo, ein Key reicht für Bridge und Web-App).
 
 Pattern-Wert: zukünftige VPS-Setups gleich so machen, statt 
 Password-Workflow als „erste Lösung" zu etablieren.
+
+### 65. Reverse-Proxy-Architektur statt Cookie-Domain — NEU 4. Mai
+Heute: Cookie-Domain via ENV (`SESSION_COOKIE_DOMAIN=.twin.harwayexperience.com`) als Quick-Fix für Cross-Subdomain-Setup. Funktioniert, ist aber konzeptionell ein Workaround — Same-Origin wäre sauberer.
+
+Saubere Variante: Web-App und Runtime hinter demselben Origin (z.B. `app.twin.harwayexperience.com` mit Path-Prefix `/api/*` zur Runtime). Next-Middleware oder Traefik-Path-Routing übernimmt das. Vorteile: kein Cookie-Domain-Trick, keine CORS-Konfig (Same-Origin), Browser-DevTools zeigen nur eine Origin.
+
+Trade-off: Runtime ist dann nicht mehr direkt von außen aufrufbar (ohne Path-Prefix). Für Power-User-Tooling (Curl, Postman) müsste man den Path-Prefix kennen. Plus: Migration heißt Cookie-Domain entfernen, Runtime-CORS entfernen, Frontend-Calls auf relative Pfade umstellen.
+
+Kein Notfall — heutige Lösung läuft stabil. Sub-Schritt für ruhigeren Tag, wenn Architektur-Konsolidierung dran ist.
+**Größe:** L · **Priorität:** should · **Aus:** 2.5.6 Phase A.5 Reflexion
+
+### 66. DB-Backup-Strategie für Production-DBs — NEU 4. Mai
+Drei DBs auf VPS, alle bisher ohne Backup: `twin-lab-bridge-data`, `twin-lab-web-data` (Runtime), und implizit auch `traefik`-Konfig. Bei Volume-Verlust sind drei User-Accounts plus Twin-Profile (Persona, Mandates, Encryption-Keys, API-Keys verschlüsselt) weg.
+
+Pattern-Optionen:
+- Cron-Job auf VPS, sqlite-`.backup`-Befehl täglich nach `/var/backups/twin-lab/`, Rotation 7 Tage
+- Plus optional rsync/rclone zu externem Storage (Hetzner Storage Box, Backblaze B2)
+- Alternativ: Volume-Snapshots via Hetzner-API, wenn VPS dort liegt
+
+Master-Key sollte separat gesichert sein (Passwort-Manager, schon erledigt) — ohne Master-Key sind die API-Keys aus Backup nicht entschlüsselbar.
+
+Kein Notfall solange nichts kaputt ist. Wird wichtig sobald mehr als drei Power-User dranhängen.
+**Größe:** M · **Priorität:** should · **Aus:** 2.5.6 Production-Reflexion
+
+### 67. Production-Monitoring + Alerting — NEU 4. Mai
+Drei Container live, kein Monitoring. Wenn Bridge oder Runtime abstürzt, merken wir es erst beim nächsten Login.
+
+Optionen, von einfach nach reich:
+- Uptime-Kuma als selbst-gehosteter Healthcheck (ein vierter Container) mit Email/Slack-Notification
+- BetterStack / Healthchecks.io als externer Service
+- Grafana + Prometheus für Metriken (overkill für drei User)
+
+Vorbedingung: Healthcheck-Endpoints in Bridge und Runtime — Bridge hat noch kein wget/curl im Image (#61).
+**Größe:** M · **Priorität:** should · **Aus:** 2.5.6 Production-Reflexion
+
+### 68. Master-Key in Vault statt ENV-Datei — NEU 4. Mai (vorgesehen aber nicht umgesetzt)
+2.5.6 Spec erwähnte „Master-Key in produktions-tauglichem Vault (nicht mehr in ENV-Datei)". Heute pragmatisch in `/docker/twin-lab-web/.env` belassen, weil Vault-Setup für drei Power-User Overengineering wäre.
+
+Künftige Optionen wenn relevant:
+- HashiCorp Vault als selbst-gehosteter Container
+- 1Password Connect (Service-Account-API)
+- Bitwarden CLI mit Service-Token
+- AWS Secrets Manager / Hetzner-eigene Lösung
+
+Trade-off: Vault macht Container-Recovery komplexer (Container braucht Vault-Token zum Start, Vault-Token muss von woher kommen → Boot-Strapping-Problem).
+
+Heute: ENV-Datei mit `chmod 600`, `/docker/`-Verzeichnis nur für Root les- und schreibbar. Reicht für aktuellen Risikostand.
+**Größe:** M · **Priorität:** nice · **Aus:** 2.5.6 Spec, bewusst verschoben
+
+### 69. Onboarding-Polish: User-Email-Verifikation + Self-Service-Reset
+Heute (Tag 5): drei User onboarded mit Passwörtern, die Markus selbst getippt hat. Florian und Heiko kennen ihre Passwörter nicht — funktioniert solange Markus es ihnen mitteilt, aber kein Self-Service-Onboarding möglich.
+
+Pflicht-Items, wenn neue User von außen kommen:
+- Email-Verifikation beim Onboarding (Token-Link zu `/auth/verify`)
+- Password-Reset-Flow via Email-Token (#44 verknüpft, dort als nice eingestuft — heute zu must aufrücken sobald externe User kommen)
+- Optional: SSO via Google/GitHub (heute nicht nötig)
+
+Vorbedingung: Email-Versand-Infrastruktur (resend.com Konto vorhanden, in 2.5.5 für Notifications eh geplant).
+**Größe:** L · **Priorität:** should · **Aus:** 2.5.6 Production-Live
+
+### 70. Production-Stack-Doku: README für `/docker/twin-lab-web/`
+Heute: README im Repo unter `docker/twin-lab-web/README.md` beschreibt Build-Sequenz und ENV-Variablen. Ergänzen um:
+- Operations-Runbook: wie Restart, wie Logs lesen, wie .env editieren ohne Container zu stoppen
+- Troubleshooting-Sektion: Hairpin-NAT-Symptom (Connect-Timeout zu Bridge-Public-URL), Cookie-Domain-Symptom (Login-Loop), NEXT_PUBLIC-Symptom (hartcodierte URLs im Bundle)
+- Disaster-Recovery: was wenn Volume verloren, was wenn Master-Key verloren, was wenn TLS-Zertifikat abgelaufen
+- Backup/Restore-Anleitung (verknüpft mit #66)
+
+**Größe:** S · **Priorität:** should · **Aus:** 2.5.6 Reflexion
 
 ---
 
@@ -708,12 +799,86 @@ Implikation für Sub-Schritt-Planung: erst Klasse bestimmen, dann
 Werkzeug-Setup wählen. Spart das wiederkehrende „kann ich aufs 
 Repo zugreifen?"-Hin-und-Her.
 
+### Lesson (2.5.6 A.1): Suspense-Boundary am Verbraucher, nicht in der Komponente
+
+`useSearchParams()` und andere Client-only-Hooks brechen Static-Generation, wenn die Komponente nicht in einem Suspense-Boundary steckt. Zwei Patterns möglich: Suspense in der Komponente selbst (Wrap-internal) oder Suspense beim Verbraucher (z.B. `<Suspense><AppHeader/></Suspense>` im Layout). Pattern b) gewann, weil:
+- AppHeader/AppFooter bleiben einfach lesbar (keine eigene Suspense-Logik intern)
+- Layout entscheidet einmal über Loading-Verhalten der Nav
+- `fallback={null}` reicht — Nav darf für 50ms „weg" sein, kein UX-Problem
+
+Anti-Pattern: `useSearchParams` einfach durch `usePathname` ersetzen, um den Hook zu vermeiden — verliert Funktionalität. Lieber Suspense.
+
+### Lesson (2.5.6 A.2): packages/shared braucht eigenes dist/ für Produktion
+
+Lokale Entwicklung mit `tsx` und Next-dev-Auflösung verzeiht `main: "src/index.ts"`. Production-Container-Node ohne tsx-Loader bricht mit ERR_UNKNOWN_FILE_EXTENSION. Diagnose ist nicht offensichtlich — der Build läuft durch, der Container startet, das Failure passiert erst beim ersten Import.
+
+Pattern: shared baut explizit nach `dist/`, `package.json` zeigt mit `main`/`types`/`exports` darauf, `files: ["dist"]` für pnpm-deploy. predev-Hook in jeder App, damit lokale Entwicklung weiter ohne manuellen Build-Schritt funktioniert. Dockerfiles bauen shared explizit vor App-Build.
+
+Allgemeineres Prinzip: shared-Packages in einem Monorepo brauchen ein klares Production-Artefakt, sonst rächt sich die lokale Bequemlichkeit beim ersten Container-Build.
+
+### Lesson (2.5.6 A.3): Hot-Reload-Pattern für Multi-Tenant-Onboarding
+
+Vorher-Annahme war: Boot-Code läuft einmal, lädt alle Twins aus DB, Server läuft. Wenn neuer Twin angelegt wird → Restart. Das brach, sobald Onboarding möglich war.
+
+Pattern für Multi-Tenant: Server akzeptiert leere DB als gültigen Onboarding-only-Modus, Registry hat `addTwin(id)`-Methode mit Mutex gegen Race-Conditions. Hot-Reload heißt nicht „Code-Reload", sondern „in-Memory-State-Update bei DB-Änderung". 
+
+Wichtige Detail: Mutex über Promise<void>-Map, nicht boolean-Lock. Erst-Caller löst Promise aus, parallele Caller awaiten denselben Promise — niemand startet zweiten Init. Idempotent ist die `addTwin`-Methode auch: zweiter Aufruf für denselben Twin gibt cached Result zurück.
+
+### Lesson (2.5.6 A.4): NEXT_PUBLIC ist nicht Runtime-ENV
+
+Wer das erste Mal Next deployed, läuft in diese Falle: `NEXT_PUBLIC_*` heißt nicht „dynamische Runtime-Variable für den Browser", sondern „Compile-Zeit-Konstante, die ins Client-Bundle inlined wird". Compose-`environment:` setzt sie zur Runtime — zu spät.
+
+Pattern: ARG/ENV im Dockerfile-Builder-Stage, `--build-arg` beim `docker build`. README-Eintrag mit Beispiel-Aufruf. Wer das nicht weiß, debuggt stundenlang gegen ein hartcodiertes `localhost:4000` im Bundle.
+
+Allgemeineres Prinzip: bei statischem Site-Build ist „Browser-zugängliche Variable" = „Build-Zeit-Konstante". Runtime-Konfigurierbarkeit gibt's nur über Server-Komponenten oder API-Calls.
+
+### Lesson (2.5.6 A.5): Cross-Subdomain-Cookies brauchen explizite Domain
+
+Cookie ohne `Domain`-Attribut bleibt auf der setzenden Subdomain. Wenn Frontend (`app.*`) und Backend (`runtime.*`) verschiedene Subdomains sind, schickt der Browser den Cookie nur zur Backend-Subdomain — Frontend hat ihn nicht, Login funktioniert nicht obwohl POST-Login 200 zurückgibt.
+
+Fix-Patterns, von schmutzig zu sauber:
+1. **Cookie mit Domain=.parent.tld** (heute gewählt) — Browser schickt Cookie an alle Subdomains. Erfordert ENV-getriebene Konfiguration, weil lokale HTTP-Setups keinen Domain-Cookie wollen.
+2. **Same-Origin via Reverse-Proxy** (Backlog #65) — alle Calls gehen über `app.*`, Path-Prefix `/api/*` routet zur Runtime. Cookie bleibt automatisch am Origin.
+3. **Token im Body statt Cookie** — JWT in localStorage, kein Cookie-Problem mehr. Aber: XSS-Risiko, Logout schwerer, Auth-Header bei jedem Call.
+
+Heute: Variante 1, weil schnellste Lösung mit kleinstem Patch (zwei ENVs, ein Helper). Variante 2 als Backlog für später.
+
+### Lesson (2.5.6 Hairpin): Container-zu-Container-Hop schlägt Public-URL
+
+Naive Annahme im Multi-Container-Setup auf einem Host: Container A ruft Container B via dessen Public-URL. Realität: viele VPS-Provider blocken Hairpin-NAT, Connect-Timeout. Plus: TLS-Overhead, DNS-Lookup, Bandbreite.
+
+Pattern: Container im selben Docker-Network, Hostname = Container-Name (`http://twin-lab-bridge:5100`). Schneller, zuverlässiger, kein Hairpin nötig. ENV-getriebener Pfad, damit lokal weiter Public-URL gehen kann.
+
+Diagnose-Hilfe: bei Connect-Timeouts in Multi-Container-Setups als allererstes prüfen, ob es Hairpin-NAT ist. Symptom: Container kann Public-URL des Hosts nicht erreichen, Container kann andere Public-URLs erreichen.
+
+### Lesson (2.5.6 Bridge-Cleanup): Pre-existing State ist Production-Reality
+
+Bridge stand seit 3. Mai mit drei Test-Handles (markus/florian/heiko). Web-Stack vom 4. Mai mit eigener leerer DB versucht dieselben Handles neu zu registrieren → Bridge meldet „existiert bereits". Cleanup-Pfad: alte Handles via Volume-Mount in alpine-Container mit sqlite3 löschen.
+
+Pattern für künftige Re-Bootstraps: vor Onboarding immer pre-existing State des Backend-Stores verifizieren, ggf. cleanen. In CI-/Test-Setups sowieso, in Production bei expliziten Migration-Schritten.
+
+Allgemeineres Prinzip: in Multi-Service-Architekturen ist „leerer Anfangszustand" oft Wunschdenken. Service A weiß nichts von Service B's State, Aufstartreihenfolge kann zu phantom-konflikten führen.
+
+### Lesson (2.5.6 Workflow): Sub-Schritt-Disziplin bei langen Sessions
+
+Heute: 11 Stunden Pair-Programming, 8 Code-Commits, 6 Phase-Markierungen (A, A.1-A.5). Disziplin „ein Sub-Schritt, ein Commit, ein Caveat-Check, dann nächster Sub-Schritt" hat verhindert, dass Bugs sich verschachteln. Gegenbeispiel: ohne Disziplin hätten Suspense-Bug, shared-Build-Bug, NEXT_PUBLIC-Bug, Cookie-Bug ein einziges 4-Stunden-Bug-Hunt-Knäuel werden können — keiner identifizierbar isoliert.
+
+Pattern: jeder Sub-Schritt hat (a) klares AK, (b) klaren Diff-Scope, (c) klares „durch wenn"-Kriterium. Briefing dokumentiert die drei Punkte, dann Implementation, dann Verifikation, dann nächster Sub-Schritt — neues Briefing.
+
+Schwellenwert für Sub-Schritt-Aufteilung: wenn ein Bug-Hunt > 30 Minuten dauern würde, dann ist der Bug ein eigener Sub-Schritt mit eigenem Commit, nicht „noch im aktuellen Schritt mitgemacht".
+
 ---
 
 ## Notiz für später
 
 Sammle weiter Punkte, die im Sparring auftauchen. Nicht jeder Punkt muss eine Phase werden — manches ist Polishing, manches ist Architektur. Die Aufteilung S/M/L/XL und must/should/nice hilft beim Priorisieren wenn die Liste lang wird.
 
-**Item-Dichte 4. Mai 2026 mittags:** 16 neue Items aus Tag 4 (#45 ✅, #46-#58 mix, #63 ✅, #64 ✅). Plus 4 Sub-Schritte (2.5.4.1, 2.5.4.1.1, 2.5.4.2, 2.5.4.3) als ✅ markiert. Plus 5 erledigt-Items (#45, #59, #60, #63, #64). Plus 14 Lessons aus Implementation, Bug-Hunts, Production-Deploys und VPS-Auth-Setup. Items insgesamt: 60. Heute Tag 5: #64 als Quick-Win abgeschlossen, vor 2.5.6.
+**Item-Dichte 4. Mai 2026 abend (Tag 5 Schluss):** Zusätzlich zu den 60 Items vom Mittag: 6 neue Items (#65 Reverse-Proxy, #66 DB-Backup, #67 Monitoring, #68 Vault, #69 Email-Verifikation+Reset, #70 Production-Doku). Plus 2 ✅ markierte Items (#14 Owner-Recognition, #37 Hot-Reload). Plus 6 neue Architektur-Entscheidungen (Container-zu-Container-Hop, NEXT_PUBLIC-Build-ARG, Cookie-Domain-Quick-Fix, Bridge-DB-Cleanup, packages/shared-Production-Build). Plus 8 neue Lessons aus 2.5.6 (Suspense-Pattern, shared-Build, Hot-Reload-Mutex, NEXT_PUBLIC, Cross-Subdomain-Cookies, Hairpin-NAT, Pre-existing State, Sub-Schritt-Disziplin). 2.5.6 als ✅ markiert mit allen sechs Sub-Phasen. Items insgesamt jetzt: 66.
 
-**Was als Nächstes ansteht:** 2.5.6 (Production-Web-Deployment) als nächster Sub-Schritt — alle Vorbedingungen erfüllt (#45 Bridge-Sync ✅, #59 Sender-Auth ✅, #60 Register-Auth ✅, #64 VPS-Git-Auth ✅). 2.5.5 (Notifications) bleibt verschoben, bis Schmerzen sichtbar werden.
+**Was als Nächstes ansteht:** Phase 2.5 ist faktisch abgeschlossen. 2.5.5 (Notifications) bewusst verschoben — kein Blocker für Phase 3. Mögliche nächste Sub-Schritte:
+- **Phase 3 starten** (Memory-Schichten, Skill-System, MCP-Client) — eigene Planungs-Session vorab
+- **#65 Reverse-Proxy-Architektur** als Konsolidierung des Cookie-Domain-Workarounds
+- **#66 DB-Backup-Strategie** sobald mehr User dazukommen
+- **#69 Email-Verifikation + Self-Service-Reset** sobald externe User onboarded werden sollen
+
+Heute Tag 5: Phasenwechsel von „läuft lokal" zu „läuft als Produkt unter `app.twin.harwayexperience.com` mit drei aktiven Power-Usern".
