@@ -1,12 +1,49 @@
 # twin-lab — Stand
 
-**Letztes Update:** 3. Mai 2026, ~18:40
+**Letztes Update:** 4. Mai 2026, ~14:00
 
 ## Aktuell in Arbeit
-Nichts. Tag 4 sauber abgeschlossen. Bereit für 2.5.6 (Production-Web-Deployment) 
-oder Strategie-Diskussion 2.5.5 (Notifications).
+Nichts. #64 (Deploy-Key-Setup auf VPS) abgeschlossen. Bereit für 2.5.6 
+(Production-Web-Deployment) — alle Vorbedingungen erfüllt.
 
-## Heute abgeschlossen (Tag 4)
+## Heute (Tag 5) abgeschlossen
+
+### #64 — VPS-Git-Auth via Deploy-Key
+- ED25519-Deploy-Key auf VPS srv1046432 generiert (`~/.ssh/twin-lab-deploy`)
+- Public-Key bei GitHub als Repo-Deploy-Key hinterlegt (read-only, 
+  `Allow write access` nicht angekreuzt)
+- SSH-Config-Section mit `Host github.com-twin-lab`-Alias plus 
+  `IdentitiesOnly yes`
+- Bridge-Repo `/docker/twin-lab-bridge/repo/` umgestellt auf 
+  `git@github.com-twin-lab:markusbaier/twin-lab.git`
+- Verifikation: `git fetch` und `git pull` ohne Password-Prompt durch
+- Deploy-Key wird auch für Web-App-Repo in 2.5.6 wiederverwendet 
+  (Monorepo, ein Key reicht)
+
+## Phase 2.5 Status
+- 2.5.1 ✅ AI SDK Migration
+- 2.5.2a-d ✅ Schema, Multi-Twin Runtime, Florian-Twin
+- 2.5.2e ✅ Per-Twin LLM-Config
+- 2.5.3 ✅ Onboarding-Wizard
+- 2.5.4 ✅ User-Auth + Trust + A2A-UI + UX-Polish
+- #45 ✅ Bridge-Production-Sync
+- #60 ✅ Bridge-Register-Endpoint abgesichert
+- #59 ✅ Bridge-Sender-Endpoint abgesichert
+- #63 ✅ CLI-Tool für API-Key-Rotation
+- #64 ✅ VPS-Git-Auth via Deploy-Key (Tag 5)
+- 2.5.5 offen (Notifications) — verschoben nach 2.5.6
+- 2.5.6 offen (Production Web Deployment) — als nächstes
+
+## Was als nächstes ansteht
+1. **2.5.6 — Production-Web-Deployment** auf `app.twin.harwayexperience.com`
+   - eigenes Chat-Fenster (Sub-Schritt-Lesson aus 2.5.4.x)
+   - alle Vorbedingungen erfüllt
+   - Web-App-Repo-Klon nutzt Deploy-Key aus #64
+2. v2.1 Sparring mit Florian — wenn Termin sich findet
+3. 2.5.5 (Notifications) bleibt verschoben, bis Schmerzen sichtbar werden — 
+   Inbox-Badge plus drei Power-User vorm Browser reicht heute
+
+## Gestern abgeschlossen (Tag 4)
 
 ### Sub-Schritte
 - 2.5.4.1 — Owner-Modus + Trusted-Twins + Wartemeldung
@@ -16,84 +53,28 @@ oder Strategie-Diskussion 2.5.5 (Notifications).
   Conversation-Symmetrie + UI-Bug-Fixes
 
 ### UX-Iteration
-- Briefing #19 — Login-Top-Nav versteckt + Auto-Scroll + 
-  Profil-Dropdown
-- Briefing #20 — Layout-Refactor: Top-Nav neben Logo, 
-  max-w-1200px Container, Switcher-Styling, gelerntes 
-  Chat-Pattern (Slack-Style)
-- Layout-Fix: ChatLayout fixe Höhe, Sidebar mit 3 Slots, 
-  Conversation mit 3 Slots, Messages max-w-3xl
+- Briefing #19 — Login-Top-Nav versteckt + Auto-Scroll + Profil-Dropdown
+- Briefing #20 — Layout-Refactor: Top-Nav neben Logo, max-w-1200px 
+  Container, Switcher-Styling, Slack-Style-Chat-Pattern
+
+### Tag-4-Abend
+- #45 Bridge-Production-Sync (Bridge live unter 
+  `bridge.twin.harwayexperience.com`, drei Twins, neue Tokens)
+- #60 Bridge-Register-Endpoint mit Allowlist-Token (Commit `b92d774`)
+- #59 Bridge-Sender-Endpoint Auth + Owner-Scope (Commit `7662dad`, 
+  Production verifiziert)
+- #63 CLI-Tool `twin:set-api-key` für API-Key-Rotation 
+  (Commit `8783d97`, drei Twins auf neuen Key gerollt)
 
 ### Plus
-- Status-Konsistenz-Fix (owner-direct, owner-direct-send, 
-  trusted-bypass von "approved" auf "executed")
-- Backlog-Update Items #45-#52
-- Backlog-Datei-Rename: BACKLOG-PHASE-2.5.md → BACKLOG.md
-
-### Tag-4-Abend zusätzlich
-
-#### #45 — Bridge-Production-Sync
-- Production-Bridge `bridge.twin.harwayexperience.com` neu deployed
-- `/docker/twin-lab-bridge/` als Compose-Setup
-- Volume `twin-lab-bridge-data` frisch, Schema 001+002
-- Drei Twins (Markus, Florian, Heiko) registriert mit neuen API-Tokens
-- Tokens in Passwort-Manager
-
-#### #60 — Bridge-Register-Endpoint mit Allowlist-Token
-- `BRIDGE_REGISTER_TOKEN`-ENV, fail-closed
-- Constant-time-Compare via `timingSafeEqual`
-- Production deployed (Commit `b92d774`)
-
-#### #59 — Bridge `/messages/:id/sender` mit Auth + Owner-Scope
-- `requireTwinAuth`-preHandler, Format-Check, Owner-Scope, kein Existence-Leak
-- `BridgeClient.lookupSender` schickt Token bereits mit, kein Client-Change nötig
-- Lokal verifiziert (sechs Curl-Cases plus E2E Reply-Detection)
-- Production deployed (Commit `7662dad`), sechs Cases gegen 
-  `bridge.twin.harwayexperience.com` grün
-
-#### #63 — CLI-Tool `twin:set-api-key` für API-Key-Rotation
-- Auslöser: Anthropic-API-Key rotiert, Settings-UI hat kein Edit-Feld
-- Master-Key-Check vor Prompt, masked Stdin, Provider-Validation, 
-  AES-256-GCM-Verschlüsselung, DB-Update via TwinProfilesRepo
-- Drei lokale Twins erfolgreich auf neuen Key umgestellt (Commit `8783d97`)
-
-### Commits Tag 4
-- f67a7a0 — Trust + Reply-Detection + Inbox
-- 023906b — Backlog-Update
-- c9a9c61 — Datei-Rename
-- 445d1a3 — UX-Iteration
-- b92d774 — #60 Register-Token
-- 7662dad — #59 Sender-Endpoint Auth
-- 8783d97 — #63 set-api-key CLI
-
-## Phase 2.5 Status
-- 2.5.1 ✅ AI SDK Migration
-- 2.5.2a-d ✅ Schema, Multi-Twin Runtime, Florian-Twin
-- 2.5.2e ✅ Per-Twin LLM-Config
-- 2.5.3 ✅ Onboarding-Wizard
-- 2.5.4 ✅ User-Auth + Trust + A2A-UI + UX-Polish
-- #45 ✅ Bridge-Production-Sync (Vorbedingung 2.5.6)
-- #60 ✅ Bridge-Register-Endpoint abgesichert
-- #59 ✅ Bridge-Sender-Endpoint abgesichert (letzte Vorbedingung 2.5.6)
-- #63 ✅ CLI-Tool für API-Key-Rotation
-- 2.5.5 offen (Notifications) — verschoben nach 2.5.6
-- 2.5.6 offen (Production Web Deployment) — als nächstes
-
-## Was als nächstes ansteht
-1. 2.5.6 — Production-Web-Deployment auf `app.twin.harwayexperience.com`
-   (eigenes Chat-Fenster, Sub-Schritt-Lesson aus 2.5.4.x)
-2. Vor 2.5.6 lösen: #64 VPS-Git-Auth via Deploy-Key oder PAT statt Password
-3. Closed-Beta-Ansatz: kein öffentliches Marketing, Onboarding-URL 
-   selektiv teilen
-4. 2.5.5 (Notifications) erst, wenn Schmerzen sichtbar werden — 
-   Inbox-Badge plus drei Power-User vorm Browser reicht heute
+- v2.1-Diskussionspapier (HARWAY-Twin-v2.1-Diskussionspapier.pdf)
+- Doku-Commit `8db175b` (STAND + BACKLOG nach Tag 4 abend)
 
 ## Lokal
-/Users/mjb/Visual Studio/twin-lab — drei Twins (markus, 
-florian, heiko), lokale Bridge auf 5100, lokale Twin-Profile 
-zeigen weiterhin auf `localhost:5100` (kein Switch in #45)
-
-API-Keys aller drei Twins heute auf neuen Anthropic-Key gerollt.
+`/Users/mjb/Visual Studio/twin-lab` — drei Twins (markus, florian, heiko), 
+lokale Bridge auf 5100, lokale Twin-Profile zeigen weiterhin auf 
+`localhost:5100`. API-Keys aller drei Twins auf neuen Anthropic-Key 
+gerollt (Tag 4).
 
 ## Production-Bridge
 - Live unter `https://bridge.twin.harwayexperience.com`
@@ -104,6 +85,7 @@ API-Keys aller drei Twins heute auf neuen Anthropic-Key gerollt.
 - Volume `twin-lab-bridge-data`
 - Register-Endpoint geschützt via `BRIDGE_REGISTER_TOKEN` (#60)
 - Sender-Endpoint geschützt via `requireTwinAuth` + Owner-Scope (#59)
+- VPS-Git-Pull via Deploy-Key (#64), kein Password mehr nötig
 
 ## Drei User
 - Owner: @markus (Owner-Modus aktiv)

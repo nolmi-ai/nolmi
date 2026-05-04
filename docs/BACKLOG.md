@@ -408,16 +408,27 @@ Commit `8783d97`.
 Verwandt mit #10 (UI-Bearbeitung von Persona/Mandates) und #34 
 (Master-Key-Rotation CLI).
 
-### 64. VPS-Git-Auth via Deploy-Key oder PAT statt Password — NEU 3. Mai 2026 abends
-Heute: `git pull` auf `/docker/twin-lab-bridge/repo/` fragt User+Password 
-für GitHub. Funktioniert, aber GitHub deprekiert classic Password-Auth 
-für git-over-HTTPS schrittweise weiter, plus es nervt bei jedem Deploy. 
-Vor 2.5.6 (Web-App-Deploy) auf Deploy-Key (read-only SSH-Key spezifisch 
-für dieses Repo) oder Personal Access Token wechseln. PAT ist einfacher, 
-Deploy-Key ist sicherer (read-only auf ein Repo statt user-wide). Mit 
-2.5.6 kommt eine zweite VPS-Repo-Instanz dazu — einmal sauber gemacht, 
-beide Setups profitieren.
-**Größe:** S · **Priorität:** should · **Aus:** #59 Production-Deploy
+### 64. VPS-Git-Auth via Deploy-Key statt Password ✅
+**Abgeschlossen 4. Mai 2026 vormittags.** Heute: `git pull` auf 
+`/docker/twin-lab-bridge/repo/` fragte User+Password für GitHub. 
+Lösung: read-only Deploy-Key (ED25519) auf VPS srv1046432, bei 
+GitHub als Repo-spezifischer Deploy-Key hinterlegt (kein User-Key, 
+also Scope nur auf `twin-lab`-Repo). SSH-Config-Section mit 
+`Host github.com-twin-lab` als Alias plus `IdentitiesOnly yes` 
+zwingt SSH, nur diesen Key zu probieren. Remote-URL umgestellt 
+auf `git@github.com-twin-lab:markusbaier/twin-lab.git`. 
+
+`Allow write access` bewusst nicht angekreuzt — VPS soll nur 
+pullen, nicht pushen können. Wenn der VPS kompromittiert wird, 
+kann der Angreifer keinen Schadcode in's Repo pushen.
+
+Verifikation: `git fetch` und `git pull` ohne Password-Prompt 
+durchgelaufen, Doku-Commit `8db175b` vom 3. Mai sauber gepullt. 
+Vorbedingung 2.5.6 erfüllt — Web-App-Repo-Klon kann denselben 
+Deploy-Key nutzen (Monorepo, ein Key reicht für Bridge und Web-App).
+
+Pattern-Wert: zukünftige VPS-Setups gleich so machen, statt 
+Password-Workflow als „erste Lösung" zu etablieren.
 
 ---
 
@@ -659,12 +670,50 @@ das CLI-Tool. Pattern für künftige Mehrfach-Sub-Schritte: trotz
 zeitlicher Nähe getrennt committen, wenn sie unterschiedliche 
 Backlog-Items betreffen.
 
+### Lesson (#64): Deploy-Key statt User-Key oder PAT als Default 
+für VPS-Setups
+
+Bei VPS-zu-GitHub-Auth gibt es drei Wege: Personal Access Token 
+(user-wide, läuft ab), User-SSH-Key (voller Repo-Zugang von dieser 
+Maschine) oder Repo-spezifischer Deploy-Key (read-only, ein Repo). 
+Letzterer ist der sauberste — minimaler Scope, kein Ablaufdatum, 
+read-only-Default. Bei VPS-Kompromittierung ist der Schaden 
+begrenzt: nur ein Repo lesbar, kein Push möglich, andere Repos 
+unberührt. Pattern für alle künftigen VPS-Setups: Deploy-Key, 
+nicht Password und nicht User-Key. PAT nur als Notlösung wenn 
+SSH-Pfad blockiert ist.
+
+### Lesson (#64): Sub-Schritt-Pattern für nicht-Repo-zugängliche 
+Sessions
+
+Heute Vormittag war Repo-Zugang im Chat nicht möglich (privates 
+GitHub-Repo, kein MCP-Connector), aber der Sub-Schritt brauchte 
+ihn auch nicht: #64 ändert reine VPS-Konfiguration (SSH-Config, 
+Remote-URL, Deploy-Key bei GitHub), kein Code im Repo. Heißt: 
+Sub-Schritte lassen sich in drei Klassen einteilen, jede mit 
+eigener Werkzeug-Anforderung:
+
+- **Code-Sub-Schritte** (Server, Frontend, neue Files): brauchen 
+  Repo-Sicht. Heute paste-n betroffener Files reicht für isolierte 
+  Sub-Schritte (siehe #59-Pattern).
+- **VPS / DevOps / Konfig-Sub-Schritte** (#45, #59-Production-
+  Deploy, #60-Production-Deploy, #64): brauchen kein Repo, nur 
+  SSH-Zugang. Werden vom User selbst auf VPS ausgeführt, 
+  Outputs werden im Chat interpretiert.
+- **Strategie / Doku / Konzept** (v2.1 heute morgen): brauchen 
+  weder Repo-Zugang noch VPS, sondern Diskussion und 
+  Synthese-Arbeit.
+
+Implikation für Sub-Schritt-Planung: erst Klasse bestimmen, dann 
+Werkzeug-Setup wählen. Spart das wiederkehrende „kann ich aufs 
+Repo zugreifen?"-Hin-und-Her.
+
 ---
 
 ## Notiz für später
 
 Sammle weiter Punkte, die im Sparring auftauchen. Nicht jeder Punkt muss eine Phase werden — manches ist Polishing, manches ist Architektur. Die Aufteilung S/M/L/XL und must/should/nice hilft beim Priorisieren wenn die Liste lang wird.
 
-**Item-Dichte 3. Mai 2026 ende:** 16 neue Items aus Tag 4 (#45 Bridge-Production-Sync, #46 Test-Skript-Reparatur, #47 Reply-Marker-Bug, #48 Conversations-Roundtrip, #49 Mark-Read-Delay-Config, #50 Sidebar-Polling, #51 DisplayName-Cache, #52 read_at im UI, #53 Conversations löschen/archivieren, #54 Header-Höhe als CSS-Variable, #55 Mobile-Layout, #56 Textarea Auto-Grow, #57 100dvh, #58 Visual-Design-Iteration, #63 set-api-key CLI ✅, #64 VPS-Git-Auth). Plus 4 Sub-Schritte (2.5.4.1, 2.5.4.1.1, 2.5.4.2, 2.5.4.3) als ✅ markiert, plus #45, #59, #60, #63 als ✅. Plus 12 Lessons aus Implementation, Bug-Hunts und Production-Deploys. Items insgesamt: 60.
+**Item-Dichte 4. Mai 2026 mittags:** 16 neue Items aus Tag 4 (#45 ✅, #46-#58 mix, #63 ✅, #64 ✅). Plus 4 Sub-Schritte (2.5.4.1, 2.5.4.1.1, 2.5.4.2, 2.5.4.3) als ✅ markiert. Plus 5 erledigt-Items (#45, #59, #60, #63, #64). Plus 14 Lessons aus Implementation, Bug-Hunts, Production-Deploys und VPS-Auth-Setup. Items insgesamt: 60. Heute Tag 5: #64 als Quick-Win abgeschlossen, vor 2.5.6.
 
-**Was als Nächstes ansteht:** 2.5.6 (Production-Web-Deployment) als nächster Sub-Schritt — alle Vorbedingungen erfüllt (#45 Bridge-Sync ✅, #59 Sender-Auth ✅, #60 Register-Auth ✅). Vor 2.5.6 noch #64 VPS-Git-Auth lösen. 2.5.5 (Notifications) bleibt verschoben, bis Schmerzen sichtbar werden.
+**Was als Nächstes ansteht:** 2.5.6 (Production-Web-Deployment) als nächster Sub-Schritt — alle Vorbedingungen erfüllt (#45 Bridge-Sync ✅, #59 Sender-Auth ✅, #60 Register-Auth ✅, #64 VPS-Git-Auth ✅). 2.5.5 (Notifications) bleibt verschoben, bis Schmerzen sichtbar werden.
