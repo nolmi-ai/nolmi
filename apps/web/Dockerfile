@@ -40,11 +40,12 @@ ENV NODE_ENV=production
 WORKDIR /app
 
 # Standalone-Bundle übernimmt die komplette Workspace-Pfadstruktur (apps/web,
-# node_modules) flach unter /app. Static-Assets und public/ liegen im
-# Standalone-Output NICHT mit drin, müssen also separat reinkopiert werden.
+# node_modules) flach unter /app. Static-Assets liegen im Standalone-Output
+# NICHT mit drin, müssen separat rein. (twin-lab hat heute kein public/ —
+# COPY dafür wurde aus dem Next-Standalone-Default entfernt; falls später
+# Assets dazukommen: Zeile zurück.)
 COPY --from=builder /repo/apps/web/.next/standalone ./
 COPY --from=builder /repo/apps/web/.next/static ./apps/web/.next/static
-COPY --from=builder /repo/apps/web/public ./apps/web/public
 
 EXPOSE 3000
 
