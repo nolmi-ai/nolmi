@@ -582,7 +582,7 @@ function registerOnboardingRoutes(app: FastifyInstance, deps: ServerDeps) {
 
     // 3. Bridge-Handle registrieren
     let bridgeToken: string;
-    const bridgeUrl = pickBridgeUrlForOnboarding(deps);
+    const bridgeUrl = pickBridgeUrlForOnboarding();
     try {
       const result = await registerHandleOnBridge({
         bridgeUrl,
@@ -644,16 +644,14 @@ function registerOnboardingRoutes(app: FastifyInstance, deps: ServerDeps) {
 }
 
 /**
- * Heute: Bridge-URL kommt aus dem ersten existierenden Twin, oder Fallback
- * auf localhost. Sauberer wäre ein eigenes ENV/Config — Backlog.
+ * Bridge-URL für neu angelegte Twin-Profile. Production setzt
+ * `TWIN_LAB_DEFAULT_BRIDGE_URL` in der `.env` auf die gehostete Bridge,
+ * lokal bleibt sie ungesetzt → Fallback auf den Dev-Bridge-Port.
  */
-function pickBridgeUrlForOnboarding(deps: ServerDeps): string {
-  const first = deps.registry.list()[0];
-  if (first) {
-    const entry = deps.registry.getEntry(first.handle);
-    if (entry?.profile.bridgeUrl) return entry.profile.bridgeUrl;
-  }
-  return process.env.BRIDGE_URL?.trim() || "http://127.0.0.1:5100";
+function pickBridgeUrlForOnboarding(): string {
+  return (
+    process.env.TWIN_LAB_DEFAULT_BRIDGE_URL?.trim() || "http://127.0.0.1:5100"
+  );
 }
 
 // ─── AUTH ROUTES ─────────────────────────────────────────────────────────────
