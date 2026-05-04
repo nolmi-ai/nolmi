@@ -43,7 +43,11 @@ Deploy-Sequenz für `app.twin.harwayexperience.com` +
    ```
    cd repo
    docker build -t twin-lab-runtime:latest -f apps/runtime/Dockerfile .
-   docker build -t twin-lab-web:latest -f apps/web/Dockerfile .
+   docker build \
+     -t twin-lab-web:latest \
+     -f apps/web/Dockerfile \
+     --build-arg NEXT_PUBLIC_RUNTIME_URL=https://runtime.twin.harwayexperience.com \
+     .
    cd ..
    ```
 
@@ -95,7 +99,11 @@ Deploy-Sequenz für `app.twin.harwayexperience.com` +
 cd /docker/twin-lab-web/repo
 git pull
 docker build -t twin-lab-runtime:latest -f apps/runtime/Dockerfile .
-docker build -t twin-lab-web:latest -f apps/web/Dockerfile .
+docker build \
+  -t twin-lab-web:latest \
+  -f apps/web/Dockerfile \
+  --build-arg NEXT_PUBLIC_RUNTIME_URL=https://runtime.twin.harwayexperience.com \
+  .
 cd ..
 docker compose up -d
 ```

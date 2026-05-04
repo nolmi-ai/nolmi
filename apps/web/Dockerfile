@@ -34,6 +34,13 @@ COPY packages/shared packages/shared
 # Pattern und als Sicherheits-Net, falls Next das später nicht mehr
 # automatisch tut oder eine zusätzliche Resolution-Schicht das dist erwartet.
 RUN pnpm --filter @twin-lab/shared build
+
+# NEXT_PUBLIC_*-Vars werden zur Build-Zeit ins Client-Bundle inlined.
+# Default lokal, in Production via --build-arg overriden:
+#   docker build --build-arg NEXT_PUBLIC_RUNTIME_URL=https://... ...
+ARG NEXT_PUBLIC_RUNTIME_URL=http://localhost:4000
+ENV NEXT_PUBLIC_RUNTIME_URL=${NEXT_PUBLIC_RUNTIME_URL}
+
 RUN pnpm --filter @twin-lab/web build
 
 
