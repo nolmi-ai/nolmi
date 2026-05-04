@@ -29,6 +29,11 @@ RUN pnpm install --frozen-lockfile --filter @twin-lab/web...
 COPY apps/web apps/web
 COPY packages/shared packages/shared
 
+# shared explizit vor Web bauen. Next mit transpilePackages liest heute
+# Source-TS direkt rein, aber wir bauen für Konsistenz mit dem Runtime-
+# Pattern und als Sicherheits-Net, falls Next das später nicht mehr
+# automatisch tut oder eine zusätzliche Resolution-Schicht das dist erwartet.
+RUN pnpm --filter @twin-lab/shared build
 RUN pnpm --filter @twin-lab/web build
 
 

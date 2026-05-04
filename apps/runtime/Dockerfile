@@ -34,11 +34,18 @@ RUN pnpm install --frozen-lockfile --filter @twin-lab/runtime...
 COPY apps/runtime apps/runtime
 COPY packages/shared packages/shared
 
+# shared explizit vor Runtime bauen — Runtime importiert @twin-lab/shared,
+# dessen package.json zeigt main/exports auf dist/index.js. Ohne diesen
+# Schritt wirft `node dist/index.js` zur Laufzeit ERR_UNKNOWN_FILE_EXTENSION,
+# weil pnpm deploy zwar die Source-TS materialisiert, aber Node sie nicht
+# laden kann.
+RUN pnpm --filter @twin-lab/shared build
 RUN pnpm --filter @twin-lab/runtime build
 
 # `pnpm deploy` materialisiert ein deploybares Verzeichnis ohne pnpm-Symlinks:
 # flaches node_modules (nur prod-Deps), plus alle Files aus apps/runtime/
-# (dist/, migrations/, package.json).
+# (dist/, migrations/, package.json). shared kommt mit dist/ rein, weil
+# packages/shared/package.json files: ["dist"] gesetzt hat.
 RUN pnpm deploy --filter @twin-lab/runtime --prod /out
 
 
