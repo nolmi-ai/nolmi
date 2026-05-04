@@ -1,0 +1,42 @@
+# BuildKit liest diese Datei automatisch, wenn der Build mit
+#   docker build -f apps/web/Dockerfile .
+# startet. Pfade sind relativ zum Build-Context (= Repo-Root).
+
+# Build-Artefakte (werden im Container neu erzeugt)
+node_modules
+**/node_modules
+**/.next
+dist
+**/dist
+**/*.tsbuildinfo
+
+# Runtime-Daten + DB gehören nicht ins Web-Image.
+data
+**/data
+
+# Secrets — Image bleibt env-frei, Compose injiziert zur Laufzeit.
+.env
+.env.*
+
+# Git und CI
+.git
+.github
+
+# Doku
+*.md
+**/*.md
+
+# IDE / Editor
+.vscode
+.idea
+
+# Andere Apps des Monorepo: Web braucht weder Runtime noch Bridge im Build-
+# Context. @twin-lab/shared kommt über packages/shared.
+apps/runtime
+apps/bridge
+
+# Logs / Coverage / Misc
+coverage
+*.log
+.DS_Store
+.turbo

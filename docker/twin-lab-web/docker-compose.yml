@@ -1,0 +1,63 @@
+name: twin-lab-web
+
+services:
+  runtime:
+    image: twin-lab-runtime:latest
+    container_name: twin-lab-runtime
+    restart: unless-stopped
+    networks:
+      - traefik-proxy
+      - internal
+    volumes:
+      - twin-lab-web-data:/data
+    environment:
+      - NODE_ENV=production
+      - RUNTIME_HOST=0.0.0.0
+      - RUNTIME_PORT=4000
+      - TWIN_DATABASE_PATH=/data/twin.db
+      - TWIN_LAB_ENCRYPTION_KEY=${TWIN_LAB_ENCRYPTION_KEY}
+      - TWIN_LAB_SESSION_SECRET=${TWIN_LAB_SESSION_SECRET}
+      - TWIN_LAB_DEFAULT_BRIDGE_URL=${TWIN_LAB_DEFAULT_BRIDGE_URL}
+      - BRIDGE_REGISTER_TOKEN=${BRIDGE_REGISTER_TOKEN}
+      - ACTIVE_PROVIDER=${ACTIVE_PROVIDER:-anthropic}
+    labels:
+      - "traefik.enable=true"
+      - "traefik.docker.network=traefik-proxy"
+      - "traefik.http.routers.twin-runtime.rule=Host(`runtime.twin.harwayexperience.com`)"
+      - "traefik.http.routers.twin-runtime.entrypoints=websecure"
+      - "traefik.http.routers.twin-runtime.tls=true"
+      - "traefik.http.routers.twin-runtime.tls.certresolver=letsencrypt"
+      - "traefik.http.services.twin-runtime.loadbalancer.server.port=4000"
+
+  web:
+    image: twin-lab-web:latest
+    container_name: twin-lab-web
+    restart: unless-stopped
+    depends_on:
+      - runtime
+    networks:
+      - traefik-proxy
+      - internal
+    environment:
+      - NODE_ENV=production
+      - PORT=3000
+      - HOSTNAME=0.0.0.0
+      - NEXT_PUBLIC_RUNTIME_URL=https://runtime.twin.harwayexperience.com
+    labels:
+      - "traefik.enable=true"
+      - "traefik.docker.network=traefik-proxy"
+      - "traefik.http.routers.twin-web.rule=Host(`app.twin.harwayexperience.com`)"
+      - "traefik.http.routers.twin-web.entrypoints=websecure"
+      - "traefik.http.routers.twin-web.tls=true"
+      - "traefik.http.routers.twin-web.tls.certresolver=letsencrypt"
+      - "traefik.http.services.twin-web.loadbalancer.server.port=3000"
+
+networks:
+  traefik-proxy:
+    external: true
+  internal:
+    driver: bridge
+
+volumes:
+  twin-lab-web-data:
+    name: twin-lab-web-data

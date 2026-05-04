@@ -1,0 +1,42 @@
+# BuildKit liest diese Datei automatisch, wenn der Build mit
+#   docker build -f apps/runtime/Dockerfile .
+# startet. Pfade sind relativ zum Build-Context (= Repo-Root).
+
+# Build-Artefakte (werden im Container neu erzeugt)
+node_modules
+**/node_modules
+dist
+**/dist
+**/*.tsbuildinfo
+
+# Runtime-Daten gehören NIE ins Image — würden sonst lokalen DB-State
+# mitschleifen.
+data
+**/data
+
+# Secrets — Image bleibt env-frei, Compose injiziert zur Laufzeit.
+.env
+.env.*
+
+# Git und CI
+.git
+.github
+
+# Doku — Image braucht weder README noch CLAUDE.md noch ADRs.
+*.md
+**/*.md
+
+# IDE / Editor
+.vscode
+.idea
+
+# Andere Apps des Monorepo: Runtime braucht weder Web-Frontend noch Bridge
+# im Image. @twin-lab/shared wird über packages/shared mitgenommen.
+apps/web
+apps/bridge
+
+# Logs / Coverage / Misc
+coverage
+*.log
+.DS_Store
+.turbo
