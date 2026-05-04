@@ -39,6 +39,26 @@ function loadSecret(): string {
 }
 
 /**
+ * Optionale Cookie-Attribute aus ENV. Production setzt
+ *   SESSION_COOKIE_DOMAIN=.twin.harwayexperience.com
+ *   SESSION_COOKIE_SECURE=true
+ * damit der Cookie auf der Parent-Domain gilt (Web auf app.*, Runtime auf
+ * runtime.*) und Browser ihn nur über HTTPS senden. Lokal beide ungesetzt →
+ * kein Domain-Attribut, kein Secure-Flag (sonst lehnt Chrome den Secure-
+ * Cookie auf http://localhost ab und der Login-Loop bricht stumm).
+ *
+ * Backlog: Reverse-Proxy mit Same-Origin macht das überflüssig.
+ */
+function cookieAttrs(): { domain?: string; secure?: boolean } {
+  const out: { domain?: string; secure?: boolean } = {};
+  const domain = process.env.SESSION_COOKIE_DOMAIN?.trim();
+  if (domain) out.domain = domain;
+  const secure = process.env.SESSION_COOKIE_SECURE?.trim().toLowerCase();
+  if (secure === "true") out.secure = true;
+  return out;
+}
+
+/**
  * Liest und entsiegelt den Session-Cookie. null wenn kein Cookie oder
  * Cookie ungültig (gefälscht, abgelaufen, anderes Secret). Dürfte bei
  * Letzterem leise null zurückgeben — Fastify entscheidet je nach Route,
@@ -75,16 +95,19 @@ export async function setSession(
     path: "/",
     httpOnly: true,
     sameSite: "lax",
-    // secure: true,  // einschalten sobald wir hinter HTTPS deployen
     maxAge: SESSION_TTL_SECONDS,
+    ...cookieAttrs(),
   });
 }
 
 export function destroySession(reply: FastifyReply): void {
+  // domain + secure müssen identisch zum Set sein, sonst ignoriert der
+  // Browser das Delete und der Cookie bleibt aktiv bis TTL.
   reply.setCookie(SESSION_COOKIE_NAME, "", {
     path: "/",
     httpOnly: true,
     sameSite: "lax",
     maxAge: 0,
+    ...cookieAttrs(),
   });
 }
