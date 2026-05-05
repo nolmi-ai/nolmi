@@ -5,6 +5,11 @@ import type { AuditEntry, ChatMessage, TwinEvent } from "@twin-lab/shared";
 
 const RUNTIME_URL = process.env.NEXT_PUBLIC_RUNTIME_URL ?? "http://localhost:4000";
 
+// Audit-Capabilities, die im Direct-Chat-Verlauf erscheinen sollen.
+// "respond_to_chat" = Standard-Pfad, "owner-direct" = Owner-Bypass — beide
+// haben dasselbe Audit-Input-/Output-Schema (lastMessage + reply).
+const DIRECT_CHAT_CAPABILITIES = new Set(["respond_to_chat", "owner-direct"]);
+
 // Threshold in px: User gilt als "unten", wenn er weniger als so viel vom
 // Bottom-Rand entfernt ist. Liegt etwas oberhalb der typischen Bubble-Höhe,
 // damit der "war-unten"-State auch greift, wenn gerade eine neue Nachricht
@@ -410,11 +415,13 @@ function DirectChat({ handle }: { handle: string }) {
 
   // History aus dem Audit-Log nachladen — sonst geht der Verlauf bei jedem
   // Tab-Switch verloren, weil DirectChat dann frisch gemountet wird (#71).
-  // Quelle: GET /twins/:handle/audit liefert respond_to_chat-Pärchen mit
+  // Quelle: GET /twins/:handle/audit liefert Direct-Chat-Pärchen mit
   // input.lastMessage (User-Turn) und output.reply (Twin-Antwort). Wir
   // nehmen lastMessage (nicht messages[0]), weil messages[] den kumulativen
   // Verlauf je Audit speichert und [0] sonst N Mal dieselbe Erst-Message
   // wäre. failed/pending werden geskippt — Verlauf zeigt nur ausgeführte Turns.
+  // Capability-Filter umfasst beide Direct-Chat-Pfade: "respond_to_chat"
+  // (Standard) und "owner-direct" (Owner-Bypass — gleiches Schema).
   useEffect(() => {
     let cancelled = false;
     fetch(`${RUNTIME_URL}/twins/${handle}/audit?limit=50`, {
@@ -432,7 +439,7 @@ function DirectChat({ handle }: { handle: string }) {
         for (let i = data.entries.length - 1; i >= 0; i--) {
           const entry = data.entries[i];
           if (!entry) continue;
-          if (entry.capability !== "respond_to_chat") continue;
+          if (!DIRECT_CHAT_CAPABILITIES.has(entry.capability)) continue;
           if (entry.status !== "executed") continue;
           const userText =
             typeof entry.input.lastMessage === "string"
