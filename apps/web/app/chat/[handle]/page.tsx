@@ -1,7 +1,7 @@
 "use client";
 
 import { use, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { ChatMessage, TwinEvent } from "@twin-lab/shared";
+import type { AuditEntry, ChatMessage, TwinEvent } from "@twin-lab/shared";
 
 const RUNTIME_URL = process.env.NEXT_PUBLIC_RUNTIME_URL ?? "http://localhost:4000";
 
@@ -407,6 +407,55 @@ function DirectChat({ handle }: { handle: string }) {
     messages.length,
     `direct:${handle}`,
   );
+
+  // History aus dem Audit-Log nachladen — sonst geht der Verlauf bei jedem
+  // Tab-Switch verloren, weil DirectChat dann frisch gemountet wird (#71).
+  // Quelle: GET /twins/:handle/audit liefert respond_to_chat-Pärchen mit
+  // input.lastMessage (User-Turn) und output.reply (Twin-Antwort). Wir
+  // nehmen lastMessage (nicht messages[0]), weil messages[] den kumulativen
+  // Verlauf je Audit speichert und [0] sonst N Mal dieselbe Erst-Message
+  // wäre. failed/pending werden geskippt — Verlauf zeigt nur ausgeführte Turns.
+  useEffect(() => {
+    let cancelled = false;
+    fetch(`${RUNTIME_URL}/twins/${handle}/audit?limit=50`, {
+      credentials: "include",
+    })
+      .then((res) =>
+        res.ok
+          ? (res.json() as Promise<{ entries: AuditEntry[] }>)
+          : Promise.reject(`HTTP ${res.status}`),
+      )
+      .then((data) => {
+        if (cancelled) return;
+        // Audit-API liefert DESC, Render braucht ASC → reverse iteration.
+        const pairs: ChatMessage[] = [];
+        for (let i = data.entries.length - 1; i >= 0; i--) {
+          const entry = data.entries[i];
+          if (!entry) continue;
+          if (entry.capability !== "respond_to_chat") continue;
+          if (entry.status !== "executed") continue;
+          const userText =
+            typeof entry.input.lastMessage === "string"
+              ? entry.input.lastMessage
+              : null;
+          const replyText =
+            entry.output && typeof entry.output.reply === "string"
+              ? entry.output.reply
+              : null;
+          if (!userText || !replyText) continue;
+          pairs.push({ role: "user", content: userText });
+          pairs.push({ role: "assistant", content: replyText });
+        }
+        setMessages(pairs);
+      })
+      .catch(() => {
+        // Silent fail — Audit-Endpoint nicht erreichbar oder 401. Direct-Chat
+        // bleibt mit leerem State und ist trotzdem benutzbar.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [handle]);
 
   async function send() {
     if (!input.trim() || busy) return;
