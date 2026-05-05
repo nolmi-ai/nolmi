@@ -1,6 +1,6 @@
 # Backlog Phase 2.5 und später
 
-Stand: 4. Mai 2026, Abend — Phase 2.5 zu ~95% durch. 2.5.6 (Production-Web-Deployment) abgeschlossen, drei User und Twins live unter `app.twin.harwayexperience.com`. Nur 2.5.5 (Notifications) bleibt offen, bewusst verschoben bis Schmerz sichtbar wird.
+Stand: 5. Mai 2026, Abend (Tag 6) — Polish-Sprint nach 2.5.6 abgeschlossen. Drei kleine Items abgearbeitet (#15, #43, #71). Phase 2.5 inhaltlich komplett durch, Production-Stack stabil seit gestern.
 
 Format: Punkte mit Größe (S/M/L/XL) und Priorität (must/should/nice).
 
@@ -221,9 +221,8 @@ Plus: Web-UI-Chat überspringt Approval-Flow für Markus (`requires_approval=fal
 
 Fix in 2.5.4: System-Prompt erweitert um Owner-Erkennung via `req.user_id == twin.owner_user_id`. Approval-Logic mit Bypass für Owner. Production-Verifizierung in 2.5.6: drei Owner haben mit eigenen Twins gechattet, keine Pending-Approvals, korrekte Persona-Adressierung.
 
-### 15. Footer-Text aktualisieren
-Footer zeigt noch "phase 1 · closed twin · läuft lokal". Ist heute durch Phase 2 + Phase 2.5e + 2.5.3 überholt. Update auf "phase 2.5 · multi-twin · läuft lokal" oder dynamisch aus DB ("3 Twins aktiv · Bridge live · API-Keys verschlüsselt").
-**Größe:** S · **Priorität:** nice · **Aus:** Sub-Schritt 2γ Live-Test, durchgängig sichtbar
+### 15. Footer-Text aktualisieren ✅
+**Abgeschlossen 5. Mai 2026 (Tag 6, Commit `5ed4365`).** Hartcodiertes „phase 2.5 · ... · läuft lokal" durch ENV-getriebene Konstante ersetzt. Neue Variable `NEXT_PUBLIC_DEPLOYMENT_LABEL` mit Default „läuft lokal", Production-Wert „production". Pattern analog zu `NEXT_PUBLIC_RUNTIME_URL` aus 2.5.6.A.4 — ARG/ENV im Dockerfile-Builder, `--build-arg` beim `docker build`. Footer zeigt jetzt „X Twins aktiv · läuft lokal" lokal und „X Twins aktiv · production" in Production. Lokal verifiziert, Production-Deploy steht aus (kein Druck, beim nächsten regulären Pull).
 
 ### 16. Backward-Compat-Aliases entfernen
 Sub-Schritt 2d hat alte Pfade (`/chat`, `/twin-profile`, `/audit`, `/audit/pending`, etc.) als Aliases zu `/twins/@markus/...` umgeleitet. Sollte nach komplettem UI-Refresh-Cycle entfernt werden — sonst dauerhafter Tech-Debt.
@@ -296,9 +295,12 @@ Alternative zu Email/Passwort: User gibt Email ein, kriegt Login-Link via Email 
 Heute kein Rate-Limit. Bei breiterem Deployment Brute-Force-anfällig. `@fastify/rate-limit` mit konservativem Default (z.B. 5 Login-Versuche pro IP pro 15 Minuten), bei Treffer 429 mit Retry-After-Header. Plus per-Email-Tracking gegen distributed Brute-Force.
 **Größe:** S · **Priorität:** should · **Aus:** 2.5.4 Caveat #6
 
-### 43. Top-Nav auf /login + /onboarding versteckt — NEU aus 2.5.4
-Heute rendert die Top-Nav (TwinSwitcher + Logout + Tabs) auf jeder Page, auch `/login`. Auf der Login-Page erscheint dann "twins: HTTP 401" und "chat/stream/settings"-Tabs, die für nicht-eingeloggte User sinnlos sind. Frontend sollte Top-Nav für Public-Routes (`/login`, `/onboarding`) anders rendern oder ganz weglassen — am saubersten via Layout-Variante oder Conditional in `layout.tsx`.
-**Größe:** S · **Priorität:** should · **Aus:** 2.5.4 Live-Test, durchgängig sichtbar
+### 43. Top-Nav auf /login + /onboarding versteckt ✅
+**Implementation vor 5. Mai 2026, Reality-Check 5. Mai (Tag 6 Polish-Sprint).** `apps/web/components/AppHeader.tsx` returned `null` für Routes mit Prefix `/login` oder `/onboarding` via `PUBLIC_PREFIXES`-Array und `usePathname`-Check. Implementiert vermutlich in 2.5.4 UX-Iteration Briefing #19 (Tag 4 — exakter Commit nicht zugeordnet, aber Datei `AppHeader.tsx` letzter Commit `445d1a3` enthielt die `PUBLIC_PREFIXES`-Logik bereits).
+
+Tag-6-Reality-Check vor Briefing-Schreibung: Login-Page zeigt nur Brand + Login-Form + Footer, keine Tabs, kein TwinSwitcher, kein ProfileMenu. Item als ✅ markiert ohne Code-Change.
+
+Footer rendert weiterhin auf Public-Routes — Twin-Count fällt auf "multi-twin"-Fallback zurück, da `/twins` ohne Auth 401 returnt (graceful degradation, kein Bug).
 
 ### 44. Self-Service-Password-Reset — NEU aus 2.5.4
 Florian und Heiko haben heute Platzhalter-Passworte von Markus per CLI bekommen. Es gibt aber keinen Weg für sie, das Passwort selbst zu ändern. CLI-Tool (`pnpm user:create` mit Update-Flag oder ein neues `user:reset-password`) reicht für heute, aber UI-Flow ("Passwort vergessen?" → Email-Link → Set-New-Password) wäre richtig. Vorbedingung: Email-Versand aus 2.5.5.
@@ -520,6 +522,38 @@ Heute: README im Repo unter `docker/twin-lab-web/README.md` beschreibt Build-Seq
 - Backup/Restore-Anleitung (verknüpft mit #66)
 
 **Größe:** S · **Priorität:** should · **Aus:** 2.5.6 Reflexion
+
+### 71. Direct-Chat-History persistent über Tab-Switches ✅
+**Abgeschlossen 5. Mai 2026 (Tag 6 Polish-Sprint, Commits `9a6cff9` + `f80558f`).** Vorher: `DirectChat`-Komponente in `apps/web/app/chat/[handle]/page.tsx` initialisierte ihre Messages mit leerem `useState`, History ging beim Wechsel zu A2A-Konversation und zurück verloren. A2A-Konversationen verloren ihre History nicht, weil sie aus der Bridge-DB nachgeladen wurden — Direct-Chat hatte keine vergleichbare Persistenz-Quelle.
+
+Lösung: `useEffect([handle])` lädt `/twins/:handle/audit?limit=50` beim Mount, filtert auf relevante Capabilities, mappt `input.lastMessage` + `output.reply` auf User+Assistant-Pärchen, sortiert chronologisch (DESC → ASC), setzt Messages-State. Cancelled-Flag-Pattern für Race-Conditions, silent fail bei 401.
+
+Filter-Erweiterung in `f80558f`: erste Implementation filterte nur auf `respond_to_chat`, übersah aber `owner-direct`-Audits. Owner-Bypass-Pfad aus 2.5.4.1 schreibt nicht `respond_to_chat`, sondern `owner-direct` als Capability — gleiches Schema, andere Capability. Filter erweitert auf `Set` mit beiden: `DIRECT_CHAT_CAPABILITIES = new Set(["respond_to_chat", "owner-direct"])`. Lokal-Test zeigte alle Pärchen sichtbar inklusive Tag-6-Test-Sends.
+
+Spec-Deviation gegenüber Briefing: Claude Code nutzte `input.lastMessage` statt `input.messages[0].content`. Begründung: `input.messages` ist der kumulative Verlauf je Audit, `[0]` wäre N-mal die Erst-Message. `lastMessage` liefert pro Turn die richtige User-Message. Korrektur ohne Rückfrage akzeptiert, im Briefing-Doku im Nachgang übernommen.
+
+### 71b. Audit-Schema speichert kumulative Konversations-History — NEU 5. Mai
+Beobachtung beim #71-Debug: Owner-Direct-Audit-Schema enthält in `input.messages` den gesamten kumulativen Konversations-Verlauf, nicht nur die aktuelle User-Message. Bei Audit #50 ist die History von Audit #1 bis #49 plus eine User-Message drin — exponentielles Wachstum.
+
+Heute kein akutes Problem (DB-Größe für 30 Audits noch klein), aber langfristig:
+- Audit-Tabelle wächst quadratisch mit Konversations-Länge
+- LLM-Token-Kosten pro Audit-Schreibung enthalten die ganze History
+- `/audit?limit=50` returnt potentiell mehrere MB
+
+Lösung: Backend `apps/runtime/src/twin-service.ts` ändern, dass nur die letzte User-Message in `input.messages` persistiert wird. `lastMessage` und `output.reply` reichen für Render und Audit-Trail.
+
+Vorbedingung-Check: existing Audits müssen rückwärtskompatibel gerendert werden. Frontend-Filter aus #71 nutzt schon `lastMessage`-Field, würde mit reduzierter `input.messages`-Liste weiter funktionieren.
+
+**Größe:** S · **Priorität:** nice · **Aus:** #71 Implementation-Diskussion
+
+### 71c. Hydration-Error nach ENV-Variable-Änderungen — Stale-Bundle-Phantom
+Während #71-Test sichtbarer Hydration-Error auf `<footer>`-Element. Nach Diagnose-Sequenz (Vor-#15-Stand auschecken, Test, Stand zurück, Hard-Reload) verschwand der Fehler komplett.
+
+Ursache: `next dev` Hot-Reload beim ENV-Variable-Update (NEXT_PUBLIC_DEPLOYMENT_LABEL aus #15) hat das Bundle nicht sauber neu generiert. Server-Render hatte alten Wert, Client-Bundle den neuen — Hydration-Mismatch. Hard-Reload (Cmd+Shift+R) räumt Bundle-Cache, alles okay.
+
+Kein echter Code-Bug — pragmatisch dokumentiert als Lesson („bei ENV-Änderungen lokal Hard-Reload"), kein Sub-Schritt nötig. Falls in Production reproducible, dann eigenes Item.
+
+**Größe:** XS · **Priorität:** nice · **Aus:** #71 Live-Test, kein Action Required
 
 ---
 
@@ -867,18 +901,52 @@ Pattern: jeder Sub-Schritt hat (a) klares AK, (b) klaren Diff-Scope, (c) klares 
 
 Schwellenwert für Sub-Schritt-Aufteilung: wenn ein Bug-Hunt > 30 Minuten dauern würde, dann ist der Bug ein eigener Sub-Schritt mit eigenem Commit, nicht „noch im aktuellen Schritt mitgemacht".
 
+### Lesson (Tag 6 / #43): Reality-Check vor Briefing-Schreibung
+
+#43 stand seit drei Tagen im BACKLOG als „should". Vor dem Briefing-Schreiben kurzer Check des aktuellen Codes (`AppHeader.tsx`) — und siehe da, der Fix war längst drin. Implementiert in 2.5.4 UX-Iteration Briefing #19, ohne als Backlog-Item-Erledigung notiert worden zu sein.
+
+Lesson: Bevor man ein Briefing schreibt, einmal den aktuellen Code lesen. Drei Minuten Reality-Check sparen 30 Minuten Briefing-Schreibung plus Live-Test. Ist konsistent mit dem `git status` / `docker ps` / `curl /health` Pre-Flight-Check aus #45.
+
+Pattern: jeder Sub-Schritt beginnt mit einem 2-3-Zeilen-Reality-Check. Was ist heute der Code-Stand? Existiert der Bug noch? Welche Files sind beteiligt? Erst dann Briefing.
+
+### Lesson (Tag 6 / #71): Capability-Naming-Disziplin
+
+#71 brauchte zwei Commits, weil die erste Implementation nur auf `respond_to_chat` filterte — aber Owner-Bypass-Pfad schreibt `owner-direct`. Beide sind konzeptionell „Direct-Chat-Audits", werden aber mit unterschiedlicher Capability persistiert (Trade-off aus 2.5.4.1 Architektur-Entscheidung).
+
+Subtler Punkt: das Audit-Schema hat ein `originalCapability`-Feld in `input`, das bei `owner-direct` auf `respond_to_chat` zeigt. Hätte das Frontend dieses Feld als Filter-Source genutzt, wäre die Capability-Verzweigung im Frontend transparent gewesen.
+
+Generelle Lehre: bei Bypass-Architekturen entstehen mehrere Capabilities für dasselbe konzeptionelle Ereignis. Frontend-Filter sollte alle Varianten berücksichtigen, oder Backend sollte Bypass-Markierung anders auflösen (z.B. Capability gleich, separates `bypassed: true`-Feld).
+
+Pattern für künftige Multi-Capability-Filter: `Set<string>`-Konstante am File-Anfang, kommentiert warum mehrere Capabilities gleich behandelt werden. Macht es zukunftssicher gegen weitere Bypass-Pfade.
+
+### Lesson (Tag 6 / #71): Spec-Deviations dokumentieren, nicht zurückdrängen
+
+Briefing schrieb `input.messages[0].content` als Render-Source. Claude Code hat im Code geprüft (`twin-service.ts:106,130`) und gesehen, dass `input.messages` kumulativ ist — `[0]` wäre N-mal die Erst-Message. Stattdessen `input.lastMessage` benutzt, mit Code-Referenz als Begründung.
+
+Das ist genau der richtige Move. Briefing-Spec ist Vorgabe, aber nicht heilig. Wenn Claude Code im Code sieht, dass die Spec falsch ist, soll es korrigieren, nicht stumm umsetzen oder rückfragen. Wichtig: die Korrektur klar kennzeichnen („Spec-Deviation: ..."), Begründung mit Code-Referenz, und das Briefing im Nachgang aktualisieren.
+
+Pattern: Briefing ist Hypothese, Code-Realität ist Truth. Bei Konflikt gewinnt Code, mit dokumentierter Begründung.
+
+### Lesson (Tag 6 / Hydration-Phantom): ENV-Var-Änderungen brauchen Hard-Reload
+
+`next dev` Hot-Reload räumt das Bundle bei ENV-Variable-Updates nicht zuverlässig. Symptom: Hydration-Error nach `--build-arg`- oder `process.env`-Änderungen, der nach Hard-Reload (Cmd+Shift+R) komplett verschwindet.
+
+15 Minuten Diagnose verloren, weil ich versucht habe den Bug logisch zu erklären, statt einfach Hard-Reload als ersten Reflex zu nutzen.
+
+Pattern für künftige Frontend-Sessions: bei jedem File-Save in `.env*`, `next.config.mjs`, oder Dockerfiles → einmal Hard-Reload, bevor Bug-Diagnose anfängt. Spart Phantom-Bugs.
+
 ---
 
 ## Notiz für später
 
 Sammle weiter Punkte, die im Sparring auftauchen. Nicht jeder Punkt muss eine Phase werden — manches ist Polishing, manches ist Architektur. Die Aufteilung S/M/L/XL und must/should/nice hilft beim Priorisieren wenn die Liste lang wird.
 
-**Item-Dichte 4. Mai 2026 abend (Tag 5 Schluss):** Zusätzlich zu den 60 Items vom Mittag: 6 neue Items (#65 Reverse-Proxy, #66 DB-Backup, #67 Monitoring, #68 Vault, #69 Email-Verifikation+Reset, #70 Production-Doku). Plus 2 ✅ markierte Items (#14 Owner-Recognition, #37 Hot-Reload). Plus 6 neue Architektur-Entscheidungen (Container-zu-Container-Hop, NEXT_PUBLIC-Build-ARG, Cookie-Domain-Quick-Fix, Bridge-DB-Cleanup, packages/shared-Production-Build). Plus 8 neue Lessons aus 2.5.6 (Suspense-Pattern, shared-Build, Hot-Reload-Mutex, NEXT_PUBLIC, Cross-Subdomain-Cookies, Hairpin-NAT, Pre-existing State, Sub-Schritt-Disziplin). 2.5.6 als ✅ markiert mit allen sechs Sub-Phasen. Items insgesamt jetzt: 66.
+**Item-Dichte 5. Mai 2026 abend (Tag 6 Schluss):** Polish-Sprint nach 2.5.6. Drei Items als ✅ markiert (#15 Footer-Text, #43 Top-Nav-Versteck-Reality-Check, #71 Direct-Chat-History). Plus 2 neue Items entstanden (#71b kumulative Audit-History als Speicher-Problem, #71c Hydration-Phantom-Lesson ohne Action). Plus 4 neue Lessons aus Tag 6 (Reality-Check vor Briefing, Capability-Naming-Disziplin, Spec-Deviations dokumentieren, ENV-Hard-Reload). Items insgesamt jetzt: 69 (66 + 3 neue Sub-Items mit Buchstaben-Suffix).
 
-**Was als Nächstes ansteht:** Phase 2.5 ist faktisch abgeschlossen. 2.5.5 (Notifications) bewusst verschoben — kein Blocker für Phase 3. Mögliche nächste Sub-Schritte:
-- **Phase 3 starten** (Memory-Schichten, Skill-System, MCP-Client) — eigene Planungs-Session vorab
-- **#65 Reverse-Proxy-Architektur** als Konsolidierung des Cookie-Domain-Workarounds
-- **#66 DB-Backup-Strategie** sobald mehr User dazukommen
-- **#69 Email-Verifikation + Self-Service-Reset** sobald externe User onboarded werden sollen
+**Was als Nächstes ansteht:** Phase 2.5 inhaltlich vollständig durch. Production läuft seit Tag 5 stabil. Mögliche nächste Sub-Schritte:
+- **Pause / Reflexion** — drei Tage Production-Erfahrung sammeln, schauen was wirklich auftritt vs. was wir antizipiert haben
+- **#71b kumulative Audit-Messages** als kleiner Backend-Sub-Schritt
+- **#65 Reverse-Proxy-Architektur** für saubere Cross-Subdomain-Konsolidierung
+- **Phase 3 starten** — Memory-Schichten, Skill-System, MCP-Client mit eigener Planungs-Session vorab
 
-Heute Tag 5: Phasenwechsel von „läuft lokal" zu „läuft als Produkt unter `app.twin.harwayexperience.com` mit drei aktiven Power-Usern".
+Tag 6 Bilanz: drei kleine Items in unter zwei Stunden Code-Zeit, sauber dokumentiert. Nach den 11-Stunden-Tagen 4 und 5 gut für die Mental-Hygiene. Reality-Check als Pattern beim Polish-Arbeiten bewährt — #43 wurde dadurch ein Null-Code-Item statt eines verlorenen 30-Min-Briefings.

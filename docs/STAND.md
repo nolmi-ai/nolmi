@@ -1,93 +1,85 @@
 # twin-lab — Stand
 
-**Letztes Update:** 4. Mai 2026, ~20:00
+**Letztes Update:** 5. Mai 2026, ~20:00
 
 ## Aktuell in Arbeit
-Nichts. 2.5.6 (Production-Web-Deployment) abgeschlossen. Alle drei User
-und Twins live unter `app.twin.harwayexperience.com`. Phase 2.5 zu
-~95 % durch — nur 2.5.5 (Notifications) bleibt offen, bewusst verschoben.
+Nichts. Polish-Sprint Tag 6 abgeschlossen — drei kleine Items aus
+2.5.6-Backwash gemacht (#15, #43, #71). Phase 2.5 inhaltlich komplett
+durch, Production-Stack stabil seit gestern.
 
-## Heute (Tag 5) abgeschlossen
+## Heute (Tag 6) abgeschlossen
 
-### #64 — VPS-Git-Auth via Deploy-Key (vormittags)
-- ED25519-Deploy-Key auf VPS srv1046432 generiert (`~/.ssh/twin-lab-deploy`)
-- Public-Key bei GitHub als Repo-Deploy-Key hinterlegt (read-only,
-  `Allow write access` nicht angekreuzt)
-- SSH-Config-Section mit `Host github.com-twin-lab`-Alias plus
-  `IdentitiesOnly yes`
-- Bridge-Repo `/docker/twin-lab-bridge/repo/` umgestellt auf
-  `git@github.com-twin-lab:markusbaier/twin-lab.git`
-- Verifikation: `git fetch` und `git pull` ohne Password-Prompt durch
-- Deploy-Key wird auch für Web-App-Repo in 2.5.6 wiederverwendet
-  (Monorepo, ein Key reicht)
+### #15 — Footer-Text via ENV (vormittags, ~20 Min)
+- `apps/web/components/AppFooter.tsx`: hartcodiertes „phase 2.5"
+  entfernt, „läuft lokal" durch ENV-getriebene Konstante
+  `DEPLOYMENT_LABEL` ersetzt (Pattern analog zu `RUNTIME_URL` in
+  `FooterMeta.tsx`)
+- Neue ENV-Variable `NEXT_PUBLIC_DEPLOYMENT_LABEL` mit Default
+  „läuft lokal", Production-Wert „production"
+- `apps/web/Dockerfile`: ARG/ENV-Block erweitert (analog zu
+  NEXT_PUBLIC_RUNTIME_URL aus 2.5.6.A.4)
+- `docker/twin-lab-web/.env.example` + `README.md`: Build-Aufruf um
+  zweiten `--build-arg` ergänzt
+- `.env.example` (Workspace-Root): auskommentierter Hinweis
+- Lokal verifiziert: Footer zeigt „X Twins aktiv · läuft lokal"
+- Commit `5ed4365`
 
-### 2.5.6 — Production-Web-Deployment (nachmittags + abends)
+### #43 — Top-Nav auf /login + /onboarding versteckt (Reality-Check, 0 Min Code)
+- Backlog-Item beim Reality-Check als bereits erledigt erkannt:
+  `apps/web/components/AppHeader.tsx` returnt seit Briefing #19
+  (Tag 4 UX-Iteration, Commit `445d1a3`) `null` für Routes mit
+  `/login`- oder `/onboarding`-Prefix via `PUBLIC_PREFIXES`-Array
+  und `usePathname`-Check
+- Footer rendert weiterhin auf Public-Routes — Twin-Count fällt
+  graceful auf „multi-twin"-Fallback zurück bei 401
+- Verifizierung im Browser: `/login` zeigt nur Brand + Login-Form +
+  Footer, keine Tabs, kein TwinSwitcher, kein ProfileMenu
+- Lesson: Reality-Check vor Briefing-Schreibung lohnt sich. Drei
+  Tage zwischen Item-Entstehung und heutigem Tag, in der Zwischen-
+  zeit war's nebenbei gefixt — als ✅ markieren reicht
 
-Phase B technisch komplett durch. Drei User registriert, drei Twins
-live, Onboarding ohne Restart, Hot-Load funktional, Cookie-
-Cross-Subdomain läuft, Bridge-Hop intern stabil, A2A-Infrastruktur
-bereit.
+### #71 — Direct-Chat-History persistent über Tab-Switches (~90 Min, zwei Commits)
+- **`9a6cff9`**: erste Implementation
+  - `apps/web/app/chat/[handle]/page.tsx`, `DirectChat`-Komponente
+    erweitert um `useEffect([handle])` der `/twins/:handle/audit?limit=50`
+    fetcht, filtert auf `capability === "respond_to_chat" && status === "executed"`,
+    chronologisch (DESC → ASC) sortiert und auf User+Assistant-
+    Pärchen via `input.lastMessage` + `output.reply` mappt
+  - Spec-Deviation gegenüber Briefing: `input.lastMessage` statt
+    `input.messages[0].content`. Begründung von Claude Code:
+    `input.messages` ist kumulativ, `[0]` wäre N-mal die Erst-
+    Message. `lastMessage` liefert pro Turn die richtige User-
+    Message. Saubere Korrektur, im Briefing übernommen.
+  - cancelled-Flag-Pattern für Race-Conditions, silent fail bei 401
+- **`f80558f`**: Filter-Fix nach Live-Test
+  - Erste Test-Sends im Browser zeigten: History laden funktioniert,
+    aber Owner-Direct-Audits (Capability `owner-direct`, geschrieben
+    durch Owner-Bypass-Pfad in 2.5.4.1) waren unsichtbar
+  - Verifiziert via DB-Query: 4 Owner-Direct-Audits seit 4. Mai,
+    ungesehen in der UI
+  - Schema identisch zu `respond_to_chat` (`input.lastMessage` +
+    `output.reply`), plus zusätzlich `input.originalCapability`
+    als Markierung
+  - Filter erweitert auf `Set` mit beiden Capabilities:
+    `DIRECT_CHAT_CAPABILITIES = new Set(["respond_to_chat", "owner-direct"])`
+- Lokal verifiziert: alle Pärchen sichtbar, Tab-Switch behält History,
+  neue Sends erscheinen sofort und nach Mount-Reload via Audit
+- Backlog-Item ✅, plus neue Items #71b (kumulative History in Audits
+  als Speicher-Problem) und #71c (Hydration-Error-Phantom) entstanden
 
-Acht Commits in einem Tag:
+### Hydration-Error war Stale-Bundle-Phantom
+- Während #71-Test sichtbarer Hydration-Error auf Footer-Element
+- Diagnose-Sequenz: git log auf AppFooter.tsx, Vor-#15-Stand
+  ausgecheckt, Browser-Test → Fehler weg, #15-Stand zurück, Hard-
+  Reload → Fehler auch weg
+- Diagnose-Schluss: `next dev` Hot-Reload hat bei ENV-Variable-
+  Update das Bundle nicht sauber neu generiert. Nach Hard-Reload
+  Konsole sauber, Footer rendert korrekt
+- Kein echter Bug, aber 15-Min-Diagnose-Zeit kostete uns. Lesson:
+  bei ENV-Var-Änderungen lokal immer Hard-Reload, nicht auf Hot-
+  Reload vertrauen
 
-- **`a5b14a9`** — feat(onboarding): bridge URL aus ENV mit Fallback
-  Wizard liest `TWIN_LAB_DEFAULT_BRIDGE_URL` für Bridge-URL beim
-  Twin-Profil-Insert. Default-Fallback `http://127.0.0.1:5100` für
-  lokale Entwicklung. Vorbedingung für Production: Twins zeigen auf
-  Production-Bridge statt localhost.
-
-- **`13cc70a`** — fix(onboarding): Bridge-Register-Token im Header
-  Backlog #60 hatte den Bridge-Register-Endpoint mit Allowlist-Token
-  geschützt, der Onboarding-Caller war nicht angepasst worden. Pre-
-  existing Lücke, durch Production-Versuch aufgedeckt.
-
-- **`bdde263`** — feat(deploy): Code-Artefakte für 2.5.6
-  Phase A: Dockerfiles für Web (Next-Standalone) und Runtime,
-  Compose-File, .env.example, README mit Deploy-Sequenz. Web-Image
-  baute initial nicht durch wegen Suspense-Bug.
-
-- **`85f664e`** — fix(web): Suspense-Boundary für Nav-Komponenten
-  AppHeader und AppFooter im Layout in `<Suspense fallback={null}>`
-  gewrapped. Static-Generation von 10 Pages grün, Web-Image baut
-  durch. Plus: COPY-Zeile für nicht-existentes `apps/web/public/`
-  aus dem Web-Dockerfile entfernt.
-
-- **`79e3ae0`** — fix(shared): Production-Build mit dist/
-  `packages/shared` zeigte mit `main` auf Source-TS. Lokal okay
-  (tsx, next dev), Production-Container brachen mit
-  ERR_UNKNOWN_FILE_EXTENSION. Build-Script ergänzt, `main`/`types`/
-  `exports` auf `dist/`, predev-Hook in apps/runtime und apps/web
-  baut shared automatisch beim ersten `pnpm dev`.
-
-- **`a4f1465`** — feat(runtime): Hot-Reload für TwinServiceRegistry
-  Boot-Code akzeptiert leere DB als gültigen Onboarding-only-Modus
-  (statt `process.exit(1)`). Plus `addTwin(twinId)`-Methode auf der
-  Registry, idempotent und atomisch via pendingAdds-Mutex.
-  Onboarding-Submit ruft addTwin nach DB-Insert,
-  `requiresRestart: false` zurück. Backlog-Item #37 abgeschlossen.
-
-- **`758058e`** — fix(web): NEXT_PUBLIC_RUNTIME_URL als Build-ARG
-  Next inlined `NEXT_PUBLIC_*` zur Build-Zeit ins Client-Bundle.
-  Compose-environment kommt zu spät — Bundle hatte hartcodiert
-  `localhost:4000`. Dockerfile mit `ARG`/`ENV` vor dem Web-Build,
-  README mit `--build-arg`-Aufruf für Production.
-
-- **`f94ae0d`** — feat(auth): Cookie-Domain + Secure-Flag aus ENV
-  Cross-Subdomain-Setup (`app.*` Frontend, `runtime.*` Backend)
-  scheiterte am Cookie ohne Domain-Attribut. Zwei neue ENVs
-  (`SESSION_COOKIE_DOMAIN`, `SESSION_COOKIE_SECURE`) mit
-  konservativem Default. Backlog #65 für später: Reverse-Proxy-
-  Architektur (Same-Origin) macht das überflüssig.
-
-Plus drei Production-Aktionen ohne Code-Commit:
-- Bridge-DB von alten Handles (markus/florian/heiko vom 3. Mai)
-  bereinigt — `registeredTwins: 0` vor Onboarding
-- Bridge-URL für interne Calls auf `http://twin-lab-bridge:5100`
-  umgestellt (Container-zu-Container statt Hairpin-NAT zur Public-URL)
-- Drei User registriert via Production-Wizard, drei Twins
-  hot-geladen ohne Container-Restart
-
-## Phase 2.5 Status
+## Phase 2.5 Status (unverändert seit gestern)
 - 2.5.1 ✅ AI SDK Migration
 - 2.5.2a-d ✅ Schema, Multi-Twin Runtime, Florian-Twin
 - 2.5.2e ✅ Per-Twin LLM-Config
@@ -98,23 +90,27 @@ Plus drei Production-Aktionen ohne Code-Commit:
 - #59 ✅ Bridge-Sender-Endpoint abgesichert
 - #63 ✅ CLI-Tool für API-Key-Rotation
 - #64 ✅ VPS-Git-Auth via Deploy-Key
-- 2.5.6 ✅ Production-Web-Deployment (Tag 5)
+- 2.5.6 ✅ Production-Web-Deployment
 - 2.5.5 offen (Notifications) — verschoben, kein akuter Schmerz
 
-## Was als nächstes ansteht
-1. **Phase 2.5 als Ganzes bewusst abschließen.** STAND und BACKLOG
-   sind aktualisiert, alle drei Power-User können sich registrieren,
-   Twins onboarden, chatten. Multi-Tenant-SaaS funktional.
-2. **2.5.5 (Notifications)** bleibt verschoben, bis Schmerzen
-   sichtbar werden. Inbox-Badge plus drei Power-User vorm Browser
-   reicht heute.
-3. **Backlog #65 (Reverse-Proxy-Architektur)** als sauberer
-   Sub-Schritt, wenn Cookie-Domain-Workaround konsolidiert werden
-   soll. L-Größe, kein Notfall.
-4. **Phase 3 starten** — Memory-Schichten, Skill-System, MCP-Client.
-   Größerer strategischer Block, eigene Planungs-Session vorab.
+Plus heute aus Polish-Sprint:
+- #15 ✅ Footer-Text via ENV
+- #43 ✅ Top-Nav auf /login + /onboarding versteckt (war bereits erledigt)
+- #71 ✅ Direct-Chat-History persistent
 
-## Production-Stack — live
+## Was als nächstes ansteht
+1. **Pause oder weiteres Polish.** Heute drei Items in zwei Stunden,
+   Production läuft stabil, kein Druck.
+2. **#71b (kumulative Audit-Messages)** als Backlog-Item dokumentiert,
+   Backend-Change im Twin-Service nötig — eigener Sub-Schritt mit
+   DB-Migration-Frage. Nicht akut.
+3. **#65 Reverse-Proxy-Architektur** für saubereren Cross-Subdomain-
+   Setup. L-Größe, ruhiger Tag.
+4. **Phase 3 starten** — Memory + Skills + MCP-Client. Großer
+   strategischer Block, braucht eigene Planungs-Session vor dem
+   ersten Sub-Schritt.
+
+## Production-Stack — live (unverändert)
 - **`https://app.twin.harwayexperience.com`** — Web (Next.js Standalone)
 - **`https://runtime.twin.harwayexperience.com`** — Runtime (Fastify,
   drei Twins hot-geladen)
@@ -124,24 +120,11 @@ Plus drei Production-Aktionen ohne Code-Commit:
 Alle drei mit `restart: unless-stopped`, HTTPS via Let's Encrypt,
 Traefik-Routing.
 
-### Production-Web-Stack
-- `/docker/twin-lab-web/` auf VPS srv1046432
-- Compose mit zwei Services: `runtime` und `web`
-- Volume `twin-lab-web-data` für Runtime-DB
-- Networks: `traefik-proxy` (extern) + `internal` (Compose-intern)
-- Master-Key + Session-Secret + Bridge-Register-Token in
-  `/docker/twin-lab-web/.env` (nicht in Git)
-- Bridge-Hop intern via `http://twin-lab-bridge:5100` (kein Hairpin)
-
-### Production-Bridge-Stack (unverändert seit Tag 4)
-- `/docker/twin-lab-bridge/` auf VPS srv1046432
-- Schema: 001 + 002 (message_type drin)
-- Drei NEU registrierte Twins (Mai 4, mit neuen Tokens)
-- Container `twin-lab-bridge` mit `restart: unless-stopped`
-- Volume `twin-lab-bridge-data`
-- Register-Endpoint geschützt via `BRIDGE_REGISTER_TOKEN` (#60)
-- Sender-Endpoint geschützt via `requireTwinAuth` + Owner-Scope (#59)
-- VPS-Git-Pull via Deploy-Key (#64)
+Hinweis: heutige Footer-Änderung (#15) noch nicht in Production
+deployed. Nach Pull + Rebuild mit beiden `--build-args` würde
+Production „X Twins aktiv · production" zeigen statt aktuell „läuft
+lokal". Kein Druck — Pull machen wir beim nächsten regulären
+Production-Deploy mit.
 
 ## Lokal
 `/Users/mjb/Visual Studio/twin-lab` — drei Twins (markus, florian,
@@ -158,4 +141,5 @@ eigene Tokens, eigene API-Keys — komplett getrennt von Lokal.
 Alle drei mit anthropic/claude-opus-4-7, Production-Bridge.
 
 ## Repo
-github.com/markusbaier/twin-lab
+github.com/markusbaier/twin-lab — origin/main aktuell auf `f80558f`
+(stand von heute Mittag, drei Polish-Commits).
