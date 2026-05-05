@@ -3,6 +3,9 @@
 import { usePathname } from "next/navigation";
 import { FooterMeta } from "./FooterMeta";
 
+const DEPLOYMENT_LABEL =
+  process.env.NEXT_PUBLIC_DEPLOYMENT_LABEL ?? "läuft lokal";
+
 // ─── APP FOOTER ──────────────────────────────────────────────────────────────
 //
 // Versteckt sich auf /chat-Routes — ChatLayout nutzt `h-[calc(100vh-65px)]`,
@@ -20,7 +23,7 @@ export function AppFooter() {
 
   return (
     <footer className="border-t border-border px-6 py-3 text-xs text-muted">
-      phase 2.5 · <FooterMeta /> · läuft lokal
+      <FooterMeta /> · {DEPLOYMENT_LABEL}
     </footer>
   );
 }

@@ -47,6 +47,7 @@ Deploy-Sequenz für `app.twin.harwayexperience.com` +
      -t twin-lab-web:latest \
      -f apps/web/Dockerfile \
      --build-arg NEXT_PUBLIC_RUNTIME_URL=https://runtime.twin.harwayexperience.com \
+     --build-arg NEXT_PUBLIC_DEPLOYMENT_LABEL=production \
      .
    cd ..
    ```
