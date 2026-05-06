@@ -1,6 +1,6 @@
 # Backlog Phase 2.5 und später
 
-Stand: 5. Mai 2026, Abend (Tag 6) — Polish-Sprint nach 2.5.6 abgeschlossen. Drei kleine Items abgearbeitet (#15, #43, #71). Phase 2.5 inhaltlich komplett durch, Production-Stack stabil seit gestern.
+Stand: 6. Mai 2026, Mittag (Tag 7) — Phase 3.1 (Skill-System Engine + Pilot) komplett durch. Fünf Sub-Schritte (3.1.A bis 3.1.F) an einem Vormittag. Vier neue Commits (`2c1cfd0`, `b2b796e`, `7c65c41`, `5fbf254`) plus ein Pilot-Skill via CLI in @markus' DB. Phase 3 zur Hälfte durch.
 
 Format: Punkte mit Größe (S/M/L/XL) und Priorität (must/should/nice).
 
@@ -557,6 +557,61 @@ Kein echter Code-Bug — pragmatisch dokumentiert als Lesson („bei ENV-Änderu
 
 ---
 
+## Aus Phase 3.1 entstanden
+
+### 73. Inline-Twin-Befehle aus Owner-Chat heraus
+Aus „Mit meinem Twin"-Konversation soll User natural-language-Befehle geben können wie „Frage @florian wann er morgen Zeit hat" oder „Schick @heiko die Workshop-Details". Markus-Twin erkennt Intent, formuliert Nachricht im Markus-Stil, sendet via Bridge. Antwort kommt in der entsprechenden A2A-Konversation an. Optional: Round-trip-Update zurück in Owner-Konversation („Florian sagt: 14 Uhr passt").
+
+Drei Schichten nötig:
+- **Intent-Detection** — LLM-basierter Klassifikator („ist das ein send_to_twin-Intent?"), Regex auf @-Patterns zu fragil
+- **Tool-Use-Pattern** — Twin nutzt Skill `send_to_twin` als Tool-Call, formuliert Recipient + Content, System schickt
+- **Round-trip-Threading** — Antwort taucht in A2A-Konversation auf (haben wir), optional in Owner-Konversation als Update (neu)
+
+Approval-Strategie: **Variante C — Trust-basiert.** Vertraute Twins direkt (existierende Trust-Layer aus 2.5.4.1 wiederverwenden, nicht duplizieren), Fremde mit Approval. Skill-Manifest-Feld `requires_approval` muss Trust-aware werden — entweder Logik im Skill, oder Skill ruft existierende `checkTrust()`-Funktion auf.
+
+Vorbedingung: 3.1 Skill-System ✅ + 3.2 Tool-Use über MCP-Pattern. Implementation als Action-Skill `send_to_twin` mit Manifest, Mandate-gated. Kalenderzeit: 6-10 Wochen ab heute.
+
+**Größe:** L · **Priorität:** should · **Aus:** Markus-Idee 6. Mai während 3.1.B-Implementation
+
+### 74. Persona-Skill-Layering klären
+Beim 3.1.E-Toggle-Test entdeckt: Twin antwortet mit Workshop-Daten obwohl `harway-workshops`-Skill deaktiviert. Ursache: `docs/persona.md` enthält Workshop-Block 1:1 (aus dem der Skill-Inhalt extrahiert wurde). Toggle-Test funktioniert deshalb nicht als verlässlicher Engine-Test — Engine selbst ist clean (`test-skill-engine.ts` grün, Skill-Block bei `is_active=0` korrekt nicht im System-Prompt).
+
+Architektur-Frage: wenn Wissen gleichzeitig in Persona und Skill steckt, ist es nicht eindeutig zu welchem es gehört. Drei Lösungs-Optionen:
+1. **Persona-Cleanup** — Workshop-Inhalt aus `docs/persona.md` raus, lebt nur noch im Skill. Saubere Trennung. Risiko: bei Skill-Deaktivierung weiß der Twin nichts mehr von Workshops
+2. **Persona als Fallback markieren** — Workshop-Inhalt mit „Falls keine konkreten Daten verfügbar: nicht raten, auf workshop@harwayexperience.com verweisen". Skill liefert dann konkrete Daten, Persona dient als Fallback
+3. **Layering klar dokumentieren** — Persona = identitäts-stabiles Wissen (wer Markus ist, wie er klingt), Skill = austauschbares Wissen (Termine, Preise, Daten die sich ändern). Workshop-Inhalt ist austauschbar, gehört in Skill — Persona-Eintrag wäre dann ein Bug
+
+Vote: **3.** Konsequent durchziehen. Persona-Refactor in eigenem Sub-Schritt — Workshop-Block raus, andere identitäts-stabile Inhalte (wer Markus ist, wie er klingt, was er nicht tut) bleiben drin.
+
+Vorbedingung-Check: Skill-System steht (Phase 3.1 ✅), Persona-Reload pro Boot ist stable. Ein Sub-Schritt von ~30 Min Edit + Boot-Test reicht.
+
+**Größe:** S · **Priorität:** should · **Aus:** 3.1.E Toggle-Test 6. Mai
+
+### 75. Skills lokal vs. Production-Sync
+Skills leben heute nur in der lokalen DB (`data/twin.db`). Markus-Twin auf Production hat keine Skills, weil Skill-Files via CLI lokal in lokale DB importiert wurden — Production-DB ist unberührt.
+
+Drei Sync-Strategien denkbar:
+- **Manuell pro Production-Deploy** — Skill-Files committen (gitignored entfernen), CLI auf Production laufen lassen. Einfach, aber: Skills im Repo = öffentlich
+- **Skill-Sync-Endpoint** — Backend-Route `POST /twins/:handle/skills/sync` mit Manifest+Markdown-Body, importiert in DB. Wäre auch UI-fähig (3.1-Phase-Ende oder später, war geplant) — Edit/Create via UI baut auf demselben Endpoint
+- **Eigener Skill-Repo pro User** — User hat einen privaten Repo nur für Skills, Production-Twin liest beim Boot (oder via Webhook-Refresh). Komplexer, aber: Multi-Device-fähig, Skills versioniert
+
+Vote heute: **2.** Macht Skills UI-fähig und löst gleichzeitig das Sync-Problem. Gehört eigentlich zur „UI-Editierbarkeit"-Phase, die bisher als Phase 3-Ende oder später angesetzt war. Konkret: Endpoint, dann optional UI-Editor in Phase 4.
+
+**Größe:** M · **Priorität:** should · **Aus:** 3.1.F Pilot-Skill war lokal, Frage „und Production?" ungeklärt
+
+### 76. Skill-Edit / Delete via UI
+Heute (3.1.E): UI ist read-only mit Aktiv-Toggle. Skills werden via CLI angelegt und überschrieben (`--force`). Es gibt keinen UI-Pfad zum Editieren oder Löschen.
+
+Was fehlt:
+- **Edit:** Skill-Detail-View mit Markdown-Editor für SKILL.md, Form-Fields für Manifest. Auf Save: PATCH gegen `/twins/:handle/skills/:skillId`. Vorbedingung: Sync-Endpoint aus #75
+- **Delete:** Confirm-Dialog, dann DELETE gegen `/twins/:handle/skills/:skillId`. Optional: „Soft-Delete" via `is_active=false` (haben wir schon im Toggle), Hard-Delete als zweite Stufe
+
+Verknüpft mit #10 (UI-Bearbeitung von Persona/Mandates). Konsistente UX: alles, was heute in Files lebt, soll später in der UI editierbar sein.
+
+**Größe:** L · **Priorität:** should · **Aus:** 3.1.E expliziter Scope-Ausschluss
+
+---
+
 ## Phase 3 — Memory + Skills + Tools
 
 Memory-Schichten und Skill-System. Vor Phase 4. Aufwand-Cluster.
@@ -935,18 +990,80 @@ Pattern: Briefing ist Hypothese, Code-Realität ist Truth. Bei Konflikt gewinnt 
 
 Pattern für künftige Frontend-Sessions: bei jedem File-Save in `.env*`, `next.config.mjs`, oder Dockerfiles → einmal Hard-Reload, bevor Bug-Diagnose anfängt. Spart Phantom-Bugs.
 
+### Lesson (Tag 7 / 3.1.B): Pattern aus 2.5.4.1 als Vorlage für neues Subsystem
+
+3.1.B hat 7 Minuten Code-Zeit gebraucht, weil Trust-Layer aus 2.5.4.1 das Pattern vorgegeben hat: DB-Repo + Routes-Funktion + Registry-Dependency-Injection + Test-Skript mit Mock-LLM. Skill-System ist konzeptionell ein anderes Domain, aber strukturell exakt dieselbe Architektur.
+
+Generelles Prinzip: bei neuen Multi-Tenant-Features in twin-lab — Mandate-System, Trust-Layer, Skill-System, später Memory-Schichten — ist das Pattern „Pro-Twin-Tabelle + Repo + DI über Registry + Routes-Funktion + Mock-Test" robust genug, dass Briefings 1:1 auf existierende Code-Stellen referenzieren können statt freihändig zu spezifizieren.
+
+Briefings für künftige Phase-3-Sub-Schritte sollten bewusst auf diese Vorlage zeigen — spart Code-Zeit und macht Architektur konsistent.
+
+### Lesson (Tag 7 / 3.1.D): Briefing-Pfad-Bug bei pnpm-filter-Aufrufen
+
+Im 3.1.D-Briefing standen Verifikations-Befehle wie `pnpm --filter @twin-lab/runtime twin:skill-create @markus apps/runtime/skills-templates/_test-skill`. Lief auf `apps/runtime/apps/runtime/skills-templates/_test-skill` — `apps/runtime/`-Prefix wurde doppelt, weil `pnpm --filter` bereits ins Workspace-Verzeichnis wechselt.
+
+Korrektur: relativ zum Workspace aufrufen (`skills-templates/_test-skill` ohne Prefix), oder absoluten Pfad nutzen. Claude Code hat den Bug nicht erkannt, weil das Briefing eindeutig formuliert war — der Bug war konzeptionell auf User-Ebene (Pfad-Auflösung), nicht im Code.
+
+Pattern für künftige Briefings mit pnpm-filter-Aufrufen: explizit notieren, dass Pfade relativ zum Filter-Target sind. Oder besser: Beispiele mit absoluten Pfaden geben, die garantiert funktionieren.
+
+### Lesson (Tag 7 / Cleanup): tsx-Inline-Eval kann keine relativen Imports auflösen
+
+Cleanup-Skript für 3.1.D-Test sollte als `pnpm exec tsx -e "..."` mit `import { ... } from './src/...js'` laufen. Brach mit `Cannot find module './src/config.js'`, weil `tsx -e` die Source aus `[eval]` ausführt — `[eval]` hat keinen Filesystem-Anker, relative Imports lösen nicht auf.
+
+Zwei pragmatische Workarounds: (a) Wegwerf-Skript als Tempfile schreiben, dann `tsx /tmp/cleanup.ts`, oder (b) SQL direkt nutzen (`sqlite3 data/twin.db "DELETE FROM ..."`). SQL ist schneller, sicherer (kein TS-Build-Pfad), und bei einfachen Cleanup-Operationen die richtige Wahl.
+
+Pattern: für DB-Inspektion oder -Cleanup während Verifikation → erste Wahl ist sqlite3-CLI, nicht tsx-eval. Inline-tsx eignet sich nur für Multi-Step-Logik, die nicht mit SQL ausdrückbar ist.
+
+### Lesson (Tag 7 / 3.1.E): Engine-Test ist verlässlicher als Browser-Test bei Persona-Confound
+
+Browser-Test für 3.1.E (Skill-Toggle aus → Twin verliert Wissen) war kompromittiert, weil `docs/persona.md` denselben Workshop-Inhalt hatte wie der Skill. Twin antwortete trotz `is_active=0` korrekt — aus Persona, nicht aus Skill.
+
+Engine-Test (`test-skill-engine.ts`) hat parallel grün durchlaufen mit isoliertem Mock-LLM und sauberer Schichten-Reihenfolge-Assertion. Damit war klar: Engine ist correctness-mäßig in Ordnung, der Browser-Confound ist ein Daten-Problem (Persona-Skill-Doppelung), kein Code-Bug.
+
+Generelles Prinzip: bei verdächtigen Browser-Symptomen erst Engine-Test laufen lassen, dann debuggen. Engine-Tests sind Mock-LLM-basiert, schnell, deterministisch — Browser-Tests sind LLM-basiert, langsam, nicht-deterministisch. Bei Konflikt zwischen den beiden gewinnt der Engine-Test als Truth-Source.
+
+### Lesson (Tag 7 / 3.1.E): UI-Payload-Filter als Konvention für Listen-Endpoints
+
+Skill-DB-Records enthalten Manifest, SKILL.md, optional Script — alles potentiell groß. Listen-Endpoints sollen nicht alles ausliefern. 3.1.E-Pattern: Backend-Helper `toSkillUiPayload()` schneidet schwere Felder raus, ersetzt durch Char-Counts (`instructionsLength`) und Bool-Flags (`hasScript`).
+
+Pattern für künftige Listen-Endpoints in twin-lab: separates UI-Payload-Schema in `packages/shared`, das die Wire-Form von der DB-Form trennt. Backend liefert UI-Form, Frontend importiert UI-Type. Macht Wire-Format vorhersehbar und erlaubt DB-Schema-Änderungen ohne Frontend-Auswirkung.
+
+Verwandt: `instructionsLength` und `hasScript` als Pattern für „große Felder kompakt repräsentieren". Bei Memory-Schichten in 3.3 vermutlich wieder relevant (Conversation-Summary statt full History).
+
+### Lesson (Tag 7 / Workflow): Vier Sub-Schritte am Vormittag ist Tempo-Ausreißer, nicht Norm
+
+3.1.A bis 3.1.F (Modulo F als Daten-Op) an einem Vormittag — ungewöhnlich schnell. Faktoren, die das ermöglicht haben:
+
+- Architektur war vor 3.1.A klar (Strategie-Session vorab)
+- Pattern aus 2.5.4.1 als Vorlage (siehe vorige Lesson)
+- Briefings waren detailliert und referenzierten existierende Code-Stellen (Trust-Routes, set-api-key-Tool)
+- Verifikations-Schritte klar dokumentiert (Test-Skripte, Curl-Befehle, SQL-Inspect)
+
+Schätzungen für 3.2 (MCP-Client) sollten NICHT auf diesem Tempo basieren. MCP ist ein Protokoll-Standard mit eigenen Edge-Cases (Stdio vs. HTTP-Transport, Tool-Schema-Validation, Server-Capabilities-Discovery), keine Trust-Repo-Variante. Zeitfenster-Annahme aus ROADMAP (1-2 Wochen) ist realistischer als „4 Stunden".
+
+Generelles Prinzip: Tempo-Ausreißer als Datenpunkt nehmen, nicht als Baseline. Schätzungen kalibrieren sich erst nach 3-4 Sub-Schritten in einer neuen Domain.
+
+### Lesson (Tag 7 / Strategie): Pre-Implementation-Strategie-Sessions sind Hebel
+
+Vor 3.1.A gab's eine ~30-Min-Session, in der fünf Architektur-Entscheidungen festgelegt wurden (Hybrid-C, DB-Storage, Capability-Mapping, MCP-als-Source, Strategie-B). Die Entscheidungen waren so klar, dass die folgenden Sub-Schritte ohne weitere Architektur-Diskussion durchliefen.
+
+Vergleich zu 2.5.6 (Production-Web-Deployment, Tag 5): viele kleine Architektur-Entscheidungen wurden ad-hoc während der Implementation getroffen (Container-zu-Container-Hop, Cookie-Domain via ENV, NEXT_PUBLIC als Build-ARG). Funktionierte auch, aber kostete mehr Bug-Hunt-Zeit.
+
+Pattern: bei neuen Phase-Blöcken (3.2 MCP-Client, 3.3 Memory) zuerst eine Strategie-Session mit konkreten Architektur-Festlegungen. Erst dann Sub-Schritt-Briefings schreiben. Spart Implementation-Zeit, weil Claude Code Entscheidungen nicht selbst treffen muss.
+
 ---
 
 ## Notiz für später
 
 Sammle weiter Punkte, die im Sparring auftauchen. Nicht jeder Punkt muss eine Phase werden — manches ist Polishing, manches ist Architektur. Die Aufteilung S/M/L/XL und must/should/nice hilft beim Priorisieren wenn die Liste lang wird.
 
-**Item-Dichte 5. Mai 2026 abend (Tag 6 Schluss):** Polish-Sprint nach 2.5.6. Drei Items als ✅ markiert (#15 Footer-Text, #43 Top-Nav-Versteck-Reality-Check, #71 Direct-Chat-History). Plus 2 neue Items entstanden (#71b kumulative Audit-History als Speicher-Problem, #71c Hydration-Phantom-Lesson ohne Action). Plus 4 neue Lessons aus Tag 6 (Reality-Check vor Briefing, Capability-Naming-Disziplin, Spec-Deviations dokumentieren, ENV-Hard-Reload). Items insgesamt jetzt: 69 (66 + 3 neue Sub-Items mit Buchstaben-Suffix).
+**Item-Dichte 6. Mai 2026 mittag (Tag 7):** Phase 3.1 (Skill-System Engine + Pilot) komplett durch — fünf Sub-Schritte (3.1.A bis 3.1.F) an einem Vormittag, vier neue Commits, ein Pilot-Skill via CLI lokal in @markus' DB. Plus 4 neue Items entstanden (#73 Inline-Twin-Befehle, #74 Persona-Skill-Layering, #75 Skills-Production-Sync, #76 Skill-Edit-via-UI). Plus 7 neue Lessons aus Tag 7 (Pattern aus 2.5.4.1 als Vorlage, Briefing-Pfad-Bug bei pnpm-filter, tsx-Inline-Eval-Limits, Engine-Test als Truth-Source bei Persona-Confound, UI-Payload-Filter als Konvention, Tempo-Ausreißer-Vorsicht, Pre-Implementation-Strategie-Sessions als Hebel). Items insgesamt jetzt: 73 (69 + 4 neue Items #73-#76).
 
-**Was als Nächstes ansteht:** Phase 2.5 inhaltlich vollständig durch. Production läuft seit Tag 5 stabil. Mögliche nächste Sub-Schritte:
-- **Pause / Reflexion** — drei Tage Production-Erfahrung sammeln, schauen was wirklich auftritt vs. was wir antizipiert haben
-- **#71b kumulative Audit-Messages** als kleiner Backend-Sub-Schritt
-- **#65 Reverse-Proxy-Architektur** für saubere Cross-Subdomain-Konsolidierung
-- **Phase 3 starten** — Memory-Schichten, Skill-System, MCP-Client mit eigener Planungs-Session vorab
+**Was als Nächstes ansteht:** Phase 3.1 abgeschlossen. Mögliche nächste Sub-Schritte:
+- **Pause / Reflexion** — vier Commits am Vormittag, Mental-Hygiene
+- **Strategie-Session vor 3.2 (MCP-Client)** — Pre-Implementation-Diskussion mit konkreten Architektur-Festlegungen, analog zur Phase-3-Strategie-Session heute morgen
+- **#74 Persona-Skill-Layering** als kleiner Sub-Schritt (~30 Min Persona-Edit + Boot-Test)
+- **#75 Skills-Production-Sync** als Vorbereitung auf Multi-User-Skills
+- **3.2 starten** mit MCP-Client-Implementation
 
-Tag 6 Bilanz: drei kleine Items in unter zwei Stunden Code-Zeit, sauber dokumentiert. Nach den 11-Stunden-Tagen 4 und 5 gut für die Mental-Hygiene. Reality-Check als Pattern beim Polish-Arbeiten bewährt — #43 wurde dadurch ein Null-Code-Item statt eines verlorenen 30-Min-Briefings.
+Tag 7 Bilanz: schneller als geplant (5 Sub-Schritte statt 1-2), klar strukturiert (jeder Sub-Schritt ein Commit oder explizite Daten-Op), sauber dokumentiert. Pre-Implementation-Strategie-Session als wichtigster Hebel — sollte vor 3.2 wiederholt werden.

@@ -1,145 +1,208 @@
 # twin-lab — Stand
 
-**Letztes Update:** 5. Mai 2026, ~20:00
+**Letztes Update:** 6. Mai 2026, ~12:00
 
 ## Aktuell in Arbeit
-Nichts. Polish-Sprint Tag 6 abgeschlossen — drei kleine Items aus
-2.5.6-Backwash gemacht (#15, #43, #71). Phase 2.5 inhaltlich komplett
-durch, Production-Stack stabil seit gestern.
+Nichts. Phase 3.1 (Skill-System Engine + Pilot) komplett durch — fünf
+Sub-Schritte (3.1.A bis 3.1.F) an einem Vormittag. Production-Stack
+weiter stabil seit Tag 5.
 
-## Heute (Tag 6) abgeschlossen
+## Heute (Tag 7) abgeschlossen
 
-### #15 — Footer-Text via ENV (vormittags, ~20 Min)
-- `apps/web/components/AppFooter.tsx`: hartcodiertes „phase 2.5"
-  entfernt, „läuft lokal" durch ENV-getriebene Konstante
-  `DEPLOYMENT_LABEL` ersetzt (Pattern analog zu `RUNTIME_URL` in
-  `FooterMeta.tsx`)
-- Neue ENV-Variable `NEXT_PUBLIC_DEPLOYMENT_LABEL` mit Default
-  „läuft lokal", Production-Wert „production"
-- `apps/web/Dockerfile`: ARG/ENV-Block erweitert (analog zu
-  NEXT_PUBLIC_RUNTIME_URL aus 2.5.6.A.4)
-- `docker/twin-lab-web/.env.example` + `README.md`: Build-Aufruf um
-  zweiten `--build-arg` ergänzt
-- `.env.example` (Workspace-Root): auskommentierter Hinweis
-- Lokal verifiziert: Footer zeigt „X Twins aktiv · läuft lokal"
-- Commit `5ed4365`
+### Strategie-Session: Phase 3 konkretisiert (vormittags, ~30 Min)
+Fünf Architektur-Entscheidungen festgelegt:
+- **Skill-Definition Hybrid C** — Manifest (YAML) + SKILL.md +
+  optional Script. Pattern angelehnt an Hermes/Cline/agentskills.io
+- **Storage in DB von Anfang an** — Tabelle `skills` mit
+  Multi-Tenant-Isolation pro `twin_id`
+- **Capability-Mapping** — Skills gehören zu Capabilities, sind
+  selbst keine. Mandate-Layer aus 2.5.4.1 unangetastet
+- **MCP als Skill-Source** — keine zweite Architektur, MCP-Tools
+  registrieren als Skills mit `source: "mcp"`
+- **Skill-Selection Strategie B** — alle aktiven Skills permanent
+  im System-Prompt. Migrationspfad zu C (Hybrid Core/On-demand)
+  dokumentiert für später, wenn Token-Volumen es erzwingt
 
-### #43 — Top-Nav auf /login + /onboarding versteckt (Reality-Check, 0 Min Code)
-- Backlog-Item beim Reality-Check als bereits erledigt erkannt:
-  `apps/web/components/AppHeader.tsx` returnt seit Briefing #19
-  (Tag 4 UX-Iteration, Commit `445d1a3`) `null` für Routes mit
-  `/login`- oder `/onboarding`-Prefix via `PUBLIC_PREFIXES`-Array
-  und `usePathname`-Check
-- Footer rendert weiterhin auf Public-Routes — Twin-Count fällt
-  graceful auf „multi-twin"-Fallback zurück bei 401
-- Verifizierung im Browser: `/login` zeigt nur Brand + Login-Form +
-  Footer, keine Tabs, kein TwinSwitcher, kein ProfileMenu
-- Lesson: Reality-Check vor Briefing-Schreibung lohnt sich. Drei
-  Tage zwischen Item-Entstehung und heutigem Tag, in der Zwischen-
-  zeit war's nebenbei gefixt — als ✅ markieren reicht
+Plus: Phase-3-Reihenfolge umgestellt — Skill-System (3.1) ist
+Fundament, MCP (3.2) ist Tool-Provider. Vorher war's andersherum.
+ROADMAP.md aktualisiert.
 
-### #71 — Direct-Chat-History persistent über Tab-Switches (~90 Min, zwei Commits)
-- **`9a6cff9`**: erste Implementation
-  - `apps/web/app/chat/[handle]/page.tsx`, `DirectChat`-Komponente
-    erweitert um `useEffect([handle])` der `/twins/:handle/audit?limit=50`
-    fetcht, filtert auf `capability === "respond_to_chat" && status === "executed"`,
-    chronologisch (DESC → ASC) sortiert und auf User+Assistant-
-    Pärchen via `input.lastMessage` + `output.reply` mappt
-  - Spec-Deviation gegenüber Briefing: `input.lastMessage` statt
-    `input.messages[0].content`. Begründung von Claude Code:
-    `input.messages` ist kumulativ, `[0]` wäre N-mal die Erst-
-    Message. `lastMessage` liefert pro Turn die richtige User-
-    Message. Saubere Korrektur, im Briefing übernommen.
-  - cancelled-Flag-Pattern für Race-Conditions, silent fail bei 401
-- **`f80558f`**: Filter-Fix nach Live-Test
-  - Erste Test-Sends im Browser zeigten: History laden funktioniert,
-    aber Owner-Direct-Audits (Capability `owner-direct`, geschrieben
-    durch Owner-Bypass-Pfad in 2.5.4.1) waren unsichtbar
-  - Verifiziert via DB-Query: 4 Owner-Direct-Audits seit 4. Mai,
-    ungesehen in der UI
-  - Schema identisch zu `respond_to_chat` (`input.lastMessage` +
-    `output.reply`), plus zusätzlich `input.originalCapability`
-    als Markierung
-  - Filter erweitert auf `Set` mit beiden Capabilities:
-    `DIRECT_CHAT_CAPABILITIES = new Set(["respond_to_chat", "owner-direct"])`
-- Lokal verifiziert: alle Pärchen sichtbar, Tab-Switch behält History,
-  neue Sends erscheinen sofort und nach Mount-Reload via Audit
-- Backlog-Item ✅, plus neue Items #71b (kumulative History in Audits
-  als Speicher-Problem) und #71c (Hydration-Error-Phantom) entstanden
+### 3.1.A — DB-Schema + Skill-Repo (~45 Min)
+**Commit `2c1cfd0`**
+- Migration `008_skills.sql`: Tabelle `skills` mit
+  `UNIQUE(twin_id, name)`, FK auf `twin_profiles` mit
+  `ON DELETE CASCADE`, Indizes für `twin_id` / `is_active` / `source`
+- `apps/runtime/src/skills/repo.ts`: SkillRepo mit
+  `add` / `findById` / `findByName` / `list` / `update` / `setActive` /
+  `remove` plus eigene Error-Typen `SkillAlreadyExistsError` /
+  `SkillNotFoundError`
+- `apps/runtime/src/scripts/test-skill-repo.ts`: 9 Steps grün
+- `packages/shared/src/index.ts`: Zod-Schemas für `Skill`,
+  `SkillManifest`, `SkillInput`, `SkillOutput`, `SkillSource`
+- ID-Format: `skill_<nanoid(16)>`
 
-### Hydration-Error war Stale-Bundle-Phantom
-- Während #71-Test sichtbarer Hydration-Error auf Footer-Element
-- Diagnose-Sequenz: git log auf AppFooter.tsx, Vor-#15-Stand
-  ausgecheckt, Browser-Test → Fehler weg, #15-Stand zurück, Hard-
-  Reload → Fehler auch weg
-- Diagnose-Schluss: `next dev` Hot-Reload hat bei ENV-Variable-
-  Update das Bundle nicht sauber neu generiert. Nach Hard-Reload
-  Konsole sauber, Footer rendert korrekt
-- Kein echter Bug, aber 15-Min-Diagnose-Zeit kostete uns. Lesson:
-  bei ENV-Var-Änderungen lokal immer Hard-Reload, nicht auf Hot-
-  Reload vertrauen
+### 3.1.B+C — Skill-Engine + System-Prompt-Integration (~7 Min Code, +Verifikation)
+**Commit `b2b796e`**
+- Neu: `apps/runtime/src/skills/prompt-builder.ts` —
+  `buildSkillsBlock(skills)` baut die vierte System-Prompt-Schicht
+  (`# Verfügbare Skills` Header + Hinweis-Satz + pro Skill
+  `## name` + Beschreibung + `instructionsMd`, getrennt durch `---`)
+- `apps/runtime/src/twin-service.ts`: `runModel()` lädt vor jedem
+  Call `skills.list({activeOnly: true})`, baut Block, loggt
+  `[skills] block in system-prompt: twinId=…, skillCount=…,
+  skillsBlockChars=…` als Token-Volumen-Proxy. Reiht ihn als
+  dritte Schicht zwischen Persona und LANGUAGE_DIRECTIVE ein.
+  Skills automatisch aktiv für alle Aufrufer (chat,
+  runOwnerDirect, approveDefault, approveTwinSend,
+  approveTwinResponse, handleTrustedBridgeMessage).
+- `apps/runtime/src/twin-service-registry.ts` und `index.ts`:
+  SkillRepo via Registry-Pattern durchgereicht (analog TrustRepo)
+- Neu: `apps/runtime/src/scripts/test-skill-engine.ts` — Mock-LLM
+  via `MockLanguageModelV3` aus `ai/test`, 6 Stages alle grün
+  (Skill anlegen, Chat-Call, Assertions auf Schichten-Reihenfolge,
+  setActive(false) + zweiter Call, Cleanup)
+- 3.1.C ist konzeptionell Teil von 3.1.B — Claude Code hat beides
+  in einem Schritt gebaut, ein Commit reicht
 
-## Phase 2.5 Status (unverändert seit gestern)
-- 2.5.1 ✅ AI SDK Migration
-- 2.5.2a-d ✅ Schema, Multi-Twin Runtime, Florian-Twin
-- 2.5.2e ✅ Per-Twin LLM-Config
-- 2.5.3 ✅ Onboarding-Wizard
-- 2.5.4 ✅ User-Auth + Trust + A2A-UI + UX-Polish
-- #45 ✅ Bridge-Production-Sync
-- #60 ✅ Bridge-Register-Endpoint abgesichert
-- #59 ✅ Bridge-Sender-Endpoint abgesichert
-- #63 ✅ CLI-Tool für API-Key-Rotation
-- #64 ✅ VPS-Git-Auth via Deploy-Key
-- 2.5.6 ✅ Production-Web-Deployment
-- 2.5.5 offen (Notifications) — verschoben, kein akuter Schmerz
+### 3.1.D — CLI-Tool für Skill-Anlegen (~30 Min)
+**Commit `7c65c41`**
+- `apps/runtime/src/scripts/skill-create.ts` — CLI-Tool:
+  Args-Parsing `<handle> <skill-dir> [--force]`, Verzeichnis-Sanity
+  (manifest.yaml + SKILL.md Pflicht, script.ts optional),
+  YAML-Parse mit snake→camel-Mapping (`requires_approval` →
+  `requiresApproval`), Validierung gegen `SkillManifestSchema`,
+  Twin-Lookup über `TwinProfilesRepo`, Conflict-Detection via
+  `SkillRepo.findByName()` (Default = Error mit `--force`-Hinweis,
+  `--force` triggert `update()`)
+- `apps/runtime/package.json`: Script-Eintrag `twin:skill-create`
+- Neu: `apps/runtime/skills-templates/` mit `.gitignore`-Whitelist
+  (README.md, `_test-skill/**`), README mit Format-Doku,
+  `_test-skill/manifest.yaml` + `_test-skill/SKILL.md` (Marker-Wort
+  `twinlab-skill-test-marker` für späteren Engine-Sanity-Check)
+- Source-Format `manual` (Platz für `mcp` in 3.2)
+- Verifikation: 4 Steps grün (Import → Re-Import-Error → --force →
+  Update mit gleicher skillId)
 
-Plus heute aus Polish-Sprint:
-- #15 ✅ Footer-Text via ENV
-- #43 ✅ Top-Nav auf /login + /onboarding versteckt (war bereits erledigt)
-- #71 ✅ Direct-Chat-History persistent
+### 3.1.F — Pilot-Skill HARWAY-Workshop-Kontext (~15 Min)
+- Skill-Files lokal in `apps/runtime/skills-templates/harway-workshops/`
+  (gitignored — Skills sind User-Daten, nicht Repo-Inhalt)
+- Manifest: `name: harway-workshops`,
+  `capability: respond_to_chat`, `requires_approval: false`
+- SKILL.md: drei Workshop-Formate (Konzept / Hands-on /
+  Team-Enablement), Konditionen, Kontaktdaten — Inhalt aus
+  `docs/persona.md` extrahiert
+- Import via CLI: `pnpm --filter @twin-lab/runtime
+  twin:skill-create @markus skills-templates/harway-workshops`
+- skillId: `skill_2-T2zqvxf3m-0bbD`, 1800 chars Instructions
+- Browser-Test mit drei Fragen (Termin / Preise / Übersicht): Twin
+  antwortet sauber im Markus-Stil mit den Skill-Daten, keine
+  Halluzinationen, keine erfundenen Tagessätze
+- Kein Commit — reine Datenoperation, Skill-Files gitignored
+
+### 3.1.E — Read-only UI in Settings + Toggle (~3h Pair-Programming)
+**Commit `5fbf254`**
+- Backend `apps/runtime/src/server.ts`:
+  `registerSkillRoutes(app, deps, requireOwner)` analog zu
+  `registerTrustRoutes`. Hilfs-Funktion `toSkillUiPayload()`
+  schneidet Manifest/Markdown/Script raus und konvertiert
+  Timestamps (DB epoch ms → ISO-String)
+- Backend Routes: `GET /twins/:handle/skills` (Owner-gated,
+  sortiert aktive zuerst alphabetisch, dann inaktive) und
+  `PATCH /twins/:handle/skills/:skillId/active` (Body
+  `{ isActive: boolean }`, Cross-Twin-Check → 404 wenn Skill
+  nicht zum Handle gehört)
+- `apps/runtime/src/index.ts`: SkillRepo-Instanz aus 3.1.B
+  zusätzlich an `createServer({...})` durchgereicht
+- `packages/shared/src/index.ts`: `SkillUiPayloadSchema` +
+  `SkillUiPayload`-Type
+- Frontend `apps/web/app/settings/page.tsx`: neue Skills-Section
+  zwischen „Vertraute Twins" und „Persona und Mandates". Pro
+  Skill: Name + Description, Aktiv-Toggle rechts, Badges
+  (Capability, Source, Instructions-Länge, ggf. „Script" /
+  „requires approval"). Toggle mit Optimistic-Update +
+  Revert-bei-Error + 5s-Auto-Clear. Empty-State mit CLI-Befehl
+  als monospace-Block. `mcp`-Source-Badge accent-coloriert
+  (vorbereitet auf 3.2)
+- `skillBusyIds`-Set statt globalem busy-Boolean — User kann
+  mehrere Skills parallel toggeln ohne UI-Block
+- Browser-Test: Settings-Block korrekt, PATCH ändert DB-Wert,
+  Cross-Twin-Isolation grün (Florian sieht keine Markus-Skills),
+  Owner-Gating Backend liefert 401 ohne Cookie
+- Mit `5fbf254` ist Phase 3.1 inhaltlich abgeschlossen
+
+### Persona-Skill-Doppelung als Architektur-Befund
+- Beim Toggle-Test entdeckt: Twin antwortet mit Workshop-Daten
+  obwohl Skill deaktiviert. Ursache: `docs/persona.md` enthält
+  Workshop-Block 1:1 (aus dem der Skill-Inhalt extrahiert wurde)
+- Engine selbst ist clean (`test-skill-engine.ts` grün,
+  Skill-Block bei `is_active=0` korrekt nicht im System-Prompt)
+- Confound, kein Bug — gehört als Architektur-Frage in den
+  Backlog (Item #74). Vote: Layering klar dokumentieren
+  (Persona = identitäts-stabiles Wissen, Skill = austauschbares),
+  Workshop-Inhalt aus Persona raus
+
+### Hydration-Error wieder aufgetaucht
+- Nach Schema-Erweiterung in `packages/shared` und Server-Code-
+  Änderungen zeigte Browser kurz Hydration-Error auf `<footer>`
+- Bekannt aus Tag 6 (Backlog #71c, Stale-Bundle-Phantom). Hard-
+  Reload räumt's
+- Bestätigt das Pattern: bei ENV-Var-Änderungen UND bei
+  Schema-Erweiterungen in `packages/shared` lokal Hard-Reload
+
+## Phase 3 Status
+
+- 3.1 ✅ **Skill-System Engine + Pilot** (5/5 Sub-Schritte, ein
+  Vormittag)
+  - 3.1.A ✅ DB-Schema + Skill-Repo
+  - 3.1.B+C ✅ Engine + System-Prompt-Integration
+  - 3.1.D ✅ CLI-Tool zum Importieren
+  - 3.1.E ✅ Read-only UI + Toggle
+  - 3.1.F ✅ Pilot-Skill `harway-workshops`
+- 3.2 offen — MCP-Client als Skill-Provider
+- 3.3 offen — Memory: Conversation + Semantic
+- 3.4 offen — Memory: Episodic
+- 3.5 offen — Hyperbrowser als MCP-Skill
+- 3.6 offen — Procedural Memory (ggf. Phase 4)
 
 ## Was als nächstes ansteht
-1. **Pause oder weiteres Polish.** Heute drei Items in zwei Stunden,
-   Production läuft stabil, kein Druck.
-2. **#71b (kumulative Audit-Messages)** als Backlog-Item dokumentiert,
-   Backend-Change im Twin-Service nötig — eigener Sub-Schritt mit
-   DB-Migration-Frage. Nicht akut.
-3. **#65 Reverse-Proxy-Architektur** für saubereren Cross-Subdomain-
-   Setup. L-Größe, ruhiger Tag.
-4. **Phase 3 starten** — Memory + Skills + MCP-Client. Großer
-   strategischer Block, braucht eigene Planungs-Session vor dem
-   ersten Sub-Schritt.
+1. **Pause / Mittagspause.** Vier Commits am Vormittag, sauber
+   abgeschlossen.
+2. **3.2 starten** — MCP-Client als Skill-Provider. Großer Brocken,
+   braucht eigene Planungs-Session: MCP-Protokoll-Implementation,
+   MCP-Server-Konfiguration pro Twin, Pilot-MCP-Server (z.B.
+   Filesystem oder Time), Mandate-Gates für Tool-Calls.
+3. **Backlog-Items in Reihenfolge** — #71b kumulative
+   Audit-Messages, #65 Reverse-Proxy, #74 Persona-Skill-Layering.
+4. **Production-Update fällig** — Tag-7-Commits noch nicht
+   deployed. Beim nächsten regulären Pull mitnehmen.
 
 ## Production-Stack — live (unverändert)
-- **`https://app.twin.harwayexperience.com`** — Web (Next.js Standalone)
-- **`https://runtime.twin.harwayexperience.com`** — Runtime (Fastify,
-  drei Twins hot-geladen)
-- **`https://bridge.twin.harwayexperience.com`** — Bridge (vom 3. Mai,
-  drei Twins registriert)
+- **`https://app.twin.harwayexperience.com`** — Web
+- **`https://runtime.twin.harwayexperience.com`** — Runtime
+- **`https://bridge.twin.harwayexperience.com`** — Bridge
 
 Alle drei mit `restart: unless-stopped`, HTTPS via Let's Encrypt,
 Traefik-Routing.
 
-Hinweis: heutige Footer-Änderung (#15) noch nicht in Production
-deployed. Nach Pull + Rebuild mit beiden `--build-args` würde
-Production „X Twins aktiv · production" zeigen statt aktuell „läuft
-lokal". Kein Druck — Pull machen wir beim nächsten regulären
-Production-Deploy mit.
+Hinweis: Tag-7-Commits (3.1.A-F) noch nicht in Production
+deployed. Skill-System läuft nur lokal. Beim nächsten Pull +
+Rebuild geht's mit. Kein Druck — niemand auf Production hat
+heute Skills.
 
 ## Lokal
-`/Users/mjb/Visual Studio/twin-lab` — drei Twins (markus, florian,
-heiko), lokale Bridge auf 5100. Lokale Twin-Profile zeigen weiterhin
-auf `localhost:5100`. API-Keys aller drei Twins auf neuen
-Anthropic-Key gerollt (Tag 4). Production-Twins haben eigene Profile,
-eigene Tokens, eigene API-Keys — komplett getrennt von Lokal.
+`/Users/mjb/Visual Studio/twin-lab` — drei Twins (@markus, @florian,
+@heiko), lokale Bridge auf 5100. Markus-Twin hat den Pilot-Skill
+`harway-workshops` aktiv in seiner DB.
 
 ## Drei User auf Production
 - Owner: @markus (markus.baier@harway.de)
 - Owner: @florian (florian.ristig@harway.de)
 - Owner: @heiko (heiko.gregor@harway.de)
 
-Alle drei mit anthropic/claude-opus-4-7, Production-Bridge.
+Alle drei mit anthropic/claude-opus-4-7, Production-Bridge. Keine
+Skills auf Production.
 
 ## Repo
-github.com/markusbaier/twin-lab — origin/main aktuell auf `f80558f`
-(stand von heute Mittag, drei Polish-Commits).
+github.com/markusbaier/twin-lab — origin/main aktuell auf `5fbf254`
+(Tag-7 Mittag, vier neue Commits seit gestern: 2c1cfd0, b2b796e,
+7c65c41, 5fbf254).

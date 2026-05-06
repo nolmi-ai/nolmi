@@ -1,6 +1,6 @@
 # twin-lab Roadmap
 
-Stand: 6. Mai 2026, nach Phase 2.5 abgeschlossen + Tag 6 Polish-Sprint. Phase 3 konkretisiert in Strategie-Session.
+Stand: 6. Mai 2026 Mittag, nach Phase 3.1 (Skill-System Engine + Pilot) komplett.
 
 ---
 
@@ -43,26 +43,23 @@ Macht Twins inhaltlich tiefer. Reihenfolge ist klar: **Skill-System ist Fundamen
 
 ## Phase 3 — Sub-Schritte
 
-### 3.1 — Skill-System Engine + Pilot
-**Größe:** L · **Zeitfenster:** 2-3 Wochen, in 6 Sub-Schritten
+### 3.1 — Skill-System Engine + Pilot ✅
+**Abgeschlossen 6. Mai 2026 (Tag 7 Vormittag).** Fünf Sub-Schritte (3.1.A bis 3.1.F) an einem Vormittag durch — die Hälfte von Phase 3 in einer Session. Tempo höher als geplant, weil das Pattern aus 2.5.4.1 (Trust-Repo + Routes) als Vorlage gepasst hat und Claude Code die Implementations-Schritte zügig durchgereicht hat.
 
-Foundation für alles weitere. Sechs Sub-Phasen, alle separat testbar abschließbar:
+- **3.1.A** ✅ DB-Schema + Skill-Repo (Commit `2c1cfd0`)
+  Migration `008_skills.sql` mit `UNIQUE(twin_id, name)`, FK auf `twin_profiles` mit `ON DELETE CASCADE`. SkillRepo mit `add/remove/list/findById/findByName/setActive/update`. Test-Skript mit 9 Steps grün.
+- **3.1.B+C** ✅ Engine + System-Prompt-Integration (Commit `b2b796e`)
+  `prompt-builder.ts` baut Skills-Block, `runModel()` lädt Skills bei jedem Call frisch. Vierte Schicht im System-Prompt zwischen Persona und Language-Directive. Mock-LLM-Test mit Reihenfolge-Check und setActive-Verifikation grün. 3.1.C fiel zusammen mit 3.1.B — Engine-Integration und Prompt-Integration sind ein Schritt.
+- **3.1.D** ✅ CLI-Tool zum Importieren (Commit `7c65c41`)
+  `pnpm twin:skill-create <handle> <skill-dir> [--force]` mit YAML-Manifest-Parser, snake→camel-Mapping, Conflict-Detection. Verzeichnis-Konvention `skills-templates/<name>/manifest.yaml + SKILL.md (+ optional script.ts)`. Pattern angelehnt an agentskills.io.
+- **3.1.E** ✅ Read-only UI + Toggle (Commit `5fbf254`)
+  Settings-Section mit Skills-Liste, Aktiv-Toggle pro Skill, Optimistic-Update mit Revert-bei-Error. Backend-Routes `GET /twins/:handle/skills` + `PATCH /twins/:handle/skills/:skillId/active`, beide Owner-gated. UI-Payload schneidet Markdown raus (chars-Count statt Inhalt). Cross-Twin-Isolation verifiziert.
+- **3.1.F** ✅ Pilot-Skill HARWAY-Workshop-Kontext (kein Commit, Skill-Files gitignored)
+  Skill in `apps/runtime/skills-templates/harway-workshops/` lokal, via CLI in @markus' DB importiert. skillId `skill_2-T2zqvxf3m-0bbD`, 1800 chars Instructions. Browser-Test mit drei Workshop-Fragen: Twin antwortet sauber im Markus-Stil, keine Halluzinationen, keine erfundenen Tagessätze.
 
-- **3.1.A** — DB-Schema + Skill-Repo (S, ~2-3h)
-  Migration für `skills`-Tabelle, `SkillRepo` mit `add/remove/list/findById/getActive`, Tests
-- **3.1.B** — Skill-Engine: Discovery + Selection + Loading (M, ~4-6h)
-  Bei jedem `respond_to_chat`: verfügbare Skills holen, Klassifikator entscheidet, SKILL.md in Kontext
-- **3.1.C** — System-Prompt-Integration (S, ~2-3h)
-  Skill-Markdown wird in LLM-Kontext eingebettet, sauber abgegrenzt von Persona/Mandate
-- **3.1.D** — CLI-Tool für Skill-Anlegen (S, ~2-3h)
-  `pnpm skill:create <twin-handle>` analog zu `twin:set-api-key`. Liest Manifest + Markdown von Filesystem, schreibt in DB
-- **3.1.E** — Read-only UI in Settings (M, ~3-4h)
-  Settings-Page erweitert um Skill-Liste pro Twin. Anzeige: Name, Beschreibung, Aktiv-Toggle. Kein Edit, kein Delete (kommt später)
-- **3.1.F** — Pilot-Skill: HARWAY-Workshop-Kontext (S, ~2-3h)
-  Skill als Markdown anlegen, via CLI in DB schreiben, am Twin testen. Twin kennt jetzt Workshop-Termine, Preise, Inhalte
+**Architektur-Entscheidung Strategie B (vor 3.1.B festgelegt):** Alle aktiven Skills permanent im System-Prompt. Migrationspfad zu C (Hybrid Core/On-demand) dokumentiert für später, wenn Token-Volumen es erzwingt. Heute kein Klassifikator-Call vor jedem Chat — würde unnötige Latenz und Kosten verursachen bei aktuell wenigen Skills pro Twin.
 
-**Vorab-Strategiefragen vor 3.1.B:**
-- Skill-Selection: LLM-Klassifikator-Call vor jedem `respond_to_chat`? Oder Skills permanent im System-Prompt? Hybrid (kleine permanent, große on-demand)?
+**Aufgedeckter Architektur-Befund:** Persona-Skill-Doppelung. Wenn Persona dasselbe Wissen enthält wie ein Skill, ist der Skill-Toggle wirkungslos — Twin antwortet aus Persona. Backlog-Item #74 für sauberes Layering (Persona = identitäts-stabiles Wissen, Skill = austauschbares).
 
 ### 3.2 — MCP-Client als Skill-Provider
 **Größe:** L · **Zeitfenster:** 1-2 Wochen
@@ -114,7 +111,7 @@ Lerngedächtnis. Twin lernt aus Approves/Rejects/Edits, schreibt Skills selbst. 
 **Zeitfenster:** 7-12 Wochen, je nach Tiefe.
 **Realistisch:** 2-3 Monate bei aktuellem Tempo.
 **Definition of Done für Phase 3:**
-- [ ] Skill-System läuft mit Pilot-Skill (3.1.A-F)
+- [x] Skill-System läuft mit Pilot-Skill (3.1.A-F) ✅
 - [ ] MCP-Client als Skill-Provider integriert (3.2)
 - [ ] Conversation-Memory + Semantic-Memory live (3.3)
 - [ ] Episodic-Memory mit sqlite-vec (3.4)
@@ -173,15 +170,16 @@ Bei realistischem Tempo (2-3 Sessions pro Woche, je 2-4h):
 
 ## Was als Nächstes konkret kommt
 
-**Heute (6. Mai):**
-1. 3.1.A starten — DB-Schema + Skill-Repo
+**Heute (6. Mai) Vormittag:** Phase 3.1 komplett abgeschlossen ✅
 
 **Nächste Sessions:**
-- 3.1.B mit Vorab-Diskussion zu Skill-Selection-Strategie
-- 3.1.C-F als geordnete Sub-Schritte
+- Pause / Mittagspause heute, dann ggf. weitere Polish-Arbeit oder direkt Phase 3.2
+- Phase 3.2 (MCP-Client) starten — eigene Strategie-Session vorab nötig: MCP-Protokoll-Implementation, MCP-Server-Konfiguration pro Twin (analog LLM-Config), Pilot-MCP-Server (z.B. Filesystem oder Time), Mandate-Gates für Tool-Calls
+- Vor 3.2: Persona-Skill-Layering klären (Backlog #74) — Wissens-Bereinigung oder explizite Layering-Doku
 
 **Was als Hintergrund läuft:**
-- Backlog-Items in Priorität abarbeiten (#71b kumulative Audit-Messages, #65 Reverse-Proxy, etc.)
+- Backlog-Items in Priorität abarbeiten (#71b kumulative Audit-Messages, #65 Reverse-Proxy, #74 Persona-Skill-Layering)
+- Production-Update fällig — Tag-7-Commits noch nicht deployed, beim nächsten Pull mitnehmen
 - Production-Erfahrung sammeln, neue Items dokumentieren
 
 ---
@@ -189,7 +187,7 @@ Bei realistischem Tempo (2-3 Sessions pro Woche, je 2-4h):
 ## Stop-Punkt-Definition Phase 3
 
 Phase 3 ist abgeschlossen, wenn:
-- [ ] Skill-System mit Pilot-Skill (3.1)
+- [x] Skill-System mit Pilot-Skill (3.1) ✅
 - [ ] MCP-Client als Skill-Provider (3.2)
 - [ ] Memory: Conversation + Semantic (3.3)
 - [ ] Memory: Episodic (3.4)
