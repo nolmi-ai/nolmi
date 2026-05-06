@@ -25,6 +25,8 @@ import {
   TrustAlreadyExistsError,
   TrustNotFoundError,
 } from "./trust/trust-repo.js";
+import { SkillRepo } from "./skills/repo.js";
+import type { Skill, SkillUiPayload } from "@twin-lab/shared";
 import {
   mergeAuditIntoBridgeMessages,
   type MergedMessage,
@@ -67,6 +69,8 @@ export interface ServerDeps {
   db: Database.Database;
   /** Für /twins/:handle/trust* — geteilte Instanz mit der Registry. */
   trustRepo: TrustRepo;
+  /** Für /twins/:handle/skills* — geteilte Instanz mit der Registry. */
+  skillRepo: SkillRepo;
 }
 
 export async function createServer(deps: ServerDeps) {
@@ -212,6 +216,9 @@ export async function createServer(deps: ServerDeps) {
 
   // ─── Trust-Relationships ───────────────────────────────────────────────────
   registerTrustRoutes(app, deps, requireOwner);
+
+  // ─── Skills (3.1.E) ────────────────────────────────────────────────────────
+  registerSkillRoutes(app, deps, requireOwner);
 
   // ─── A2A-Conversations (2.5.4.2) ──────────────────────────────────────────
   registerConversationRoutes(app, deps, requireOwner);
@@ -901,6 +908,88 @@ function registerTrustRoutes(
         }
         throw err;
       }
+    },
+  );
+}
+
+// ─── SKILL ROUTES (3.1.E) ────────────────────────────────────────────────────
+//
+// Read-only Skill-UI: GET listet Skills im UI-Payload-Format (ohne
+// instructions_md/script_ts), PATCH togglet `isActive`. Anlegen, Editieren,
+// Löschen läuft weiter über CLI (`twin:skill-create`) — Edit-UI kommt später.
+
+const SkillToggleSchema = z.object({
+  isActive: z.boolean(),
+});
+
+function toSkillUiPayload(skill: Skill): SkillUiPayload {
+  return {
+    skillId: skill.skillId,
+    name: skill.name,
+    description: skill.description,
+    capability: skill.manifestJson.capability,
+    requiresApproval: skill.manifestJson.requiresApproval,
+    source: skill.source,
+    isActive: skill.isActive,
+    instructionsLength: skill.instructionsMd.length,
+    hasScript: skill.scriptTs !== null && skill.scriptTs.length > 0,
+    createdAt: new Date(skill.createdAt).toISOString(),
+    updatedAt: new Date(skill.updatedAt).toISOString(),
+  };
+}
+
+function registerSkillRoutes(
+  app: FastifyInstance,
+  deps: ServerDeps,
+  requireOwner: (
+    request: FastifyRequest,
+    reply: FastifyReply,
+    handle: string,
+  ) => Promise<{ entry: RegistryEntry; user: User } | null>,
+) {
+  // Liste — aktive Skills zuerst (alphabetisch), dann inaktive (alphabetisch).
+  app.get<{ Params: { handle: string } }>(
+    "/twins/:handle/skills",
+    async (request, reply) => {
+      const ctx = await requireOwner(request, reply, request.params.handle);
+      if (!ctx) return;
+      const skills = deps.skillRepo
+        .list(ctx.entry.twinId)
+        .map(toSkillUiPayload)
+        .sort((a, b) => {
+          if (a.isActive !== b.isActive) return a.isActive ? -1 : 1;
+          return a.name.localeCompare(b.name);
+        });
+      return { skills };
+    },
+  );
+
+  // Toggle isActive. Cross-Twin-Schutz: Skill muss zum aufgerufenen Twin
+  // gehören — sonst 404, gleicher Trick wie bei DELETE /trust/:id.
+  app.patch<{ Params: { handle: string; skillId: string } }>(
+    "/twins/:handle/skills/:skillId/active",
+    async (request, reply) => {
+      const ctx = await requireOwner(request, reply, request.params.handle);
+      if (!ctx) return;
+      const { entry } = ctx;
+
+      const parsed = SkillToggleSchema.safeParse(request.body);
+      if (!parsed.success) {
+        return reply.status(400).send({ error: parsed.error.message });
+      }
+
+      const existing = deps.skillRepo.findById(request.params.skillId);
+      if (!existing || existing.twinId !== entry.twinId) {
+        return reply.status(404).send({ error: "Skill nicht für diesen Twin" });
+      }
+
+      deps.skillRepo.setActive(existing.skillId, parsed.data.isActive);
+      const updated = deps.skillRepo.findById(existing.skillId);
+      if (!updated) {
+        // Sollte unmöglich sein — setActive ist atomar, kein DELETE dazwischen.
+        return reply.status(500).send({ error: "Skill nach Update nicht gefunden" });
+      }
+      return toSkillUiPayload(updated);
     },
   );
 }

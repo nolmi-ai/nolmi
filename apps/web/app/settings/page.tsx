@@ -47,6 +47,20 @@ interface TrustRelationship {
   createdByUserId: string;
 }
 
+interface Skill {
+  skillId: string;
+  name: string;
+  description: string;
+  capability: string;
+  requiresApproval: boolean;
+  source: "manual" | "mcp";
+  isActive: boolean;
+  instructionsLength: number;
+  hasScript: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export default function SettingsPage() {
   return (
     <Suspense fallback={<div className="text-sm text-muted">Lade Settings…</div>}>
@@ -71,6 +85,9 @@ function SettingsInner() {
   const [trustError, setTrustError] = useState<string | null>(null);
   const [trustBusy, setTrustBusy] = useState(false);
   const [trustInfo, setTrustInfo] = useState<string | null>(null);
+  const [skills, setSkills] = useState<Skill[]>([]);
+  const [skillError, setSkillError] = useState<string | null>(null);
+  const [skillBusyIds, setSkillBusyIds] = useState<Set<string>>(new Set());
 
   const selectedHandle = useMemo(
     () => requestedHandle ?? twins[0]?.handle ?? null,
@@ -115,6 +132,19 @@ function SettingsInner() {
     }
   }, []);
 
+  const loadSkills = useCallback(async (handle: string) => {
+    try {
+      const res = await fetch(`${RUNTIME_URL}/twins/${handle}/skills`, {
+        credentials: "include",
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = (await res.json()) as { skills: Skill[] };
+      setSkills(data.skills);
+    } catch (err) {
+      console.error("loadSkills failed:", err);
+    }
+  }, []);
+
   const loadProfile = useCallback(async (handle: string) => {
     setProfileLoading(true);
     setProfileError(null);
@@ -134,17 +164,20 @@ function SettingsInner() {
     }
   }, []);
 
-  // Bei Twin-Wechsel: Profil + Trusts neu. Trusts pollen wir nicht — die
-  // ändern sich nur über lokale User-Aktionen.
+  // Bei Twin-Wechsel: Profil + Trusts + Skills neu. Pollen entfällt — alle
+  // drei ändern sich nur über lokale User-Aktionen oder die CLI (Skills).
   useEffect(() => {
     if (!selectedHandle) return;
     setProfile(null);
     setTrusts([]);
     setTrustError(null);
     setTrustInfo(null);
+    setSkills([]);
+    setSkillError(null);
     loadProfile(selectedHandle);
     loadTrusts(selectedHandle);
-  }, [selectedHandle, loadProfile, loadTrusts]);
+    loadSkills(selectedHandle);
+  }, [selectedHandle, loadProfile, loadTrusts, loadSkills]);
 
   async function addTrust() {
     if (!selectedHandle) return;
@@ -212,6 +245,54 @@ function SettingsInner() {
       setTrustError(err instanceof Error ? err.message : "Entfernen fehlgeschlagen");
     } finally {
       setTrustBusy(false);
+    }
+  }
+
+  async function toggleSkill(skill: Skill) {
+    if (!selectedHandle) return;
+    const next = !skill.isActive;
+
+    // Optimistic — UI sofort. Server gibt das aktualisierte Objekt zurück,
+    // das wir bei Success ersetzen (für updatedAt-Refresh). Bei Error revert.
+    setSkillError(null);
+    setSkills((curr) =>
+      curr.map((s) => (s.skillId === skill.skillId ? { ...s, isActive: next } : s)),
+    );
+    setSkillBusyIds((curr) => new Set(curr).add(skill.skillId));
+
+    try {
+      const res = await fetch(
+        `${RUNTIME_URL}/twins/${selectedHandle}/skills/${skill.skillId}/active`,
+        {
+          method: "PATCH",
+          credentials: "include",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ isActive: next }),
+        },
+      );
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(
+          (body as { error?: string }).error ?? `HTTP ${res.status} — Toggle fehlgeschlagen`,
+        );
+      }
+      const updated = (await res.json()) as Skill;
+      setSkills((curr) => curr.map((s) => (s.skillId === updated.skillId ? updated : s)));
+    } catch (err) {
+      // Revert
+      setSkills((curr) =>
+        curr.map((s) =>
+          s.skillId === skill.skillId ? { ...s, isActive: skill.isActive } : s,
+        ),
+      );
+      setSkillError(err instanceof Error ? err.message : "Toggle fehlgeschlagen");
+      setTimeout(() => setSkillError(null), 5000);
+    } finally {
+      setSkillBusyIds((curr) => {
+        const next = new Set(curr);
+        next.delete(skill.skillId);
+        return next;
+      });
     }
   }
 
@@ -336,6 +417,79 @@ function SettingsInner() {
             </div>
           )}
         </form>
+      </Section>
+
+      <Section title={`Skills (${skills.length})`}>
+        <p className="text-sm text-muted leading-relaxed mb-4">
+          Skills geben dem Twin zusätzliches Wissen oder Fähigkeiten. Sie werden via CLI hinzugefügt und können hier individuell aktiviert oder deaktiviert werden. Aktive Skills landen automatisch im System-Prompt.
+        </p>
+        {skills.length === 0 ? (
+          <div className="text-sm text-muted">
+            <p className="mb-2">
+              Keine Skills für diesen Twin. Skills werden via CLI angelegt:
+            </p>
+            <pre className="text-xs font-mono bg-bg border border-border rounded px-3 py-2 whitespace-pre-wrap">
+              pnpm --filter @twin-lab/runtime twin:skill-create &lt;handle&gt; &lt;skill-dir&gt;
+            </pre>
+          </div>
+        ) : (
+          <ul className="space-y-2">
+            {skills.map((skill) => {
+              const busy = skillBusyIds.has(skill.skillId);
+              return (
+                <li
+                  key={skill.skillId}
+                  className="border border-border rounded px-3 py-2"
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="flex-1 min-w-0">
+                      <div className="text-sm font-mono text-text">{skill.name}</div>
+                      <div className="text-xs text-muted mt-0.5 leading-relaxed">
+                        {skill.description}
+                      </div>
+                    </div>
+                    <label className="flex items-center gap-2 shrink-0 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={skill.isActive}
+                        onChange={() => void toggleSkill(skill)}
+                        disabled={busy}
+                        className="h-4 w-4 cursor-pointer disabled:cursor-not-allowed"
+                      />
+                      <span className="text-xs text-muted">
+                        {skill.isActive ? "aktiv" : "inaktiv"}
+                      </span>
+                    </label>
+                  </div>
+                  <div className="mt-2 flex flex-wrap items-center gap-2 text-[10px]">
+                    <span className="font-mono px-2 py-0.5 border border-border rounded text-muted">
+                      {skill.capability}
+                    </span>
+                    <span
+                      className={`font-mono px-2 py-0.5 rounded ${
+                        skill.source === "mcp"
+                          ? "border border-accent text-accent"
+                          : "border border-border text-muted"
+                      }`}
+                    >
+                      {skill.source}
+                    </span>
+                    <span className="text-muted">
+                      {skill.instructionsLength} chars Instructions
+                      {skill.hasScript && " · Script"}
+                      {skill.requiresApproval && " · requires approval"}
+                    </span>
+                  </div>
+                </li>
+              );
+            })}
+          </ul>
+        )}
+        {skillError && (
+          <div className="mt-3 text-xs text-warn border border-warn rounded px-3 py-2">
+            {skillError}
+          </div>
+        )}
       </Section>
 
       <Section title="Persona und Mandates">

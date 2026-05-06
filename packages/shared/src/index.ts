@@ -195,6 +195,31 @@ export const SkillManifestSchema = z.object({
 });
 export type SkillManifest = z.infer<typeof SkillManifestSchema>;
 
+/**
+ * Schmales UI-Payload-Format. Backend-Routes liefern die GET-/PATCH-Skill-
+ * Antworten in dieser Form, statt das volle DB-Skill-Objekt durchzugeben.
+ * Spart Bandbreite und schützt davor, dass Markdown-Instructions oder
+ * Script-Code unnötig in die UI fließen.
+ *
+ * Timestamps als ISO-8601-Strings (DB hält epoch ms, Konvertierung im Server-
+ * Handler) — konsistent mit Trust-Pattern, das ebenfalls strings nach außen
+ * gibt.
+ */
+export const SkillUiPayloadSchema = z.object({
+  skillId: z.string(),
+  name: z.string(),
+  description: z.string(),
+  capability: z.string(),
+  requiresApproval: z.boolean(),
+  source: SkillSourceSchema,
+  isActive: z.boolean(),
+  instructionsLength: z.number().int().nonnegative(),
+  hasScript: z.boolean(),
+  createdAt: z.string(),
+  updatedAt: z.string(),
+});
+export type SkillUiPayload = z.infer<typeof SkillUiPayloadSchema>;
+
 export const SkillSchema = z.object({
   skillId: z.string(),
   twinId: z.string(),

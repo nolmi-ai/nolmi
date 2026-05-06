@@ -69,6 +69,7 @@ async function main() {
     masterKey,
     db: repo.db,
     trustRepo,
+    skillRepo,
   });
 
   // 5. Registry mit allen aktiven Twins füllen — entschlüsselt API-Keys.
