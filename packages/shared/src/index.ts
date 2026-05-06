@@ -156,3 +156,57 @@ export const ChatResponseSchema = z.object({
 export type ChatMessage = z.infer<typeof ChatMessageSchema>;
 export type ChatRequest = z.infer<typeof ChatRequestSchema>;
 export type ChatResponse = z.infer<typeof ChatResponseSchema>;
+
+// ─── SKILLS (Phase 3.1) ──────────────────────────────────────────────────────
+//
+// Skills bündeln Wissen + optional Script, das ein Twin im Rahmen einer
+// Capability anwenden kann. Hybrid-Ansatz: maschinen-lesbares Manifest +
+// Markdown-Instructions + optional Action-Script.
+//
+// Mandate bleibt auf Capability-Ebene (Twin darf "respond_to_chat"). Skills
+// haben zusätzlich `requiresApproval` als Inner-Mandate, das die Engine in
+// 3.1.B+ auswerten wird.
+
+export const SkillSourceSchema = z.enum(["manual", "mcp"]);
+export type SkillSource = z.infer<typeof SkillSourceSchema>;
+
+export const SkillInputSchema = z.object({
+  name: z.string(),
+  type: z.enum(["string", "number", "boolean", "object"]),
+  description: z.string(),
+  required: z.boolean(),
+});
+export type SkillInput = z.infer<typeof SkillInputSchema>;
+
+export const SkillOutputSchema = z.object({
+  name: z.string(),
+  type: z.enum(["string", "number", "boolean", "object"]),
+  description: z.string(),
+});
+export type SkillOutput = z.infer<typeof SkillOutputSchema>;
+
+export const SkillManifestSchema = z.object({
+  name: z.string(),
+  description: z.string(),
+  capability: z.string(), // z.B. "respond_to_chat"
+  requiresApproval: z.boolean(),
+  inputs: z.array(SkillInputSchema).optional(),
+  outputs: z.array(SkillOutputSchema).optional(),
+});
+export type SkillManifest = z.infer<typeof SkillManifestSchema>;
+
+export const SkillSchema = z.object({
+  skillId: z.string(),
+  twinId: z.string(),
+  name: z.string(),
+  description: z.string(),
+  manifestJson: SkillManifestSchema,
+  instructionsMd: z.string(),
+  scriptTs: z.string().nullable(),
+  source: SkillSourceSchema,
+  sourceMetadata: z.record(z.string(), z.unknown()).nullable(),
+  isActive: z.boolean(),
+  createdAt: z.number(),
+  updatedAt: z.number(),
+});
+export type Skill = z.infer<typeof SkillSchema>;
