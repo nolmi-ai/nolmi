@@ -1,0 +1,6 @@
+*
+!.gitignore
+!.gitkeep
+!README.md
+!_test-skill
+!_test-skill/**

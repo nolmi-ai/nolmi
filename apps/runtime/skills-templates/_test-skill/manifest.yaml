@@ -1,0 +1,4 @@
+name: _test-skill
+description: Test-Skill für CLI-Tool-Verifikation, kein produktiver Inhalt
+capability: respond_to_chat
+requires_approval: false

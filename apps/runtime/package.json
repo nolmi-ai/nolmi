@@ -11,6 +11,7 @@
     "db:init": "tsx src/scripts/init-db.ts",
     "twin:bootstrap": "tsx src/scripts/bootstrap-twin.ts",
     "twin:set-api-key": "tsx src/scripts/set-api-key.ts",
+    "twin:skill-create": "tsx src/scripts/skill-create.ts",
     "key:generate": "tsx src/scripts/generate-master-key.ts",
     "session-secret:generate": "tsx src/scripts/generate-session-secret.ts",
     "user:create": "tsx src/scripts/create-user.ts",
