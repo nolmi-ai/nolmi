@@ -610,6 +610,25 @@ Verknüpft mit #10 (UI-Bearbeitung von Persona/Mandates). Konsistente UX: alles,
 
 **Größe:** L · **Priorität:** should · **Aus:** 3.1.E expliziter Scope-Ausschluss
 
+### 77. Production-Container-Bootstrap ruft init-db nicht auf
+Beim Tag-7-Production-Deploy entdeckt: Migration 008 (Skills-Tabelle) lag im Repo, wurde aber beim Container-Boot nicht angewendet. Symptom: `SqliteError: no such table: skills` bei jedem Settings-Page-Load. Ursache: `apps/runtime/Dockerfile` startet direkt `node ./apps/runtime/dist/index.js`, ohne vorgeschaltetes `init-db`. Lokal versteckt der `predev`-Hook in `pnpm dev` das Problem (`pnpm db:init` läuft vor jedem Dev-Start).
+
+Ad-hoc-Fix war: `docker compose exec runtime node /app/apps/runtime/dist/scripts/init-db.js`. Idempotent, hat 008 angewendet, alle anderen als „bereits angewendet" geskipped. Dauerhafter Fix gehört in den Boot-Pfad.
+
+Drei Lösungs-Optionen:
+
+1. **Init-DB als Entrypoint-Vorlauf im Dockerfile.** CMD wird zu Shell-Script `node dist/scripts/init-db.js && node dist/index.js`. Idempotent, kein zusätzlicher Container. Einfachster Quick-Fix, ein Zeilen-Diff im Dockerfile.
+
+2. **Init-DB im Server-Boot.** `apps/runtime/src/index.ts` ruft `runMigrations(db)` als ersten Schritt vor TwinService-Start auf. Migrations-Logic muss aus dem CLI-Skript in eine reusable Library extrahiert werden. Sauberste Lösung — Server kann nicht starten mit veraltetem Schema.
+
+3. **Init-DB als separater Compose-Service** mit `depends_on: condition: service_completed_successfully`. Sauber separiert, aber mehr Compose-Komplexität, bringt im Single-Host-Setup wenig Mehrwert.
+
+Vote: **2** als saubere Variante, **1** als pragmatischer Quick-Fix. Beide verhindern das Problem strukturell.
+
+Risiko-Analyse: heute hatten wir Glück, weil 008 additiv (CREATE TABLE) ist — System lief weiter, nur Skill-Endpoints failed mit 500. Bei einer Migration mit `ALTER TABLE` und Code der die neuen Spalten erwartet, würde der Service beim ersten Request crashen. Bei Migration für 3.2 (MCP-Servers) oder 3.3 (Memory-Schichten) Pflicht-Vorbedingung.
+
+**Größe:** S (Variante 1), M (Variante 2) · **Priorität:** must · **Aus:** Tag-7-Production-Deploy
+
 ---
 
 ## Phase 3 — Memory + Skills + Tools
@@ -1051,19 +1070,32 @@ Vergleich zu 2.5.6 (Production-Web-Deployment, Tag 5): viele kleine Architektur-
 
 Pattern: bei neuen Phase-Blöcken (3.2 MCP-Client, 3.3 Memory) zuerst eine Strategie-Session mit konkreten Architektur-Festlegungen. Erst dann Sub-Schritt-Briefings schreiben. Spart Implementation-Zeit, weil Claude Code Entscheidungen nicht selbst treffen muss.
 
+### Lesson (Tag 7 / Production-Deploy): Lokaler predev-Hook versteckt Production-Bugs
+
+`pnpm dev` ruft via `predev`-Hook automatisch `pnpm db:init` auf, bevor der Server startet. Lokal heißt das: jede neue Migration läuft beim ersten Dev-Start automatisch durch. In Production startet der Container direkt `node dist/index.js` — ohne Migration-Lauf.
+
+Heute (Tag 7): Migration 008 (Skills-Tabelle) wurde gepullt, Image neu gebaut, Container neu gestartet — und failed bei jedem Skills-Endpoint-Aufruf mit `no such table: skills`. Ad-hoc-Fix war `docker compose exec runtime node /app/apps/runtime/dist/scripts/init-db.js`. Idempotent, hat sauber 008 angewendet.
+
+Generelles Prinzip: **was lokal automatisch passiert (predev, postinstall, etc.) muss in Production explizit sein.** Andernfalls findet man die Diskrepanz erst beim Production-Deploy einer kritischen Migration. Hat heute keinen Schaden angerichtet (Migration ist additiv, System lief weiter), wäre bei `ALTER TABLE` und Code der die neuen Spalten erwartet ein Service-Crash.
+
+Konkreter Pattern für künftige Container-Setups: alle predev/predeploy-Hooks aus `package.json` durchgehen, prüfen ob das Production-Equivalent (Dockerfile-CMD oder Compose-depends_on) sie abdeckt. Ist nicht der Fall — Backlog-Item, idealerweise vor dem nächsten Production-Deploy fixen.
+
+Backlog-Item #77 dokumentiert die Lösungs-Optionen.
+
 ---
 
 ## Notiz für später
 
 Sammle weiter Punkte, die im Sparring auftauchen. Nicht jeder Punkt muss eine Phase werden — manches ist Polishing, manches ist Architektur. Die Aufteilung S/M/L/XL und must/should/nice hilft beim Priorisieren wenn die Liste lang wird.
 
-**Item-Dichte 6. Mai 2026 mittag (Tag 7):** Phase 3.1 (Skill-System Engine + Pilot) komplett durch — fünf Sub-Schritte (3.1.A bis 3.1.F) an einem Vormittag, vier neue Commits, ein Pilot-Skill via CLI lokal in @markus' DB. Plus 4 neue Items entstanden (#73 Inline-Twin-Befehle, #74 Persona-Skill-Layering, #75 Skills-Production-Sync, #76 Skill-Edit-via-UI). Plus 7 neue Lessons aus Tag 7 (Pattern aus 2.5.4.1 als Vorlage, Briefing-Pfad-Bug bei pnpm-filter, tsx-Inline-Eval-Limits, Engine-Test als Truth-Source bei Persona-Confound, UI-Payload-Filter als Konvention, Tempo-Ausreißer-Vorsicht, Pre-Implementation-Strategie-Sessions als Hebel). Items insgesamt jetzt: 73 (69 + 4 neue Items #73-#76).
+**Item-Dichte 6. Mai 2026 mittag (Tag 7):** Phase 3.1 (Skill-System Engine + Pilot) komplett durch — fünf Sub-Schritte (3.1.A bis 3.1.F) an einem Vormittag, vier neue Commits, ein Pilot-Skill via CLI lokal in @markus' DB. Plus Production-Deploy am Mittag (Migration 008 nachgezogen, Footer-Update aus Tag 6 endlich live). Plus 5 neue Items entstanden (#73 Inline-Twin-Befehle, #74 Persona-Skill-Layering, #75 Skills-Production-Sync, #76 Skill-Edit-via-UI, #77 Container-Bootstrap-Migration). Plus 8 neue Lessons aus Tag 7 (Pattern aus 2.5.4.1 als Vorlage, Briefing-Pfad-Bug bei pnpm-filter, tsx-Inline-Eval-Limits, Engine-Test als Truth-Source bei Persona-Confound, UI-Payload-Filter als Konvention, Tempo-Ausreißer-Vorsicht, Pre-Implementation-Strategie-Sessions als Hebel, Lokaler predev-Hook versteckt Production-Bugs). Items insgesamt jetzt: 74 (69 + 5 neue Items #73-#77).
 
-**Was als Nächstes ansteht:** Phase 3.1 abgeschlossen. Mögliche nächste Sub-Schritte:
-- **Pause / Reflexion** — vier Commits am Vormittag, Mental-Hygiene
+**Was als Nächstes ansteht:** Phase 3.1 abgeschlossen, Production updated. Mögliche nächste Sub-Schritte:
+- **Pause / Reflexion** — vier Code-Commits am Vormittag plus Production-Deploy, Mental-Hygiene
+- **#77 Migration-Bootstrap-Fix** als kleiner must-Sub-Schritt (~30 Min Dockerfile-Edit oder ~2h Server-Boot-Refactor) — Pflicht-Vorbedingung vor nächster Migration
 - **Strategie-Session vor 3.2 (MCP-Client)** — Pre-Implementation-Diskussion mit konkreten Architektur-Festlegungen, analog zur Phase-3-Strategie-Session heute morgen
 - **#74 Persona-Skill-Layering** als kleiner Sub-Schritt (~30 Min Persona-Edit + Boot-Test)
 - **#75 Skills-Production-Sync** als Vorbereitung auf Multi-User-Skills
 - **3.2 starten** mit MCP-Client-Implementation
 
-Tag 7 Bilanz: schneller als geplant (5 Sub-Schritte statt 1-2), klar strukturiert (jeder Sub-Schritt ein Commit oder explizite Daten-Op), sauber dokumentiert. Pre-Implementation-Strategie-Session als wichtigster Hebel — sollte vor 3.2 wiederholt werden.
+Tag 7 Bilanz: schneller als geplant (5 Sub-Schritte statt 1-2), klar strukturiert (jeder Sub-Schritt ein Commit oder explizite Daten-Op), sauber dokumentiert. Pre-Implementation-Strategie-Session als wichtigster Hebel — sollte vor 3.2 wiederholt werden. Plus erster echter Production-Migration-Bug entdeckt — kein Schaden, aber Pattern-Lesson für künftige Migrations.
