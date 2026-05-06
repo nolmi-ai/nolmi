@@ -1,6 +1,6 @@
 # twin-lab Roadmap
 
-Stand: 1. Mai 2026, nach Sub-Schritt 2.5.2d (Multi-Twin Runtime + Florian-Twin)
+Stand: 6. Mai 2026, nach Phase 2.5 abgeschlossen + Tag 6 Polish-Sprint. Phase 3 konkretisiert in Strategie-Session.
 
 ---
 
@@ -12,122 +12,116 @@ Markus-Twin antwortet im Persona-Stil, Mandates aktiv, Audit-Log, Pending-Workfl
 **Phase 2 — A2A Bridge** ✅
 Bridge-Service eigenständig, Twin-zu-Twin-Kommunikation läuft, Konversations-Threading, VPS-Deployment unter `bridge.twin.harwayexperience.com` mit HTTPS.
 
-**Phase 2.5 — Multi-Tenant-Vorbereitung** (in Arbeit)
-- 2.5.1 Vercel AI SDK Migration ✅
-- 2.5.2b Schema (twin_profiles) ✅
-- 2.5.2c Twin-Runtime DB-Backed ✅
-- 2.5.2γ Profil-Anzeige in Settings ✅
-- 2.5.2d Multi-Twin Runtime + Florian-Twin ✅ (heute Abend)
-- 2.5.2e Per-Twin LLM-Config — als nächstes
-- 2.5.3 Onboarding-Wizard
-- 2.5.4 User-Auth
-- 2.5.5 Notifications
-- 2.5.6 Production-Deployment Web
+**Phase 2.5 — Multi-Tenant** ✅
+Web-UI, Onboarding, User-Auth, Trust-Layer, Production-Deployment. Drei User live unter `app.twin.harwayexperience.com`. 2.5.5 (Notifications) bewusst verschoben — kein Blocker.
 
-**Was live ist:** Bridge auf VPS, Multi-Twin-Runtime lokal, A2A-Loop verifiziert mit zwei eigenständigen Personas.
+**Was live ist:**
+- `bridge.twin.harwayexperience.com` — A2A-Bridge
+- `runtime.twin.harwayexperience.com` — Twin-Runtime
+- `app.twin.harwayexperience.com` — Web-UI
+- Drei Owner: @markus, @florian, @heiko
 
 ---
 
-## Phase 2.5 — Restliche Sub-Schritte
+## Phase 3 — Skills + Memory + Tools
 
-### 2.5.2e — Per-Twin LLM-Config aus DB
-**Größe:** S · **Zeitfenster:** 1 Session (~1-2h)
+Macht Twins inhaltlich tiefer. Reihenfolge ist klar: **Skill-System ist Fundament, MCP nutzt Skill-System, Memory läuft parallel.**
 
-Beide Twins erben aktuell `TWIN_LLM_*`-ENV. Sollten pro Twin separat konfigurierbar sein. Bootstrap-Script liest pro Twin individuelle ENV (`MARKUS_LLM_PROVIDER`, `FLORIAN_LLM_MODEL`, etc.), Default-Fallback auf gemeinsame `TWIN_LLM_*`. Schreibt LLM-Config in `twin_profiles.llm_config`-JSON, von wo Runtime liest.
+### Architektur-Entscheidungen (6. Mai 2026)
 
-**Warum jetzt:** Aufwärm-Übung nach Multi-Twin. Macht den Boden für 2.5.3 (Onboarding-Wizard) bereit, wo User pro Twin eigene LLM-Provider auswählen.
+**Skill-Definition (Hybrid C):** Ein Skill besteht aus Manifest (YAML/JSON), SKILL.md (Instruktionen fürs LLM), optional Script (TS/Python). Wissens-Skills haben nur Manifest + Markdown. Action-Skills haben zusätzlich Script. Pattern angelehnt an Hermes/Cline plus agentskills.io.
 
-### 2.5.3 — Onboarding-Flow Web-UI Wizard
-**Größe:** L · **Zeitfenster:** 2-3 Sessions (~6-10h)
+**Skill-Storage:** DB von Anfang an. Tabelle `skills` mit `twin_id`, `manifest_json`, `instructions_md`, `script_ts`, `is_active`, `created_at`, `updated_at`. Multi-Tenant-Isolation pro Twin (nicht pro User), konsistent mit `mandates`-Pattern.
 
-Neuer User soll Twin selbst bootstrappen — ohne Terminal. Web-UI-Wizard mit:
-- Persona-Markdown-Editor (mit Live-Preview)
-- Mandate-Picker mit Templates (Starter-Set für typische Use-Cases)
-- LLM-Provider/Modell-Auswahl
-- API-Key-Eingabe (verschlüsselt in DB)
-- Bridge wird automatisch zugewiesen (zentrale Bridge gibt Token aus)
+**Capability-Mapping:** Skills gehören zu Capabilities, sind nicht selbst Capabilities. Mandate-Layer aus 2.5.4.1 bleibt unangetastet. Skill-Manifest hat `requires_approval`-Feld als Inner-Mandate. Default `false` für Wissens-Skills, `true` für Action-Skills.
 
-**Warum jetzt:** Erste echte Nicht-Markus-Erfahrung. Bevor wir Auth bauen, müssen wir wissen, wie Onboarding aussieht — die User-Experience-Frage zuerst.
+**MCP-Integration:** MCP-Tools werden als Skills im Skill-System registriert (`source: "mcp"` vs. `source: "manual"`). Kein zweites paralleles System.
 
-### 2.5.4 — User-Auth (Email/Passwort)
-**Größe:** L · **Zeitfenster:** 2-3 Sessions (~6-10h)
-
-Heute: kein Auth-Layer. Phase 2.5.4:
-- `users`-Tabelle mit `email`, `password_hash`, `created_at`
-- Login-Form, Session-Cookie
-- `owner_user_id` in `twin_profiles` wird belegt
-- Twin-UI nur für Owner sichtbar (oder für explicit-shared Users)
-- Owner-Recognition im System-Prompt (Backlog #14 wird hier gefixt)
-
-**Warum jetzt:** Vorbedingung für Public-Deployment. Sub-Schritt 2.5.6 braucht Auth, sonst sieht jeder mit der URL alle Twins.
-
-**Optional in 2.5.4 oder später:** SSO (Google, GitHub) — entscheiden wenn wir an dem Punkt sind.
-
-### 2.5.5 — Notification-System für Pending
-**Größe:** M · **Zeitfenster:** 1-2 Sessions (~4-6h)
-
-Heute: Pending nur sichtbar wenn Settings-Page offen.
-- Browser-Notifications (Web Push API)
-- Email-Notifications via resend.com (Konto schon vorhanden)
-- Konfigurierbar pro Twin: welche Events triggern Notifications
-- Optional: SMS/Telegram (gehört aber eher zu Phase 4 Multi-Channel)
-
-**Warum jetzt:** UX-Lücke wird mit jedem Tag schmerzhafter, je mehr Twins laufen. Plus: ohne Notifications hat keiner Anreiz, das Tool aktiv zu nutzen.
-
-### 2.5.6 — Production-Deployment Web auf VPS
-**Größe:** L · **Zeitfenster:** 1-2 Sessions (~4-6h)
-
-Web-UI deploy unter `app.twin.harwayexperience.com`:
-- Next.js Production-Build
-- Docker-Container, analog zur Bridge
-- Traefik routet `app.*` auf den Container
-- HTTPS via existierendem Let's Encrypt-Setup
-- DB-Persistenz via Volume-Mount
-- ENV-Variablen für API-URLs (Bridge, etc.)
-
-**Warum als Letztes in 2.5:** Erst wenn Onboarding + Auth + Notifications stehen, macht ein Public-Deployment Sinn. Vorher ist's nur ein Twin-Lab für Markus, das niemand sonst sieht.
+**UI-Editierbarkeit:** Phase-3-Ende oder Phase 4. In 3.1 nur Read-only-Anzeige der Skills. Skills werden via CLI angelegt, später UI-fähig.
 
 ---
 
-## Phase 2.5 Total
+## Phase 3 — Sub-Schritte
 
-**Zeitfenster:** ~7-15 Stunden Arbeit auf 6-10 Sessions verteilt.
-**Realistisch:** 2-3 Wochen, je nach verfügbarer Zeit.
-**Definition of Done für Phase 2.5:** Externer User kann sich registrieren, eigenen Twin onboarden, mit dem Twin chatten, Pending approven, Twin verleihen. Multi-Tenant-SaaS funktional.
+### 3.1 — Skill-System Engine + Pilot
+**Größe:** L · **Zeitfenster:** 2-3 Wochen, in 6 Sub-Schritten
 
----
+Foundation für alles weitere. Sechs Sub-Phasen, alle separat testbar abschließbar:
 
-## Phase 3 — Memory + Skills + Tools
+- **3.1.A** — DB-Schema + Skill-Repo (S, ~2-3h)
+  Migration für `skills`-Tabelle, `SkillRepo` mit `add/remove/list/findById/getActive`, Tests
+- **3.1.B** — Skill-Engine: Discovery + Selection + Loading (M, ~4-6h)
+  Bei jedem `respond_to_chat`: verfügbare Skills holen, Klassifikator entscheidet, SKILL.md in Kontext
+- **3.1.C** — System-Prompt-Integration (S, ~2-3h)
+  Skill-Markdown wird in LLM-Kontext eingebettet, sauber abgegrenzt von Persona/Mandate
+- **3.1.D** — CLI-Tool für Skill-Anlegen (S, ~2-3h)
+  `pnpm skill:create <twin-handle>` analog zu `twin:set-api-key`. Liest Manifest + Markdown von Filesystem, schreibt in DB
+- **3.1.E** — Read-only UI in Settings (M, ~3-4h)
+  Settings-Page erweitert um Skill-Liste pro Twin. Anzeige: Name, Beschreibung, Aktiv-Toggle. Kein Edit, kein Delete (kommt später)
+- **3.1.F** — Pilot-Skill: HARWAY-Workshop-Kontext (S, ~2-3h)
+  Skill als Markdown anlegen, via CLI in DB schreiben, am Twin testen. Twin kennt jetzt Workshop-Termine, Preise, Inhalte
 
-Macht Twins inhaltlich tiefer. Vor Phase 4 (Multi-Channel).
+**Vorab-Strategiefragen vor 3.1.B:**
+- Skill-Selection: LLM-Klassifikator-Call vor jedem `respond_to_chat`? Oder Skills permanent im System-Prompt? Hybrid (kleine permanent, große on-demand)?
 
-### 3.1 — MCP-Client-Implementierung
-Twin als MCP-Client, kann Tools von externen MCP-Servern nutzen. Standard-Compliance.
+### 3.2 — MCP-Client als Skill-Provider
 **Größe:** L · **Zeitfenster:** 1-2 Wochen
 
-### 3.2 — Skill-System (4-Layer)
-Capability → Tool → Skill → Mandate. Skill-Engine mit Markdown-basierten Skills, agentskills.io-Format-kompatibel.
-**Größe:** XL · **Zeitfenster:** 2-3 Wochen
+MCP ist das Standard-Protokoll für LLM-Tools (Anthropic-getrieben, breite Adoption). Twin als MCP-Client kann externe Tools nutzen.
 
-### 3.3 — Memory-Schichten
-- Conversation Memory (komprimierter Sliding-Window-Kontext)
-- Episodic Memory (sqlite-vec für Embeddings)
-- Semantic Memory (`facts.md` + KV-Store)
-- Procedural Memory (Lerngedächtnis aus Approves/Rejects/Edits)
+- MCP-Protokoll-Implementation (Client-Side)
+- MCP-Server-Konfiguration pro Twin (analog zu LLM-Config)
+- MCP-Tools werden als Skills im Skill-System registriert (`source: "mcp"`)
+- Pilot-MCP-Server (z.B. Filesystem oder Time)
+- Mandate-Gates für MCP-Tool-Calls
 
-**Größe:** XL · **Zeitfenster:** 3-4 Wochen
+### 3.3 — Memory: Conversation + Semantic
+**Größe:** L · **Zeitfenster:** 2-3 Wochen
 
-### 3.4 — Hyperbrowser als Web-Browser-Skill
-Cloud-Browser-Infrastruktur. Twins navigieren autonom im Web. Vorbedingung: 3.2 (Skill-System).
-**Größe:** L · **Zeitfenster:** 1 Woche
+Erste zwei Memory-Schichten — schneller ROI.
+
+- **Conversation-Memory:** Sliding-Window mit Auto-Summary. Bei jedem Chat werden die letzten N Messages plus zusammengefasste ältere Messages in Kontext geladen. Pro `(twin_id, partner_handle)`-Paar separater Verlauf.
+- **Semantic-Memory:** KV-Store + `facts.md`. Persistente Fakten ("Markus' Frau heißt X", "Florians Geburtstag ist Y"). Vom User editierbar (UI), vom Twin schreibbar mit Approval-Gate.
+
+### 3.4 — Memory: Episodic
+**Größe:** L · **Zeitfenster:** 1-2 Wochen
+
+Vector-Embeddings für „Twin erinnert sich an spezifische Events".
+
+- sqlite-vec Setup
+- Embedding-Provider-Wahl (OpenAI vs. Anthropic vs. lokal — kein Vendor-Lock)
+- Retrieval-Logik: Similarity-Search pro Konversation
+- Update-Strategie: was wird embedded, wann
+
+### 3.5 — Hyperbrowser als MCP-Skill
+**Größe:** M · **Zeitfenster:** 1 Woche
+
+Cloud-Browser-Infrastruktur (hyperbrowser.ai) als MCP-Server eingebunden. Twin navigiert autonom im Web.
+
+- Hyperbrowser-MCP-Server konfigurieren
+- Mandate-Gate: Web-Aktionen brauchen Approval
+- Test-Cases: Web-Research, Form-Filling, Scraping
+
+### 3.6 — Procedural Memory (optional, ggf. Phase 4)
+**Größe:** XL · **Zeitfenster:** 2-3 Wochen oder später
+
+Lerngedächtnis. Twin lernt aus Approves/Rejects/Edits, schreibt Skills selbst. Konzeptionell anspruchsvoll, vermutlich erst nach Phase 4 sinnvoll.
 
 ---
 
 ## Phase 3 Total
 
-**Zeitfenster:** ~7-10 Wochen, je nach Tiefe.
-**Realistisch:** 2-3 Monate.
-**Definition of Done für Phase 3:** Twin merkt sich Konversationen, kennt Fakten, lernt aus Feedback, kann externe Tools nutzen, navigiert das Web mit Approval-Gates.
+**Zeitfenster:** 7-12 Wochen, je nach Tiefe.
+**Realistisch:** 2-3 Monate bei aktuellem Tempo.
+**Definition of Done für Phase 3:**
+- [ ] Skill-System läuft mit Pilot-Skill (3.1.A-F)
+- [ ] MCP-Client als Skill-Provider integriert (3.2)
+- [ ] Conversation-Memory + Semantic-Memory live (3.3)
+- [ ] Episodic-Memory mit sqlite-vec (3.4)
+- [ ] Hyperbrowser als MCP-Skill (3.5)
+- [ ] Twin merkt sich Konversationen, kennt Fakten, nutzt externe Tools, navigiert das Web mit Approval-Gates
+
+3.6 (Procedural Memory) kann nachgezogen werden, ist nicht im DoD.
 
 ---
 
@@ -136,32 +130,30 @@ Cloud-Browser-Infrastruktur. Twins navigieren autonom im Web. Vorbedingung: 3.2 
 Twins werden überall erreichbar.
 
 ### 4.1 — Telegram-Adapter (Owner-Mode)
-Markus chattet mit Markus-Twin via Telegram. Bot-API, einfachste Channel-Integration.
+Markus chattet mit Markus-Twin via Telegram. Bot-API.
 **Zeitfenster:** ~1 Woche
 
 ### 4.2 — WhatsApp-Adapter (Owner-Mode)
-WhatsApp-Business-API. Meta-KYC-Bürokratie kostet Wochen.
+Meta-Business-API, KYC-Bürokratie.
 **Zeitfenster:** 2-3 Wochen inkl. Wartezeit
 
 ### 4.3 — Public-Mode (Externe schreiben Twins an)
-Mandate-Layer für eingehende Nachrichten von Externen. DSGVO-Erwägungen.
+Mandate-Layer für eingehende Channel-Messages. DSGVO.
 **Zeitfenster:** 2-3 Wochen
 
 ### 4.4 — Föderation (mehrere Bridges)
 Matrix-Modell. Twin auf Bridge-A spricht mit Twin auf Bridge-B.
 **Zeitfenster:** 1-2 Monate
 
----
-
-## Phase 4 Total
-
-**Zeitfenster:** ~3-4 Monate, je nach Bürokratie und Tiefe.
+### 4.5 — Google A2A-Adapter
+Twins als A2A-Server für Ökosystem-Anbindung. Adapter-Schicht über interner Bridge.
+**Zeitfenster:** 2-3 Wochen
 
 ---
 
 ## Phase 5+ — Vision
 
-P2P mit DIDs, optional Blockchain als Bezahlebene. Nicht jetzt planen — wenn die ersten 4 Phasen stehen, schauen wir.
+P2P mit DIDs, optional Blockchain als Bezahlebene. Nicht jetzt planen.
 
 ---
 
@@ -171,40 +163,36 @@ Bei realistischem Tempo (2-3 Sessions pro Woche, je 2-4h):
 
 | Phase | Zeitfenster | Kalenderzeit |
 |-------|-------------|--------------|
-| 2.5 (Rest) | 7-15h | 2-3 Wochen |
-| 3 (Memory + Skills + Tools) | 7-10 Wochen | 2-3 Monate |
+| 3 (Skills + Memory + Tools) | 7-12 Wochen | 2-3 Monate |
 | 4 (Multi-Channel) | 3-4 Monate | 4-5 Monate |
 
-**Bis Ende August 2026:** Phase 2.5 + Phase 3 abgeschlossen.
+**Bis Ende Juli/August 2026:** Phase 3 abgeschlossen.
 **Bis Ende 2026:** Phase 4 weitgehend fertig.
 
 ---
 
 ## Was als Nächstes konkret kommt
 
-**Nächste Session:**
-1. Sub-Schritt 2.5.2e starten (Per-Twin LLM-Config)
-2. Strategie-Diskussion: Onboarding-Flow visuell skizzieren (vor Implementierung 2.5.3)
+**Heute (6. Mai):**
+1. 3.1.A starten — DB-Schema + Skill-Repo
 
-**Vor der nächsten Session:**
-- Markus überlegt: wie viel Zeit pro Woche realistisch für twin-lab?
-- Markus überlegt: welche User soll der Onboarding-Flow als erstes ansprechen? (Florian? Ronja? Workshop-Teilnehmer 7. Mai?)
+**Nächste Sessions:**
+- 3.1.B mit Vorab-Diskussion zu Skill-Selection-Strategie
+- 3.1.C-F als geordnete Sub-Schritte
 
 **Was als Hintergrund läuft:**
-- Backlog-Items in der Reihenfolge their Priorität abarbeiten
-- Architektur-Entscheidungen aus 1.5. weiter verfeinern, wenn relevant
+- Backlog-Items in Priorität abarbeiten (#71b kumulative Audit-Messages, #65 Reverse-Proxy, etc.)
+- Production-Erfahrung sammeln, neue Items dokumentieren
 
 ---
 
-## Stop-Punkt-Definition
+## Stop-Punkt-Definition Phase 3
 
-Phase 2.5 ist abgeschlossen, wenn:
-- [x] Multi-Twin-Runtime live (heute)
-- [ ] Per-Twin LLM-Config (2.5.2e)
-- [ ] Onboarding-Wizard funktional (2.5.3)
-- [ ] User-Auth eingebaut (2.5.4)
-- [ ] Notification-System läuft (2.5.5)
-- [ ] Web-UI auf `app.twin.harwayexperience.com` deployed (2.5.6)
-- [ ] Florian kann sich selbst registrieren und seinen eigenen Twin bauen (Live-Test)
+Phase 3 ist abgeschlossen, wenn:
+- [ ] Skill-System mit Pilot-Skill (3.1)
+- [ ] MCP-Client als Skill-Provider (3.2)
+- [ ] Memory: Conversation + Semantic (3.3)
+- [ ] Memory: Episodic (3.4)
+- [ ] Hyperbrowser als MCP-Skill (3.5)
 
-Wenn alle Häkchen sitzen: Phase 2.5 done. Pause für Reflexion. Dann Phase 3 starten.
+Wenn alle Häkchen sitzen: Phase 3 done. Pause für Reflexion. Phase 4 starten.
