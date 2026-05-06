@@ -21,6 +21,7 @@ import {
 import type { AuditRepository } from "./repository/types.js";
 import type { BridgeConfig } from "./bridge/types.js";
 import type { TrustRepo } from "./trust/trust-repo.js";
+import type { SkillRepo } from "./skills/repo.js";
 
 // ─── TWIN SERVICE REGISTRY ──────────────────────────────────────────────────
 //
@@ -67,6 +68,7 @@ interface RegistryDeps {
   logger: FastifyBaseLogger;
   masterKey: Buffer;
   trustRepo: TrustRepo;
+  skillRepo: SkillRepo;
 }
 
 export class TwinServiceRegistry {
@@ -101,6 +103,7 @@ export class TwinServiceRegistry {
         opts.logger,
         opts.masterKey,
         opts.trustRepo,
+        opts.skillRepo,
       );
       this.entries.set(profile.handle, entry);
     }
@@ -162,6 +165,7 @@ export class TwinServiceRegistry {
       deps.logger,
       deps.masterKey,
       deps.trustRepo,
+      deps.skillRepo,
     );
 
     // Inbox-Sync analog zu {@link startBridges} — Sync-Fehler sind nicht
@@ -263,6 +267,7 @@ export class TwinServiceRegistry {
     logger: FastifyBaseLogger,
     masterKey: Buffer,
     trustRepo: TrustRepo,
+    skillRepo: SkillRepo,
   ): RegistryEntry {
     const bus = new EventBus();
     const audit = new AuditService(auditRepo, bus, profile.twinId);
@@ -322,6 +327,7 @@ export class TwinServiceRegistry {
       mandates: profile.mandates,
       bridgeClient,
       trustRepo,
+      skills: skillRepo,
     });
 
     const bridgeStream = new BridgeStream(

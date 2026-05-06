@@ -7,6 +7,7 @@ import { loadRuntimeConfig } from "./config.js";
 import { TwinServiceRegistry } from "./twin-service-registry.js";
 import { TwinProfilesRepo } from "./twin-profiles-repo.js";
 import { TrustRepo } from "./trust/trust-repo.js";
+import { SkillRepo } from "./skills/repo.js";
 import { EncryptionKeyMissingError, loadMasterKey } from "./crypto-utils.js";
 
 // ─── BOOTSTRAP ───────────────────────────────────────────────────────────────
@@ -60,6 +61,7 @@ async function main() {
   // vom TwinService (Trust-Bypass-Check) genutzt — eine Instanz, geteilt.
   const registry = new TwinServiceRegistry();
   const trustRepo = new TrustRepo(repo.db);
+  const skillRepo = new SkillRepo(repo.db);
   const app = await createServer({
     audit: repo.audit,
     registry,
@@ -78,6 +80,7 @@ async function main() {
     logger: app.log,
     masterKey,
     trustRepo,
+    skillRepo,
   });
   const summaries = registry.list();
 

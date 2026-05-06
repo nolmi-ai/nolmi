@@ -7,6 +7,8 @@ import type { BridgeClient } from "./bridge/client.js";
 import { BridgeError } from "./bridge/client.js";
 import type { BridgeMessage } from "./bridge/types.js";
 import type { TrustRepo } from "./trust/trust-repo.js";
+import type { SkillRepo } from "./skills/repo.js";
+import { buildSkillsBlock } from "./skills/prompt-builder.js";
 
 // ─── TWIN SERVICE ────────────────────────────────────────────────────────────
 //
@@ -49,6 +51,12 @@ export interface TwinServiceDeps {
   bridgeClient?: BridgeClient | null;
   /** Trust-Repository — Hot-Path bei jedem eingehenden Bridge-Call. */
   trustRepo: TrustRepo;
+  /**
+   * Skill-Repository — bei jedem Modell-Call werden alle aktiven Skills des
+   * Twins geladen und permanent in den System-Prompt eingebettet (Strategie
+   * B, siehe `skills/prompt-builder.ts`).
+   */
+  skills: SkillRepo;
 }
 
 export interface ApproveResult {
@@ -757,12 +765,29 @@ export class TwinService {
     messages: ChatMessage[],
     extraSystem?: string,
   ): Promise<{ content: string; metadata: Record<string, unknown> }> {
-    // Drei Schichten, Reihenfolge bewusst:
+    // Skills landen zwischen Persona und LANGUAGE_DIRECTIVE: sie ergänzen die
+    // Persona ("wer der Twin ist") um Wissen/Verhalten ("was er zusätzlich
+    // kann"), sollen sie aber nicht überschreiben. Direktive bleibt am Ende
+    // dominant. Strategie B: alle aktiven Skills permanent geladen.
+    const skills = this.deps.skills.list(this.deps.twinId, { activeOnly: true });
+    const skillsBlock = skills.length > 0 ? buildSkillsBlock(skills) : null;
+    if (skillsBlock) {
+      // Token-Volumen-Proxy für späteren C-Wechsel (Core/On-demand). Echte
+      // Provider-Token-Counts wären teuer; Zeichenanzahl reicht als Schwellwert-
+      // Indikator.
+      console.log(
+        `[skills] block in system-prompt: twinId=${this.deps.twinId}, ` +
+          `skillCount=${skills.length}, skillsBlockChars=${skillsBlock.length}`,
+      );
+    }
+
+    // Vier Schichten, Reihenfolge bewusst:
     //   1. extraSystem (situativer Bridge-Kontext, optional)
     //   2. persona.systemPrompt (wer der Twin ist)
-    //   3. LANGUAGE_DIRECTIVE (Anti-"weiss"-statt-"weiß", gilt für alle Twins)
+    //   3. skillsBlock (Skill-Erweiterungen, ergänzen Persona)
+    //   4. LANGUAGE_DIRECTIVE (Anti-"weiss"-statt-"weiß", gilt für alle Twins)
     // Direktive ans Ende, weil LLMs den letzten System-Block stärker gewichten.
-    const system = [extraSystem, persona.systemPrompt, LANGUAGE_DIRECTIVE]
+    const system = [extraSystem, persona.systemPrompt, skillsBlock, LANGUAGE_DIRECTIVE]
       .filter(Boolean)
       .join("\n\n");
 
