@@ -1,6 +1,6 @@
 # Backlog Phase 2.5 und später
 
-Stand: 7. Mai 2026, vormittag (Tag 8) — #77 und #74 abgeschlossen, drei neue Items entstanden bei der #74-Verifikation. Persona-Architektur-Befund: Persona wird aus DB-Spalte `twin_profiles.persona_md` gelesen, nicht aus File. File-Edit allein wirkungslos ohne DB-Update.
+Stand: 7. Mai 2026, mittag (Tag 8) — vier must-Items vor 3.2 abgeschlossen: #77 (Production-Container-Bootstrap), #74 (Persona-Skill-Layering), #78 (Persona/Mandates-Reload-CLI). Plus drei neue Items entstanden, plus Tag-8-Lessons. Phase 3.1 ist sauber, vor 3.2 noch #71b + #80 (Test-Hygiene-Block) als letzte must-Vorbedingung.
 
 Format: Punkte mit Größe (S/M/L/XL) und Priorität (must/should/nice).
 
@@ -643,7 +643,9 @@ Risiko-Analyse: heute hatten wir Glück, weil 008 additiv (CREATE TABLE) ist —
 
 **Größe:** S · **Priorität:** must · **Aus:** Tag-7-Production-Deploy
 
-### 78. Persona-File-Sync zur DB fehlt
+### 78. Persona-File-Sync zur DB fehlt ✅
+**Abgeschlossen 7. Mai 2026 (Tag 8 Mittag) — Commit `61154c0` mit Variante 1 (CLI-Tool `pnpm twin:reload <handle>`).**
+
 Bei der #74-Verifikation entdeckt: `docs/persona.md` ist Source-of-Truth fürs Repo, aber Persona wird zur Laufzeit aus `twin_profiles.persona_md`-DB-Spalte gelesen. Sync von File zu DB findet nur einmal statt — beim initialen `pnpm twin:bootstrap`. Danach gibt's keinen Pfad mehr. File-Edit wird nicht in DB übertragen, Server bleibt auf altem Persona-Stand.
 
 Heute (Tag 8) gelöst via Wegwerf-Skript in `/tmp/update-persona.ts`, das `readFile(docs/persona.md)` plus `TwinProfilesRepo.update(twinId, { personaMd })` macht. Funktioniert, ist aber undokumentiert und nicht reusable.
@@ -654,6 +656,8 @@ Drei Lösungs-Optionen:
 3. **UI-Editor in Settings** — gehört zu #10 (UI-Bearbeitung von Persona/Mandates) und #76 (Skill-Edit via UI). Größerer Scope
 
 Plus (Production-relevante Implication): bei Production-Deploy mit Persona-Änderung muss aktuell jemand manuell pro Twin das Update-Skript laufen lassen. Das wird bei drei Twins schon nervig, bei mehr User-Twins später unhaltbar.
+
+**Umsetzung:** Variante 1 gewählt — neues CLI-Tool `pnpm --filter @twin-lab/runtime twin:reload <handle> [--force]`. Liest alle drei Source-Files (Persona-Markdown, Persona-Meta-YAML, Mandates-YAML) und schreibt sie in `twin_profiles`-DB. Pfad-Resolution via neuem Helper `_twin-source-paths.ts` (auch von `bootstrap-twin.ts` genutzt, doppelte Pfad-Logik entfernt). Confirm-Prompt mit y/yes/j/ja-Akzeptanz, `--force` für Skripte. Diff-Summary zeigt persona_md-chars-delta, display_name-Wechsel, mandates-count-delta. Restart-Hinweis am Ende, weil Persona/Mandates nur beim Twin-Service-Boot in den Speicher geladen werden.
 
 **Größe:** S (Variante 1), M (Variante 2), L (Variante 3) · **Priorität:** must · **Aus:** Tag-8 #74-Verifikation
 
@@ -1187,17 +1191,25 @@ zeigt verstrichene Zeit seit Start.
 
 Lesson für Cross-Platform-Briefings: ps-Optionen sind nicht portabel zwischen Linux und macOS. Wenn Briefing auf macOS-Dev und Linux-Server gleichzeitig laufen muss: entweder beide Varianten nennen oder eine Lösung wählen die auf beiden funktioniert (z.B. `stat -c %y /proc/<PID>` auf Linux, oder Process-Start aus Logs).
 
+### Lesson (Tag 8 / #78): Helper-Extraktion bei zweitem Aufruf, nicht beim ersten
+
+#78 hat einen kleinen Architektur-Effekt produziert: die Pfad-Resolution-Logik aus `bootstrap-twin.ts` (Markus = Default-Pfade ohne Suffix, andere = `-<handle>`-Suffix) wurde in `_twin-source-paths.ts` extrahiert, weil das neue `twin-reload`-Skript dieselbe Logik braucht. Plus: `bootstrap-twin.ts` wurde direkt mit umgestellt — keine doppelte Wahrheit, kein Code-Drift-Tech-Debt.
+
+Generelles Prinzip: **DRY beim zweiten Aufruf, nicht beim ersten.** Premature Abstraction kostet mehr als sie spart. Erst wenn klar ist, dass eine Logik mehrfach gebraucht wird (zweiter Aufruf), lohnt sich die Extraktion. Für #78: Pfad-Logic war erstmal in `bootstrap-twin.ts` inline okay (eine Stelle, ein Twin-Setup-Skript). Erst als `twin-reload` dieselbe Logic braucht, wird's ein shared Helper.
+
+Plus eine kleine Konvention: Underscore-Prefix für shared Helpers in `scripts/`-Ordner — `_twin-source-paths.ts` signalisiert „kein ausführbares Script, sondern Hilfsmodul". Pattern für künftige shared Skript-Helpers übernehmen.
+
 ---
 
 ## Notiz für später
 
 Sammle weiter Punkte, die im Sparring auftauchen. Nicht jeder Punkt muss eine Phase werden — manches ist Polishing, manches ist Architektur. Die Aufteilung S/M/L/XL und must/should/nice hilft beim Priorisieren wenn die Liste lang wird.
 
-**Item-Dichte 7. Mai 2026 vormittag (Tag 8):** Drei Items abgeschlossen — #77 (Production-Container-Bootstrap, Commit `2e96ddb`) und #74 (Persona-Skill-Layering, Commit `f045dd8` plus DB-Update via Wegwerf-Skript). Plus drei neue Items entstanden bei der #74-Verifikation (#78 Persona-File-Sync zur DB, #79 `persona`-Tabelle als Phase-1-Altlast, #80 Direct-Chat-History-Reset fehlt). Plus #71b von should auf must hochgestuft (Test-Hygiene als Pflicht-Vorbedingung vor 3.2). Plus 4 neue Lessons (Engine-Test als Truth-Source bei Persona-File-DB-Diskrepanz, Architektur-Befunde finden sich beim Verifizieren, tsx-Wegwerf-Skripts-Patterns, ps-Optionen Cross-Platform). Items insgesamt jetzt: 77 (74 + 3 neue Items #78-#80).
+**Item-Dichte 7. Mai 2026 mittag (Tag 8):** Vier Items abgeschlossen — #77 (Production-Container-Bootstrap, Commit `2e96ddb`), #74 (Persona-Skill-Layering, Commit `f045dd8` plus DB-Update via Wegwerf-Skript), #78 (Persona/Mandates-Reload-CLI, Commit `61154c0`). Plus drei neue Items entstanden bei der #74-Verifikation (#78 ✅, #79 `persona`-Tabelle als Phase-1-Altlast, #80 Direct-Chat-History-Reset fehlt). Plus #71b von should auf must hochgestuft (Test-Hygiene als Pflicht-Vorbedingung vor 3.2). Plus 5 neue Lessons (Engine-Test als Truth-Source bei Persona-File-DB-Diskrepanz, Architektur-Befunde finden sich beim Verifizieren, tsx-Wegwerf-Skripts-Patterns, ps-Optionen Cross-Platform, Helper-Extraktion bei zweitem Aufruf). Items insgesamt jetzt: 77 (74 + 3 neue Items #78-#80, davon #78 schon erledigt).
 
-**Was als Nächstes ansteht:** vor 3.2 noch zwei must-Items aus heutigem Vormittag:
+**Was als Nächstes ansteht:** vor 3.2 noch ein must-Block aus heutigem Vormittag:
 - **#71b + #80 zusammen** als Test-Hygiene-Block (~M, ~3-4h) — kumulative History fixen plus Reset-Pfad bauen, vor 3.2 zwingend
-- **#78 Persona-File-Sync** (~30 Min CLI-Tool) — wenn schon mehr als ein Twin Persona-Edits braucht
 - **Strategie-Session vor 3.2 (MCP-Client)** — Pre-Implementation-Diskussion mit konkreten Architektur-Festlegungen
+- Optional dazwischen: **#79 Persona-Tabelle droppen** (~XS, nice) — kann beim nächsten Migrations-Anlass mit angehängt werden
 
-Tag 8 Bilanz: Vormittag war Pflicht-Aufräumarbeit (#77, #74) plus Architektur-Erkenntnisse, die drei neue must-Items aufgedeckt haben. Lesson: ein 30-Min-Sub-Schritt produzierte 90 Min Erkenntnisarbeit plus Backlog-Wachstum. Erkenntnis-Phase ist nicht Verschwendung sondern Architektur-Investition — die Befunde von heute hätten uns sonst während 3.2 unterbrochen.
+Tag 8 Bilanz: Vormittag plus Mittag waren Pflicht-Aufräumarbeit (#77, #74, #78) plus Architektur-Erkenntnisse, die drei neue must-Items aufgedeckt haben. Lesson: ein 30-Min-Sub-Schritt produzierte 90 Min Erkenntnisarbeit plus Backlog-Wachstum. Erkenntnis-Phase ist nicht Verschwendung sondern Architektur-Investition — die Befunde von heute hätten uns sonst während 3.2 unterbrochen.

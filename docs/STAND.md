@@ -1,162 +1,134 @@
 # twin-lab — Stand
 
-**Letztes Update:** 6. Mai 2026, ~12:00
+**Letztes Update:** 7. Mai 2026, mittag (Tag 8)
 
 ## Aktuell in Arbeit
-Nichts. Phase 3.1 (Skill-System Engine + Pilot) komplett durch — fünf
-Sub-Schritte (3.1.A bis 3.1.F) an einem Vormittag. Production-Stack
-weiter stabil seit Tag 5.
+Nichts. Vier Pflicht-Items vor 3.2 abgehakt — #77, #74, #78, plus
+heute morgen final verifizierter 3.1.E-Toggle-Test. Vor 3.2 fehlt
+nur noch der Test-Hygiene-Block (#71b + #80, ~3-4h).
 
-## Heute (Tag 7) abgeschlossen
+## Heute (Tag 8) abgeschlossen
 
-### Strategie-Session: Phase 3 konkretisiert (vormittags, ~30 Min)
-Fünf Architektur-Entscheidungen festgelegt:
-- **Skill-Definition Hybrid C** — Manifest (YAML) + SKILL.md +
-  optional Script. Pattern angelehnt an Hermes/Cline/agentskills.io
-- **Storage in DB von Anfang an** — Tabelle `skills` mit
-  Multi-Tenant-Isolation pro `twin_id`
-- **Capability-Mapping** — Skills gehören zu Capabilities, sind
-  selbst keine. Mandate-Layer aus 2.5.4.1 unangetastet
-- **MCP als Skill-Source** — keine zweite Architektur, MCP-Tools
-  registrieren als Skills mit `source: "mcp"`
-- **Skill-Selection Strategie B** — alle aktiven Skills permanent
-  im System-Prompt. Migrationspfad zu C (Hybrid Core/On-demand)
-  dokumentiert für später, wenn Token-Volumen es erzwingt
+### #77 — Production-Container-Bootstrap-Fix (~30 Min)
+**Commit `2e96ddb`**
 
-Plus: Phase-3-Reihenfolge umgestellt — Skill-System (3.1) ist
-Fundament, MCP (3.2) ist Tool-Provider. Vorher war's andersherum.
-ROADMAP.md aktualisiert.
+Beim Tag-7-Production-Deploy entdeckt: Container ruft kein
+`init-db` auf, Migration 008 (Skills) wurde nicht angewendet.
+Symptom: `SqliteError: no such table: skills` bei jedem
+Skills-Endpoint-Aufruf. Ad-hoc-Fix war manueller
+`docker compose exec runtime node /app/apps/runtime/dist/scripts/init-db.js`.
 
-### 3.1.A — DB-Schema + Skill-Repo (~45 Min)
-**Commit `2c1cfd0`**
-- Migration `008_skills.sql`: Tabelle `skills` mit
-  `UNIQUE(twin_id, name)`, FK auf `twin_profiles` mit
-  `ON DELETE CASCADE`, Indizes für `twin_id` / `is_active` / `source`
-- `apps/runtime/src/skills/repo.ts`: SkillRepo mit
-  `add` / `findById` / `findByName` / `list` / `update` / `setActive` /
-  `remove` plus eigene Error-Typen `SkillAlreadyExistsError` /
-  `SkillNotFoundError`
-- `apps/runtime/src/scripts/test-skill-repo.ts`: 9 Steps grün
-- `packages/shared/src/index.ts`: Zod-Schemas für `Skill`,
-  `SkillManifest`, `SkillInput`, `SkillOutput`, `SkillSource`
-- ID-Format: `skill_<nanoid(16)>`
+Heute strukturell gelöst:
+- `apps/runtime/Dockerfile`: CMD ist jetzt
+  `sh -c "node dist/scripts/init-db.js && exec node dist/index.js"`
+- `exec` ersetzt Shell-Prozess durch Node — sauberes
+  Signal-Handling bei `docker stop` (kein Phantom-`sh`-Parent)
+- Migration läuft idempotent bei jedem Container-Start, skipped
+  wenn alle Migrations schon angewendet
+- Lokal verifiziert mit `docker build` + `docker run` —
+  Migration-Pfad-Test grün
 
-### 3.1.B+C — Skill-Engine + System-Prompt-Integration (~7 Min Code, +Verifikation)
-**Commit `b2b796e`**
-- Neu: `apps/runtime/src/skills/prompt-builder.ts` —
-  `buildSkillsBlock(skills)` baut die vierte System-Prompt-Schicht
-  (`# Verfügbare Skills` Header + Hinweis-Satz + pro Skill
-  `## name` + Beschreibung + `instructionsMd`, getrennt durch `---`)
-- `apps/runtime/src/twin-service.ts`: `runModel()` lädt vor jedem
-  Call `skills.list({activeOnly: true})`, baut Block, loggt
-  `[skills] block in system-prompt: twinId=…, skillCount=…,
-  skillsBlockChars=…` als Token-Volumen-Proxy. Reiht ihn als
-  dritte Schicht zwischen Persona und LANGUAGE_DIRECTIVE ein.
-  Skills automatisch aktiv für alle Aufrufer (chat,
-  runOwnerDirect, approveDefault, approveTwinSend,
-  approveTwinResponse, handleTrustedBridgeMessage).
-- `apps/runtime/src/twin-service-registry.ts` und `index.ts`:
-  SkillRepo via Registry-Pattern durchgereicht (analog TrustRepo)
-- Neu: `apps/runtime/src/scripts/test-skill-engine.ts` — Mock-LLM
-  via `MockLanguageModelV3` aus `ai/test`, 6 Stages alle grün
-  (Skill anlegen, Chat-Call, Assertions auf Schichten-Reihenfolge,
-  setActive(false) + zweiter Call, Cleanup)
-- 3.1.C ist konzeptionell Teil von 3.1.B — Claude Code hat beides
-  in einem Schritt gebaut, ein Commit reicht
+Production-Update für #77 nicht akut, da Production heute morgen
+manuell init-db gemacht hat. Beim nächsten regulären Pull kommt
+das neue Dockerfile mit, dann läuft Migration auch dort
+automatisch.
 
-### 3.1.D — CLI-Tool für Skill-Anlegen (~30 Min)
-**Commit `7c65c41`**
-- `apps/runtime/src/scripts/skill-create.ts` — CLI-Tool:
-  Args-Parsing `<handle> <skill-dir> [--force]`, Verzeichnis-Sanity
-  (manifest.yaml + SKILL.md Pflicht, script.ts optional),
-  YAML-Parse mit snake→camel-Mapping (`requires_approval` →
-  `requiresApproval`), Validierung gegen `SkillManifestSchema`,
-  Twin-Lookup über `TwinProfilesRepo`, Conflict-Detection via
-  `SkillRepo.findByName()` (Default = Error mit `--force`-Hinweis,
-  `--force` triggert `update()`)
-- `apps/runtime/package.json`: Script-Eintrag `twin:skill-create`
-- Neu: `apps/runtime/skills-templates/` mit `.gitignore`-Whitelist
-  (README.md, `_test-skill/**`), README mit Format-Doku,
-  `_test-skill/manifest.yaml` + `_test-skill/SKILL.md` (Marker-Wort
-  `twinlab-skill-test-marker` für späteren Engine-Sanity-Check)
-- Source-Format `manual` (Platz für `mcp` in 3.2)
-- Verifikation: 4 Steps grün (Import → Re-Import-Error → --force →
-  Update mit gleicher skillId)
+### #74 — Persona-Skill-Layering (~90 Min, davon ~60 Min Diagnose)
+**Commit `f045dd8`** (File-Edit) plus DB-Update via Wegwerf-Skript
 
-### 3.1.F — Pilot-Skill HARWAY-Workshop-Kontext (~15 Min)
-- Skill-Files lokal in `apps/runtime/skills-templates/harway-workshops/`
-  (gitignored — Skills sind User-Daten, nicht Repo-Inhalt)
-- Manifest: `name: harway-workshops`,
-  `capability: respond_to_chat`, `requires_approval: false`
-- SKILL.md: drei Workshop-Formate (Konzept / Hands-on /
-  Team-Enablement), Konditionen, Kontaktdaten — Inhalt aus
-  `docs/persona.md` extrahiert
-- Import via CLI: `pnpm --filter @twin-lab/runtime
-  twin:skill-create @markus skills-templates/harway-workshops`
-- skillId: `skill_2-T2zqvxf3m-0bbD`, 1800 chars Instructions
-- Browser-Test mit drei Fragen (Termin / Preise / Übersicht): Twin
-  antwortet sauber im Markus-Stil mit den Skill-Daten, keine
-  Halluzinationen, keine erfundenen Tagessätze
-- Kein Commit — reine Datenoperation, Skill-Files gitignored
+Workshop-Block aus `docs/persona.md` entfernt, Fallback-Hinweis
+ergänzt:
 
-### 3.1.E — Read-only UI in Settings + Toggle (~3h Pair-Programming)
-**Commit `5fbf254`**
-- Backend `apps/runtime/src/server.ts`:
-  `registerSkillRoutes(app, deps, requireOwner)` analog zu
-  `registerTrustRoutes`. Hilfs-Funktion `toSkillUiPayload()`
-  schneidet Manifest/Markdown/Script raus und konvertiert
-  Timestamps (DB epoch ms → ISO-String)
-- Backend Routes: `GET /twins/:handle/skills` (Owner-gated,
-  sortiert aktive zuerst alphabetisch, dann inaktive) und
-  `PATCH /twins/:handle/skills/:skillId/active` (Body
-  `{ isActive: boolean }`, Cross-Twin-Check → 404 wenn Skill
-  nicht zum Handle gehört)
-- `apps/runtime/src/index.ts`: SkillRepo-Instanz aus 3.1.B
-  zusätzlich an `createServer({...})` durchgereicht
-- `packages/shared/src/index.ts`: `SkillUiPayloadSchema` +
-  `SkillUiPayload`-Type
-- Frontend `apps/web/app/settings/page.tsx`: neue Skills-Section
-  zwischen „Vertraute Twins" und „Persona und Mandates". Pro
-  Skill: Name + Description, Aktiv-Toggle rechts, Badges
-  (Capability, Source, Instructions-Länge, ggf. „Script" /
-  „requires approval"). Toggle mit Optimistic-Update +
-  Revert-bei-Error + 5s-Auto-Clear. Empty-State mit CLI-Befehl
-  als monospace-Block. `mcp`-Source-Badge accent-coloriert
-  (vorbereitet auf 3.2)
-- `skillBusyIds`-Set statt globalem busy-Boolean — User kann
-  mehrere Skills parallel toggeln ohne UI-Block
-- Browser-Test: Settings-Block korrekt, PATCH ändert DB-Wert,
-  Cross-Twin-Isolation grün (Florian sieht keine Markus-Skills),
-  Owner-Gating Backend liefert 401 ohne Cookie
-- Mit `5fbf254` ist Phase 3.1 inhaltlich abgeschlossen
+```
+## HARWAY Experience — was du sagen darfst
 
-### Persona-Skill-Doppelung als Architektur-Befund
-- Beim Toggle-Test entdeckt: Twin antwortet mit Workshop-Daten
-  obwohl Skill deaktiviert. Ursache: `docs/persona.md` enthält
-  Workshop-Block 1:1 (aus dem der Skill-Inhalt extrahiert wurde)
-- Engine selbst ist clean (`test-skill-engine.ts` grün,
-  Skill-Block bei `is_active=0` korrekt nicht im System-Prompt)
-- Confound, kein Bug — gehört als Architektur-Frage in den
-  Backlog (Item #74). Vote: Layering klar dokumentieren
-  (Persona = identitäts-stabiles Wissen, Skill = austauschbares),
-  Workshop-Inhalt aus Persona raus
+Du kennst die öffentliche Außendarstellung von HARWAY Experience.
+Konkrete Workshop-Termine, Preise und Buchungs-Links erhältst du
+über separat geladenen Kontext. Wenn dir keine konkreten Daten zur
+Verfügung stehen und jemand danach fragt: keine Zahlen erfinden,
+keine Termine spekulieren. Verweis auf info@harwayexperience.com
+oder Discovery Call (calendly.com/harwayexperience/discoverycall).
+```
 
-### Hydration-Error wieder aufgetaucht
-- Nach Schema-Erweiterung in `packages/shared` und Server-Code-
-  Änderungen zeigte Browser kurz Hydration-Error auf `<footer>`
-- Bekannt aus Tag 6 (Backlog #71c, Stale-Bundle-Phantom). Hard-
-  Reload räumt's
-- Bestätigt das Pattern: bei ENV-Var-Änderungen UND bei
-  Schema-Erweiterungen in `packages/shared` lokal Hard-Reload
+Browser-Test verifiziert:
+- Skill `harway-workshops` aus → Twin verweist auf Discovery
+  Call: „Konkrete Preise hab ich gerade nicht parat. Schreib am
+  besten kurz an info@..."
+- Skill an → Twin nennt 599/499 Euro, Daten aus Skill
+- `[skills] block in system-prompt: ... skillCount=1,
+  skillsBlockChars=2152`-Logging bestätigt System-Prompt-Layering
 
-## Phase 3 Status
+Saubere Trennung erreicht: Persona = identitäts-stabiles Wissen,
+Skill = austauschbares Workshop-Wissen.
 
-- 3.1 ✅ **Skill-System Engine + Pilot** (5/5 Sub-Schritte, ein
-  Vormittag)
+### Architektur-Befunde während #74-Verifikation
+
+Ein 30-Min-Sub-Schritt produzierte ~60 Min Diagnose plus drei
+neue Backlog-Items. Drei wichtige Erkenntnisse über die
+Persona/History-Architektur:
+
+**1. Persona wird aus DB gelesen, nicht aus File.** Der Server
+liest `twin_profiles.persona_md` beim Boot, File-Edit allein ist
+wirkungslos. `loadPersona` aus `apps/runtime/src/persona/loader.ts`
+wird nur in `bootstrap-twin.ts` aufgerufen — also nur beim
+initialen Setup eines Twins. → **Backlog #78** dokumentiert das
+Sync-Problem (heute behoben mit CLI-Tool, siehe unten).
+
+**2. `persona`-Tabelle ist Phase-1-Altlast.** Schema mit
+`CHECK (id = 1)` (single-twin), enthält alten Phase-1-Snapshot,
+wird vom Code nicht mehr genutzt. → **Backlog #79** dokumentiert
+den geplanten DROP via Migration 009.
+
+**3. Direct-Chat-History persistiert ohne Reset-Pfad.** Audit-Log
+wächst monoton, History-Kontext beim nächsten Send enthält alle
+früheren Konversationen. Verfälscht jeden Skill-Toggle-Test:
+Twin antwortet mit Workshop-Daten aus eigener früherer Antwort.
+→ **Backlog #80** dokumentiert den fehlenden Reset-Pfad. Plus
+**#71b von should auf must hochgestuft** vor 3.2.
+
+### #78 — CLI-Tool `pnpm twin:reload <handle>` (~45 Min)
+**Commit `61154c0`**
+
+Drei Source-Files in einem Befehl synchronisiert:
+- `docs/persona.md` (oder `docs/persona-<handle>.md`)
+- `docs/persona-meta.yaml` (oder `docs/persona-<handle>-meta.yaml`)
+- `docs/mandates.yaml` (immer global)
+
+Pattern angelehnt an `twin:set-api-key` und `twin:skill-create`.
+Args: `<handle> [--force]`. Confirm-Prompt mit y/yes/j/ja-Akzeptanz,
+`--force` für Skripte. Diff-Summary zeigt persona_md-chars-delta,
+display_name-Wechsel, mandates-count-delta. Restart-Hinweis am
+Ende, weil Persona/Mandates nur beim Twin-Service-Boot in den
+Speicher geladen werden (anders als Skills, die bei jedem Chat
+frisch aus DB gelesen werden).
+
+Architektur-Detail: Pfad-Resolution in eigenen Helper extrahiert
+(`apps/runtime/src/scripts/_twin-source-paths.ts`), den auch
+`bootstrap-twin.ts` jetzt nutzt — keine doppelte Pfad-Logik.
+Underscore-Prefix als Konvention für shared Helpers im
+scripts-Ordner.
+
+Verifikation: drei Aufrufe (`@markus` mit Confirm, `@markus`
+`--force`, `@florian` `--force`) plus DB-Inspect — alle drei
+Twins korrekt synchron, kein Cross-Twin-Kontamination.
+
+### Persona-DB-Synchronisierung im Test
+
+Der ursprüngliche Test heute morgen scheiterte am Persona-File-
+zu-DB-Sync-Bug. Eingriff: Wegwerf-Skript in `/tmp/update-persona.ts`
+mit absoluten Imports und async-main-Wrapper, weil tsx-Inline-Eval
+relative Imports nicht auflöst und top-level-await im CJS-Modus
+nicht funktioniert. Lessons aus diesem Side-Quest sind als #78
+und Tag-8-Lessons in BACKLOG dokumentiert.
+
+## Phase 3 Status (unverändert seit Tag 7)
+
+- 3.1 ✅ **Skill-System Engine + Pilot**
   - 3.1.A ✅ DB-Schema + Skill-Repo
   - 3.1.B+C ✅ Engine + System-Prompt-Integration
   - 3.1.D ✅ CLI-Tool zum Importieren
-  - 3.1.E ✅ Read-only UI + Toggle
+  - 3.1.E ✅ Read-only UI + Toggle (heute final verifiziert nach
+    #74-Persona-Cleanup)
   - 3.1.F ✅ Pilot-Skill `harway-workshops`
 - 3.2 offen — MCP-Client als Skill-Provider
 - 3.3 offen — Memory: Conversation + Semantic
@@ -165,16 +137,22 @@ ROADMAP.md aktualisiert.
 - 3.6 offen — Procedural Memory (ggf. Phase 4)
 
 ## Was als nächstes ansteht
-1. **Pause / Mittagspause.** Vier Commits am Vormittag, sauber
-   abgeschlossen.
-2. **3.2 starten** — MCP-Client als Skill-Provider. Großer Brocken,
-   braucht eigene Planungs-Session: MCP-Protokoll-Implementation,
-   MCP-Server-Konfiguration pro Twin, Pilot-MCP-Server (z.B.
-   Filesystem oder Time), Mandate-Gates für Tool-Calls.
-3. **Backlog-Items in Reihenfolge** — #71b kumulative
-   Audit-Messages, #65 Reverse-Proxy, #74 Persona-Skill-Layering.
-4. **Production-Update fällig** — Tag-7-Commits noch nicht
-   deployed. Beim nächsten regulären Pull mitnehmen.
+1. **Pause / Mittagspause.** Vier Code-Commits plus zwei Doku-
+   Commits am Vormittag, sauber abgeschlossen.
+2. **#71b + #80 als Test-Hygiene-Block** (~M, ~3-4h) — letzter
+   must-Block vor 3.2. Audit-Schema fixen (kumulative History
+   raus) plus History-Reset-Pfad in UI/Backend. Beide hängen
+   konzeptionell zusammen — könnten in einem Sub-Schritt
+   gemeinsam angegangen werden, evtl. mit Vorarbeit für 3.3
+   Conversation-Memory (Sliding-Window-Pattern).
+3. **Strategie-Session vor 3.2 (MCP-Client)** — sobald Test-
+   Hygiene steht. Pre-Implementation-Diskussion mit konkreten
+   Architektur-Festlegungen, analog zur Phase-3-Strategie-Session
+   gestern morgen.
+4. **Optional: #79 Persona-Tabelle droppen** (XS, nice) — kann
+   beim nächsten Migrations-Anlass mit angehängt werden.
+5. **Production-Update fällig** — Tag-7- und Tag-8-Commits noch
+   nicht alle deployed. Beim nächsten regulären Pull mitnehmen.
 
 ## Production-Stack — live (unverändert)
 - **`https://app.twin.harwayexperience.com`** — Web
@@ -184,25 +162,30 @@ ROADMAP.md aktualisiert.
 Alle drei mit `restart: unless-stopped`, HTTPS via Let's Encrypt,
 Traefik-Routing.
 
-Hinweis: Tag-7-Commits (3.1.A-F) noch nicht in Production
-deployed. Skill-System läuft nur lokal. Beim nächsten Pull +
-Rebuild geht's mit. Kein Druck — niemand auf Production hat
-heute Skills.
+Hinweis: Tag-7-Skill-System ist deployed (manuelles init-db lief
+gestern Mittag), aber Tag-8-Commits (#77 Dockerfile-Fix, #74
+Persona-Cleanup, #78 twin:reload CLI) noch nicht. Beim nächsten
+regulären Pull kommen die mit. #74 in Production braucht
+zusätzlich `pnpm twin:reload @markus --force` plus Container-
+Restart, sonst hat Production-Markus-Twin noch den alten
+Workshop-Block in der Persona-DB-Spalte. Kein Druck — niemand auf
+Production hat heute Skill-Toggles.
 
 ## Lokal
 `/Users/mjb/Visual Studio/twin-lab` — drei Twins (@markus, @florian,
-@heiko), lokale Bridge auf 5100. Markus-Twin hat den Pilot-Skill
-`harway-workshops` aktiv in seiner DB.
+@heiko), lokale Bridge auf 5100. Markus-Twin hat Pilot-Skill
+`harway-workshops` aktiv in seiner DB. Persona-DB-Spalte ist nach
+#78-Tool-Lauf synchron mit `docs/persona.md`-File.
 
 ## Drei User auf Production
 - Owner: @markus (markus.baier@harway.de)
 - Owner: @florian (florian.ristig@harway.de)
 - Owner: @heiko (heiko.gregor@harway.de)
 
-Alle drei mit anthropic/claude-opus-4-7, Production-Bridge. Keine
-Skills auf Production.
+Alle drei mit anthropic/claude-opus-4-7, Production-Bridge.
 
 ## Repo
-github.com/markusbaier/twin-lab — origin/main aktuell auf `5fbf254`
-(Tag-7 Mittag, vier neue Commits seit gestern: 2c1cfd0, b2b796e,
-7c65c41, 5fbf254).
+github.com/markusbaier/twin-lab — origin/main aktuell auf `61154c0`
+(Tag 8 Mittag, vier neue Commits seit gestern Mittag: 2e96ddb
+Dockerfile, f045dd8 Persona-Edit, f0705c2 Tag-8-Doku, 61154c0
+twin:reload-CLI).
