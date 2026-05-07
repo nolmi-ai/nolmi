@@ -1,6 +1,6 @@
 # Backlog Phase 2.5 und später
 
-Stand: 6. Mai 2026, Mittag (Tag 7) — Phase 3.1 (Skill-System Engine + Pilot) komplett durch. Fünf Sub-Schritte (3.1.A bis 3.1.F) an einem Vormittag. Vier neue Commits (`2c1cfd0`, `b2b796e`, `7c65c41`, `5fbf254`) plus ein Pilot-Skill via CLI in @markus' DB. Phase 3 zur Hälfte durch.
+Stand: 7. Mai 2026, vormittag (Tag 8) — #77 und #74 abgeschlossen, drei neue Items entstanden bei der #74-Verifikation. Persona-Architektur-Befund: Persona wird aus DB-Spalte `twin_profiles.persona_md` gelesen, nicht aus File. File-Edit allein wirkungslos ohne DB-Update.
 
 Format: Punkte mit Größe (S/M/L/XL) und Priorität (must/should/nice).
 
@@ -544,7 +544,11 @@ Lösung: Backend `apps/runtime/src/twin-service.ts` ändern, dass nur die letzte
 
 Vorbedingung-Check: existing Audits müssen rückwärtskompatibel gerendert werden. Frontend-Filter aus #71 nutzt schon `lastMessage`-Field, würde mit reduzierter `input.messages`-Liste weiter funktionieren.
 
-**Größe:** S · **Priorität:** nice · **Aus:** #71 Implementation-Diskussion
+**Tag-8-Update:** Bei der #74-Verifikation zeigt sich, dass das Problem direkt mit Test-Hygiene zusammenhängt — Skill-Toggle-Test war durch History-Persistenz verfälscht. Verwandt mit neuem Item #80 (History-Reset-Pfad fehlt). Beide könnten gemeinsam angegangen werden mit einem sauberen Sliding-Window-Schema, das gleich Vorarbeit für 3.3 Conversation-Memory leistet.
+
+**Priorität-Hochstufung 7. Mai:** von should auf **must** vor 3.2 — weil MCP-Tool-Use-Tests durch dieselbe History-Verfälschung blockiert würden.
+
+**Größe:** S · **Priorität:** must · **Aus:** #71 Implementation-Diskussion + Tag-8-#74-Verifikation
 
 ### 71c. Hydration-Error nach ENV-Variable-Änderungen — Stale-Bundle-Phantom
 Während #71-Test sichtbarer Hydration-Error auf `<footer>`-Element. Nach Diagnose-Sequenz (Vor-#15-Stand auschecken, Test, Stand zurück, Hard-Reload) verschwand der Fehler komplett.
@@ -573,7 +577,9 @@ Vorbedingung: 3.1 Skill-System ✅ + 3.2 Tool-Use über MCP-Pattern. Implementat
 
 **Größe:** L · **Priorität:** should · **Aus:** Markus-Idee 6. Mai während 3.1.B-Implementation
 
-### 74. Persona-Skill-Layering klären
+### 74. Persona-Skill-Layering klären ✅
+**Abgeschlossen 7. Mai 2026 (Tag 8 Vormittag) — Commit `f045dd8` (File) plus DB-Update via Wegwerf-Skript.**
+
 Beim 3.1.E-Toggle-Test entdeckt: Twin antwortet mit Workshop-Daten obwohl `harway-workshops`-Skill deaktiviert. Ursache: `docs/persona.md` enthält Workshop-Block 1:1 (aus dem der Skill-Inhalt extrahiert wurde). Toggle-Test funktioniert deshalb nicht als verlässlicher Engine-Test — Engine selbst ist clean (`test-skill-engine.ts` grün, Skill-Block bei `is_active=0` korrekt nicht im System-Prompt).
 
 Architektur-Frage: wenn Wissen gleichzeitig in Persona und Skill steckt, ist es nicht eindeutig zu welchem es gehört. Drei Lösungs-Optionen:
@@ -584,6 +590,10 @@ Architektur-Frage: wenn Wissen gleichzeitig in Persona und Skill steckt, ist es 
 Vote: **3.** Konsequent durchziehen. Persona-Refactor in eigenem Sub-Schritt — Workshop-Block raus, andere identitäts-stabile Inhalte (wer Markus ist, wie er klingt, was er nicht tut) bleiben drin.
 
 Vorbedingung-Check: Skill-System steht (Phase 3.1 ✅), Persona-Reload pro Boot ist stable. Ein Sub-Schritt von ~30 Min Edit + Boot-Test reicht.
+
+**Umsetzung:** Workshop-Block aus `docs/persona.md` entfernt, Fallback-Hinweis ergänzt (Verweis auf Discovery Call und info@ wenn keine konkreten Daten verfügbar). Browser-Test mit Skill aus → Twin verweist statt halluziniert. Skill an → konkrete Daten aus Skill. Tonalität in beiden Fällen sauber im Markus-Stil.
+
+**Caveat / Folge-Erkenntnis:** Persona-File-Edit alleine ist wirkungslos — Persona wird aus `twin_profiles.persona_md`-DB-Spalte gelesen, nicht aus File. Wegwerf-Skript zum DB-Update musste genutzt werden. Backlog-Item #78 dokumentiert den fehlenden Persona-File-Sync-Pfad.
 
 **Größe:** S · **Priorität:** should · **Aus:** 3.1.E Toggle-Test 6. Mai
 
@@ -610,8 +620,10 @@ Verknüpft mit #10 (UI-Bearbeitung von Persona/Mandates). Konsistente UX: alles,
 
 **Größe:** L · **Priorität:** should · **Aus:** 3.1.E expliziter Scope-Ausschluss
 
-### 77. Production-Container-Bootstrap ruft init-db nicht auf
-Beim Tag-7-Production-Deploy entdeckt: Migration 008 (Skills-Tabelle) lag im Repo, wurde aber beim Container-Boot nicht angewendet. Symptom: `SqliteError: no such table: skills` bei jedem Settings-Page-Load. Ursache: `apps/runtime/Dockerfile` startet direkt `node ./apps/runtime/dist/index.js`, ohne vorgeschaltetes `init-db`. Lokal versteckt der `predev`-Hook in `pnpm dev` das Problem (`pnpm db:init` läuft vor jedem Dev-Start).
+### 77. Production-Container-Bootstrap ruft init-db nicht auf ✅
+**Abgeschlossen 7. Mai 2026 (Tag 8 Vormittag) — Commit `2e96ddb` mit Variante 1 (Dockerfile-CMD-Wrap).**
+
+Beim Tag-7-Production-Deploy entdeckt: Migration 008 (Skills-Tabelle) lag im Repo, wurde aber beim Container-Boot nicht angewendet. Symptom: `SqliteError: no such table: skills` bei jedem Settings-Page-Load. Ursache: `apps/runtime/Dockerfile` startete direkt `node ./apps/runtime/dist/index.js`, ohne vorgeschaltetes `init-db`. Lokal versteckt der `predev`-Hook in `pnpm dev` das Problem (`pnpm db:init` läuft vor jedem Dev-Start).
 
 Ad-hoc-Fix war: `docker compose exec runtime node /app/apps/runtime/dist/scripts/init-db.js`. Idempotent, hat 008 angewendet, alle anderen als „bereits angewendet" geskipped. Dauerhafter Fix gehört in den Boot-Pfad.
 
@@ -627,7 +639,48 @@ Vote: **2** als saubere Variante, **1** als pragmatischer Quick-Fix. Beide verhi
 
 Risiko-Analyse: heute hatten wir Glück, weil 008 additiv (CREATE TABLE) ist — System lief weiter, nur Skill-Endpoints failed mit 500. Bei einer Migration mit `ALTER TABLE` und Code der die neuen Spalten erwartet, würde der Service beim ersten Request crashen. Bei Migration für 3.2 (MCP-Servers) oder 3.3 (Memory-Schichten) Pflicht-Vorbedingung.
 
-**Größe:** S (Variante 1), M (Variante 2) · **Priorität:** must · **Aus:** Tag-7-Production-Deploy
+**Umsetzung:** Variante 1 (Quick-Fix) gewählt — Dockerfile-CMD ist jetzt `sh -c "node dist/scripts/init-db.js && exec node dist/index.js"`. `exec` ersetzt Shell-Prozess durch Node, sauberes Signal-Handling bei `docker stop`. Migration läuft idempotent bei jedem Container-Start (skipped wenn alle Migrations schon angewendet). Lokal verifiziert mit Docker-Image-Build und Migration-Pfad-Test. Saubere Variante 2 (Migrations-Library, Server-Boot-Refactor) bleibt als Backlog-Item für später.
+
+**Größe:** S · **Priorität:** must · **Aus:** Tag-7-Production-Deploy
+
+### 78. Persona-File-Sync zur DB fehlt
+Bei der #74-Verifikation entdeckt: `docs/persona.md` ist Source-of-Truth fürs Repo, aber Persona wird zur Laufzeit aus `twin_profiles.persona_md`-DB-Spalte gelesen. Sync von File zu DB findet nur einmal statt — beim initialen `pnpm twin:bootstrap`. Danach gibt's keinen Pfad mehr. File-Edit wird nicht in DB übertragen, Server bleibt auf altem Persona-Stand.
+
+Heute (Tag 8) gelöst via Wegwerf-Skript in `/tmp/update-persona.ts`, das `readFile(docs/persona.md)` plus `TwinProfilesRepo.update(twinId, { personaMd })` macht. Funktioniert, ist aber undokumentiert und nicht reusable.
+
+Drei Lösungs-Optionen:
+1. **CLI-Tool `pnpm twin:reload-persona <handle>`** — minimal-invasiv, Production-fähig, Pattern wie `twin:set-api-key`. Vote.
+2. **File-Watcher in dev-Mode** — `chokidar` auf `docs/persona.md`, automatischer DB-Update + Twin-Reload bei File-Änderung. Bequem, aber Production-fremd
+3. **UI-Editor in Settings** — gehört zu #10 (UI-Bearbeitung von Persona/Mandates) und #76 (Skill-Edit via UI). Größerer Scope
+
+Plus (Production-relevante Implication): bei Production-Deploy mit Persona-Änderung muss aktuell jemand manuell pro Twin das Update-Skript laufen lassen. Das wird bei drei Twins schon nervig, bei mehr User-Twins später unhaltbar.
+
+**Größe:** S (Variante 1), M (Variante 2), L (Variante 3) · **Priorität:** must · **Aus:** Tag-8 #74-Verifikation
+
+### 79. Phase-1-`persona`-Tabelle ist Altlast in DB
+Bei der #78-Diagnose gesichtet: Tabelle `persona` mit `id INTEGER PRIMARY KEY CHECK (id = 1)` und `data TEXT` enthält noch den ursprünglichen Phase-1-Snapshot (single-twin, Pre-2.5.2). Wird vom Code seit Phase 2.5.2b nicht mehr genutzt — Persona kommt jetzt aus `twin_profiles.persona_md`. Tote Tabelle, harmlos, aber Confound bei DB-Inspect (man fragt sich „warum ist Workshop-Inhalt da drin?").
+
+Migration 009 könnte die Tabelle droppen. Triviale `DROP TABLE persona;`. Nice-to-have, kein Blocker.
+
+**Größe:** XS · **Priorität:** nice · **Aus:** Tag-8 #78-Diagnose
+
+### 80. Direct-Chat-History-Reset fehlt (Test-Hygiene und Production-Issue)
+Beim #74-Verifikations-Test entdeckt: Direct-Chat-History persistiert in der `audit`-Tabelle, wächst monoton, beeinflusst jeden Send als History-Kontext. Heute Vormittag verfälscht das den Skill-Toggle-Test: Twin nennt Workshop-Daten aus seiner eigenen früheren Antwort, nicht aus aktivem Skill.
+
+Ist konzeptionell verwandt mit #71b (kumulative Audit-Messages als Speicher-Problem), aber spezifischer: hier geht es nicht nur um Speicher-Wachstum, sondern um **fehlenden Reset-Pfad**. Aus der UI gibt's keinen „neue Konversation starten"-Knopf, keinen „History löschen", kein Twin-Self-Reset.
+
+Drei Lösungs-Optionen:
+1. **„Neue Konversation"-Button** in Direct-Chat-UI — markiert die folgenden Audits mit neuer `conversation_id`, History-Loader filtert entsprechend. Saubere UX, schreibt nichts kaputt
+2. **„History löschen"-Button** — DELETE-Statement auf alle Direct-Chat-Audits für ein Twin-Owner-Pärchen. Drastisch, aber einfach
+3. **Auto-Window** — History-Loader nimmt nur die letzten N Audits oder die der letzten X Tage. Versteckt das Problem, fixt es nicht
+
+Plus #71b-Connection: wenn beide gemeinsam angegangen werden, könnte das Audit-Schema gleich neu strukturiert werden mit echtem Sliding-Window-Pattern (vorbereitet für 3.3 Conversation-Memory).
+
+**Test-Hygiene-Aspekt:** für Engine-Verifikation müsste man entweder die Audit-Tabelle pro Test resetten oder die History gezielt umgehen. Heute Vormittag haben wir's via DB-DELETE gelöst, was aber unsauber war (kein offizieller Pfad). 
+
+**Priorität-Hochstufung:** vor 3.2-Strategie-Session sollte das angegangen werden, weil 3.2 (MCP-Tool-Use) nochmal viel mehr Test-Szenarien produziert. Test-Hygiene ist Pflicht-Vorbedingung.
+
+**Größe:** M · **Priorität:** must · **Aus:** Tag-8 #74-Verifikation
 
 ---
 
@@ -1082,20 +1135,69 @@ Konkreter Pattern für künftige Container-Setups: alle predev/predeploy-Hooks a
 
 Backlog-Item #77 dokumentiert die Lösungs-Optionen.
 
+### Lesson (Tag 8 / #74): Engine-Test ist Truth-Source bei Persona-File-DB-Diskrepanz
+
+Heute Vormittag verbrachten wir ~30 Min mit der Suche nach „warum nennt der Twin Workshops obwohl Skill aus und Persona-Block raus". Browser-Test zeigte: Twin antwortet wie vor der Persona-Edit. Annahme war: Toggle hat nicht durchgegriffen oder Server-Cache. Reality: Persona wird aus DB-Spalte `twin_profiles.persona_md` gelesen, nicht aus File. File-Edit allein wirkungslos.
+
+Engine-Test (`test-skill-engine.ts`) hätte den Confound nicht aufgedeckt — er testet die Skill-Pipeline mit isolierter Mock-Persona, nicht den Server-Boot mit DB-Persona. **Aber:** der Engine-Test war ein wichtiger Datenpunkt zur Eingrenzung — er zeigte „Skill-System funktioniert in Isolation", was die Diagnose von „Toggle-Bug" auf „Persona-Source-Confound" verschob.
+
+Generelles Prinzip: bei verdächtigen Browser-Symptomen Engine-Test als ersten Schritt laufen lassen. Wenn Engine grün UND Browser red: das Problem ist in der Daten-Pipeline (DB-State, Loading-Pfad, Cache), nicht in der Engine.
+
+Verwandt mit Tag-7-Lesson „Engine-Test verlässlicher als Browser-Test bei Persona-Confound" — heute zweite Bestätigung des Prinzips, plus präzisierte Aussage: **Engine ≠ Pipeline**, beide brauchen separate Tests.
+
+### Lesson (Tag 8 / #74): Architektur-Befunde finden sich beim Verifizieren, nicht beim Implementieren
+
+#74 war als „kleiner Sub-Schritt ~30 Min" eingeschätzt. Tatsächlich: ~90 Min, davon ~30 Min Implementation und ~60 Min Diagnose plus drei neue Backlog-Items (#78, #79, #80) plus #71b-Hochstufung.
+
+Der eigentliche Code-Diff ist trivial (8 Zeilen Persona-File-Edit). Der Wert kommt aus dem Verifikations-Prozess:
+- File-Edit landet nicht in DB → #78 (Persona-Sync-Pfad fehlt)
+- `persona`-Tabelle ist Phase-1-Altlast → #79 (Tidy-up via Migration)
+- History verfälscht Tests → #80 (Reset-Pfad fehlt) + #71b-Hochstufung
+
+Generelles Prinzip: bei Refactor-artigen Sub-Schritten die Verifikation nicht als „letzter Smoke-Test" sehen, sondern als **eigentlichen Erkenntnis-Phase**. Implementation ist mechanisch, Verifikation deckt Architektur-Lücken auf. Plan dafür eingeplant: 50% Implementation, 50% Verifikation plus Backlog-Updates.
+
+### Lesson (Tag 8 / Wegwerf-Skripts): tsx mit absoluten Imports und async-main
+
+Bei #74-Verifikation drei Mal in Wegwerf-Skripts gestolpert:
+1. Relative Imports wie `./src/config.js` funktionieren nicht in tsx-Inline-Eval (`tsx -e "..."`) und auch nicht in Tempfiles, weil `[eval]` keinen Filesystem-Anker hat. Lösung: absolute Pfade in den Imports.
+2. Top-Level-await funktioniert in tsx mit CJS-Output nicht (esbuild-Constraint). Lösung: alles in `async function main() { ... }; main().catch(...)` wrappen.
+3. SQL-Direct-Insert mit Markdown-Inhalt ist Stress (Quoting, Newlines, Sonderzeichen). Wenn TS möglich: TS-Skript ist sicherer.
+
+Pattern für künftige DB-Operations bei Verifikations-Phase:
+- Strukturierter Repo-Code (TwinProfilesRepo, SkillRepo) statt Roh-SQL
+- Tempfile statt `tsx -e`-Inline
+- Async-Wrapper als Standard
+- Absolute Pfade in Imports zum Workspace-Root
+
+Drei Patterns sind heute drei Mal aufgetaucht — gehört in eine wiederverwendbare Skript-Vorlage. Vielleicht als `apps/runtime/src/scripts/_template.ts`-File mit Boilerplate, dass man kopieren kann.
+
+### Lesson (Tag 8 / Process): `ps -o lstart=` ist macOS-inkompatibel
+
+Versucht: `ps -p 35734 -o lstart=` um Server-Start-Zeit zu bekommen — zeigt auf macOS `Invalid process id: -o`. Auf Linux funktioniert das, auf BSD-`ps` (macOS-Default) andere Syntax.
+
+Macht-OS-Workaround:
+```
+ps -p <PID> -o lstart
+```
+(ohne `=` am Ende) — funktioniert. Oder direkter:
+```
+ps -p <PID> -o etime
+```
+zeigt verstrichene Zeit seit Start.
+
+Lesson für Cross-Platform-Briefings: ps-Optionen sind nicht portabel zwischen Linux und macOS. Wenn Briefing auf macOS-Dev und Linux-Server gleichzeitig laufen muss: entweder beide Varianten nennen oder eine Lösung wählen die auf beiden funktioniert (z.B. `stat -c %y /proc/<PID>` auf Linux, oder Process-Start aus Logs).
+
 ---
 
 ## Notiz für später
 
 Sammle weiter Punkte, die im Sparring auftauchen. Nicht jeder Punkt muss eine Phase werden — manches ist Polishing, manches ist Architektur. Die Aufteilung S/M/L/XL und must/should/nice hilft beim Priorisieren wenn die Liste lang wird.
 
-**Item-Dichte 6. Mai 2026 mittag (Tag 7):** Phase 3.1 (Skill-System Engine + Pilot) komplett durch — fünf Sub-Schritte (3.1.A bis 3.1.F) an einem Vormittag, vier neue Commits, ein Pilot-Skill via CLI lokal in @markus' DB. Plus Production-Deploy am Mittag (Migration 008 nachgezogen, Footer-Update aus Tag 6 endlich live). Plus 5 neue Items entstanden (#73 Inline-Twin-Befehle, #74 Persona-Skill-Layering, #75 Skills-Production-Sync, #76 Skill-Edit-via-UI, #77 Container-Bootstrap-Migration). Plus 8 neue Lessons aus Tag 7 (Pattern aus 2.5.4.1 als Vorlage, Briefing-Pfad-Bug bei pnpm-filter, tsx-Inline-Eval-Limits, Engine-Test als Truth-Source bei Persona-Confound, UI-Payload-Filter als Konvention, Tempo-Ausreißer-Vorsicht, Pre-Implementation-Strategie-Sessions als Hebel, Lokaler predev-Hook versteckt Production-Bugs). Items insgesamt jetzt: 74 (69 + 5 neue Items #73-#77).
+**Item-Dichte 7. Mai 2026 vormittag (Tag 8):** Drei Items abgeschlossen — #77 (Production-Container-Bootstrap, Commit `2e96ddb`) und #74 (Persona-Skill-Layering, Commit `f045dd8` plus DB-Update via Wegwerf-Skript). Plus drei neue Items entstanden bei der #74-Verifikation (#78 Persona-File-Sync zur DB, #79 `persona`-Tabelle als Phase-1-Altlast, #80 Direct-Chat-History-Reset fehlt). Plus #71b von should auf must hochgestuft (Test-Hygiene als Pflicht-Vorbedingung vor 3.2). Plus 4 neue Lessons (Engine-Test als Truth-Source bei Persona-File-DB-Diskrepanz, Architektur-Befunde finden sich beim Verifizieren, tsx-Wegwerf-Skripts-Patterns, ps-Optionen Cross-Platform). Items insgesamt jetzt: 77 (74 + 3 neue Items #78-#80).
 
-**Was als Nächstes ansteht:** Phase 3.1 abgeschlossen, Production updated. Mögliche nächste Sub-Schritte:
-- **Pause / Reflexion** — vier Code-Commits am Vormittag plus Production-Deploy, Mental-Hygiene
-- **#77 Migration-Bootstrap-Fix** als kleiner must-Sub-Schritt (~30 Min Dockerfile-Edit oder ~2h Server-Boot-Refactor) — Pflicht-Vorbedingung vor nächster Migration
-- **Strategie-Session vor 3.2 (MCP-Client)** — Pre-Implementation-Diskussion mit konkreten Architektur-Festlegungen, analog zur Phase-3-Strategie-Session heute morgen
-- **#74 Persona-Skill-Layering** als kleiner Sub-Schritt (~30 Min Persona-Edit + Boot-Test)
-- **#75 Skills-Production-Sync** als Vorbereitung auf Multi-User-Skills
-- **3.2 starten** mit MCP-Client-Implementation
+**Was als Nächstes ansteht:** vor 3.2 noch zwei must-Items aus heutigem Vormittag:
+- **#71b + #80 zusammen** als Test-Hygiene-Block (~M, ~3-4h) — kumulative History fixen plus Reset-Pfad bauen, vor 3.2 zwingend
+- **#78 Persona-File-Sync** (~30 Min CLI-Tool) — wenn schon mehr als ein Twin Persona-Edits braucht
+- **Strategie-Session vor 3.2 (MCP-Client)** — Pre-Implementation-Diskussion mit konkreten Architektur-Festlegungen
 
-Tag 7 Bilanz: schneller als geplant (5 Sub-Schritte statt 1-2), klar strukturiert (jeder Sub-Schritt ein Commit oder explizite Daten-Op), sauber dokumentiert. Pre-Implementation-Strategie-Session als wichtigster Hebel — sollte vor 3.2 wiederholt werden. Plus erster echter Production-Migration-Bug entdeckt — kein Schaden, aber Pattern-Lesson für künftige Migrations.
+Tag 8 Bilanz: Vormittag war Pflicht-Aufräumarbeit (#77, #74) plus Architektur-Erkenntnisse, die drei neue must-Items aufgedeckt haben. Lesson: ein 30-Min-Sub-Schritt produzierte 90 Min Erkenntnisarbeit plus Backlog-Wachstum. Erkenntnis-Phase ist nicht Verschwendung sondern Architektur-Investition — die Befunde von heute hätten uns sonst während 3.2 unterbrochen.
