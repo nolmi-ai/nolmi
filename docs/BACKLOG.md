@@ -1,6 +1,6 @@
 # Backlog Phase 2.5 und später
 
-Stand: 7. Mai 2026, mittag (Tag 8) — vier must-Items vor 3.2 abgeschlossen: #77 (Production-Container-Bootstrap), #74 (Persona-Skill-Layering), #78 (Persona/Mandates-Reload-CLI). Plus drei neue Items entstanden, plus Tag-8-Lessons. Phase 3.1 ist sauber, vor 3.2 noch #71b + #80 (Test-Hygiene-Block) als letzte must-Vorbedingung.
+Stand: 7. Mai 2026, nachmittag (Tag 8) — sieben Commits heute, Production komplett aktualisiert. Vier Pflicht-Items vor 3.2 abgehakt: #77, #74, #78, #81. Plus zwei neue offene Items entstanden (#81 abgeschlossen via Override-File-Pattern, #82 Heikos Persona-Source-File fehlt). Production-Persona-Drift-Befund: Production-Markus hatte 244-Zeichen-Stub aus Onboarding-Wizard, jetzt mit voller Persona aus docs/-Files synchronisiert.
 
 Format: Punkte mit Größe (S/M/L/XL) und Priorität (must/should/nice).
 
@@ -686,6 +686,51 @@ Plus #71b-Connection: wenn beide gemeinsam angegangen werden, könnte das Audit-
 
 **Größe:** M · **Priorität:** must · **Aus:** Tag-8 #74-Verifikation
 
+### 81. `docs/`-Volume-Mount für `twin:reload` in Production ✅
+**Abgeschlossen 7. Mai 2026 (Tag 8 Nachmittag) — VPS-Override-File-Pattern, kein Repo-Commit (siehe unten).**
+
+Beim Tag-8-Production-Deploy entdeckt: das neue `twin:reload`-CLI aus #78 funktioniert lokal, aber nicht im Production-Container. Symptom: `[twin:reload] Fehler: persona.md fehlt unter /app/docs/persona.md`. Ursache: das Production-Image kopiert nur `apps/runtime/` (standalone-Pattern), `docs/` ist nicht im Image.
+
+**Erste fehlgeschlagene Lösung (committet, dann reverted):** Volume-Mount `../../docs:/app/docs:ro` direkt in `repo/docker/twin-lab-web/docker-compose.yml`. Funktionierte lokal, aber nicht auf VPS, weil `docker-compose.yml` dort ein Symlink ist — Compose löste den relativen Pfad nicht relativ zum Symlink-Ziel auf, sondern relativ zum Symlink-Standort (`/docker/twin-lab-web/`), was zu `/docs` (Root + zwei mal hoch) wurde. Compose mountete leeres Verzeichnis. Commits `fc3389d` (broken) und `5ee5352` (revert).
+
+**Endgültige Lösung — Override-File-Pattern auf VPS:** `/docker/twin-lab-web/docker-compose.override.yml` mit absolutem Pfad-Mount. Datei NICHT im Repo (VPS-spezifisch), nur lokal auf VPS angelegt:
+
+```yaml
+# VPS-spezifischer Override: docs/-Volume-Mount für twin:reload-CLI (#81)
+services:
+  runtime:
+    volumes:
+      - /docker/twin-lab-web/repo/docs:/app/docs:ro
+```
+
+Compose lädt `docker-compose.override.yml` automatisch und merged es mit dem Haupt-Compose-File. Vorteil: Repo-Compose-File bleibt clean (keine Lokal-vs-Production-Pfad-Verwirrung), Override ist explizit VPS-only. Pattern für künftige VPS-spezifische Konfiguration etabliert.
+
+**Production-Workflow für Persona-Updates ist jetzt:**
+1. `docs/persona.md` lokal editieren, committen, pushen
+2. Auf VPS: `git pull` (File via Volume-Mount sofort im Container sichtbar)
+3. `docker compose exec runtime node /app/apps/runtime/dist/scripts/twin-reload.js @<handle> --force`
+4. `docker compose restart runtime` (Persona neu in Speicher laden)
+
+Production-Update-Schritte 3+4 sollten irgendwann zu einem Skript/Make-Target zusammengefasst werden, aber out-of-scope hier.
+
+**Größe:** XS · **Priorität:** must · **Aus:** Tag-8-Production-Deploy
+
+### 82. Heikos Persona-Source-File `docs/persona-heiko.md` fehlt
+Beim Tag-8-Production-Persona-Sync entdeckt: für @heiko gibt's keine `docs/persona-heiko.md` und keine `docs/persona-heiko-meta.yaml`. `twin:reload @heiko --force` failed mit `persona.md fehlt unter /app/docs/persona-heiko.md`.
+
+Ursache: Heikos Twin wurde via Onboarding-Wizard angelegt, nicht via `twin:bootstrap`-Skript. Wizard schreibt direkt in DB, kein File-Backup im `docs/`-Ordner. Heikos Production-Persona ist 344 chars (Stub aus Wizard).
+
+Lösungs-Optionen:
+1. **Persona-File aus DB rückwärts erzeugen** — Reverse-Sync DB → File. Wäre eine Funktion im `twin:reload`-Tool oder ein eigenes `twin:export-persona <handle>`. Out-of-scope #78
+2. **Onboarding-Wizard erweitern** — schreibt automatisch File-Backup in `docs/persona-<handle>.md` parallel zum DB-Insert. Strukturell sauberer, aber Wizard-Refactor
+3. **Manuell ein File anlegen** — pragmatisch, einmalig. Wenn Heiko seine Persona ohnehin überarbeiten will, ist das jetzt der Anlass
+
+Vote: **3 für jetzt, 2 für später.** Heute kein Druck — Heikos Twin auf Production hat einen funktionierenden Stub, der reicht für die Test-Phase. Wenn er Persona-Updates braucht: einmalig manuell `docs/persona-heiko.md` und `docs/persona-heiko-meta.yaml` anlegen, dann läuft `twin:reload`.
+
+Verwandt mit #78 — beide entstehen aus dem File-zu-DB-Sync-Modell. Onboarding-Wizard-Erweiterung als sauberster Pfad gehört strukturell zur 2.5.3-Phase (Onboarding-Wizard) als Backwash-Item.
+
+**Größe:** S (Variante 1, 3) / M (Variante 2) · **Priorität:** nice · **Aus:** Tag-8-Production-Deploy
+
 ---
 
 ## Phase 3 — Memory + Skills + Tools
@@ -1199,17 +1244,40 @@ Generelles Prinzip: **DRY beim zweiten Aufruf, nicht beim ersten.** Premature Ab
 
 Plus eine kleine Konvention: Underscore-Prefix für shared Helpers in `scripts/`-Ordner — `_twin-source-paths.ts` signalisiert „kein ausführbares Script, sondern Hilfsmodul". Pattern für künftige shared Skript-Helpers übernehmen.
 
+### Lesson (Tag 8 / #81): Compose-Symlinks und relative Pfad-Auflösung
+
+`/docker/twin-lab-web/docker-compose.yml` ist auf VPS ein Symlink zu `repo/docker/twin-lab-web/docker-compose.yml`. Erste Lösung war Volume-Mount mit relativem Pfad `../../docs:/app/docs:ro` direkt im Repo-Compose-File — funktionierte lokal (echte Datei), aber nicht auf VPS (Symlink). Docker Compose löst relative Pfade **vom Symlink-Standort, nicht vom Symlink-Ziel auf**. Heißt: `../../docs` von `/docker/twin-lab-web/` aus = `/docs` (Root + zwei mal hoch).
+
+`docker compose config` zeigt die fully-resolved Konfiguration und ist das richtige Diagnose-Tool: `source: /docs` war eindeutig falsch. Plus `docker inspect <container> --format='{{range .Mounts}}{{.Source}} -> {{.Destination}}{{end}}'` zeigt was tatsächlich gemounted wurde.
+
+Lösung: Override-File-Pattern. `/docker/twin-lab-web/docker-compose.override.yml` mit absolutem Pfad. Compose lädt `docker-compose.override.yml` automatisch aus dem gleichen Verzeichnis und merged es. VPS-spezifische Konfiguration bleibt VPS-spezifisch, Repo-Compose-File bleibt portable.
+
+**Generelles Prinzip:** Repo-Code soll lokal und Production identisch sein. VPS-spezifische Anpassungen gehören nicht ins Repo, sondern in Override-Files oder ENV-Variablen. Pattern für künftige VPS-Spezifika übernehmen.
+
+Plus Lesson zum Diagnose-Workflow: bei verdächtigen Mount-Problemen erst `docker compose config` (was Compose ausgehandelt hat) plus `docker inspect` (was Docker tatsächlich macht), dann debuggen. Zeile-für-Zeile-Compose-Lesen ohne diese Tools ist verschwendete Zeit.
+
+### Lesson (Tag 8 / Production-Drift): Lokal vs. Production divergieren leise
+
+Beim Production-`twin:reload @markus --force` kam ein überraschender Diff: `persona_md: 244 → 6991 chars (+6747)`. Production-Markus hatte einen 244-Zeichen-Stub aus dem Onboarding-Wizard, nicht die volle Persona aus `docs/persona.md`. Niemand hat's gemerkt, weil Production-Markus selten direkt getestet wurde.
+
+Verstehen warum: Lokal-Bootstrap nutzt `pnpm twin:bootstrap` mit `docs/persona.md` als Source. Production-Bootstrap (für die ersten User-Twins inklusive Markus' Production-Account) lief via Onboarding-Wizard, der eine Stub-Persona erzeugt. Beide Setups produzieren technisch valide Twins, aber mit semantisch unterschiedlichem Inhalt.
+
+Generelles Prinzip: **Multi-Tenant-State ist nicht automatisch zwischen Environments synchron.** Bei Architektur-Änderungen (wie #74-Persona-Refactor) muss explizit geprüft werden, was lokal vs. Production drin ist. Ein einfacher Smoke-Test wie „stell @markus auf Production eine Frage und schau ob sich's wie der lokale Twin anfühlt" hätte den Drift früher aufgedeckt.
+
+Plus konkret: `twin:reload @<handle> --force` plus DB-Diff-Output ist ein gutes Production-Audit-Tool. Bei jedem Production-Deploy mit Persona-relevanten Änderungen lohnt sich der Lauf — entweder zeigt's `unverändert` (alles gut) oder es deckt einen Drift auf.
+
 ---
 
 ## Notiz für später
 
 Sammle weiter Punkte, die im Sparring auftauchen. Nicht jeder Punkt muss eine Phase werden — manches ist Polishing, manches ist Architektur. Die Aufteilung S/M/L/XL und must/should/nice hilft beim Priorisieren wenn die Liste lang wird.
 
-**Item-Dichte 7. Mai 2026 mittag (Tag 8):** Vier Items abgeschlossen — #77 (Production-Container-Bootstrap, Commit `2e96ddb`), #74 (Persona-Skill-Layering, Commit `f045dd8` plus DB-Update via Wegwerf-Skript), #78 (Persona/Mandates-Reload-CLI, Commit `61154c0`). Plus drei neue Items entstanden bei der #74-Verifikation (#78 ✅, #79 `persona`-Tabelle als Phase-1-Altlast, #80 Direct-Chat-History-Reset fehlt). Plus #71b von should auf must hochgestuft (Test-Hygiene als Pflicht-Vorbedingung vor 3.2). Plus 5 neue Lessons (Engine-Test als Truth-Source bei Persona-File-DB-Diskrepanz, Architektur-Befunde finden sich beim Verifizieren, tsx-Wegwerf-Skripts-Patterns, ps-Optionen Cross-Platform, Helper-Extraktion bei zweitem Aufruf). Items insgesamt jetzt: 77 (74 + 3 neue Items #78-#80, davon #78 schon erledigt).
+**Item-Dichte 7. Mai 2026 nachmittag (Tag 8):** Vier Items abgeschlossen — #77 (Production-Container-Bootstrap, Commit `2e96ddb`), #74 (Persona-Skill-Layering, Commit `f045dd8`), #78 (Persona/Mandates-Reload-CLI, Commit `61154c0`), #81 (docs/-Volume-Mount via VPS-Override-File, kein Repo-Commit). Plus Production-komplett aktualisiert auf Tag-7+8-Stand. Plus zwei neue Items entstanden (#81 ✅ via Override-Pattern, #82 Heikos Persona-Source-File fehlt — open). Plus #71b von should auf must hochgestuft (Test-Hygiene als Pflicht-Vorbedingung vor 3.2). Plus 7 neue Lessons (Engine-Test als Truth-Source bei Persona-File-DB-Diskrepanz, Architektur-Befunde finden sich beim Verifizieren, tsx-Wegwerf-Skripts-Patterns, ps-Optionen Cross-Platform, Helper-Extraktion bei zweitem Aufruf, Compose-Symlinks und relative Pfad-Auflösung, Production-Drift-Pattern). Items insgesamt jetzt: 78 (74 + 4 neue Items #78-#82, davon #78 + #81 schon erledigt).
 
 **Was als Nächstes ansteht:** vor 3.2 noch ein must-Block aus heutigem Vormittag:
 - **#71b + #80 zusammen** als Test-Hygiene-Block (~M, ~3-4h) — kumulative History fixen plus Reset-Pfad bauen, vor 3.2 zwingend
 - **Strategie-Session vor 3.2 (MCP-Client)** — Pre-Implementation-Diskussion mit konkreten Architektur-Festlegungen
 - Optional dazwischen: **#79 Persona-Tabelle droppen** (~XS, nice) — kann beim nächsten Migrations-Anlass mit angehängt werden
+- Optional: **#82 Heikos Persona-File anlegen** — nice, wenn Heiko Persona-Updates braucht
 
-Tag 8 Bilanz: Vormittag plus Mittag waren Pflicht-Aufräumarbeit (#77, #74, #78) plus Architektur-Erkenntnisse, die drei neue must-Items aufgedeckt haben. Lesson: ein 30-Min-Sub-Schritt produzierte 90 Min Erkenntnisarbeit plus Backlog-Wachstum. Erkenntnis-Phase ist nicht Verschwendung sondern Architektur-Investition — die Befunde von heute hätten uns sonst während 3.2 unterbrochen.
+**Tag 8 Bilanz:** Sieben Commits insgesamt heute — vier Code-Commits, drei Doku-Commits plus ein Revert. Production-komplett auf Tag-8-Stand: #77 Migration-Auto-Bootstrap funktioniert in Production verifiziert (`[db:init] 8 Migration(en) bereits angewendet (skipped)` in den Boot-Logs), #74 Persona-Cleanup mit `twin:reload`-Sync auf Production durchgelaufen, #81 docs/-Volume-Mount via Override etabliert. Plus eine wichtige Architektur-Erkenntnis: Multi-Tenant-State driftet zwischen Lokal und Production wenn niemand explizit synchronisiert. Pattern für künftige Architektur-Änderungen: bei Änderungen am Persona/State-Schema explizit Production-Audit machen.
