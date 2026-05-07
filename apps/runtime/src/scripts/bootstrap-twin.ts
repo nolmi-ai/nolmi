@@ -1,9 +1,8 @@
 import "dotenv/config";
 import Database from "better-sqlite3";
 import { readFile } from "node:fs/promises";
-import { resolve } from "node:path";
 import { nanoid } from "nanoid";
-import { loadRuntimeConfig, WORKSPACE_ROOT } from "../config.js";
+import { loadRuntimeConfig } from "../config.js";
 import { loadPersona } from "../persona/loader.js";
 import { loadMandatesFromYaml } from "../mandates/service.js";
 import {
@@ -13,6 +12,7 @@ import {
 } from "../llm-config.js";
 import { encrypt, loadMasterKey, maskApiKey } from "../crypto-utils.js";
 import { TwinProfilesRepo, type TwinProfile } from "../twin-profiles-repo.js";
+import { resolveTwinSourcePaths } from "./_twin-source-paths.js";
 
 // ─── BOOTSTRAP TWIN ──────────────────────────────────────────────────────────
 //
@@ -49,25 +49,17 @@ async function main() {
   }
 
   const config = loadRuntimeConfig();
-  const docsDir = resolve(WORKSPACE_ROOT, "docs");
-
-  // Pfade je nach Twin-Name auflösen
-  const personaMdPath =
-    name === "markus" ? config.personaPath : resolve(docsDir, `persona-${name}.md`);
-  const personaMetaPath =
-    name === "markus"
-      ? config.personaMetaPath
-      : resolve(docsDir, `persona-${name}-meta.yaml`);
+  const paths = resolveTwinSourcePaths(name, config);
 
   // 1. Persona laden
-  const personaMd = (await readFile(personaMdPath, "utf-8")).trim();
+  const personaMd = (await readFile(paths.personaMd, "utf-8")).trim();
   const personaMeta = await loadPersona({
-    promptPath: personaMdPath,
-    metaPath: personaMetaPath,
+    promptPath: paths.personaMd,
+    metaPath: paths.personaMeta,
   });
 
   // 2. Mandates aus YAML (gleiche Datei für alle Twins in 2.5)
-  const mandates = await loadMandatesFromYaml(config.mandatesPath);
+  const mandates = await loadMandatesFromYaml(paths.mandates);
 
   // 3. LLM-Konfig aus ENV — per-Twin Override mit Fallback auf TWIN_LLM_*
   const llmConfig = loadTwinLlmConfig(name);
