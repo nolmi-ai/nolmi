@@ -10,6 +10,7 @@ services:
       - internal
     volumes:
       - twin-lab-web-data:/data
+      - ../../docs:/app/docs:ro
     environment:
       - NODE_ENV=production
       - RUNTIME_HOST=0.0.0.0
