@@ -68,6 +68,8 @@ EXPOSE 4000
 
 # Wichtig: im Container muss RUNTIME_HOST=0.0.0.0 gesetzt werden, sonst
 # hört die Runtime nur auf localhost (Default 127.0.0.1) und ist von außen
-# nicht erreichbar. DB-Init läuft separat:
-#   docker compose exec runtime node dist/scripts/init-db.js
-CMD ["node", "dist/index.js"]
+# nicht erreichbar. Migration läuft automatisch beim Container-Start
+# (idempotent — bereits angewendete Migrations werden übersprungen). `exec`
+# ersetzt den Shell-Prozess durch Node, damit SIGTERM von `docker stop`
+# direkt beim Server ankommt und der Shutdown sauber bleibt.
+CMD ["sh", "-c", "node dist/scripts/init-db.js && exec node dist/index.js"]
