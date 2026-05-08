@@ -1,6 +1,6 @@
 # Backlog Phase 2.5 und später
 
-Stand: 7. Mai 2026, nachmittag (Tag 8) — sieben Commits heute, Production komplett aktualisiert. Vier Pflicht-Items vor 3.2 abgehakt: #77, #74, #78, #81. Plus zwei neue offene Items entstanden (#81 abgeschlossen via Override-File-Pattern, #82 Heikos Persona-Source-File fehlt). Production-Persona-Drift-Befund: Production-Markus hatte 244-Zeichen-Stub aus Onboarding-Wizard, jetzt mit voller Persona aus docs/-Files synchronisiert.
+Stand: 8. Mai 2026, abend (Tag 9) — Test-Hygiene-Block (#71b + #80 + #84 + #85) abgeschlossen. Sechs Commits über fünf Sub-Schritte plus UX-Polish plus Cleanup+Doku. Konversations-Modellierung als Ersatz für die flache Audit-History; Skill-Toggle-Tests sind jetzt sauber. Pfad frei für 3.2-Strategie-Session (MCP-Client). Items insgesamt: 80, davon vier heute neu erledigt.
 
 Format: Punkte mit Größe (S/M/L/XL) und Priorität (must/should/nice).
 
@@ -532,7 +532,10 @@ Filter-Erweiterung in `f80558f`: erste Implementation filterte nur auf `respond_
 
 Spec-Deviation gegenüber Briefing: Claude Code nutzte `input.lastMessage` statt `input.messages[0].content`. Begründung: `input.messages` ist der kumulative Verlauf je Audit, `[0]` wäre N-mal die Erst-Message. `lastMessage` liefert pro Turn die richtige User-Message. Korrektur ohne Rückfrage akzeptiert, im Briefing-Doku im Nachgang übernommen.
 
-### 71b. Audit-Schema speichert kumulative Konversations-History — NEU 5. Mai
+### 71b. Audit-Schema speichert kumulative Konversations-History — NEU 5. Mai ✅
+**Abgeschlossen 8. Mai 2026 (Tag 9), gemeinsam mit #80, #84, #85 als Test-Hygiene-Block.** Sechs Commits über fünf Sub-Schritte. Konversations-Modellierung als Ersatz für die flache Audit-History: eigene `conversations`-Tabelle (Migration 009), `audit.conversation_id`-FK, `ConversationsRepo.getOrStart()` vor jedem `owner-direct`-Audit-Insert, History-Loader per `listByConversation()` mit 40-Messages-Sliding-Window, UI-Reset-Button mit Inline-Confirm und daten-getriebenem Konversations-Trenner im Verlauf, Migration 010 (Cleanup von Pre-Konversations-`owner-direct`-Audits). Hauptpunkt: nach Konversations-Reset kein Memory-Leak aus voriger Session — Skill-Toggle-Tests sind jetzt sauber.
+
+**Originale Beobachtung (5. Mai):**
 Beobachtung beim #71-Debug: Owner-Direct-Audit-Schema enthält in `input.messages` den gesamten kumulativen Konversations-Verlauf, nicht nur die aktuelle User-Message. Bei Audit #50 ist die History von Audit #1 bis #49 plus eine User-Message drin — exponentielles Wachstum.
 
 Heute kein akutes Problem (DB-Größe für 30 Audits noch klein), aber langfristig:
@@ -668,7 +671,10 @@ Migration 009 könnte die Tabelle droppen. Triviale `DROP TABLE persona;`. Nice-
 
 **Größe:** XS · **Priorität:** nice · **Aus:** Tag-8 #78-Diagnose
 
-### 80. Direct-Chat-History-Reset fehlt (Test-Hygiene und Production-Issue)
+### 80. Direct-Chat-History-Reset fehlt (Test-Hygiene und Production-Issue) ✅
+**Abgeschlossen 8. Mai 2026 (Tag 9), gemeinsam mit #71b, #84, #85 als Test-Hygiene-Block.** Lösungs-Option 1 (Konversations-Modellierung mit Reset-Button) gewählt und umgesetzt. UI-Reset im Direct-Chat-Header beendet die aktive Konversation, lazy-Start beim nächsten Send via `getOrStart()`. Vier Repo-Schichten gleichzeitig angepasst: Schema (Migration 009), Repo (`ConversationsRepo`), Audit-Verknüpfung (`audit.conversation_id`), History-Loader (server-seitig per Konversation gefiltert mit 40-Messages-Cap). Plus daten-getriebener Konversations-Trenner im Verlauf, der sowohl live als auch nach Page-Reload an der richtigen Stelle erscheint.
+
+**Originale Beobachtung (Tag 8):**
 Beim #74-Verifikations-Test entdeckt: Direct-Chat-History persistiert in der `audit`-Tabelle, wächst monoton, beeinflusst jeden Send als History-Kontext. Heute Vormittag verfälscht das den Skill-Toggle-Test: Twin nennt Workshop-Daten aus seiner eigenen früheren Antwort, nicht aus aktivem Skill.
 
 Ist konzeptionell verwandt mit #71b (kumulative Audit-Messages als Speicher-Problem), aber spezifischer: hier geht es nicht nur um Speicher-Wachstum, sondern um **fehlenden Reset-Pfad**. Aus der UI gibt's keinen „neue Konversation starten"-Knopf, keinen „History löschen", kein Twin-Self-Reset.
@@ -730,6 +736,49 @@ Vote: **3 für jetzt, 2 für später.** Heute kein Druck — Heikos Twin auf Pro
 Verwandt mit #78 — beide entstehen aus dem File-zu-DB-Sync-Modell. Onboarding-Wizard-Erweiterung als sauberster Pfad gehört strukturell zur 2.5.3-Phase (Onboarding-Wizard) als Backwash-Item.
 
 **Größe:** S (Variante 1, 3) / M (Variante 2) · **Priorität:** nice · **Aus:** Tag-8-Production-Deploy
+
+### 84. Reset-Button: Inline-Confirm statt window.confirm() ✅
+**Abgeschlossen 8. Mai 2026 (Tag 9), gemeinsam mit #85 als UX-Polish-Item zum #71b/#80-Block.** Sub-Schritt D hatte den Reset-Button funktional gelöst, aber `window.confirm()` als OS-natives Overlay war ein visueller Bruch zum Tailwind-Stil. Lösung: lokaler `confirming`-State im Button selbst, Klick toggled in einen Zwei-Knopf-Mini-Dialog „Wirklich? [✓ Bestätigen] [Abbrechen]". 5-Sekunden-`useEffect`-Timeout setzt zurück, wenn der User wegklickt. Pattern-Konsistenz mit den anderen kompakten Header-Buttons im Direct-Chat. Commit `76e2728`.
+
+**Größe:** XS · **Priorität:** must · **Aus:** Tag-8 #71b/#80 Sub-Schritt D-Verifikation
+
+### 85. Konversations-Trenner im Chat-Verlauf ✅
+**Abgeschlossen 8. Mai 2026 (Tag 9), gemeinsam mit #84.** Nach Reset blieb der visuelle Verlauf unverändert (gewollt — Twin-Memory ≠ visueller Scroll), aber ohne Marker konnte der User nicht sehen wo die alte Konversation aufhörte und die neue begann. Lösung: daten-getriebene `ConversationDivider`-Komponente, die zwischen Messages mit unterschiedlicher `conversationId` gerendert wird. Backend-getrieben aus den geladenen Audits (Audit-Schema enthält `conversationId` seit Sub-Schritt B), also robust gegen Page-Reload und vorbereitet für Phase 3.3 (Multi-Konversations-Sicht). Live-Sends bekommen via `directChatResetSeq`-Counter im Parent eine synthetische Local-ID, damit der Trenner sofort nach dem nächsten Send erscheint, ohne auf einen Reload zu warten. Commit `76e2728`.
+
+**Größe:** S · **Priorität:** must · **Aus:** Tag-8 #71b/#80 Sub-Schritt D-Verifikation
+
+### 83. UI-Reply-Verkettung verhindert Twin-Trigger bei Folge-Fragen
+Beim Tag-8-Production-Smoke-Test fiel auf: Florians Twin antwortet nicht autonom auf Markus' Bridge-Messages — obwohl Trust beidseitig gesetzt ist und der Mandate-Layer Trusted-Bypass für `respond_to_twin_message` korrekt definiert hat. Initial-Hypothese „Auto-Respond gebrochen seit 4. Mai" hat sich als falsch erwiesen.
+
+**Tatsächliche Diagnose (Tag 9 Vormittag):**
+
+Architektur funktioniert wie spezifiziert. Der Test `pnpm --filter @twin-lab/runtime trust:test` läuft erfolgreich durch alle drei Pfade (External-Pending, Trusted-Bypass, External-Pending nach Trust-Removal). Plus Browser-Test mit komplett leerer Konversation: Markus sendet „Hey Florian, wann hast du morgen Zeit?" → Florians Twin antwortet in 3 Sekunden via `trusted-bypass`. Audits korrekt: `owner-direct-send` → `trusted-bypass` → `reply-received`.
+
+**Was den Twin-Trigger blockiert:** Frontend setzt bei jedem Send in einer existierenden Konversation `in_reply_to` auf die letzte Bridge-Message. Reply-Detection im Backend (`twin-service.ts:327-378`) prüft ob die referenzierte Original-Message von uns gesendet wurde — wenn ja: `reply-received` Audit, kein neuer Twin-Trigger. Heißt: nach der ersten Florian-Twin-Antwort hängen sich alle weiteren Markus-Sends an diese Antwort, Reply-Detection greift, Twin antwortet nicht mehr.
+
+**Reproduzierbar in beide Richtungen:**
+- Frische Konversation (keine vorherige Message zwischen den Twins) → Twin antwortet ✓
+- Folge-Frage in laufender Konversation → Twin schweigt ✗
+
+**Architektonische Frage:** sollen Folge-Fragen in einer Konversation Twin-Trigger erzeugen oder nicht?
+
+Argument dafür: aus User-Sicht ist „Hey Florian, wann hast du morgen Zeit?" als zweite Frage in der Konversation **eine neue Anfrage**, nicht ein Reply auf die vorherige Antwort. Twin sollte triggern.
+
+Argument dagegen: Reply-Detection wurde explizit eingebaut um Loop-Risiko zu vermeiden — wenn Twin auf jede Folge-Message antwortet, kann sich eine Konversation beider Twins selbst befeuern. `test-trust-flow.ts` enthält explizit Loop-Detection (`STEP_MAX_DELTA_TRUSTED = 3`) als Schutz vor genau diesem Bug aus 2.5.4.1.
+
+**Drei Lösungs-Optionen:**
+
+1. **`in_reply_to` nur bei explizitem Reply-Button setzen** — UI bekommt einen Reply-Button pro Bridge-Message. Send ohne Reply-Button hat `in_reply_to: NULL`, neue Frage triggert Twin. Sauber, aber UI-Refactor mit Reply-Button-Logik nötig
+2. **`in_reply_to` immer leer lassen vom Frontend** — schnellster Fix. Bricht aber Reply-Threading falls für künftige UI-Features (Conversation-Threads in #20 Conversation-Memory) gebraucht
+3. **Reply-Detection im Backend nur bei kurzem Zeitfenster greifen** — z.B. nur wenn letzte Bridge-Message <60s her ist. Heuristik, fragil
+
+**Mein Vote (Markus): 1.** Sauberste Trennung zwischen User-Intent „Reply auf diese Message" und „neue Frage in der Konversation". Plus konsistent mit anderen Chat-UIs (Slack, iMessage).
+
+**Verwandt mit #80:** History-Reset-Pfad. Beide adressieren UX-Lücken in der Konversations-UI. Könnten architektur-seitig gemeinsam gedacht werden — Konversations-Konzept (Threads, Resets, Reply-Verlinkung) als kohärentes UX-Subsystem.
+
+**Größe:** M (Variante 1, mit UI-Refactor) / XS (Variante 2, Frontend-Quickfix) · **Priorität:** should · **Aus:** Tag-8-Production-Smoke-Test, korrigierte Diagnose Tag-9-Vormittag
+
+**Status-Erkenntnis aus der Diagnose:** Der gestern als „echte Production-Regression" eingeordnete Bug ist keine Regression — die `trusted-bypass`-Architektur war seit 2.5.4.1 stabil und hat heute morgen im Test sauber funktioniert. Was geändert wurde: die UI-Verkettungs-Logik im Frontend produziert seit irgendwann (vermutlich Phase 2.5.5 mit Konversations-UI-Refactor) immer ein `in_reply_to`. Das versteckt den Twin-Trigger-Pfad bei allen Folge-Fragen. Ist also ein UX-Bug, nicht Architektur-Bug. Plus eine wichtige Lesson: Reply-Detection greift sowohl bei semantischen Replies („okay, danke!") als auch bei neuen Fragen, weil das Frontend nicht zwischen beiden unterscheidet. Differenzierung braucht UI-Konzept-Arbeit, nicht nur Backend-Fix.
 
 ---
 
@@ -1266,6 +1315,26 @@ Generelles Prinzip: **Multi-Tenant-State ist nicht automatisch zwischen Environm
 
 Plus konkret: `twin:reload @<handle> --force` plus DB-Diff-Output ist ein gutes Production-Audit-Tool. Bei jedem Production-Deploy mit Persona-relevanten Änderungen lohnt sich der Lauf — entweder zeigt's `unverändert` (alles gut) oder es deckt einen Drift auf.
 
+### Lesson (Tag 9 / #71b): 5-Sub-Schritt-Aufteilung beim Schema-Refactor zahlt sich aus
+
+Der Test-Hygiene-Block (#71b + #80) hätte als ein 3-4h-Mega-Commit angelegt werden können (Schema + Repo + Service + Loader + UI alles in einem). Stattdessen fünf Sub-Schritte (A/B/C/D/E) plus zwei UX-Polish-Items (#84/#85), jeder einzeln testbar.
+
+Effekt: jede Schicht hatte ein eigenes Test-Skript (`test-conversations-repo.ts`, `test-conversation-flow.ts`, `test-conversation-history.ts`), das genau ihren Layer verifiziert hat. Bugs sind sofort an der Stelle aufgefallen, wo sie reingekommen sind, nicht erst beim End-to-End-Test. Plus: jeder Commit war sauber rückverfolgbar.
+
+Generelles Prinzip: **bei Multi-Layer-Refactors immer pro Layer einen Sub-Schritt + Test, statt alles in einem Commit zu mischen.** Pattern für künftige Schema-Refactors (z.B. 3.3 Conversation-Memory, das ähnlich tief geht) übernehmen.
+
+Plus eine kleine Variante: die UX-Polish-Items (#84 Inline-Confirm, #85 Trenner) sind gemeinsam mit dem funktionalen Block gemerged worden — nicht als „nächste Session". Begründung: Inline-Confirm und Trenner sind direkt aus den Sub-Schritt-D-Smoke-Tests entstanden („`window.confirm()` ist hässlich", „kein Marker im Verlauf"). Wer die Schwachstelle sieht und nicht löst, wird sie nicht mehr sehen, wenn sie länger steht. Zwei zusätzliche Items innerhalb der gleichen Session ist okay.
+
+### Lesson (Tag 9 / #85): Backend-getriebene UI-Marker statt State-Marker
+
+Der Konversations-Trenner hätte als Frontend-State implementiert werden können („User klickt Reset → setze Marker an Position N im messages-Array"). Stattdessen: daten-getrieben aus den geladenen Audits — der Render-Loop vergleicht zwei aufeinanderfolgende Messages und rendert einen Trenner, wenn die `conversation_id` wechselt.
+
+Effekt: Page-Reload, Tab-Switch, Re-Mount — der Trenner steht überall an derselben Stelle, weil aus den persistenten DB-Daten abgeleitet. Plus: Vorbereitung für Phase 3.3 (Multi-Konversations-Sicht) — derselbe Render-Code zeichnet später mehrere historische Konversationen mit Trennern dazwischen, ohne neuen Code.
+
+Plus eine Hybrid-Detail: für Live-Sends, deren `conversation_id` der Server erst nach Reload zurückspielt, gibt's einen kleinen Counter im Parent (`directChatResetSeq`), den der Reset-Button hochzählt. Live-Messages bekommen dann eine synthetische Local-ID, damit der Trenner sofort nach dem nächsten Send erscheint, nicht erst nach Reload. Lokale Hybrid-Logik unter daten-getriebener Render-Logik — beste aus beiden Welten.
+
+Generelles Prinzip: **bei UI-Markern, die aus persistenten Daten ableitbar sind, daten-getrieben rendern statt im State zu führen.** State-Marker driften (Reset-Klick verloren bei Reload), Daten-Marker bleiben.
+
 ---
 
 ## Notiz für später
@@ -1274,10 +1343,13 @@ Sammle weiter Punkte, die im Sparring auftauchen. Nicht jeder Punkt muss eine Ph
 
 **Item-Dichte 7. Mai 2026 nachmittag (Tag 8):** Vier Items abgeschlossen — #77 (Production-Container-Bootstrap, Commit `2e96ddb`), #74 (Persona-Skill-Layering, Commit `f045dd8`), #78 (Persona/Mandates-Reload-CLI, Commit `61154c0`), #81 (docs/-Volume-Mount via VPS-Override-File, kein Repo-Commit). Plus Production-komplett aktualisiert auf Tag-7+8-Stand. Plus zwei neue Items entstanden (#81 ✅ via Override-Pattern, #82 Heikos Persona-Source-File fehlt — open). Plus #71b von should auf must hochgestuft (Test-Hygiene als Pflicht-Vorbedingung vor 3.2). Plus 7 neue Lessons (Engine-Test als Truth-Source bei Persona-File-DB-Diskrepanz, Architektur-Befunde finden sich beim Verifizieren, tsx-Wegwerf-Skripts-Patterns, ps-Optionen Cross-Platform, Helper-Extraktion bei zweitem Aufruf, Compose-Symlinks und relative Pfad-Auflösung, Production-Drift-Pattern). Items insgesamt jetzt: 78 (74 + 4 neue Items #78-#82, davon #78 + #81 schon erledigt).
 
-**Was als Nächstes ansteht:** vor 3.2 noch ein must-Block aus heutigem Vormittag:
-- **#71b + #80 zusammen** als Test-Hygiene-Block (~M, ~3-4h) — kumulative History fixen plus Reset-Pfad bauen, vor 3.2 zwingend
-- **Strategie-Session vor 3.2 (MCP-Client)** — Pre-Implementation-Diskussion mit konkreten Architektur-Festlegungen
+**Item-Dichte 8. Mai 2026 abend (Tag 9):** Test-Hygiene-Block komplett — #71b und #80 ✅, plus #84 (Inline-Confirm) und #85 (Konversations-Trenner) als UX-Polish im selben Block ✅. Sechs Commits über fünf Sub-Schritte (A/B/C/D/E) plus die UX-Polish-Items: `bc1669a` Schema+Repo, `d0b8cc7` Twin-Service, `b694d0d` History-Loader, `8f604fa` UI-Reset-Button, `76e2728` UX-Polish, `<hash>` Cleanup+Doku. Plus zwei neue Lessons (5-Sub-Schritt-Aufteilung beim Schema-Refactor, Backend-getriebene UI-Marker statt State-Marker). Items insgesamt jetzt: 80 (78 + #84 + #85, alle vier neu erledigten Items aus dem Test-Hygiene-Block ✅).
+
+**Was als Nächstes ansteht:** Test-Hygiene-Block ist abgeschlossen, der Pfad zu 3.2 ist frei:
+- **Strategie-Session vor 3.2 (MCP-Client)** — Pre-Implementation-Diskussion mit konkreten Architektur-Festlegungen (Tool-Discovery, Server-Lifecycle, Auth-Modell, Mandate-Integration für MCP-Tools, Failure-Modes)
+- **3.2 — MCP-Client als Skill-Provider** — externe Tools als Skills exponieren, Mandate-Gating analog zum existierenden Skill-System
 - Optional dazwischen: **#79 Persona-Tabelle droppen** (~XS, nice) — kann beim nächsten Migrations-Anlass mit angehängt werden
 - Optional: **#82 Heikos Persona-File anlegen** — nice, wenn Heiko Persona-Updates braucht
+- Optional: **#83 UI-Reply-Verkettung** — wartet auf weitere Reproduktion, kein akuter Blocker
 
-**Tag 8 Bilanz:** Sieben Commits insgesamt heute — vier Code-Commits, drei Doku-Commits plus ein Revert. Production-komplett auf Tag-8-Stand: #77 Migration-Auto-Bootstrap funktioniert in Production verifiziert (`[db:init] 8 Migration(en) bereits angewendet (skipped)` in den Boot-Logs), #74 Persona-Cleanup mit `twin:reload`-Sync auf Production durchgelaufen, #81 docs/-Volume-Mount via Override etabliert. Plus eine wichtige Architektur-Erkenntnis: Multi-Tenant-State driftet zwischen Lokal und Production wenn niemand explizit synchronisiert. Pattern für künftige Architektur-Änderungen: bei Änderungen am Persona/State-Schema explizit Production-Audit machen.
+**Tag 9 Bilanz:** Sechs Commits über fünf Sub-Schritte plus UX-Polish, plus dieser Cleanup-+-Doku-Commit. Test-Hygiene-Block ist Schema-Refactor mit Migration 009 (`conversations`-Tabelle + `audit.conversation_id`), Migration 010 (Bestand-Cleanup), neuem Repo (`ConversationsRepo`), umgestelltem History-Loader (server-seitig per Konversation gefiltert mit 40-Messages-Cap), neuem UI-Reset-Button mit Inline-Confirm und Konversations-Trenner. Hauptpunkt erreicht: Skill-Toggle-Tests sind sauber, kein Memory-Leak nach Reset. Plus eine wichtige Architektur-Erkenntnis: bei Multi-Layer-Refactors zahlt sich die Sub-Schritt-Aufteilung mit eigenen Test-Skripten pro Layer aus — Bugs fallen sofort an der richtigen Stelle auf. Production-Update folgt beim nächsten regulären Pull (Tag-9-Stand ist nicht produktionskritisch).

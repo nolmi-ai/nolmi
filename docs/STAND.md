@@ -1,13 +1,65 @@
 # twin-lab — Stand
 
-**Letztes Update:** 7. Mai 2026, nachmittag (Tag 8)
+**Letztes Update:** 8. Mai 2026, abend (Tag 9)
 
 ## Aktuell in Arbeit
-Nichts. Vier Pflicht-Items vor 3.2 abgehakt — #77, #74, #78, #81.
-Production komplett auf Tag-8-Stand. Vor 3.2 fehlt nur noch der
-Test-Hygiene-Block (#71b + #80, ~3-4h).
+Nichts. Test-Hygiene-Block (#71b + #80 + #84 + #85) abgeschlossen.
+Ready für 3.2 — MCP-Client-Strategie-Session.
 
-## Heute (Tag 8) abgeschlossen
+## Heute (Tag 9) abgeschlossen
+
+### #71b + #80 — Konversations-Konzept als Test-Hygiene-Block (~3h)
+**Sechs Commits über fünf Sub-Schritte plus zwei UX-Polish-Items.**
+
+Konversations-Modellierung als Ersatz für die flache Audit-History.
+Die DB hat jetzt eine eigene `conversations`-Tabelle, jeder
+`owner-direct`-Audit ist via `conversation_id` daran gebunden, der
+LLM-History-Loader filtert strict pro Konversation, und der User
+hat einen Reset-Button mit Inline-Confirm und einem visuellen
+Trenner im Verlauf.
+
+- **A**: Migration 009 + `ConversationsRepo` (Commit `bc1669a`)
+- **B**: Twin-Service-Anpassung mit `getOrStart()` vor Audit-Insert,
+  `audit.conversation_id`-Spalte (Commit `d0b8cc7`)
+- **C**: History-Loader auf Konversations-Scope plus 40-Messages-
+  Sliding-Window-Cap. Frontend-`messages` werden vom Server
+  bewusst ignoriert — der LLM bekommt rekonstruierte History aus
+  Audits der aktiven Konversation plus die neue User-Message
+  (Commit `b694d0d`)
+- **D**: UI-Reset-Button im Direct-Chat-Header plus Backend-Route
+  `POST /twins/:handle/conversations/reset`. Lazy-Start der nächsten
+  Konversation passiert beim nächsten Send via `getOrStart()`,
+  nicht beim Reset selbst (Commit `8f604fa`)
+- **#84/#85 UX-Polish**: `window.confirm()` raus, Inline-Bestätigung
+  am Reset-Button mit 5-Sekunden-Auto-Reset. Plus daten-getriebener
+  Konversations-Trenner im Verlauf — überlebt Page-Reload, weil aus
+  geladenen Audits abgeleitet (Commit `76e2728`)
+- **E**: Migration 010 (Cleanup von Pre-Konversations-Audits ohne
+  `conversation_id` mit `capability='owner-direct'`). Andere
+  Capabilities bleiben erhalten. Doku auf Tag-9-Stand (Commit `<hash>`)
+
+Hauptpunkt: Skill-Toggle-Tests sind jetzt sauber — nach
+Konversations-Reset kein Memory-Leak aus voriger Session. Verifiziert
+mit dem Workshop-Skill-Toggle-Smoke-Test (Skill an → Twin nennt
+Preise, Skill aus + Reset → Twin verweist auf Discovery Call ohne
+Referenz auf den vorigen Inhalt).
+
+### Architektur-Erkenntnisse (Tag 9)
+
+- **5-Sub-Schritte-Aufteilung war richtig.** Jeder Schritt einzeln
+  testbar (eigenes Test-Skript pro Repo-Layer-Change), kein Mega-
+  Commit, sauberer Verifikations-Pfad. Pattern für künftige
+  Multi-Layer-Refactors.
+- **Backend-getriebener UI-Trenner statt State-getrieben** macht
+  ihn robust gegen Page-Reload und ist gleichzeitig Vorarbeit für
+  Phase 3.3 (Multi-Konversations-Sicht): derselbe Render-Code
+  zeichnet später mehrere Konversationen mit Trennern dazwischen.
+- **Lazy-Start beim ersten Send statt Eager beim Reset** vermeidet
+  0-Message-Geisterkonversationen. `started_at`-Timestamp ist
+  semantisch korrekt der Zeitpunkt der ersten Message, nicht der
+  Reset-Klick.
+
+## Tag 8 abgeschlossen
 
 ### #77 — Production-Container-Bootstrap-Fix (~30 Min)
 **Commit `2e96ddb`**
@@ -178,21 +230,16 @@ File `/docker/twin-lab-web/docker-compose.override.yml` für #81.
 - 3.6 offen — Procedural Memory (ggf. Phase 4)
 
 ## Was als nächstes ansteht
-1. **Pause / Mittagspause.** Sieben Commits heute (vier Code,
-   drei Doku, ein Revert) plus Production-Update, sauber
-   abgeschlossen.
-2. **#71b + #80 als Test-Hygiene-Block** (~M, ~3-4h) — letzter
-   must-Block vor 3.2. Audit-Schema fixen (kumulative History
-   raus) plus History-Reset-Pfad in UI/Backend. Beide hängen
-   konzeptionell zusammen — könnten in einem Sub-Schritt
-   gemeinsam angegangen werden, evtl. mit Vorarbeit für 3.3
-   Conversation-Memory (Sliding-Window-Pattern).
-3. **Strategie-Session vor 3.2 (MCP-Client)** — sobald Test-
-   Hygiene steht. Pre-Implementation-Diskussion mit konkreten
-   Architektur-Festlegungen.
-4. **Optional: #79 Persona-Tabelle droppen** (XS, nice) — kann
+1. **Strategie-Session vor 3.2 (MCP-Client).** Pre-Implementation-
+   Diskussion mit konkreten Architektur-Festlegungen — Tool-
+   Discovery-Pfad, Server-Lifecycle (per Skill / per Twin / global),
+   Auth-Modell, Mandate-Integration für MCP-Tools, Failure-Modes.
+2. **3.2 — MCP-Client als Skill-Provider.** Externe Tools (z.B.
+   Hyperbrowser, Filesystem) als Skills exponieren, mit
+   Mandate-Gating analog zum existierenden Skill-System.
+3. **Optional: #79 Persona-Tabelle droppen** (XS, nice) — kann
    beim nächsten Migrations-Anlass mit angehängt werden.
-5. **Optional: #82 Heikos Persona-File** — wenn Heiko Persona-
+4. **Optional: #82 Heikos Persona-File** — wenn Heiko Persona-
    Updates braucht. Pragmatisch: einmalig manuell File anlegen,
    dann läuft `twin:reload`.
 
