@@ -26,6 +26,10 @@ export interface CreateSkillInput {
   scriptTs?: string | null;
   source?: SkillSource;
   sourceMetadata?: Record<string, unknown> | null;
+  // 3.2.C: nur bei source='mcp' setzen; bei 'manual' beides null/undefined.
+  // validateInput() enforced die Konsistenz.
+  mcpServerId?: string | null;
+  mcpToolName?: string | null;
 }
 
 export interface UpdateSkillInput {
@@ -36,6 +40,8 @@ export interface UpdateSkillInput {
   scriptTs?: string | null;
   source?: SkillSource;
   sourceMetadata?: Record<string, unknown> | null;
+  mcpServerId?: string | null;
+  mcpToolName?: string | null;
 }
 
 export interface ListSkillsOptions {
@@ -53,6 +59,8 @@ interface SkillRow {
   script_ts: string | null;
   source: string;
   source_metadata: string | null;
+  mcp_server_id: string | null;
+  mcp_tool_name: string | null;
   is_active: number;
   created_at: number;
   updated_at: number;
@@ -72,11 +80,59 @@ export class SkillNotFoundError extends Error {
   }
 }
 
+export class SkillValidationError extends Error {
+  constructor(reason: string) {
+    super(`Skill-Validation fehlgeschlagen: ${reason}`);
+    this.name = "SkillValidationError";
+  }
+}
+
+/**
+ * Erzwingt Konsistenz zwischen `source` und `mcpServerId`/`mcpToolName`.
+ * source='mcp' verlangt beide Felder gesetzt; source='manual' verlangt beide
+ * null. SQLite kann das nicht in einem CHECK-Constraint elegant ausdrücken,
+ * also macht es der Repo-Layer — sowohl bei add() als auch update().
+ */
+function validateSourceConsistency(
+  source: SkillSource,
+  mcpServerId: string | null,
+  mcpToolName: string | null,
+): void {
+  if (source === "mcp") {
+    if (!mcpServerId) {
+      throw new SkillValidationError(
+        "source='mcp' verlangt mcpServerId — fehlt",
+      );
+    }
+    if (!mcpToolName) {
+      throw new SkillValidationError(
+        "source='mcp' verlangt mcpToolName — fehlt",
+      );
+    }
+  } else if (source === "manual") {
+    if (mcpServerId !== null) {
+      throw new SkillValidationError(
+        "source='manual' verlangt mcpServerId=null",
+      );
+    }
+    if (mcpToolName !== null) {
+      throw new SkillValidationError(
+        "source='manual' verlangt mcpToolName=null",
+      );
+    }
+  }
+}
+
 export class SkillRepo {
   constructor(private db: Database.Database) {}
 
   add(input: CreateSkillInput): Skill {
     const now = Date.now();
+    const source = input.source ?? "manual";
+    const mcpServerId = input.mcpServerId ?? null;
+    const mcpToolName = input.mcpToolName ?? null;
+    validateSourceConsistency(source, mcpServerId, mcpToolName);
+
     const skill: Skill = {
       skillId: `skill_${nanoid(16)}`,
       twinId: input.twinId,
@@ -85,8 +141,10 @@ export class SkillRepo {
       manifestJson: input.manifestJson,
       instructionsMd: input.instructionsMd,
       scriptTs: input.scriptTs ?? null,
-      source: input.source ?? "manual",
+      source,
       sourceMetadata: input.sourceMetadata ?? null,
+      mcpServerId,
+      mcpToolName,
       isActive: true,
       createdAt: now,
       updatedAt: now,
@@ -96,10 +154,12 @@ export class SkillRepo {
         .prepare(
           `INSERT INTO skills
              (skill_id, twin_id, name, description, manifest_json, instructions_md,
-              script_ts, source, source_metadata, is_active, created_at, updated_at)
+              script_ts, source, source_metadata, mcp_server_id, mcp_tool_name,
+              is_active, created_at, updated_at)
            VALUES
              (@skill_id, @twin_id, @name, @description, @manifest_json, @instructions_md,
-              @script_ts, @source, @source_metadata, @is_active, @created_at, @updated_at)`,
+              @script_ts, @source, @source_metadata, @mcp_server_id, @mcp_tool_name,
+              @is_active, @created_at, @updated_at)`,
         )
         .run({
           skill_id: skill.skillId,
@@ -113,6 +173,8 @@ export class SkillRepo {
           source_metadata: skill.sourceMetadata
             ? JSON.stringify(skill.sourceMetadata)
             : null,
+          mcp_server_id: skill.mcpServerId,
+          mcp_tool_name: skill.mcpToolName,
           is_active: skill.isActive ? 1 : 0,
           created_at: skill.createdAt,
           updated_at: skill.updatedAt,
@@ -185,7 +247,12 @@ export class SkillRepo {
         patch.sourceMetadata === undefined
           ? existing.sourceMetadata
           : patch.sourceMetadata,
+      mcpServerId:
+        patch.mcpServerId === undefined ? existing.mcpServerId : patch.mcpServerId,
+      mcpToolName:
+        patch.mcpToolName === undefined ? existing.mcpToolName : patch.mcpToolName,
     };
+    validateSourceConsistency(merged.source, merged.mcpServerId, merged.mcpToolName);
     try {
       this.db
         .prepare(
@@ -197,6 +264,8 @@ export class SkillRepo {
              script_ts        = @script_ts,
              source           = @source,
              source_metadata  = @source_metadata,
+             mcp_server_id    = @mcp_server_id,
+             mcp_tool_name    = @mcp_tool_name,
              updated_at       = @updated_at
            WHERE skill_id = @skill_id`,
         )
@@ -211,6 +280,8 @@ export class SkillRepo {
           source_metadata: merged.sourceMetadata
             ? JSON.stringify(merged.sourceMetadata)
             : null,
+          mcp_server_id: merged.mcpServerId,
+          mcp_tool_name: merged.mcpToolName,
           updated_at: merged.updatedAt,
         });
     } catch (err) {
@@ -221,6 +292,32 @@ export class SkillRepo {
       throw err;
     }
     return merged;
+  }
+
+  /**
+   * Alle Skills eines MCP-Servers (active+inactive). Für refresh()-Diff und
+   * Listings. Keine sortierte Liste nötig — Caller macht eigene Sortierung.
+   */
+  listByMcpServer(mcpServerId: string): Skill[] {
+    const rows = this.db
+      .prepare(
+        "SELECT * FROM skills WHERE mcp_server_id = ? ORDER BY mcp_tool_name ASC",
+      )
+      .all(mcpServerId) as SkillRow[];
+    return rows.map(rowToSkill);
+  }
+
+  /**
+   * Lookup für refresh()-Sync: gibt es schon einen Skill für (server, tool)?
+   * Effizienter als listByMcpServer + filter, weil partial-Index zieht.
+   */
+  findByMcpTool(mcpServerId: string, toolName: string): Skill | null {
+    const row = this.db
+      .prepare(
+        "SELECT * FROM skills WHERE mcp_server_id = ? AND mcp_tool_name = ?",
+      )
+      .get(mcpServerId, toolName) as SkillRow | undefined;
+    return row ? rowToSkill(row) : null;
   }
 
   setActive(skillId: string, isActive: boolean): void {
@@ -257,6 +354,8 @@ function rowToSkill(row: SkillRow): Skill {
     sourceMetadata: row.source_metadata
       ? (JSON.parse(row.source_metadata) as Record<string, unknown>)
       : null,
+    mcpServerId: row.mcp_server_id,
+    mcpToolName: row.mcp_tool_name,
     isActive: row.is_active === 1,
     createdAt: row.created_at,
     updatedAt: row.updated_at,

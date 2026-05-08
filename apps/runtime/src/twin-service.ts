@@ -13,6 +13,7 @@ import type { ConversationsRepo } from "./conversations/repo.js";
 import type { McpServersRepo } from "./mcp/repo.js";
 import type { McpClientFactory } from "./mcp/client-factory.js";
 import { McpClientManager } from "./mcp/client-manager.js";
+import { McpSkillSync } from "./mcp/skill-sync.js";
 
 // ─── TWIN SERVICE ────────────────────────────────────────────────────────────
 //
@@ -105,11 +106,25 @@ export class TwinService {
    */
   public readonly mcp: McpClientManager;
 
+  /**
+   * Tool-Discovery + Skill-Registration für MCP-Server (3.2.C). Wird vom
+   * CLI-Add-Pfad (Sub-E) per `service.mcpSkillSync.syncOnAdd(serverId)`
+   * aufgerufen, sobald eine neue mcp_servers-Row existiert. Manueller
+   * Refresh nutzt `service.mcpSkillSync.refresh(serverId)`.
+   */
+  public readonly mcpSkillSync: McpSkillSync;
+
   constructor(private deps: TwinServiceDeps) {
     this.mcp = new McpClientManager(
       deps.twinId,
       deps.mcpServersRepo,
       deps.mcpClientFactory,
+    );
+    this.mcpSkillSync = new McpSkillSync(
+      deps.mcpServersRepo,
+      deps.skills,
+      this.mcp,
+      deps.twinId,
     );
   }
 

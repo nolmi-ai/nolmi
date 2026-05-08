@@ -221,12 +221,32 @@ export type SkillOutput = z.infer<typeof SkillOutputSchema>;
 export const SkillManifestSchema = z.object({
   name: z.string(),
   description: z.string(),
-  capability: z.string(), // z.B. "respond_to_chat"
+  capability: z.string(), // z.B. "respond_to_chat", "mcp_tool"
   requiresApproval: z.boolean(),
   inputs: z.array(SkillInputSchema).optional(),
   outputs: z.array(SkillOutputSchema).optional(),
+  // 3.2.C: synthetisches Manifest für MCP-Tools. Manual-Skills haben diese
+  // Felder nicht. version='auto-generated' macht den synthetischen Ursprung
+  // im DB-Inhalt sichtbar (Listings/Debug); kein semantisches Versioning heute.
+  version: z.string().optional(),
+  mcpServerId: z.string().optional(),
+  mcpToolName: z.string().optional(),
+  mcpInputSchema: z.unknown().optional(),
 });
 export type SkillManifest = z.infer<typeof SkillManifestSchema>;
+
+// ─── MCP TOOL DEFINITION (Phase 3.2.C) ───────────────────────────────────────
+//
+// Das, was ein MCP-Server via listTools() advertised. Wird in
+// McpSkillSync zum Skill-Manifest gemappt; in 3.2.D landet das input_schema
+// als Tool-Use-Schema im LLM-Prompt.
+
+export const McpToolDefinitionSchema = z.object({
+  name: z.string(),
+  description: z.string().optional(),
+  inputSchema: z.unknown(), // JSON-Schema-Object vom Server
+});
+export type McpToolDefinition = z.infer<typeof McpToolDefinitionSchema>;
 
 /**
  * Schmales UI-Payload-Format. Backend-Routes liefern die GET-/PATCH-Skill-
@@ -263,6 +283,10 @@ export const SkillSchema = z.object({
   scriptTs: z.string().nullable(),
   source: SkillSourceSchema,
   sourceMetadata: z.record(z.string(), z.unknown()).nullable(),
+  // 3.2.C: nur bei source='mcp' gesetzt, sonst null. FK-CASCADE via Migration —
+  // wenn der MCP-Server entfernt wird, fliegt der Skill automatisch raus.
+  mcpServerId: z.string().nullable(),
+  mcpToolName: z.string().nullable(),
   isActive: z.boolean(),
   createdAt: z.number(),
   updatedAt: z.number(),
