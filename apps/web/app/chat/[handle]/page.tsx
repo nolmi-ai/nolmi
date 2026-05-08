@@ -1,6 +1,14 @@
 "use client";
 
-import { use, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  Fragment,
+  use,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import type { AuditEntry, ChatMessage, TwinEvent } from "@twin-lab/shared";
 
 const RUNTIME_URL = process.env.NEXT_PUBLIC_RUNTIME_URL ?? "http://localhost:4000";
@@ -127,6 +135,12 @@ function ChatLayout({ handle }: { handle: string }) {
   const [selection, setSelection] = useState<Selection>({ kind: "direct" });
   const [showNewModal, setShowNewModal] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // #84/#85: Counter, der nach jedem erfolgreichen Direct-Chat-Reset hochzählt.
+  // DirectChat leitet daraus eine synthetische Local-Konversations-ID ab und
+  // taggt damit live gesendete Messages — so erscheint der Trenner zwischen
+  // letztem Server-Audit und neuer Live-Message ohne Page-Reload. Nach Reload
+  // hat der Server die echten conversation_ids und übersteuert die Local-IDs.
+  const [directChatResetSeq, setDirectChatResetSeq] = useState(0);
 
   const loadConversations = useCallback(async () => {
     try {
@@ -221,9 +235,10 @@ function ChatLayout({ handle }: { handle: string }) {
           selection={selection}
           partnerDisplayName={partnerDisplayName}
           partnerIsTrusted={partnerIsTrusted}
+          onDirectChatReset={() => setDirectChatResetSeq((s) => s + 1)}
         />
         {selection.kind === "direct" ? (
-          <DirectChat handle={handle} />
+          <DirectChat handle={handle} resetSeq={directChatResetSeq} />
         ) : (
           <A2AChat
             handle={handle}
@@ -253,11 +268,13 @@ function ConversationHeader({
   selection,
   partnerDisplayName,
   partnerIsTrusted,
+  onDirectChatReset,
 }: {
   handle: string;
   selection: Selection;
   partnerDisplayName: string | null;
   partnerIsTrusted: boolean;
+  onDirectChatReset?: () => void;
 }) {
   if (selection.kind === "direct") {
     return (
@@ -268,7 +285,10 @@ function ConversationHeader({
           </div>
           <div className="text-xs text-muted font-mono truncate">{handle}</div>
         </div>
-        <DirectChatResetButton handle={handle} />
+        <DirectChatResetButton
+          handle={handle}
+          onResetSuccess={onDirectChatReset}
+        />
         <span className="text-[10px] uppercase tracking-wider text-muted border border-border rounded px-2 py-0.5">
           direct chat
         </span>
@@ -297,26 +317,61 @@ function ConversationHeader({
   );
 }
 
-// ─── Direct-Chat-Reset-Button (#71b/#80 Sub-Schritt D) ─────────────────────
+// #85: Trenner-Marker zwischen zwei Konversationen im Chat-Verlauf. Dezent
+// gestaltet — eine horizontale Linie mit zentriertem Label. Daten-getrieben:
+// erscheint dort, wo zwei aufeinanderfolgende Messages unterschiedliche
+// conversationId haben.
+
+function ConversationDivider() {
+  return (
+    <div className="flex items-center gap-3 my-4 text-[10px] uppercase tracking-wider text-muted">
+      <div className="flex-1 h-px bg-border" />
+      <span>Neue Konversation</span>
+      <div className="flex-1 h-px bg-border" />
+    </div>
+  );
+}
+
+// ─── Direct-Chat-Reset-Button (#71b/#80 Sub-Schritt D + #84 Inline-Confirm) ─
 //
 // Beendet die aktive Direct-Chat-Konversation des Owners mit seinem eigenen
 // Twin. Lazy-Start der nächsten Konversation passiert im Backend beim
 // nächsten Send (TwinService.runOwnerDirect → conversations.getOrStart).
 //
+// #84: Inline-Confirm statt window.confirm() — Klick toggled in einen
+// Zwei-Knopf-Modus „Bestätigen / Abbrechen". 5-Sekunden-Timeout, falls der
+// User in dem Zustand wegklickt, ohne explizit abzubrechen. Kein Modal.
+//
 // Wir leeren `messages[]` im DirectChat NICHT — der visuelle Verlauf bleibt
 // scrollbar. Nur der Backend-Loader (filtert nach conversation_id) sieht die
-// alten Messages beim nächsten Send nicht mehr. Mental-Model: „visueller
-// Verlauf vs. Twin-Memory" — bewusste Trennung.
+// alten Messages beim nächsten Send nicht mehr. `onResetSuccess` reicht den
+// Reset an die Page-Ebene weiter, damit DirectChat seine Live-Messages mit
+// einer neuen Local-Conv-ID taggt — Trenner-Marker (#85) erscheint dann
+// nach dem nächsten Send ohne Page-Reload.
 
-function DirectChatResetButton({ handle }: { handle: string }) {
+const RESET_CONFIRM_TIMEOUT_MS = 5000;
+
+function DirectChatResetButton({
+  handle,
+  onResetSuccess,
+}: {
+  handle: string;
+  onResetSuccess?: () => void;
+}) {
   const [busy, setBusy] = useState(false);
+  const [confirming, setConfirming] = useState(false);
 
-  async function reset() {
+  // Auto-Reset des Confirm-Modus nach Timeout. Cleanup beim Unmount oder bei
+  // erneutem Wechsel — useEffect-Return räumt den Timer ab. Verhindert ein
+  // stehengebliebenes „Bestätigen", wenn der User einfach woanders weiterklickt.
+  useEffect(() => {
+    if (!confirming) return;
+    const t = setTimeout(() => setConfirming(false), RESET_CONFIRM_TIMEOUT_MS);
+    return () => clearTimeout(t);
+  }, [confirming]);
+
+  async function performReset() {
     if (busy) return;
-    const ok = window.confirm(
-      "Konversation zurücksetzen? Nachrichten bleiben sichtbar, aber der Twin startet ohne Erinnerung.",
-    );
-    if (!ok) return;
     setBusy(true);
     try {
       await fetch(`${RUNTIME_URL}/twins/${handle}/conversations/reset`, {
@@ -324,18 +379,46 @@ function DirectChatResetButton({ handle }: { handle: string }) {
         credentials: "include",
       });
       // Backend liefert {reset:false} wenn keine aktive Konversation existiert
-      // — silent durchwinken. Frontend-State unverändert; der nächste Send
-      // löst lazy-start aus.
+      // — silent durchwinken. onResetSuccess immer feuern, damit der Trenner
+      // auch in dem Fall nach dem nächsten Send greift (semantisch ist die
+      // Konversation jetzt jedenfalls leer).
+      onResetSuccess?.();
     } catch {
-      // Silent: kein Toast-Mechanismus im Codebase. Bei Bedarf Backend-Log.
+      // Silent: kein Toast-Mechanismus im Codebase.
     } finally {
+      setConfirming(false);
       setBusy(false);
     }
   }
 
+  if (confirming) {
+    return (
+      <span
+        className="inline-flex items-center gap-1"
+        title="Konversation beenden — Twin startet beim nächsten Send ohne Erinnerung"
+      >
+        <span className="text-xs text-muted hidden sm:inline">Wirklich?</span>
+        <button
+          onClick={performReset}
+          disabled={busy}
+          className="text-xs text-accent border border-accent rounded px-2 py-1 hover:bg-accent hover:text-bg disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+        >
+          ✓ Bestätigen
+        </button>
+        <button
+          onClick={() => setConfirming(false)}
+          disabled={busy}
+          className="text-xs text-muted border border-border rounded px-2 py-1 hover:border-warn hover:text-warn disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+        >
+          Abbrechen
+        </button>
+      </span>
+    );
+  }
+
   return (
     <button
-      onClick={reset}
+      onClick={() => setConfirming(true)}
       disabled={busy}
       title="Konversation beenden — Twin startet beim nächsten Send ohne Erinnerung"
       className="text-xs text-muted border border-border rounded px-2 py-1 hover:border-accent hover:text-accent disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
@@ -452,11 +535,25 @@ function Sidebar({
 
 // ─── Direct-Chat (Owner → eigener Twin, LLM) ────────────────────────────────
 
-function DirectChat({ handle }: { handle: string }) {
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
+// #85: ChatMessage-Erweiterung um conversationId. Audit-Mapping reicht das
+// Field aus AuditEntry.conversationId durch (Backend liefert es seit
+// #71b/#80 Sub-Schritt B im JSON). Live gesendete Messages tagged DirectChat
+// selbst — siehe activeConvId-Logik unten. null = Pre-Migration oder
+// frisch nach Reset (vor erstem Send).
+type DirectMessage = ChatMessage & { conversationId: string | null };
+
+function DirectChat({ handle, resetSeq }: { handle: string; resetSeq: number }) {
+  const [messages, setMessages] = useState<DirectMessage[]>([]);
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // #85: Conv-ID, mit der neue Live-Messages getagged werden. Initial null;
+  // nach Audit-Load auf die newest convId gesetzt — so erweitern Live-Sends
+  // die laufende Konversation, ohne falschen Trenner. Nach Reset bumped der
+  // Parent `resetSeq`, und wir setzen activeConvId auf eine synthetische
+  // Local-ID — damit erscheint nach dem nächsten Send ein Trenner zwischen
+  // letzter Server-Message und der neuen Live-Pärchen.
+  const [activeConvId, setActiveConvId] = useState<string | null>(null);
   const { containerRef, bottomRef, onScroll } = useAutoScroll(
     messages.length,
     `direct:${handle}`,
@@ -484,7 +581,8 @@ function DirectChat({ handle }: { handle: string }) {
       .then((data) => {
         if (cancelled) return;
         // Audit-API liefert DESC, Render braucht ASC → reverse iteration.
-        const pairs: ChatMessage[] = [];
+        const pairs: DirectMessage[] = [];
+        let newestConvId: string | null = null;
         for (let i = data.entries.length - 1; i >= 0; i--) {
           const entry = data.entries[i];
           if (!entry) continue;
@@ -499,10 +597,15 @@ function DirectChat({ handle }: { handle: string }) {
               ? entry.output.reply
               : null;
           if (!userText || !replyText) continue;
-          pairs.push({ role: "user", content: userText });
-          pairs.push({ role: "assistant", content: replyText });
+          const cid = entry.conversationId ?? null;
+          pairs.push({ role: "user", content: userText, conversationId: cid });
+          pairs.push({ role: "assistant", content: replyText, conversationId: cid });
+          // ASC-Iteration: das letzte gesetzte cid ist gleichzeitig das
+          // jüngste — Live-Sends erweitern die laufende Konversation.
+          newestConvId = cid;
         }
         setMessages(pairs);
+        setActiveConvId(newestConvId);
       })
       .catch(() => {
         // Silent fail — Audit-Endpoint nicht erreichbar oder 401. Direct-Chat
@@ -513,9 +616,25 @@ function DirectChat({ handle }: { handle: string }) {
     };
   }, [handle]);
 
+  // #85: Reset-Bump aus dem Parent. Synthetische Local-ID mit `resetSeq` —
+  // bei jedem Increment einzigartig. activeConvId weicht damit von der
+  // bisherigen Conv ab → Trenner-Marker erscheint zwischen letzter Server-
+  // Message und der nächsten Live-Pärchen. Die ID ist nur lokal valide; nach
+  // Page-Reload übernimmt der Server die echten conversation_ids und das
+  // Marker-Position wird daten-getrieben rekonstruiert.
+  // resetSeq=0 ist der Initialwert (kein Reset bislang) → kein Override.
+  useEffect(() => {
+    if (resetSeq <= 0) return;
+    setActiveConvId(`local-after-reset-${handle}-${resetSeq}`);
+  }, [resetSeq, handle]);
+
   async function send() {
     if (!input.trim() || busy) return;
-    const userMessage: ChatMessage = { role: "user", content: input };
+    const userMessage: DirectMessage = {
+      role: "user",
+      content: input,
+      conversationId: activeConvId,
+    };
     const next = [...messages, userMessage];
     setMessages(next);
     setInput("");
@@ -527,7 +646,13 @@ function DirectChat({ handle }: { handle: string }) {
         method: "POST",
         credentials: "include",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ messages: next }),
+        // Backend rekonstruiert die LLM-History server-seitig aus der aktiven
+        // Konversation (#71b/#80 Sub-Schritt C); wir schicken die volle Liste
+        // weiter mit, damit das alte Feld kompatibel bleibt — der Server
+        // ignoriert sie inhaltlich für den LLM-Call.
+        body: JSON.stringify({
+          messages: next.map(({ role, content }) => ({ role, content })),
+        }),
       });
       if (!res.ok) {
         const body = await res.json().catch(() => ({ error: "Unknown error" }));
@@ -545,10 +670,15 @@ function DirectChat({ handle }: { handle: string }) {
             role: "assistant",
             content:
               "Diese Anfrage habe ich an den Owner zur Freigabe weitergeleitet. Sobald approved, läuft sie. Status in der Inbox.",
+            conversationId: activeConvId,
           },
         ]);
       } else if (data.message) {
-        setMessages((current) => [...current, data.message!]);
+        const reply = data.message;
+        setMessages((current) => [
+          ...current,
+          { ...reply, conversationId: activeConvId },
+        ]);
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed");
@@ -574,9 +704,21 @@ function DirectChat({ handle }: { handle: string }) {
               Noch keine Nachrichten. Schreib unten eine Frage.
             </div>
           ) : (
-            messages.map((m, i) => (
-              <Bubble key={i} role={m.role} content={m.content} />
-            ))
+            // #85: Trenner zwischen aufeinanderfolgenden Messages mit
+            // unterschiedlicher conversationId. Erste Message (i===0) bekommt
+            // nie einen Trenner davor. Daten-getrieben — überlebt
+            // Page-Reload, weil aus dem geladenen Audit-Stream abgeleitet.
+            messages.map((m, i) => {
+              const prev = i > 0 ? messages[i - 1] : undefined;
+              const showDivider =
+                prev !== undefined && prev.conversationId !== m.conversationId;
+              return (
+                <Fragment key={i}>
+                  {showDivider && <ConversationDivider />}
+                  <Bubble role={m.role} content={m.content} />
+                </Fragment>
+              );
+            })
           )}
           {busy && <div className="text-xs text-accent">twin denkt nach…</div>}
           {error && (
