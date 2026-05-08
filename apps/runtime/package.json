@@ -26,6 +26,7 @@
     "@ai-sdk/openai": "^3.0.0",
     "@fastify/cookie": "^11",
     "@fastify/cors": "^10.0.0",
+    "@modelcontextprotocol/sdk": "^1.29.0",
     "@twin-lab/shared": "workspace:*",
     "ai": "^6.0.0",
     "bcryptjs": "^2.4.3",

@@ -10,6 +10,9 @@ import type { TrustRepo } from "./trust/trust-repo.js";
 import type { SkillRepo } from "./skills/repo.js";
 import { buildSkillsBlock } from "./skills/prompt-builder.js";
 import type { ConversationsRepo } from "./conversations/repo.js";
+import type { McpServersRepo } from "./mcp/repo.js";
+import type { McpClientFactory } from "./mcp/client-factory.js";
+import { McpClientManager } from "./mcp/client-manager.js";
 
 // ─── TWIN SERVICE ────────────────────────────────────────────────────────────
 //
@@ -64,6 +67,17 @@ export interface TwinServiceDeps {
    * wiederverwenden, sonst neue starten.
    */
   conversations: ConversationsRepo;
+  /**
+   * MCP-Server-Konfigurationen pro Twin (3.2.A). Manager nutzt das zum
+   * Lookup beim Lazy-Spawn; Tool-Discovery + Execution kommen in 3.2.C/D.
+   */
+  mcpServersRepo: McpServersRepo;
+  /**
+   * Factory für McpClient-Instanzen (3.2.B). Production: defaultMcpClient-
+   * Factory; Tests injecten Mock-Factory, sodass keine echten Subprocesses
+   * gespawnt werden.
+   */
+  mcpClientFactory: McpClientFactory;
 }
 
 export interface ApproveResult {
@@ -80,7 +94,33 @@ export interface ChatRequestContext {
 }
 
 export class TwinService {
-  constructor(private deps: TwinServiceDeps) {}
+  /**
+   * MCP-Lifecycle-Manager dieses Twins. Hält pro Server-ID einen Subprocess
+   * (lazy gespawnt beim ersten Tool-Call), idle-disconnected nach
+   * MCP_IDLE_TIMEOUT_MS. Wird in {@link dispose} sauber heruntergefahren.
+   *
+   * Public-readonly, damit Sub-D (Tool-Execution-Pfad) den Manager direkt
+   * über service.mcp ansprechen kann — wir kapseln das nicht hinter weiteren
+   * Wrapper-Methoden, weil der Manager schon das passende Interface ist.
+   */
+  public readonly mcp: McpClientManager;
+
+  constructor(private deps: TwinServiceDeps) {
+    this.mcp = new McpClientManager(
+      deps.twinId,
+      deps.mcpServersRepo,
+      deps.mcpClientFactory,
+    );
+  }
+
+  /**
+   * Container-Shutdown-Hook: wird von TwinServiceRegistry.disposeAll() bei
+   * SIGTERM/SIGINT gerufen. Beendet alle gehaltenen MCP-Subprocesses graceful
+   * (mit SIGKILL-Fallback nach MCP_DISCONNECT_TIMEOUT_MS pro Server).
+   */
+  async dispose(): Promise<void> {
+    await this.mcp.dispose();
+  }
 
   /**
    * Bridge-Client nach dem Service-Start nachreichen. Boot-Reihenfolge will

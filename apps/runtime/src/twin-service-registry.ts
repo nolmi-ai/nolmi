@@ -23,6 +23,11 @@ import type { BridgeConfig } from "./bridge/types.js";
 import type { TrustRepo } from "./trust/trust-repo.js";
 import type { SkillRepo } from "./skills/repo.js";
 import type { ConversationsRepo } from "./conversations/repo.js";
+import type { McpServersRepo } from "./mcp/repo.js";
+import {
+  defaultMcpClientFactory,
+  type McpClientFactory,
+} from "./mcp/client-factory.js";
 
 // ─── TWIN SERVICE REGISTRY ──────────────────────────────────────────────────
 //
@@ -71,6 +76,13 @@ interface RegistryDeps {
   trustRepo: TrustRepo;
   skillRepo: SkillRepo;
   conversationsRepo: ConversationsRepo;
+  mcpServersRepo: McpServersRepo;
+  /**
+   * Default ist {@link defaultMcpClientFactory} (echte Subprocess-Spawns).
+   * Optional, weil Production immer den Default will und Boot-Code so kein
+   * unnötiges Boilerplate braucht. Tests injecten eine Mock-Factory.
+   */
+  mcpClientFactory?: McpClientFactory;
 }
 
 export class TwinServiceRegistry {
@@ -107,6 +119,8 @@ export class TwinServiceRegistry {
         opts.trustRepo,
         opts.skillRepo,
         opts.conversationsRepo,
+        opts.mcpServersRepo,
+        opts.mcpClientFactory ?? defaultMcpClientFactory,
       );
       this.entries.set(profile.handle, entry);
     }
@@ -170,6 +184,8 @@ export class TwinServiceRegistry {
       deps.trustRepo,
       deps.skillRepo,
       deps.conversationsRepo,
+      deps.mcpServersRepo,
+      deps.mcpClientFactory ?? defaultMcpClientFactory,
     );
 
     // Inbox-Sync analog zu {@link startBridges} — Sync-Fehler sind nicht
@@ -263,6 +279,24 @@ export class TwinServiceRegistry {
     );
   }
 
+  /**
+   * Beendet alle MCP-Subprocesses aller Twins parallel. Wird vom Container-
+   * Shutdown vor app.close() aufgerufen, damit keine verwaisten Child-
+   * Prozesse zurückbleiben. Bridge-Stream-Disconnect läuft separat in
+   * {@link shutdown} — beide Pfade dürfen sich nicht blockieren.
+   */
+  async disposeAll(): Promise<void> {
+    await Promise.all(
+      [...this.entries.values()].map(async (entry) => {
+        try {
+          await entry.service.dispose();
+        } catch (err) {
+          console.error(`[shutdown] ${entry.handle} mcp.dispose:`, err);
+        }
+      }),
+    );
+  }
+
   // ─── intern ───────────────────────────────────────────────────────────────
 
   private buildEntry(
@@ -273,6 +307,8 @@ export class TwinServiceRegistry {
     trustRepo: TrustRepo,
     skillRepo: SkillRepo,
     conversationsRepo: ConversationsRepo,
+    mcpServersRepo: McpServersRepo,
+    mcpClientFactory: McpClientFactory,
   ): RegistryEntry {
     const bus = new EventBus();
     const audit = new AuditService(auditRepo, bus, profile.twinId);
@@ -334,6 +370,8 @@ export class TwinServiceRegistry {
       trustRepo,
       skills: skillRepo,
       conversations: conversationsRepo,
+      mcpServersRepo,
+      mcpClientFactory,
     });
 
     const bridgeStream = new BridgeStream(

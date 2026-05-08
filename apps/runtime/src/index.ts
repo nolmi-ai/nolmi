@@ -9,6 +9,7 @@ import { TwinProfilesRepo } from "./twin-profiles-repo.js";
 import { TrustRepo } from "./trust/trust-repo.js";
 import { SkillRepo } from "./skills/repo.js";
 import { ConversationsRepo } from "./conversations/repo.js";
+import { McpServersRepo } from "./mcp/repo.js";
 import { EncryptionKeyMissingError, loadMasterKey } from "./crypto-utils.js";
 
 // ─── BOOTSTRAP ───────────────────────────────────────────────────────────────
@@ -64,6 +65,7 @@ async function main() {
   const trustRepo = new TrustRepo(repo.db);
   const skillRepo = new SkillRepo(repo.db);
   const conversationsRepo = new ConversationsRepo(repo.db);
+  const mcpServersRepo = new McpServersRepo(repo.db, masterKey);
   const app = await createServer({
     audit: repo.audit,
     registry,
@@ -86,6 +88,7 @@ async function main() {
     trustRepo,
     skillRepo,
     conversationsRepo,
+    mcpServersRepo,
   });
   const summaries = registry.list();
 
@@ -114,7 +117,10 @@ async function main() {
   // 9. Graceful Shutdown
   const shutdown = async (signal: string) => {
     console.log(`[shutdown] ${signal} empfangen — fahre runter`);
+    // Reihenfolge: erst Bridge-Streams (kein neuer Inbound), dann MCP-Subprocesses
+    // disposen (kein neuer Outbound an Tools), dann Fastify schließen.
     await registry.shutdown();
+    await registry.disposeAll();
     try {
       await app.close();
     } catch (err) {

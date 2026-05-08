@@ -10,6 +10,9 @@ import { TwinService } from "../twin-service.js";
 import { AuditService } from "../audit/service.js";
 import { EventBus } from "../events/bus.js";
 import { createSqliteRepository } from "../repository/index.js";
+import { McpServersRepo } from "../mcp/repo.js";
+import { defaultMcpClientFactory } from "../mcp/client-factory.js";
+import { loadMasterKey } from "../crypto-utils.js";
 
 // ─── TEST: SKILL-ENGINE (Phase 3.1.B) ───────────────────────────────────────
 //
@@ -45,6 +48,8 @@ async function main() {
   const skillRepo = new SkillRepo(db);
   const trustRepo = new TrustRepo(db);
   const conversationsRepo = new ConversationsRepo(db);
+  const masterKey = loadMasterKey();
+  const mcpServersRepo = new McpServersRepo(db, masterKey);
   const repo = createSqliteRepository(config.dbPath);
 
   const profile = profilesRepo.findByHandle(handle);
@@ -136,6 +141,8 @@ async function main() {
     trustRepo,
     skills: skillRepo,
     conversations: conversationsRepo,
+    mcpServersRepo,
+    mcpClientFactory: defaultMcpClientFactory,
   });
 
   // ─── STEP 3: chat() durch Owner-Bypass ────────────────────────────────────
