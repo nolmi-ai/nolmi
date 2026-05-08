@@ -268,3 +268,57 @@ export const SkillSchema = z.object({
   updatedAt: z.number(),
 });
 export type Skill = z.infer<typeof SkillSchema>;
+
+// ─── MCP SERVERS (Phase 3.2) ─────────────────────────────────────────────────
+//
+// Pro Twin konfigurierte MCP-Server. Die Tools, die ein Server bereitstellt,
+// werden in späteren Sub-Schritten als Skills mit source: "mcp" registriert —
+// diese Tabelle hält nur die Verbindungs-Konfiguration.
+//
+// `env` (Plain-Object mit ENV-Vars) wird im Repo verschlüsselt abgelegt
+// (Master-Key, AES-256-GCM, analog zu llm_config.api_key_encrypted). Im
+// McpServer-Listing-Output gibt's nur `hasEnv: boolean` als Signal — der
+// Klartext kommt nur via getDecryptedEnv() raus, damit ENV-Secrets nicht
+// versehentlich in Standard-Listings (und damit ins Frontend) leaken.
+
+export const McpTransportSchema = z.enum(["stdio", "http"]);
+export type McpTransport = z.infer<typeof McpTransportSchema>;
+
+export const McpServerSchema = z.object({
+  id: z.string(),
+  twinId: z.string(),
+  name: z.string(),
+  transport: McpTransportSchema,
+  // stdio: gesetzt; http: null
+  command: z.string().nullable(),
+  args: z.array(z.string()).nullable(),
+  // Nur Signal — Klartext nur über getDecryptedEnv(id) im Repo.
+  hasEnv: z.boolean(),
+  // http: gesetzt; stdio: null
+  url: z.string().nullable(),
+  defaultRequiresApproval: z.boolean(),
+  isActive: z.boolean(),
+  createdAt: z.string(),
+  updatedAt: z.string(),
+});
+export type McpServer = z.infer<typeof McpServerSchema>;
+
+export const McpServerAddInputSchema = z.object({
+  twinId: z.string(),
+  name: z.string().min(1).max(100),
+  transport: McpTransportSchema,
+  command: z.string().nullable().optional(),
+  args: z.array(z.string()).nullable().optional(),
+  // Plain-Object — wird im Repo verschlüsselt vor dem Insert.
+  env: z.record(z.string(), z.string()).nullable().optional(),
+  url: z.string().url().nullable().optional(),
+  defaultRequiresApproval: z.boolean().optional(),
+});
+export type McpServerAddInput = z.infer<typeof McpServerAddInputSchema>;
+
+// twinId/transport sind nach dem Anlegen immutable — Transport-Wechsel würde
+// alle Felder rotieren und ist als „neu anlegen" sauberer.
+export const McpServerUpdateInputSchema = McpServerAddInputSchema
+  .omit({ twinId: true, transport: true })
+  .partial();
+export type McpServerUpdateInput = z.infer<typeof McpServerUpdateInputSchema>;
