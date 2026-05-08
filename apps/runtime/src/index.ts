@@ -8,6 +8,7 @@ import { TwinServiceRegistry } from "./twin-service-registry.js";
 import { TwinProfilesRepo } from "./twin-profiles-repo.js";
 import { TrustRepo } from "./trust/trust-repo.js";
 import { SkillRepo } from "./skills/repo.js";
+import { ConversationsRepo } from "./conversations/repo.js";
 import { EncryptionKeyMissingError, loadMasterKey } from "./crypto-utils.js";
 
 // ─── BOOTSTRAP ───────────────────────────────────────────────────────────────
@@ -62,6 +63,7 @@ async function main() {
   const registry = new TwinServiceRegistry();
   const trustRepo = new TrustRepo(repo.db);
   const skillRepo = new SkillRepo(repo.db);
+  const conversationsRepo = new ConversationsRepo(repo.db);
   const app = await createServer({
     audit: repo.audit,
     registry,
@@ -82,6 +84,7 @@ async function main() {
     masterKey,
     trustRepo,
     skillRepo,
+    conversationsRepo,
   });
   const summaries = registry.list();
 

@@ -22,6 +22,7 @@ import type { AuditRepository } from "./repository/types.js";
 import type { BridgeConfig } from "./bridge/types.js";
 import type { TrustRepo } from "./trust/trust-repo.js";
 import type { SkillRepo } from "./skills/repo.js";
+import type { ConversationsRepo } from "./conversations/repo.js";
 
 // ─── TWIN SERVICE REGISTRY ──────────────────────────────────────────────────
 //
@@ -69,6 +70,7 @@ interface RegistryDeps {
   masterKey: Buffer;
   trustRepo: TrustRepo;
   skillRepo: SkillRepo;
+  conversationsRepo: ConversationsRepo;
 }
 
 export class TwinServiceRegistry {
@@ -104,6 +106,7 @@ export class TwinServiceRegistry {
         opts.masterKey,
         opts.trustRepo,
         opts.skillRepo,
+        opts.conversationsRepo,
       );
       this.entries.set(profile.handle, entry);
     }
@@ -166,6 +169,7 @@ export class TwinServiceRegistry {
       deps.masterKey,
       deps.trustRepo,
       deps.skillRepo,
+      deps.conversationsRepo,
     );
 
     // Inbox-Sync analog zu {@link startBridges} — Sync-Fehler sind nicht
@@ -268,6 +272,7 @@ export class TwinServiceRegistry {
     masterKey: Buffer,
     trustRepo: TrustRepo,
     skillRepo: SkillRepo,
+    conversationsRepo: ConversationsRepo,
   ): RegistryEntry {
     const bus = new EventBus();
     const audit = new AuditService(auditRepo, bus, profile.twinId);
@@ -328,6 +333,7 @@ export class TwinServiceRegistry {
       bridgeClient,
       trustRepo,
       skills: skillRepo,
+      conversations: conversationsRepo,
     });
 
     const bridgeStream = new BridgeStream(

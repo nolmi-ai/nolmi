@@ -70,6 +70,11 @@ export const AuditEntrySchema = z.object({
   // bestätigt. Backward-compat: alte Rows haben das Feld nicht — Repository
   // mappt fehlende Spalte auf null.
   readAt: z.string().datetime().nullable().optional(),
+  // #71b/#80: Verknüpfung zur conversations-Tabelle. In Sub-Schritt B nur für
+  // capability='owner-direct' gesetzt; alle anderen Capabilities haben
+  // conversation_id=NULL. Backward-compat: alte Audits aus Pre-Migration-009
+  // haben die Spalte nicht — Repository mappt fehlende Spalte auf null.
+  conversationId: z.string().nullable().optional(),
 });
 
 export type AuditEntry = z.infer<typeof AuditEntrySchema>;

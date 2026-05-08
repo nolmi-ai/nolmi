@@ -5,6 +5,7 @@ import { loadRuntimeConfig } from "../config.js";
 import { TwinProfilesRepo } from "../twin-profiles-repo.js";
 import { TrustRepo } from "../trust/trust-repo.js";
 import { SkillRepo } from "../skills/repo.js";
+import { ConversationsRepo } from "../conversations/repo.js";
 import { TwinService } from "../twin-service.js";
 import { AuditService } from "../audit/service.js";
 import { EventBus } from "../events/bus.js";
@@ -43,6 +44,7 @@ async function main() {
   const profilesRepo = new TwinProfilesRepo(db);
   const skillRepo = new SkillRepo(db);
   const trustRepo = new TrustRepo(db);
+  const conversationsRepo = new ConversationsRepo(db);
   const repo = createSqliteRepository(config.dbPath);
 
   const profile = profilesRepo.findByHandle(handle);
@@ -133,6 +135,7 @@ async function main() {
     bridgeClient: null,
     trustRepo,
     skills: skillRepo,
+    conversations: conversationsRepo,
   });
 
   // ─── STEP 3: chat() durch Owner-Bypass ────────────────────────────────────

@@ -28,8 +28,9 @@ class SqliteAuditRepository implements AuditRepository {
   async append(entry: AuditEntry): Promise<void> {
     this.db
       .prepare(
-        `INSERT INTO audit (id, twin_id, timestamp, capability, mandate_id, status, data)
-         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO audit
+           (id, twin_id, timestamp, capability, mandate_id, status, conversation_id, data)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         entry.id,
@@ -38,6 +39,7 @@ class SqliteAuditRepository implements AuditRepository {
         entry.capability,
         entry.mandateId,
         entry.status,
+        entry.conversationId ?? null,
         JSON.stringify(entry),
       );
   }
@@ -58,22 +60,20 @@ class SqliteAuditRepository implements AuditRepository {
     const where = opts.twinId ? "WHERE twin_id = ?" : "";
     // 2.5.4.2: read_at als separate SQL-Spalte (nicht in JSON), via SELECT
     // gemerged. Backward-compat: Spalte fehlt vor Migration 007 → null.
-    const sql = `SELECT data, read_at FROM audit ${where} ORDER BY timestamp DESC LIMIT ? OFFSET ?`;
+    // 3/#71b: conversation_id analog separat — bei Pre-009-Audits NULL.
+    const sql = `SELECT data, read_at, conversation_id FROM audit ${where} ORDER BY timestamp DESC LIMIT ? OFFSET ?`;
     const params: unknown[] = [];
     if (opts.twinId) params.push(opts.twinId);
     params.push(opts.limit, opts.offset ?? 0);
-    const rows = this.db.prepare(sql).all(...params) as {
-      data: string;
-      read_at: string | null;
-    }[];
-    return rows.map((r) => mergeReadAt(r));
+    const rows = this.db.prepare(sql).all(...params) as AuditRow[];
+    return rows.map((r) => mergeColumns(r));
   }
 
   async get(id: string): Promise<AuditEntry | null> {
     const row = this.db
-      .prepare("SELECT data, read_at FROM audit WHERE id = ?")
-      .get(id) as { data: string; read_at: string | null } | undefined;
-    return row ? mergeReadAt(row) : null;
+      .prepare("SELECT data, read_at, conversation_id FROM audit WHERE id = ?")
+      .get(id) as AuditRow | undefined;
+    return row ? mergeColumns(row) : null;
   }
 
   async findByInputField(
@@ -90,12 +90,10 @@ class SqliteAuditRepository implements AuditRepository {
     const where = opts.twinId
       ? `json_extract(data, '$.input.${field}') = ? AND twin_id = ?`
       : `json_extract(data, '$.input.${field}') = ?`;
-    const sql = `SELECT data, read_at FROM audit WHERE ${where} LIMIT 1`;
+    const sql = `SELECT data, read_at, conversation_id FROM audit WHERE ${where} LIMIT 1`;
     const params: unknown[] = opts.twinId ? [value, opts.twinId] : [value];
-    const row = this.db.prepare(sql).get(...params) as
-      | { data: string; read_at: string | null }
-      | undefined;
-    return row ? mergeReadAt(row) : null;
+    const row = this.db.prepare(sql).get(...params) as AuditRow | undefined;
+    return row ? mergeColumns(row) : null;
   }
 
   async markRead(id: string): Promise<void> {
@@ -110,7 +108,17 @@ class SqliteAuditRepository implements AuditRepository {
   }
 }
 
-function mergeReadAt(row: { data: string; read_at: string | null }): AuditEntry {
+interface AuditRow {
+  data: string;
+  read_at: string | null;
+  conversation_id: string | null;
+}
+
+function mergeColumns(row: AuditRow): AuditEntry {
   const entry = JSON.parse(row.data) as AuditEntry;
-  return { ...entry, readAt: row.read_at };
+  return {
+    ...entry,
+    readAt: row.read_at,
+    conversationId: row.conversation_id ?? entry.conversationId ?? null,
+  };
 }

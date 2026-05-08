@@ -59,6 +59,14 @@ export class ConversationsRepo {
       endedAt: null,
     };
 
+    // Log beim Start, nicht bei jedem getOrStart() — sonst spammt jede
+     // Direct-Chat-Nachricht den Output. Pattern analog zum Skill-Loading:
+     // nur bei DB-Mutation, nicht bei Lookup.
+     console.log(
+       `[conversations] neue Konversation gestartet: ${conv.id} ` +
+         `(owner=${input.ownerUserId}, partner=${input.partnerHandle}, twin=${input.twinId})`,
+     );
+
     const tx = this.db.transaction(() => {
       // Bestehende aktive für das Tripel auf 'ended' setzen. Mehrere wären
       // ein Bug — der UPDATE setzt sie alle gleichzeitig.
@@ -97,6 +105,22 @@ export class ConversationsRepo {
     });
     tx();
     return conv;
+  }
+
+  /**
+   * Convenience: gibt die aktive Konversation zurück oder startet eine neue.
+   * Hot-Path-tauglich, weil bei vorhandener aktiver Konversation nur ein
+   * Index-Lookup passiert; nur beim ersten Send pro Konversation kommt der
+   * Insert-Pfad zum Tragen.
+   */
+  getOrStart(
+    ownerUserId: string,
+    partnerHandle: string,
+    twinId: string,
+  ): Conversation {
+    const existing = this.findActive(ownerUserId, partnerHandle, twinId);
+    if (existing) return existing;
+    return this.start({ ownerUserId, partnerHandle, twinId });
   }
 
   /**

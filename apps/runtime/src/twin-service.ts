@@ -9,6 +9,7 @@ import type { BridgeMessage } from "./bridge/types.js";
 import type { TrustRepo } from "./trust/trust-repo.js";
 import type { SkillRepo } from "./skills/repo.js";
 import { buildSkillsBlock } from "./skills/prompt-builder.js";
+import type { ConversationsRepo } from "./conversations/repo.js";
 
 // ─── TWIN SERVICE ────────────────────────────────────────────────────────────
 //
@@ -57,6 +58,12 @@ export interface TwinServiceDeps {
    * B, siehe `skills/prompt-builder.ts`).
    */
   skills: SkillRepo;
+  /**
+   * Conversations-Repository (#71b/#80) — Direct-Chat-Audits werden mit der
+   * aktiven Konversation verknüpft. Lazy-Start: bestehende aktive
+   * wiederverwenden, sonst neue starten.
+   */
+  conversations: ConversationsRepo;
 }
 
 export interface ApproveResult {
@@ -187,6 +194,23 @@ export class TwinService {
     messages: ChatMessage[],
     lastUser: string,
   ): Promise<{ message: ChatMessage; auditId: string; pending: false }> {
+    // #71b/#80: Direct-Chat-Audits werden mit der aktiven Konversation
+    // verknüpft. ownerUserId muss gesetzt sein, weil Owner-Bypass nur greift
+    // wenn requesterUserId === ownerUserId — der `chat()`-Caller stellt das
+    // sicher. Defensive Sanity-Prüfung trotzdem, damit ein vergessener
+    // Test-Pfad nicht still mit conversation_id=NULL durchläuft.
+    let conversationId: string | null = null;
+    if (this.deps.ownerUserId) {
+      const conv = this.deps.conversations.getOrStart(
+        this.deps.ownerUserId,
+        this.deps.persona.handle.startsWith("@")
+          ? this.deps.persona.handle
+          : `@${this.deps.persona.handle}`,
+        this.deps.twinId,
+      );
+      conversationId = conv.id;
+    }
+
     const audit = await this.deps.audit.start({
       capability: "owner-direct",
       mandateId: null,
@@ -199,6 +223,7 @@ export class TwinService {
       // Workflow, der Bypass läuft direkt — daher "executed" als initial.
       // complete() überschreibt nach erfolgreichem Modell-Call ohnehin.
       initialStatus: "executed",
+      conversationId,
     });
 
     this.deps.bus.emit({

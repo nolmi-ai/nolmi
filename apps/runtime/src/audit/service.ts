@@ -31,6 +31,12 @@ export class AuditService {
     mandateId: string | null;
     input: Record<string, unknown>;
     initialStatus?: AuditStatus;
+    /**
+     * #71b/#80: Verknüpfung zur conversations-Tabelle. In Sub-Schritt B nur
+     * aus dem Direct-Chat-Pfad (`owner-direct`) gesetzt. Andere Capabilities
+     * bleiben mit `null`.
+     */
+    conversationId?: string | null;
   }): Promise<AuditEntry> {
     const entry: AuditEntry = {
       id: `audit_${nanoid(12)}`,
@@ -42,6 +48,7 @@ export class AuditService {
       input: opts.input,
       output: null,
       reason: null,
+      conversationId: opts.conversationId ?? null,
     };
     await this.repo.append(entry);
     this.bus.emit({ type: "audit.created", payload: entry });
