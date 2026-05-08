@@ -40,6 +40,14 @@ export interface AuditRepository {
    * gelesen, wird der Timestamp NICHT überschrieben (erste-Lesung gewinnt).
    */
   markRead(id: string): Promise<void>;
+  /**
+   * #71b/#80: Audits einer Konversation für den LLM-History-Loader. Strict
+   * gefiltert auf `conversation_id`; Pre-Migration-Audits ohne ID kommen
+   * nicht zurück. Sortierung DESC (neueste zuerst), damit das `LIMIT` immer
+   * das jüngste Sliding-Window liefert. Caller sortiert für die LLM-Eingabe
+   * chronologisch um.
+   */
+  listByConversation(conversationId: string, limit: number): Promise<AuditEntry[]>;
 }
 
 export interface RepositoryBundle {

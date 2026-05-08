@@ -200,6 +200,7 @@ export class TwinService {
     // sicher. Defensive Sanity-Prüfung trotzdem, damit ein vergessener
     // Test-Pfad nicht still mit conversation_id=NULL durchläuft.
     let conversationId: string | null = null;
+    let history: ChatMessage[] = [];
     if (this.deps.ownerUserId) {
       const conv = this.deps.conversations.getOrStart(
         this.deps.ownerUserId,
@@ -209,6 +210,14 @@ export class TwinService {
         this.deps.twinId,
       );
       conversationId = conv.id;
+      // Sliding-Window: jüngste HISTORY_AUDIT_LIMIT-Audits der aktiven
+      // Konversation als LLM-Kontext. Vor dem audit.start() laden, damit der
+      // gerade entstehende Audit-Eintrag nicht selbst in der History landet.
+      const past = await this.deps.audit.repo.listByConversation(
+        conv.id,
+        HISTORY_AUDIT_LIMIT,
+      );
+      history = auditsToOwnerDirectMessages(past);
     }
 
     const audit = await this.deps.audit.start({
@@ -231,7 +240,16 @@ export class TwinService {
       payload: { capability: "owner-direct" },
     });
     try {
-      const reply = await this.runModel(this.deps.persona, messages);
+      // Strict-Filter: das Frontend schickt nominal seine eigene `messages`-
+      // Liste mit, aber die kann Audits aus älteren Konversationen mischen
+      // (Frontend kennt heute noch keine Konversations-Grenzen — kommt mit
+      // Sub-Schritt D). Server konstruiert den LLM-Input deshalb aus der
+      // serverseitigen Konversations-History plus der aktuellen User-Message.
+      const llmMessages: ChatMessage[] = [
+        ...history,
+        { role: "user", content: lastUser },
+      ];
+      const reply = await this.runModel(this.deps.persona, llmMessages);
       await this.deps.audit.complete(audit.id, {
         reply: reply.content,
         providerMetadata: reply.metadata,
@@ -920,6 +938,36 @@ export class TwinService {
 }
 
 // ─── helpers (modul-lokal) ───────────────────────────────────────────────────
+
+// #71b/#80: Sliding-Window-Cap pro Direct-Chat-Konversation. ~20 Turns
+// (User+Assistant pro Audit), also ~40 LLM-Messages. Bei Bedarf später als
+// Config-Option exponieren — für jetzt fix.
+const HISTORY_MESSAGE_CAP = 40;
+const HISTORY_AUDIT_LIMIT = Math.ceil(HISTORY_MESSAGE_CAP / 2);
+
+/**
+ * Konvertiert die DESC-sortierte Audit-Liste der aktiven Konversation in
+ * eine chronologisch sortierte `ChatMessage[]`-Liste (User + Assistant pro
+ * Audit). Filtert defensiv auf `executed` mit String-`reply` — pending oder
+ * failed Audits sind keine valide Konversations-Historie.
+ */
+function auditsToOwnerDirectMessages(audits: AuditEntry[]): ChatMessage[] {
+  const result: ChatMessage[] = [];
+  // Repo gibt DESC zurück; wir wollen ASC für die LLM-Eingabe.
+  for (let i = audits.length - 1; i >= 0; i--) {
+    const a = audits[i];
+    if (!a) continue;
+    if (a.status !== "executed") continue;
+    const userText =
+      typeof a.input.lastMessage === "string" ? a.input.lastMessage : null;
+    const reply =
+      a.output && typeof a.output.reply === "string" ? a.output.reply : null;
+    if (!userText || !reply) continue;
+    result.push({ role: "user", content: userText });
+    result.push({ role: "assistant", content: reply });
+  }
+  return result;
+}
 
 // Globale Sprach-Direktive — wird an JEDE Persona-System-Prompt angehängt,
 // unabhängig von Twin oder Modell. Anlass: Anthropic-Modelle haben in mehreren

@@ -96,6 +96,22 @@ class SqliteAuditRepository implements AuditRepository {
     return row ? mergeColumns(row) : null;
   }
 
+  async listByConversation(
+    conversationId: string,
+    limit: number,
+  ): Promise<AuditEntry[]> {
+    const rows = this.db
+      .prepare(
+        `SELECT data, read_at, conversation_id
+           FROM audit
+          WHERE conversation_id = ?
+          ORDER BY timestamp DESC
+          LIMIT ?`,
+      )
+      .all(conversationId, limit) as AuditRow[];
+    return rows.map((r) => mergeColumns(r));
+  }
+
   async markRead(id: string): Promise<void> {
     // Erste-Lesung gewinnt: nur setzen, wenn read_at noch NULL. So ist die
     // Methode safe-to-call, wenn das Frontend die mark-read-Anfrage doppelt
