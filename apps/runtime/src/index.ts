@@ -72,6 +72,7 @@ async function main() {
     db: repo.db,
     trustRepo,
     skillRepo,
+    conversationsRepo,
   });
 
   // 5. Registry mit allen aktiven Twins füllen — entschlüsselt API-Keys.

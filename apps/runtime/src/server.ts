@@ -27,6 +27,7 @@ import {
 } from "./trust/trust-repo.js";
 import { SkillRepo } from "./skills/repo.js";
 import type { Skill, SkillUiPayload } from "@twin-lab/shared";
+import type { ConversationsRepo } from "./conversations/repo.js";
 import {
   mergeAuditIntoBridgeMessages,
   type MergedMessage,
@@ -71,6 +72,8 @@ export interface ServerDeps {
   trustRepo: TrustRepo;
   /** Für /twins/:handle/skills* — geteilte Instanz mit der Registry. */
   skillRepo: SkillRepo;
+  /** Für /twins/:handle/conversations/reset — geteilte Instanz mit der Registry. */
+  conversationsRepo: ConversationsRepo;
 }
 
 export async function createServer(deps: ServerDeps) {
@@ -1112,6 +1115,36 @@ function registerConversationRoutes(
         entry.handle,
       );
       return { partnerHandle: partner, messages: merged };
+    },
+  );
+
+  // POST /twins/:handle/conversations/reset — Direct-Chat-Konversation beenden
+  // (#71b/#80 Sub-Schritt D). Lazy-Start der nächsten Konversation passiert
+  // beim ersten Send via getOrStart() im TwinService. Idempotent: ohne aktive
+  // Konversation kommt {reset:false} zurück, kein Fehler. partner_handle für
+  // Direct-Chat = der Twin-Handle selbst (Owner chattet mit dem eigenen Twin),
+  // konsistent mit Sub-Schritt B.
+  app.post<{ Params: { handle: string } }>(
+    "/twins/:handle/conversations/reset",
+    async (request, reply) => {
+      const ctx = await requireOwner(request, reply, request.params.handle);
+      if (!ctx) return;
+      const { entry, user } = ctx;
+
+      const active = deps.conversationsRepo.findActive(
+        user.userId,
+        entry.handle,
+        entry.twinId,
+      );
+      if (!active) {
+        return { reset: false, reason: "no_active_conversation" };
+      }
+      deps.conversationsRepo.end(active.id);
+      request.log.info(
+        { conversationId: active.id, twinId: entry.twinId },
+        "[conversations] reset durch owner",
+      );
+      return { reset: true, conversationId: active.id };
     },
   );
 

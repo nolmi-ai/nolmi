@@ -268,6 +268,7 @@ function ConversationHeader({
           </div>
           <div className="text-xs text-muted font-mono truncate">{handle}</div>
         </div>
+        <DirectChatResetButton handle={handle} />
         <span className="text-[10px] uppercase tracking-wider text-muted border border-border rounded px-2 py-0.5">
           direct chat
         </span>
@@ -293,6 +294,54 @@ function ConversationHeader({
         </span>
       )}
     </div>
+  );
+}
+
+// ─── Direct-Chat-Reset-Button (#71b/#80 Sub-Schritt D) ─────────────────────
+//
+// Beendet die aktive Direct-Chat-Konversation des Owners mit seinem eigenen
+// Twin. Lazy-Start der nächsten Konversation passiert im Backend beim
+// nächsten Send (TwinService.runOwnerDirect → conversations.getOrStart).
+//
+// Wir leeren `messages[]` im DirectChat NICHT — der visuelle Verlauf bleibt
+// scrollbar. Nur der Backend-Loader (filtert nach conversation_id) sieht die
+// alten Messages beim nächsten Send nicht mehr. Mental-Model: „visueller
+// Verlauf vs. Twin-Memory" — bewusste Trennung.
+
+function DirectChatResetButton({ handle }: { handle: string }) {
+  const [busy, setBusy] = useState(false);
+
+  async function reset() {
+    if (busy) return;
+    const ok = window.confirm(
+      "Konversation zurücksetzen? Nachrichten bleiben sichtbar, aber der Twin startet ohne Erinnerung.",
+    );
+    if (!ok) return;
+    setBusy(true);
+    try {
+      await fetch(`${RUNTIME_URL}/twins/${handle}/conversations/reset`, {
+        method: "POST",
+        credentials: "include",
+      });
+      // Backend liefert {reset:false} wenn keine aktive Konversation existiert
+      // — silent durchwinken. Frontend-State unverändert; der nächste Send
+      // löst lazy-start aus.
+    } catch {
+      // Silent: kein Toast-Mechanismus im Codebase. Bei Bedarf Backend-Log.
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <button
+      onClick={reset}
+      disabled={busy}
+      title="Konversation beenden — Twin startet beim nächsten Send ohne Erinnerung"
+      className="text-xs text-muted border border-border rounded px-2 py-1 hover:border-accent hover:text-accent disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+    >
+      ↻ Neu starten
+    </button>
   );
 }
 
