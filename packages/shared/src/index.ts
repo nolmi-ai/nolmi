@@ -157,6 +157,34 @@ export type ChatMessage = z.infer<typeof ChatMessageSchema>;
 export type ChatRequest = z.infer<typeof ChatRequestSchema>;
 export type ChatResponse = z.infer<typeof ChatResponseSchema>;
 
+// ─── CONVERSATIONS (Phase 3 / #71b + #80) ────────────────────────────────────
+//
+// Eine Konversation gruppiert Audits zu einer Direct-Chat- oder (später)
+// Bridge-Chat-Session. Höchstens eine aktive pro (owner, partner, twin) —
+// wird im Repo enforced. „Neue Konversation"-Aktion = alte enden, neue
+// starten in einer Transaktion.
+
+export const ConversationStatusSchema = z.enum(["active", "ended"]);
+export type ConversationStatus = z.infer<typeof ConversationStatusSchema>;
+
+export const ConversationSchema = z.object({
+  id: z.string(),
+  ownerUserId: z.string(),
+  partnerHandle: z.string(),
+  twinId: z.string(),
+  status: ConversationStatusSchema,
+  startedAt: z.string(),
+  endedAt: z.string().nullable(),
+});
+export type Conversation = z.infer<typeof ConversationSchema>;
+
+export const ConversationStartInputSchema = z.object({
+  ownerUserId: z.string(),
+  partnerHandle: z.string(),
+  twinId: z.string(),
+});
+export type ConversationStartInput = z.infer<typeof ConversationStartInputSchema>;
+
 // ─── SKILLS (Phase 3.1) ──────────────────────────────────────────────────────
 //
 // Skills bündeln Wissen + optional Script, das ein Twin im Rahmen einer

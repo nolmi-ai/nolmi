@@ -1,0 +1,187 @@
+import type Database from "better-sqlite3";
+import { nanoid } from "nanoid";
+import type {
+  Conversation,
+  ConversationStartInput,
+  ConversationStatus,
+} from "@twin-lab/shared";
+
+// ─── CONVERSATIONS REPOSITORY ───────────────────────────────────────────────
+//
+// Eine Row pro Direct-Chat- oder (später) Bridge-Chat-Konversation. Die
+// „nur eine aktive pro (owner, partner, twin)"-Invariante wird in start()
+// per Transaktion erzwungen: vor dem Insert werden alle aktiven Konversationen
+// für das Tripel auf 'ended' gesetzt. Ohne Transaktion gäbe es ein Zeitfenster
+// in dem zwei aktive Konversationen sichtbar wären.
+//
+// findActive() ist Hot-Path: bei jedem Chat-Call gefragt, um die aktuelle
+// Konversation zur Audit-Verknüpfung zu finden. Composite-Index
+// idx_conversations_active deckt das Lookup ab.
+//
+// end() ist idempotent: ended_at wird nur gesetzt wenn die Konversation noch
+// active ist. Erneutes end() auf eine bereits ended Konversation ist No-Op.
+
+interface ConversationRow {
+  id: string;
+  owner_user_id: string;
+  partner_handle: string;
+  twin_id: string;
+  status: ConversationStatus;
+  started_at: string;
+  ended_at: string | null;
+}
+
+export class ConversationNotFoundError extends Error {
+  constructor(id: string) {
+    super(`Konversation '${id}' nicht gefunden`);
+    this.name = "ConversationNotFoundError";
+  }
+}
+
+export class ConversationsRepo {
+  constructor(private db: Database.Database) {}
+
+  /**
+   * Startet eine neue Konversation. Wenn schon eine aktive für das Tripel
+   * (owner, partner, twin) existiert, wird sie zuerst auf 'ended' gesetzt —
+   * alles in einer Transaktion, damit nie zwei aktive gleichzeitig sichtbar
+   * sind.
+   */
+  start(input: ConversationStartInput): Conversation {
+    const now = new Date().toISOString();
+    const conv: Conversation = {
+      id: `conv_${nanoid(16)}`,
+      ownerUserId: input.ownerUserId,
+      partnerHandle: input.partnerHandle,
+      twinId: input.twinId,
+      status: "active",
+      startedAt: now,
+      endedAt: null,
+    };
+
+    const tx = this.db.transaction(() => {
+      // Bestehende aktive für das Tripel auf 'ended' setzen. Mehrere wären
+      // ein Bug — der UPDATE setzt sie alle gleichzeitig.
+      this.db
+        .prepare(
+          `UPDATE conversations
+             SET status = 'ended', ended_at = @now
+           WHERE owner_user_id = @owner_user_id
+             AND partner_handle = @partner_handle
+             AND twin_id = @twin_id
+             AND status = 'active'`,
+        )
+        .run({
+          now,
+          owner_user_id: input.ownerUserId,
+          partner_handle: input.partnerHandle,
+          twin_id: input.twinId,
+        });
+
+      this.db
+        .prepare(
+          `INSERT INTO conversations
+             (id, owner_user_id, partner_handle, twin_id, status, started_at, ended_at)
+           VALUES
+             (@id, @owner_user_id, @partner_handle, @twin_id, @status, @started_at, @ended_at)`,
+        )
+        .run({
+          id: conv.id,
+          owner_user_id: conv.ownerUserId,
+          partner_handle: conv.partnerHandle,
+          twin_id: conv.twinId,
+          status: conv.status,
+          started_at: conv.startedAt,
+          ended_at: conv.endedAt,
+        });
+    });
+    tx();
+    return conv;
+  }
+
+  /**
+   * Hot-Path: findet die aktive Konversation für das Tripel oder null.
+   * Composite-Index idx_conversations_active liefert in O(log n) auch bei
+   * tausenden Einträgen.
+   */
+  findActive(
+    ownerUserId: string,
+    partnerHandle: string,
+    twinId: string,
+  ): Conversation | null {
+    const row = this.db
+      .prepare(
+        `SELECT * FROM conversations
+           WHERE owner_user_id = ?
+             AND partner_handle = ?
+             AND twin_id = ?
+             AND status = 'active'
+           LIMIT 1`,
+      )
+      .get(ownerUserId, partnerHandle, twinId) as ConversationRow | undefined;
+    return row ? rowToConversation(row) : null;
+  }
+
+  findById(id: string): Conversation {
+    const row = this.db
+      .prepare("SELECT * FROM conversations WHERE id = ?")
+      .get(id) as ConversationRow | undefined;
+    if (!row) throw new ConversationNotFoundError(id);
+    return rowToConversation(row);
+  }
+
+  /**
+   * Listet alle Konversationen für das Tripel, neueste zuerst (started_at
+   * absteigend). Für die UI-Konversations-Historie.
+   */
+  list(
+    ownerUserId: string,
+    partnerHandle: string,
+    twinId: string,
+  ): Conversation[] {
+    const rows = this.db
+      .prepare(
+        `SELECT * FROM conversations
+           WHERE owner_user_id = ?
+             AND partner_handle = ?
+             AND twin_id = ?
+           ORDER BY started_at DESC`,
+      )
+      .all(ownerUserId, partnerHandle, twinId) as ConversationRow[];
+    return rows.map(rowToConversation);
+  }
+
+  /**
+   * Beendet eine Konversation. Idempotent: bei bereits ended-Konversation
+   * No-Op (kein Re-Stempeln des ended_at). Wirft, wenn die ID gar nicht
+   * existiert — sonst würde ein Tippfehler still durchgehen.
+   */
+  end(id: string): void {
+    const result = this.db
+      .prepare(
+        `UPDATE conversations
+           SET status = 'ended', ended_at = ?
+         WHERE id = ? AND status = 'active'`,
+      )
+      .run(new Date().toISOString(), id);
+
+    if (result.changes === 0) {
+      // Entweder nicht da, oder schon ended — `findById` für klare Diagnose.
+      // Wirft ConversationNotFoundError wenn die ID gar nicht existiert.
+      this.findById(id);
+      // Existiert, aber war schon ended → idempotent durchwinken.
+    }
+  }
+}
+
+function rowToConversation(row: ConversationRow): Conversation {
+  return {
+    id: row.id,
+    ownerUserId: row.owner_user_id,
+    partnerHandle: row.partner_handle,
+    twinId: row.twin_id,
+    status: row.status,
+    startedAt: row.started_at,
+    endedAt: row.ended_at,
+  };
+}
