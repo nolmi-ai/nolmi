@@ -22,21 +22,24 @@ Trenner im Verlauf.
 - **B**: Twin-Service-Anpassung mit `getOrStart()` vor Audit-Insert,
   `audit.conversation_id`-Spalte (Commit `d0b8cc7`)
 - **C**: History-Loader auf Konversations-Scope plus 40-Messages-
-  Sliding-Window-Cap. Frontend-`messages` werden vom Server
-  bewusst ignoriert — der LLM bekommt rekonstruierte History aus
-  Audits der aktiven Konversation plus die neue User-Message
-  (Commit `b694d0d`)
+  Sliding-Window-Cap. Der LLM bekommt rekonstruierte History strict
+  aus Audits der aktiven Konversation plus die neue User-Message —
+  die Frontend-Message-Liste fließt nicht mehr als History-Quelle
+  ein, womit auch eine inkonsistente Frontend-State-Anzeige die
+  LLM-Antwort nicht mehr verseuchen kann (Commit `b694d0d`)
 - **D**: UI-Reset-Button im Direct-Chat-Header plus Backend-Route
   `POST /twins/:handle/conversations/reset`. Lazy-Start der nächsten
   Konversation passiert beim nächsten Send via `getOrStart()`,
-  nicht beim Reset selbst (Commit `8f604fa`)
+  nicht beim Reset selbst — vermeidet 0-Message-Geisterkonversationen
+  (Commit `8f604fa`)
 - **#84/#85 UX-Polish**: `window.confirm()` raus, Inline-Bestätigung
   am Reset-Button mit 5-Sekunden-Auto-Reset. Plus daten-getriebener
   Konversations-Trenner im Verlauf — überlebt Page-Reload, weil aus
   geladenen Audits abgeleitet (Commit `76e2728`)
 - **E**: Migration 010 (Cleanup von Pre-Konversations-Audits ohne
   `conversation_id` mit `capability='owner-direct'`). Andere
-  Capabilities bleiben erhalten. Doku auf Tag-9-Stand (Commit `<hash>`)
+  Capabilities bleiben erhalten. Doku auf Tag-9-Stand
+  (Commit `e18f58c`)
 
 Hauptpunkt: Skill-Toggle-Tests sind jetzt sauber — nach
 Konversations-Reset kein Memory-Leak aus voriger Session. Verifiziert
@@ -58,6 +61,11 @@ Referenz auf den vorigen Inhalt).
   0-Message-Geisterkonversationen. `started_at`-Timestamp ist
   semantisch korrekt der Zeitpunkt der ersten Message, nicht der
   Reset-Klick.
+- **Hybrid-Synthese bei optimistic-State.** Frontend nutzt eine
+  synthetische Local-ID (`local-after-reset-<handle>-<seq>`) für
+  optimistic-Messages direkt nach Reset, damit der Trenner sofort
+  erscheint. Beim nächsten Audit-Reload überschreibt die echte
+  `conv_*`-ID die synthetische — Daten bleiben konsistent.
 
 ## Tag 8 abgeschlossen
 
@@ -220,7 +228,7 @@ File `/docker/twin-lab-web/docker-compose.override.yml` für #81.
   - 3.1.A ✅ DB-Schema + Skill-Repo
   - 3.1.B+C ✅ Engine + System-Prompt-Integration
   - 3.1.D ✅ CLI-Tool zum Importieren
-  - 3.1.E ✅ Read-only UI + Toggle (heute morgens nach
+  - 3.1.E ✅ Read-only UI + Toggle (Tag 8 nach
     #74-Persona-Cleanup final verifiziert)
   - 3.1.F ✅ Pilot-Skill `harway-workshops`
 - 3.2 offen — MCP-Client als Skill-Provider
@@ -234,16 +242,24 @@ File `/docker/twin-lab-web/docker-compose.override.yml` für #81.
    Diskussion mit konkreten Architektur-Festlegungen — Tool-
    Discovery-Pfad, Server-Lifecycle (per Skill / per Twin / global),
    Auth-Modell, Mandate-Integration für MCP-Tools, Failure-Modes.
-2. **3.2 — MCP-Client als Skill-Provider.** Externe Tools (z.B.
-   Hyperbrowser, Filesystem) als Skills exponieren, mit
-   Mandate-Gating analog zum existierenden Skill-System.
+   Erst danach 3.2-Implementierung.
+2. **Production-Deploy von Tag-9-Stand** wenn 3.2 ansteht oder bei
+   nächstem zusammenhängenden Deploy-Anlass. Test-Hygiene-Block
+   ändert Audit-Schema und LLM-History-Verhalten — sollte sauber
+   in Production wandern bevor 3.2-Code dazukommt.
 3. **Optional: #79 Persona-Tabelle droppen** (XS, nice) — kann
    beim nächsten Migrations-Anlass mit angehängt werden.
 4. **Optional: #82 Heikos Persona-File** — wenn Heiko Persona-
    Updates braucht. Pragmatisch: einmalig manuell File anlegen,
    dann läuft `twin:reload`.
 
-## Production-Stack — live, jetzt auf Tag-8-Stand
+## Production-Stack — live, aktuell auf Tag-8-Stand
+
+**Tag-9-Konversations-System ist lokal verifiziert, aber noch nicht
+deployed.** Production läuft weiter mit dem alten Audit-History-
+Verhalten (kumulativ, ohne Reset-Pfad). Skill-Toggle-Tests in
+Production wären aktuell durch History-Carry-Over verfälscht — kein
+Problem solange niemand Production aktiv für Skill-Tests nutzt.
 
 - **`https://app.twin.harwayexperience.com`** — Web (Tag-8-Image
   unverändert, kein Web-Code geändert seit Tag 7)
@@ -270,6 +286,11 @@ Production-Skill-System ist deployt aber kein Skill in Production-DB
 `harway-workshops` aktiv in seiner DB. Persona-DB-Spalte ist nach
 #78-Tool-Lauf synchron mit `docs/persona.md`-File.
 
+**Konversations-System aktiv (seit Tag 9):** `conversations`-Tabelle
+mit Test-Konversationen aus Smoke-Tests, `audit.conversation_id`
+gefüllt für `owner-direct`-Audits seit Migration 009. Pre-Migration-
+Bestand wurde via Migration 010 entfernt.
+
 ## Drei User auf Production
 - Owner: @markus (markus.baier@harway.de)
 - Owner: @florian (florian.ristig@harway.de)
@@ -278,11 +299,14 @@ Production-Skill-System ist deployt aber kein Skill in Production-DB
 Alle drei mit anthropic/claude-opus-4-7, Production-Bridge.
 
 ## Repo
-github.com/markusbaier/twin-lab — origin/main aktuell auf `5ee5352`
-(Tag 8 Nachmittag, sieben Commits seit gestern Mittag inklusive
-#81-Revert: 2e96ddb Dockerfile, f045dd8 Persona-Edit, f0705c2
-Tag-8-Vormittag-Doku, 61154c0 twin:reload-CLI, 5def45b Tag-8-
-Mittag-Doku, fc3389d #81-False-Try, 5ee5352 #81-Revert).
+github.com/markusbaier/twin-lab — `origin/main` lokal aktuell auf
+`e18f58c` (Tag 9 Abend, sechs Commits aus dem Test-Hygiene-Block:
+`bc1669a` Migration 009 + Repo, `d0b8cc7` Twin-Service-Anpassung,
+`b694d0d` History-Loader-Scope, `8f604fa` UI-Reset-Button, `76e2728`
+UX-Polish, `e18f58c` Cleanup + Doku).
+
+Production-VPS hängt weiter auf `5ee5352` (Tag-8-Stand) — siehe
+Hinweis im Production-Stack-Block oben.
 
 VPS-Override-File `/docker/twin-lab-web/docker-compose.override.yml`
 für #81-docs-Volume-Mount lebt nur auf VPS, nicht im Repo.
