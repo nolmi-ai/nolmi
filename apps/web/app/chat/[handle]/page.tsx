@@ -16,7 +16,14 @@ const RUNTIME_URL = process.env.NEXT_PUBLIC_RUNTIME_URL ?? "http://localhost:400
 // Audit-Capabilities, die im Direct-Chat-Verlauf erscheinen sollen.
 // "respond_to_chat" = Standard-Pfad, "owner-direct" = Owner-Bypass — beide
 // haben dasselbe Audit-Input-/Output-Schema (lastMessage + reply).
-const DIRECT_CHAT_CAPABILITIES = new Set(["respond_to_chat", "owner-direct"]);
+// "mcp-tool-use" (3.2.G): Tool-Approval-Audits — ein Audit pro User-Send,
+// rendert User-Bubble + Pending-Reply-Bubble + Tool-Call-Box (+ ggf. finale
+// Reply-Bubble).
+const DIRECT_CHAT_CAPABILITIES = new Set([
+  "respond_to_chat",
+  "owner-direct",
+  "mcp-tool-use",
+]);
 
 // Threshold in px: User gilt als "unten", wenn er weniger als so viel vom
 // Bottom-Rand entfernt ist. Liegt etwas oberhalb der typischen Bubble-Höhe,
@@ -537,16 +544,161 @@ function Sidebar({
 
 // #85: ChatMessage-Erweiterung um conversationId. Audit-Mapping reicht das
 // Field aus AuditEntry.conversationId durch (Backend liefert es seit
-// #71b/#80 Sub-Schritt B im JSON). Live gesendete Messages tagged DirectChat
-// selbst — siehe activeConvId-Logik unten. null = Pre-Migration oder
-// frisch nach Reset (vor erstem Send).
-type DirectMessage = ChatMessage & { conversationId: string | null };
+// 3.2.G: ChatBlock — atomares Render-Item im Direct-Chat-Verlauf. Aus dem
+// Audit-Stream rekonstruiert; Live-Sends tragen optimistic einen `user`-Block
+// bei, der beim nächsten Audit-Refresh durch den Server-Eintrag ersetzt wird.
+//
+//   - user/assistant: klassische Bubbles (owner-direct + Pending-Reply +
+//     finale Reply nach Approve)
+//   - mcp-tool-call: separate Box mit Tool-Name/Args/Result, status-spezifisch
+//     gerendert (pending → Approve/Reject-Buttons; executed/rejected →
+//     Status-Marker + Result-Preview)
+//
+// `auditId` auf den Bubbles ist der Audit, aus dem sie stammen — bei mcp-
+// tool-use teilen sich User-Bubble, Pending-Reply, Tool-Call-Box und finale
+// Reply dieselbe ID.
+type ChatBlock =
+  | {
+      kind: "user";
+      content: string;
+      conversationId: string | null;
+      auditId: string | null;
+    }
+  | {
+      kind: "assistant";
+      content: string;
+      conversationId: string | null;
+      auditId: string | null;
+    }
+  | {
+      kind: "mcp-tool-call";
+      auditId: string;
+      conversationId: string | null;
+      toolName: string;
+      args: Record<string, unknown>;
+      status: "pending" | "executed" | "rejected";
+      toolResult?: unknown;
+      rejectReason?: string | null;
+    };
+
+interface AuditMcpToolUseShape {
+  lastMessage?: string;
+  pendingReply?: string;
+  toolCall?: {
+    mcpServerId: string;
+    mcpToolName: string;
+    args: Record<string, unknown>;
+  };
+}
+
+interface AuditOwnerDirectShape {
+  lastMessage?: string;
+}
+
+interface AuditExecutedOutputShape {
+  reply?: string;
+  toolResult?: unknown;
+  rejected?: boolean;
+  rejectReason?: string;
+}
+
+/**
+ * 3.2.G: Audit-Liste (DESC vom Server) → ChatBlocks (ASC für Render).
+ * Pro Audit-Eintrag entstehen 1-4 Blöcke je nach Capability + Status:
+ *   - owner-direct/executed → user + assistant
+ *   - mcp-tool-use/pending → user + assistant(pendingReply) + tool-call(pending)
+ *   - mcp-tool-use/executed → user + assistant(pendingReply) + tool-call(executed) + assistant(finalReply)
+ *   - mcp-tool-use/rejected → user + assistant(pendingReply) + tool-call(rejected) + assistant(rejectReply)
+ * Ungültige/unvollständige Einträge werden geskippt.
+ */
+function buildChatBlocksFromAudits(entries: AuditEntry[]): {
+  blocks: ChatBlock[];
+  newestConvId: string | null;
+} {
+  const blocks: ChatBlock[] = [];
+  let newestConvId: string | null = null;
+  for (let i = entries.length - 1; i >= 0; i--) {
+    const entry = entries[i];
+    if (!entry) continue;
+    if (!DIRECT_CHAT_CAPABILITIES.has(entry.capability)) continue;
+    const cid = entry.conversationId ?? null;
+
+    if (entry.capability === "mcp-tool-use") {
+      if (entry.status === "failed" || entry.status === "blocked") continue;
+      const input = entry.input as AuditMcpToolUseShape;
+      const tc = input.toolCall;
+      if (!tc) continue;
+      const userText = typeof input.lastMessage === "string" ? input.lastMessage : null;
+      const pendingReply =
+        typeof input.pendingReply === "string" ? input.pendingReply : null;
+      if (!userText || !pendingReply) continue;
+      blocks.push({ kind: "user", content: userText, conversationId: cid, auditId: entry.id });
+      blocks.push({
+        kind: "assistant",
+        content: pendingReply,
+        conversationId: cid,
+        auditId: entry.id,
+      });
+      const status: "pending" | "executed" | "rejected" =
+        entry.status === "executed"
+          ? "executed"
+          : entry.status === "rejected"
+            ? "rejected"
+            : "pending";
+      const output = (entry.output ?? null) as AuditExecutedOutputShape | null;
+      blocks.push({
+        kind: "mcp-tool-call",
+        auditId: entry.id,
+        conversationId: cid,
+        toolName: tc.mcpToolName,
+        args: tc.args,
+        status,
+        toolResult: output?.toolResult,
+        rejectReason: output?.rejectReason ?? null,
+      });
+      if ((entry.status === "executed" || entry.status === "rejected") && output?.reply) {
+        blocks.push({
+          kind: "assistant",
+          content: output.reply,
+          conversationId: cid,
+          auditId: entry.id,
+        });
+      }
+      newestConvId = cid;
+      continue;
+    }
+
+    // owner-direct + respond_to_chat: nur ausgeführte Turns rendern.
+    if (entry.status !== "executed") continue;
+    const input = entry.input as AuditOwnerDirectShape;
+    const output = (entry.output ?? null) as AuditExecutedOutputShape | null;
+    const userText = typeof input.lastMessage === "string" ? input.lastMessage : null;
+    const replyText = output && typeof output.reply === "string" ? output.reply : null;
+    if (!userText || !replyText) continue;
+    blocks.push({ kind: "user", content: userText, conversationId: cid, auditId: entry.id });
+    blocks.push({
+      kind: "assistant",
+      content: replyText,
+      conversationId: cid,
+      auditId: entry.id,
+    });
+    newestConvId = cid;
+  }
+  return { blocks, newestConvId };
+}
 
 function DirectChat({ handle, resetSeq }: { handle: string; resetSeq: number }) {
-  const [messages, setMessages] = useState<DirectMessage[]>([]);
+  const [auditEntries, setAuditEntries] = useState<AuditEntry[]>([]);
+  // 3.2.G Optimistic-Pfad: User-Text wird sofort als pseudo-Bubble angehängt,
+  // beim nächsten erfolgreichen loadAudits() ersetzt der Server-Audit ihn.
+  // null = nichts in flight.
+  const [optimisticUser, setOptimisticUser] = useState<string | null>(null);
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // 3.2.G: Loading-State pro Audit für Approve/Reject — Tool-Call braucht
+  // 5-10s (Spawn + LLM-Resume), Buttons werden in der Zeit disabled.
+  const [loadingAuditId, setLoadingAuditId] = useState<string | null>(null);
   // #85: Conv-ID, mit der neue Live-Messages getagged werden. Initial null;
   // nach Audit-Load auf die newest convId gesetzt — so erweitern Live-Sends
   // die laufende Konversation, ohne falschen Trenner. Nach Reset bumped der
@@ -554,67 +706,65 @@ function DirectChat({ handle, resetSeq }: { handle: string; resetSeq: number }) 
   // Local-ID — damit erscheint nach dem nächsten Send ein Trenner zwischen
   // letzter Server-Message und der neuen Live-Pärchen.
   const [activeConvId, setActiveConvId] = useState<string | null>(null);
+
+  const { blocks: serverBlocks, newestConvId } = useMemo(
+    () => buildChatBlocksFromAudits(auditEntries),
+    [auditEntries],
+  );
+
+  const chatBlocks = useMemo<ChatBlock[]>(() => {
+    if (!optimisticUser) return serverBlocks;
+    return [
+      ...serverBlocks,
+      {
+        kind: "user" as const,
+        content: optimisticUser,
+        conversationId: activeConvId,
+        auditId: null,
+      },
+    ];
+  }, [serverBlocks, optimisticUser, activeConvId]);
+
   const { containerRef, bottomRef, onScroll } = useAutoScroll(
-    messages.length,
+    chatBlocks.length,
     `direct:${handle}`,
   );
 
+  const loadAudits = useCallback(async () => {
+    try {
+      const res = await fetch(`${RUNTIME_URL}/twins/${handle}/audit?limit=50`, {
+        credentials: "include",
+      });
+      if (!res.ok) return;
+      const data = (await res.json()) as { entries: AuditEntry[] };
+      setAuditEntries(data.entries);
+    } catch {
+      // Silent fail — UI bleibt mit dem letzten Stand.
+    }
+  }, [handle]);
+
   // History aus dem Audit-Log nachladen — sonst geht der Verlauf bei jedem
   // Tab-Switch verloren, weil DirectChat dann frisch gemountet wird (#71).
-  // Quelle: GET /twins/:handle/audit liefert Direct-Chat-Pärchen mit
-  // input.lastMessage (User-Turn) und output.reply (Twin-Antwort). Wir
-  // nehmen lastMessage (nicht messages[0]), weil messages[] den kumulativen
-  // Verlauf je Audit speichert und [0] sonst N Mal dieselbe Erst-Message
-  // wäre. failed/pending werden geskippt — Verlauf zeigt nur ausgeführte Turns.
-  // Capability-Filter umfasst beide Direct-Chat-Pfade: "respond_to_chat"
-  // (Standard) und "owner-direct" (Owner-Bypass — gleiches Schema).
+  // Plus 3.2.G: Polling alle 5s für mcp-tool-use-Status-Updates (gleiche
+  // Frequenz wie /inbox-Polling). Nach Approve/Reject manueller Trigger,
+  // Polling ist nur das Sicherheitsnetz.
   useEffect(() => {
     let cancelled = false;
-    fetch(`${RUNTIME_URL}/twins/${handle}/audit?limit=50`, {
-      credentials: "include",
-    })
-      .then((res) =>
-        res.ok
-          ? (res.json() as Promise<{ entries: AuditEntry[] }>)
-          : Promise.reject(`HTTP ${res.status}`),
-      )
-      .then((data) => {
-        if (cancelled) return;
-        // Audit-API liefert DESC, Render braucht ASC → reverse iteration.
-        const pairs: DirectMessage[] = [];
-        let newestConvId: string | null = null;
-        for (let i = data.entries.length - 1; i >= 0; i--) {
-          const entry = data.entries[i];
-          if (!entry) continue;
-          if (!DIRECT_CHAT_CAPABILITIES.has(entry.capability)) continue;
-          if (entry.status !== "executed") continue;
-          const userText =
-            typeof entry.input.lastMessage === "string"
-              ? entry.input.lastMessage
-              : null;
-          const replyText =
-            entry.output && typeof entry.output.reply === "string"
-              ? entry.output.reply
-              : null;
-          if (!userText || !replyText) continue;
-          const cid = entry.conversationId ?? null;
-          pairs.push({ role: "user", content: userText, conversationId: cid });
-          pairs.push({ role: "assistant", content: replyText, conversationId: cid });
-          // ASC-Iteration: das letzte gesetzte cid ist gleichzeitig das
-          // jüngste — Live-Sends erweitern die laufende Konversation.
-          newestConvId = cid;
-        }
-        setMessages(pairs);
-        setActiveConvId(newestConvId);
-      })
-      .catch(() => {
-        // Silent fail — Audit-Endpoint nicht erreichbar oder 401. Direct-Chat
-        // bleibt mit leerem State und ist trotzdem benutzbar.
-      });
+    void loadAudits();
+    const interval = setInterval(() => {
+      if (!cancelled) void loadAudits();
+    }, 5000);
     return () => {
       cancelled = true;
+      clearInterval(interval);
     };
-  }, [handle]);
+  }, [loadAudits]);
+
+  // newestConvId aus Audit-Stream synchen — Live-Sends erweitern die
+  // laufende Konversation, ohne falschen Trenner.
+  useEffect(() => {
+    setActiveConvId(newestConvId);
+  }, [newestConvId]);
 
   // #85: Reset-Bump aus dem Parent. Synthetische Local-ID mit `resetSeq` —
   // bei jedem Increment einzigartig. activeConvId weicht damit von der
@@ -630,13 +780,8 @@ function DirectChat({ handle, resetSeq }: { handle: string; resetSeq: number }) 
 
   async function send() {
     if (!input.trim() || busy) return;
-    const userMessage: DirectMessage = {
-      role: "user",
-      content: input,
-      conversationId: activeConvId,
-    };
-    const next = [...messages, userMessage];
-    setMessages(next);
+    const userText = input;
+    setOptimisticUser(userText);
     setInput("");
     setBusy(true);
     setError(null);
@@ -647,43 +792,71 @@ function DirectChat({ handle, resetSeq }: { handle: string; resetSeq: number }) 
         credentials: "include",
         headers: { "Content-Type": "application/json" },
         // Backend rekonstruiert die LLM-History server-seitig aus der aktiven
-        // Konversation (#71b/#80 Sub-Schritt C); wir schicken die volle Liste
-        // weiter mit, damit das alte Feld kompatibel bleibt — der Server
-        // ignoriert sie inhaltlich für den LLM-Call.
+        // Konversation (#71b/#80 Sub-Schritt C); wir schicken minimal die
+        // letzte User-Message mit, damit das alte Schema kompatibel bleibt.
         body: JSON.stringify({
-          messages: next.map(({ role, content }) => ({ role, content })),
+          messages: [{ role: "user", content: userText }],
         }),
       });
       if (!res.ok) {
         const body = await res.json().catch(() => ({ error: "Unknown error" }));
         throw new Error(body.error ?? `HTTP ${res.status}`);
       }
-      const data = (await res.json()) as {
-        message: ChatMessage | null;
-        auditId: string;
-        pending: boolean;
-      };
-      if (data.pending) {
-        setMessages((current) => [
-          ...current,
-          {
-            role: "assistant",
-            content:
-              "Diese Anfrage habe ich an den Owner zur Freigabe weitergeleitet. Sobald approved, läuft sie. Status in der Inbox.",
-            conversationId: activeConvId,
-          },
-        ]);
-      } else if (data.message) {
-        const reply = data.message;
-        setMessages((current) => [
-          ...current,
-          { ...reply, conversationId: activeConvId },
-        ]);
-      }
+      // 3.2.G: in beiden Fällen (pending oder direct reply) reload — der
+      // Audit-Stream ist Single-Source-of-Truth fürs Rendering.
+      await loadAudits();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed");
     } finally {
+      setOptimisticUser(null);
       setBusy(false);
+    }
+  }
+
+  async function handleApprove(auditId: string) {
+    setLoadingAuditId(auditId);
+    setError(null);
+    try {
+      const res = await fetch(
+        `${RUNTIME_URL}/twins/${handle}/audit/${auditId}/approve`,
+        { method: "POST", credentials: "include" },
+      );
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({ error: "Unknown error" }));
+        throw new Error(body.error ?? `HTTP ${res.status}`);
+      }
+      await loadAudits();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Approve fehlgeschlagen");
+    } finally {
+      setLoadingAuditId(null);
+    }
+  }
+
+  async function handleReject(auditId: string) {
+    const reason = window.prompt("Grund für Ablehnung?", "Nicht freigegeben");
+    if (reason === null) return;
+    setLoadingAuditId(auditId);
+    setError(null);
+    try {
+      const res = await fetch(
+        `${RUNTIME_URL}/twins/${handle}/audit/${auditId}/reject`,
+        {
+          method: "POST",
+          credentials: "include",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ reason }),
+        },
+      );
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({ error: "Unknown error" }));
+        throw new Error(body.error ?? `HTTP ${res.status}`);
+      }
+      await loadAudits();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Reject fehlgeschlagen");
+    } finally {
+      setLoadingAuditId(null);
     }
   }
 
@@ -699,23 +872,36 @@ function DirectChat({ handle, resetSeq }: { handle: string; resetSeq: number }) 
         className="flex-1 min-h-0 overflow-y-auto px-6 py-4"
       >
         <div className="max-w-3xl mx-auto space-y-4">
-          {messages.length === 0 ? (
+          {chatBlocks.length === 0 ? (
             <div className="text-muted text-sm">
               Noch keine Nachrichten. Schreib unten eine Frage.
             </div>
           ) : (
-            // #85: Trenner zwischen aufeinanderfolgenden Messages mit
-            // unterschiedlicher conversationId. Erste Message (i===0) bekommt
+            // #85: Trenner zwischen aufeinanderfolgenden Blöcken mit
+            // unterschiedlicher conversationId. Erster Block (i===0) bekommt
             // nie einen Trenner davor. Daten-getrieben — überlebt
             // Page-Reload, weil aus dem geladenen Audit-Stream abgeleitet.
-            messages.map((m, i) => {
-              const prev = i > 0 ? messages[i - 1] : undefined;
+            chatBlocks.map((block, i) => {
+              const prev = i > 0 ? chatBlocks[i - 1] : undefined;
               const showDivider =
-                prev !== undefined && prev.conversationId !== m.conversationId;
+                prev !== undefined && prev.conversationId !== block.conversationId;
               return (
                 <Fragment key={i}>
                   {showDivider && <ConversationDivider />}
-                  <Bubble role={m.role} content={m.content} />
+                  {block.kind === "mcp-tool-call" ? (
+                    <McpToolCallBox
+                      toolName={block.toolName}
+                      args={block.args}
+                      status={block.status}
+                      toolResult={block.toolResult}
+                      rejectReason={block.rejectReason}
+                      busy={loadingAuditId === block.auditId}
+                      onApprove={() => handleApprove(block.auditId)}
+                      onReject={() => handleReject(block.auditId)}
+                    />
+                  ) : (
+                    <Bubble role={block.kind} content={block.content} />
+                  )}
                 </Fragment>
               );
             })
@@ -1087,6 +1273,139 @@ function Bubble({ role, content }: { role: ChatMessage["role"]; content: string 
         {isUser ? "du" : "twin"}
       </div>
       {content}
+    </div>
+  );
+}
+
+// 3.2.G: Strukturierter Block für mcp-tool-use-Audits. Drei States:
+//   - pending: Tool-Name + Args + Approve/Reject-Buttons (mit Loading)
+//   - executed: ✓ approved, Result-Preview
+//   - rejected: ✗ rejected, optional Begründung
+// Box ist 100% breit (anders als Bubbles 70%) — visuell als „strukturierter
+// Action-Slot" abgesetzt von Konversations-Inhalt.
+function McpToolCallBox({
+  toolName,
+  args,
+  status,
+  toolResult,
+  rejectReason,
+  busy,
+  onApprove,
+  onReject,
+}: {
+  toolName: string;
+  args: Record<string, unknown>;
+  status: "pending" | "executed" | "rejected";
+  toolResult?: unknown;
+  rejectReason?: string | null;
+  busy: boolean;
+  onApprove: () => void;
+  onReject: () => void;
+}) {
+  let statusLabel: string;
+  let statusClass: string;
+  if (status === "executed") {
+    statusLabel = "✓ approved";
+    statusClass = "text-accent";
+  } else if (status === "rejected") {
+    statusLabel = "✗ rejected";
+    statusClass = "text-warn";
+  } else {
+    statusLabel = "wartet auf Freigabe";
+    statusClass = "text-warn";
+  }
+
+  let argsPreview: string;
+  try {
+    argsPreview = JSON.stringify(args);
+  } catch {
+    argsPreview = "(args nicht serialisierbar)";
+  }
+
+  let resultPreview: string | null = null;
+  if (status === "executed" && toolResult !== undefined && toolResult !== null) {
+    if (Array.isArray(toolResult)) {
+      const texts = toolResult
+        .map((p: unknown) => {
+          if (
+            p &&
+            typeof p === "object" &&
+            "text" in p &&
+            typeof (p as { text?: unknown }).text === "string"
+          ) {
+            return (p as { text: string }).text;
+          }
+          try {
+            return JSON.stringify(p);
+          } catch {
+            return String(p);
+          }
+        })
+        .join(" ");
+      resultPreview = texts.trim() || null;
+    } else {
+      try {
+        resultPreview = JSON.stringify(toolResult);
+      } catch {
+        resultPreview = String(toolResult);
+      }
+    }
+  }
+
+  return (
+    <div className="bg-surface border border-border rounded p-3 space-y-2">
+      <div className="flex items-center gap-2 text-[10px] uppercase tracking-wider">
+        <span className="text-muted">Tool-Call</span>
+        <span className={statusClass}>{statusLabel}</span>
+      </div>
+      <div className="text-xs space-y-1">
+        <div>
+          <span className="text-muted">Tool: </span>
+          <span className="font-mono text-text">{toolName}</span>
+        </div>
+        <div>
+          <span className="text-muted">Args: </span>
+          <span className="font-mono text-text break-all">{argsPreview}</span>
+        </div>
+        {resultPreview && (
+          <div>
+            <span className="text-muted">Result: </span>
+            <span className="font-mono text-text break-all whitespace-pre-wrap">
+              {resultPreview}
+            </span>
+          </div>
+        )}
+        {status === "rejected" && rejectReason && (
+          <div>
+            <span className="text-muted">Begründung: </span>
+            <span className="text-text">{rejectReason}</span>
+          </div>
+        )}
+      </div>
+      {status === "pending" && (
+        <div className="flex gap-2 pt-1">
+          {busy ? (
+            <div className="text-xs text-accent italic">
+              Tool läuft… (kann ein paar Sekunden dauern)
+            </div>
+          ) : (
+            <>
+              <button
+                onClick={onApprove}
+                className="px-3 py-1.5 text-xs border border-accent text-accent rounded hover:bg-accent hover:text-bg transition-colors"
+              >
+                approve
+              </button>
+              <button
+                onClick={onReject}
+                className="px-3 py-1.5 text-xs border border-warn text-warn rounded hover:bg-warn hover:text-bg transition-colors"
+              >
+                reject
+              </button>
+            </>
+          )}
+        </div>
+      )}
     </div>
   );
 }
