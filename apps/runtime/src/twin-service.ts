@@ -1,5 +1,17 @@
-import type { AuditEntry, ChatMessage, Mandate, Persona } from "@twin-lab/shared";
-import { generateText, type LanguageModel, type ModelMessage } from "ai";
+import type {
+  AuditEntry,
+  AuditToolCall,
+  ChatMessage,
+  Mandate,
+  Persona,
+  Skill,
+} from "@twin-lab/shared";
+import {
+  generateText,
+  stepCountIs,
+  type LanguageModel,
+  type ModelMessage,
+} from "ai";
 import { checkMandate } from "./mandates/service.js";
 import { AuditService } from "./audit/service.js";
 import type { EventBus } from "./events/bus.js";
@@ -14,6 +26,7 @@ import type { McpServersRepo } from "./mcp/repo.js";
 import type { McpClientFactory } from "./mcp/client-factory.js";
 import { McpClientManager } from "./mcp/client-manager.js";
 import { McpSkillSync } from "./mcp/skill-sync.js";
+import { buildMcpToolsFromSkills } from "./mcp/tool-bridge.js";
 
 // ─── TWIN SERVICE ────────────────────────────────────────────────────────────
 //
@@ -304,7 +317,12 @@ export class TwinService {
         ...history,
         { role: "user", content: lastUser },
       ];
-      const reply = await this.runModel(this.deps.persona, llmMessages);
+      const reply = await this.runModel(
+        this.deps.persona,
+        llmMessages,
+        undefined,
+        { enableMcpTools: true },
+      );
       await this.deps.audit.complete(audit.id, {
         reply: reply.content,
         providerMetadata: reply.metadata,
@@ -855,6 +873,13 @@ export class TwinService {
    * Bridge-Konversations-Kontext) wird vor die Persona gesetzt — gleicher
    * Wirkung wie früher die zwei system-Messages, aber ohne Provider-Splitting.
    *
+   * Mit `enableMcpTools: true` (Owner-Direct-Pfad) werden aktive MCP-Skills
+   * als AI-SDK-Tools an generateText übergeben und das SDK orchestriert den
+   * Tool-Use-Loop. Tool-Calls landen in metadata.toolCalls — der Audit-Insert
+   * zieht das automatisch ins audit.output. Bridge-Pfade (Approve/Trusted)
+   * lassen das Flag aus — andere Twins sollen unsere Tools nicht spontan
+   * triggern dürfen.
+   *
    * Rückgabe-Shape ist die alte ProviderCompleteOutput, damit die Aufrufer
    * (`approveDefault`, `approveTwinSend`, …) unverändert bleiben.
    */
@@ -862,12 +887,15 @@ export class TwinService {
     persona: Persona,
     messages: ChatMessage[],
     extraSystem?: string,
+    options: { enableMcpTools?: boolean } = {},
   ): Promise<{ content: string; metadata: Record<string, unknown> }> {
     // Skills landen zwischen Persona und LANGUAGE_DIRECTIVE: sie ergänzen die
     // Persona ("wer der Twin ist") um Wissen/Verhalten ("was er zusätzlich
     // kann"), sollen sie aber nicht überschreiben. Direktive bleibt am Ende
     // dominant. Strategie B: alle aktiven Skills permanent geladen.
-    const skills = this.deps.skills.list(this.deps.twinId, { activeOnly: true });
+    const skills: Skill[] = this.deps.skills.list(this.deps.twinId, {
+      activeOnly: true,
+    });
     const skillsBlock = skills.length > 0 ? buildSkillsBlock(skills) : null;
     if (skillsBlock) {
       // Token-Volumen-Proxy für späteren C-Wechsel (Core/On-demand). Echte
@@ -885,14 +913,71 @@ export class TwinService {
     //   3. skillsBlock (Skill-Erweiterungen, ergänzen Persona)
     //   4. LANGUAGE_DIRECTIVE (Anti-"weiss"-statt-"weiß", gilt für alle Twins)
     // Direktive ans Ende, weil LLMs den letzten System-Block stärker gewichten.
-    const system = [extraSystem, persona.systemPrompt, skillsBlock, LANGUAGE_DIRECTIVE]
+    const mcpTools = options.enableMcpTools
+      ? buildMcpToolsFromSkills({ skills, mcpManager: this.mcp })
+      : {};
+    const hasTools = Object.keys(mcpTools).length > 0;
+    if (hasTools) {
+      console.log(
+        `[mcp:tools] passing ${Object.keys(mcpTools).length} tool(s) to LLM (twin=${this.deps.twinId})`,
+      );
+    }
+
+    // Tool-Use-Direktive: nur wenn Tools übergeben werden. Sagt dem LLM klar
+    // dass er Tools tatsächlich aufrufen soll, statt Outputs zu simulieren.
+    // Ohne diese Direktive haben Tests gezeigt: LLM antwortet inhaltlich
+    // plausibel, ruft aber kein Tool auf. Phase 3.2.D-Lesson.
+const TOOL_USE_DIRECTIVE = hasTools
+      ? `Du hast Werkzeuge (Tools) zur Verfügung. WICHTIG:
+
+- Wenn eine Anfrage durch ein Tool gelöst werden kann, RUFE ES AUF — beschreibe nicht, was es tun würde.
+- Wenn du etwas nicht aus eigenem Wissen exakt beantworten kannst, nutze ein passendes Tool statt zu raten oder zu halluzinieren.
+- Simuliere niemals Tool-Outputs ("Tool-Result: ..."). Wenn du das Tool nicht aufrufst, hast du auch kein Tool-Result.
+- Behaupte nicht, dass ein Tool nicht funktioniert oder unterstützt wird, ohne es tatsächlich aufgerufen zu haben.`
+      : null;
+
+    // Fünf Schichten, Reihenfolge bewusst:
+    //   1. extraSystem (situativer Bridge-Kontext, optional)
+    //   2. persona.systemPrompt (wer der Twin ist)
+    //   3. skillsBlock (Skill-Erweiterungen, ergänzen Persona — nur Manual-Skills)
+    //   4. TOOL_USE_DIRECTIVE (nur wenn Tools übergeben werden)
+    //   5. LANGUAGE_DIRECTIVE (Anti-"weiss"-statt-"weiß", gilt für alle Twins)
+    const system = [
+      extraSystem,
+      persona.systemPrompt,
+      skillsBlock,
+      TOOL_USE_DIRECTIVE,
+      LANGUAGE_DIRECTIVE,
+    ]
       .filter(Boolean)
       .join("\n\n");
 
+    // stopWhen: stepCountIs(5) limitiert Tool-Use-Iterationen pro User-Send.
+    // Default in AI-SDK-6 ist stepCountIs(1) — also genau ein LLM-Call.
+    // Mit Tool-Use brauchen wir mehrere Steps (call → result → call → ...);
+    // 5 ist der Briefing-Default und reicht für die Pilot-Tools allemal.
     const result = await generateText({
       model: this.deps.model,
       system,
       messages: toModelMessages(messages),
+      ...(hasTools
+        ? { tools: mcpTools, stopWhen: stepCountIs(5) }
+        : {}),
+    });
+
+    // Tool-Use-Detail in die Audit-Metadata. Der Audit-Insert in den
+    // Approve-/OwnerDirect-Pfaden packt metadata komplett ins audit.output —
+    // damit landen Tool-Calls automatisch im Audit-Trail, ohne weitere
+    // Anpassung. AI-SDK 6 nutzt input/output (nicht args/result).
+    const toolCallsForAudit: AuditToolCall[] = result.toolCalls.map((tc) => {
+      const matchingResult = result.toolResults.find(
+        (tr) => tr.toolCallId === tc.toolCallId,
+      );
+      return {
+        toolName: tc.toolName,
+        input: tc.input,
+        output: matchingResult ? matchingResult.output : null,
+      };
     });
 
     return {
@@ -901,6 +986,9 @@ export class TwinService {
         provider: this.deps.modelLabel,
         usage: result.usage,
         finishReason: result.finishReason,
+        ...(toolCallsForAudit.length > 0
+          ? { toolCalls: toolCallsForAudit }
+          : {}),
       },
     };
   }

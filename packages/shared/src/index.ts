@@ -248,6 +248,22 @@ export const McpToolDefinitionSchema = z.object({
 });
 export type McpToolDefinition = z.infer<typeof McpToolDefinitionSchema>;
 
+// ─── AUDIT TOOL CALL (Phase 3.2.D) ───────────────────────────────────────────
+//
+// Tool-Use-Detail-Eintrag im Audit-Output. Wird vom AI-SDK-Loop pro Tool-
+// Call erzeugt: toolName ist der Skill-Name (z.B. "mcp:everything:echo"),
+// input ist das, was der LLM als Tool-Argument generiert hat (geparst aus
+// dem Tool-Call-JSON), output ist die Server-Antwort. Feldnamen folgen der
+// AI-SDK-6-Konvention (input/output, nicht args/result), damit der DB-Inhalt
+// 1:1 mit den TypedToolCall/TypedToolResult-Feldern lesbar bleibt.
+
+export const AuditToolCallSchema = z.object({
+  toolName: z.string(),
+  input: z.unknown(),
+  output: z.unknown().nullable(),
+});
+export type AuditToolCall = z.infer<typeof AuditToolCallSchema>;
+
 /**
  * Schmales UI-Payload-Format. Backend-Routes liefern die GET-/PATCH-Skill-
  * Antworten in dieser Form, statt das volle DB-Skill-Objekt durchzugeben.
