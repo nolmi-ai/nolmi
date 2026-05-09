@@ -248,6 +248,31 @@ export const McpToolDefinitionSchema = z.object({
 });
 export type McpToolDefinition = z.infer<typeof McpToolDefinitionSchema>;
 
+// ─── MCP TOOL APPROVAL (Phase 3.2.F) ────────────────────────────────────────
+//
+// Pre-Call-Approval-Pattern: wenn LLM ein Tool mit requiresApproval=true
+// ruft, wirft Tool-Bridge `McpToolApprovalRequiredError`. Twin-Service
+// catcht das, persistiert die Tool-Call-Daten plus die Message-History
+// dieser LLM-Session in einem Pending-Audit (capability='mcp-tool-use'),
+// und antwortet dem User mit einer Wartemeldung. Beim Approve wird der
+// Tool-Call ausgeführt und ein neuer LLM-Resume-Call gemacht — die
+// History garantiert, dass der LLM den Kontext der ursprünglichen Frage
+// hat. Persistenz via Audit ist Server-Restart-stabil.
+
+export const AuditMcpToolUseInputSchema = z.object({
+  messages: z.array(ChatMessageSchema),
+  toolCall: z.object({
+    mcpServerId: z.string(),
+    mcpToolName: z.string(),
+    args: z.record(z.string(), z.unknown()),
+  }),
+  conversationId: z.string().nullable(),
+  // Pseudo-Twin-Antwort, mit der wir dem User die Wartemeldung schicken.
+  // Im Audit-Output kommt später beim Approve die finale Antwort dazu.
+  pendingReply: z.string(),
+});
+export type AuditMcpToolUseInput = z.infer<typeof AuditMcpToolUseInputSchema>;
+
 // ─── AUDIT TOOL CALL (Phase 3.2.D) ───────────────────────────────────────────
 //
 // Tool-Use-Detail-Eintrag im Audit-Output. Wird vom AI-SDK-Loop pro Tool-

@@ -166,32 +166,44 @@ async function main() {
   const factory = new MockFactory();
   const manager = new McpClientManager(profile.twinId, mcpRepo, factory);
   const allSkills = skillRepo.list(profile.twinId, { activeOnly: true });
-  const tools = buildMcpToolsFromSkills({ skills: allSkills, mcpManager: manager });
-  const toolKeys = Object.keys(tools);
+  // Tool-Naming: ":" wird durch "_" ersetzt (AI-SDK-Provider verbieten ":"
+  // in Tool-Namen). Der Test referenziert den Key über diese Konvention.
+  const expectedToolKey = mcpSkillName.replaceAll(":", "_");
+  const manualToolKey = manualSkillName.replaceAll(":", "_");
+  const built = buildMcpToolsFromSkills({ skills: allSkills, mcpManager: manager });
+  const toolKeys = Object.keys(built.tools);
   log(`  toolKeys: ${toolKeys.join(", ")}`);
   if (toolKeys.length !== 1) {
     issues += 1;
     log(`  ⚠ erwartet genau 1 Tool, gefunden ${toolKeys.length}`);
   }
-  if (!toolKeys.includes(mcpSkillName)) {
+  if (!toolKeys.includes(expectedToolKey)) {
     issues += 1;
-    log(`  ⚠ MCP-Tool fehlt in Tool-Map`);
+    log(`  ⚠ MCP-Tool fehlt in Tool-Map (erwartet ${expectedToolKey})`);
   }
-  if (toolKeys.includes(manualSkillName)) {
+  if (toolKeys.includes(manualToolKey)) {
     issues += 1;
     log(`  ⚠ Manual-Skill ist fälschlich als Tool enthalten`);
+  }
+  // skillByToolKey-Map muss den Reverse-Lookup zum DB-Skill liefern (3.2.F).
+  const reverseSkill = built.skillByToolKey.get(expectedToolKey);
+  if (!reverseSkill || reverseSkill.skillId !== mcpSkill.skillId) {
+    issues += 1;
+    log(`  ⚠ skillByToolKey liefert nicht den erwarteten Skill`);
   }
 
   // ─── STEP 3: Inactive-Filter ──────────────────────────────────────────────
   banner("STEP 3 — Inactive-Filter");
   skillRepo.setActive(mcpSkill.skillId, false);
   const allActive = skillRepo.list(profile.twinId, { activeOnly: true });
-  const toolsAfter = buildMcpToolsFromSkills({
+  const builtAfter = buildMcpToolsFromSkills({
     skills: allActive,
     mcpManager: manager,
   });
-  log(`  toolKeys nach Deaktivierung: ${Object.keys(toolsAfter).join(", ") || "(leer)"}`);
-  if (Object.keys(toolsAfter).length !== 0) {
+  log(
+    `  toolKeys nach Deaktivierung: ${Object.keys(builtAfter.tools).join(", ") || "(leer)"}`,
+  );
+  if (Object.keys(builtAfter.tools).length !== 0) {
     issues += 1;
     log(`  ⚠ deaktivierter Skill darf nicht mehr in Tool-Map sein`);
   }
@@ -201,11 +213,11 @@ async function main() {
   // ─── STEP 4: tool.execute() reicht zu manager.callTool durch ──────────────
   banner("STEP 4 — execute() Roundtrip via Mock-Manager");
   const skillsAgain = skillRepo.list(profile.twinId, { activeOnly: true });
-  const toolsLive = buildMcpToolsFromSkills({
+  const builtLive = buildMcpToolsFromSkills({
     skills: skillsAgain,
     mcpManager: manager,
   });
-  const echoTool = toolsLive[mcpSkillName];
+  const echoTool = builtLive.tools[expectedToolKey];
   if (!echoTool || !echoTool.execute) {
     issues += 1;
     log(`  ⚠ echo-Tool oder .execute() fehlt`);

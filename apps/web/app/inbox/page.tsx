@@ -370,7 +370,23 @@ function extractLastMessage(entry: AuditEntry): string {
     lastMessage?: string;
     messages?: ChatMessage[];
     content?: string;
+    toolCall?: {
+      mcpServerId?: string;
+      mcpToolName?: string;
+      args?: Record<string, unknown>;
+    };
   };
+  // 3.2.F: mcp-tool-use Pending zeigt Tool-Name + Args statt der LLM-
+  // History — der User soll auf einen Blick sehen, was approved werden soll.
+  if (entry.capability === "mcp-tool-use" && input.toolCall?.mcpToolName) {
+    let argsPreview: string;
+    try {
+      argsPreview = JSON.stringify(input.toolCall.args ?? {});
+    } catch {
+      argsPreview = "(args nicht serialisierbar)";
+    }
+    return `Tool: ${input.toolCall.mcpToolName}\nArgs: ${argsPreview}`;
+  }
   if (typeof input.lastMessage === "string") return input.lastMessage;
   if (Array.isArray(input.messages)) {
     const last = input.messages[input.messages.length - 1];
@@ -381,12 +397,19 @@ function extractLastMessage(entry: AuditEntry): string {
 }
 
 function formatPendingHeader(entry: AuditEntry): string {
-  const input = entry.input as { fromHandle?: string; targetHandle?: string };
+  const input = entry.input as {
+    fromHandle?: string;
+    targetHandle?: string;
+    toolCall?: { mcpServerId?: string; mcpToolName?: string };
+  };
   if (entry.capability === "respond_to_twin_message" && input.fromHandle) {
     return `Eingehend von ${input.fromHandle}`;
   }
   if (entry.capability === "send_to_twin" && input.targetHandle) {
     return `An ${input.targetHandle} senden`;
+  }
+  if (entry.capability === "mcp-tool-use" && input.toolCall?.mcpToolName) {
+    return `MCP-Tool: ${input.toolCall.mcpToolName}`;
   }
   return entry.capability;
 }
@@ -427,6 +450,13 @@ function formatCapability(entry: AuditEntry): string {
       return input.toHandle
         ? `Direkt gesendet an ${input.toHandle}`
         : "Direkt gesendet";
+    case "mcp-tool-use": {
+      const toolCall = (entry.input as { toolCall?: { mcpToolName?: string } })
+        .toolCall;
+      return toolCall?.mcpToolName
+        ? `MCP-Tool: ${toolCall.mcpToolName}`
+        : "MCP-Tool";
+    }
     default:
       return entry.capability;
   }

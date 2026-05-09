@@ -26,7 +26,11 @@ import type { McpServersRepo } from "./mcp/repo.js";
 import type { McpClientFactory } from "./mcp/client-factory.js";
 import { McpClientManager } from "./mcp/client-manager.js";
 import { McpSkillSync } from "./mcp/skill-sync.js";
-import { buildMcpToolsFromSkills } from "./mcp/tool-bridge.js";
+import {
+  buildMcpToolsFromSkills,
+  MCP_PENDING_APPROVAL_MARKER,
+} from "./mcp/tool-bridge.js";
+import { McpToolApprovalRequiredError } from "./mcp/errors.js";
 
 // ─── TWIN SERVICE ────────────────────────────────────────────────────────────
 //
@@ -261,7 +265,7 @@ export class TwinService {
     originalCapability: string,
     messages: ChatMessage[],
     lastUser: string,
-  ): Promise<{ message: ChatMessage; auditId: string; pending: false }> {
+  ): Promise<{ message: ChatMessage; auditId: string; pending: boolean }> {
     // #71b/#80: Direct-Chat-Audits werden mit der aktiven Konversation
     // verknüpft. ownerUserId muss gesetzt sein, weil Owner-Bypass nur greift
     // wenn requesterUserId === ownerUserId — der `chat()`-Caller stellt das
@@ -279,8 +283,7 @@ export class TwinService {
       );
       conversationId = conv.id;
       // Sliding-Window: jüngste HISTORY_AUDIT_LIMIT-Audits der aktiven
-      // Konversation als LLM-Kontext. Vor dem audit.start() laden, damit der
-      // gerade entstehende Audit-Eintrag nicht selbst in der History landet.
+      // Konversation als LLM-Kontext.
       const past = await this.deps.audit.repo.listByConversation(
         conv.id,
         HISTORY_AUDIT_LIMIT,
@@ -288,41 +291,39 @@ export class TwinService {
       history = auditsToOwnerDirectMessages(past);
     }
 
-    const audit = await this.deps.audit.start({
-      capability: "owner-direct",
-      mandateId: null,
-      input: {
-        messages,
-        lastMessage: lastUser,
-        originalCapability,
-      },
-      // Konsistent mit trusted-bypass / owner-direct-send: kein Approval-
-      // Workflow, der Bypass läuft direkt — daher "executed" als initial.
-      // complete() überschreibt nach erfolgreichem Modell-Call ohnehin.
-      initialStatus: "executed",
-      conversationId,
-    });
+    // 3.2.F: audit.start() VOR runModel würde bei Approval-Pending einen
+    // executed-then-failed-Zwischenstate hinterlassen. Stattdessen erst
+    // runModel versuchen — wenn es McpToolApprovalRequiredError wirft, einen
+    // Pending-Audit `mcp-tool-use` anlegen; sonst den normalen owner-direct-
+    // Audit. Konsistente Audit-Trail-Reihenfolge: ein Audit pro User-Send.
+    const llmMessages: ChatMessage[] = [
+      ...history,
+      { role: "user", content: lastUser },
+    ];
 
     this.deps.bus.emit({
       type: "twin.thinking",
       payload: { capability: "owner-direct" },
     });
+
     try {
-      // Strict-Filter: das Frontend schickt nominal seine eigene `messages`-
-      // Liste mit, aber die kann Audits aus älteren Konversationen mischen
-      // (Frontend kennt heute noch keine Konversations-Grenzen — kommt mit
-      // Sub-Schritt D). Server konstruiert den LLM-Input deshalb aus der
-      // serverseitigen Konversations-History plus der aktuellen User-Message.
-      const llmMessages: ChatMessage[] = [
-        ...history,
-        { role: "user", content: lastUser },
-      ];
       const reply = await this.runModel(
         this.deps.persona,
         llmMessages,
         undefined,
         { enableMcpTools: true },
       );
+      const audit = await this.deps.audit.start({
+        capability: "owner-direct",
+        mandateId: null,
+        input: {
+          messages,
+          lastMessage: lastUser,
+          originalCapability,
+        },
+        initialStatus: "executed",
+        conversationId,
+      });
       await this.deps.audit.complete(audit.id, {
         reply: reply.content,
         providerMetadata: reply.metadata,
@@ -334,7 +335,60 @@ export class TwinService {
         pending: false,
       };
     } catch (err) {
-      await this.failWithReason(audit.id, err);
+      // 3.2.F: zwei Wege ende hier in derselben Branch:
+      //   1. Marker-Pfad (Standard): runModel detected den Marker im
+      //      result.toolCalls, wirft McpToolApprovalRequiredError.
+      //   2. Throw-Pfad (Defense-in-Depth): hypothetischer direkter Throw
+      //      aus tool-bridge.execute() oder anderer interner Logik. AI SDK 6
+      //      schluckt das aktuell zwar (Smoke-Test bestätigt), aber wenn ein
+      //      zukünftiges SDK-Update das Verhalten ändert, ist der Catch hier
+      //      schon bereit. Beide Pfade haben identische Pending-Audit-Logik.
+      if (err instanceof McpToolApprovalRequiredError) {
+        const pendingReply = composeToolApprovalRequest(
+          err.mcpToolName,
+          err.toolArgs,
+        );
+        const pendingAudit = await this.deps.audit.start({
+          capability: "mcp-tool-use",
+          mandateId: null,
+          input: {
+            // Persist die History des Resume — damit nach Approval der LLM
+            // mit dem Original-Kontext fortsetzen kann. Server-Restart-stabil.
+            messages: llmMessages,
+            lastMessage: lastUser,
+            toolCall: {
+              mcpServerId: err.mcpServerId,
+              mcpToolName: err.mcpToolName,
+              args: err.toolArgs,
+            },
+            conversationId,
+            pendingReply,
+            originalCapability,
+          },
+          initialStatus: "pending",
+          conversationId,
+        });
+        this.deps.bus.emit({ type: "twin.idle", payload: {} });
+        return {
+          message: { role: "assistant", content: pendingReply },
+          auditId: pendingAudit.id,
+          pending: true,
+        };
+      }
+      // Anderer Fehler: Audit als failed loggen (Reihenfolge wie bei Erfolg
+      // — wir öffnen erst, dann markieren wir fail).
+      const failedAudit = await this.deps.audit.start({
+        capability: "owner-direct",
+        mandateId: null,
+        input: {
+          messages,
+          lastMessage: lastUser,
+          originalCapability,
+        },
+        initialStatus: "executed",
+        conversationId,
+      });
+      await this.failWithReason(failedAudit.id, err);
       throw err;
     }
   }
@@ -576,6 +630,8 @@ export class TwinService {
         return this.approveTwinResponse(entry, persona);
       case "send_to_twin":
         return this.approveTwinSend(entry, persona);
+      case "mcp-tool-use":
+        return this.approveMcpToolUse(entry, persona);
       default:
         return this.approveDefault(entry, persona);
     }
@@ -603,10 +659,125 @@ export class TwinService {
           relatedAuditId: auditId,
         });
       }
+      return;
+    }
+
+    // 3.2.F: Reject eines mcp-tool-use Pending → kein Tool-Aufruf, statt-
+    // dessen Resume des LLM mit "Tool-Call wurde abgelehnt" als Kontext.
+    // Die finale Antwort landet im output.reply, damit die Inbox sie zeigen
+    // kann (gleicher Pfad wie executed-Audits mit reply).
+    if (entry.capability === "mcp-tool-use") {
+      const input = entry.input as AuditMcpToolUseInputShape;
+      if (!input.toolCall) return;
+      const resumeMessages: ChatMessage[] = [
+        ...(input.messages ?? []),
+        {
+          role: "user",
+          content:
+            `[System] Der Tool-Call '${input.toolCall.mcpToolName}' wurde abgelehnt. ` +
+            `Begründung: ${reason}. Bitte antworte direkt ohne das Tool zu nutzen.`,
+        },
+      ];
+      try {
+        const reply = await this.runModel(this.deps.persona, resumeMessages);
+        // Status wurde gerade auf 'rejected' gesetzt — wir nutzen update statt
+        // complete/fail, damit der Reject-Status erhalten bleibt aber output
+        // die finale Antwort enthält.
+        const updatedEntry = await this.deps.audit.repo.get(auditId);
+        if (updatedEntry) {
+          updatedEntry.output = {
+            reply: reply.content,
+            rejected: true,
+            rejectReason: reason,
+            providerMetadata: reply.metadata,
+          };
+          await this.deps.audit.repo.update(auditId, updatedEntry);
+          this.deps.bus.emit({ type: "audit.updated", payload: updatedEntry });
+        }
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        console.warn(
+          `[mcp-tool-use:reject] Resume-LLM-Call fehlgeschlagen: ${msg}`,
+        );
+      }
     }
   }
 
   // ─── Approve-Branches ──────────────────────────────────────────────────────
+
+  /**
+   * 3.2.F: Approve eines mcp-tool-use Pending. Drei Schritte:
+   *
+   *   1. Tool-Call ausführen (mcpManager.callTool — kein Approval-Recheck,
+   *      weil der User bereits durch das Approve genehmigt hat).
+   *   2. Resume-Run: LLM-Call mit der Original-History plus dem Tool-Result
+   *      als zusätzliche User-Kontext-Message. Tools sind im Resume
+   *      explizit DEAKTIVIERT — sonst könnte LLM den Tool-Call retriggern
+   *      und in eine Approval-Schleife laufen. Multi-Tool-Use kommt mit
+   *      späteren Sub-Schritten.
+   *   3. Audit auf executed mit toolCall+Result+finaler Antwort.
+   */
+  private async approveMcpToolUse(
+    entry: AuditEntry,
+    persona: Persona,
+  ): Promise<ApproveResult> {
+    const input = entry.input as AuditMcpToolUseInputShape;
+    if (!input.toolCall) {
+      throw new Error(
+        `Audit ${entry.id} hat keinen toolCall im Input — kann nicht approved werden`,
+      );
+    }
+    const { mcpServerId, mcpToolName, args } = input.toolCall;
+    const messages = input.messages ?? [];
+
+    this.deps.bus.emit({
+      type: "twin.thinking",
+      payload: { capability: "mcp-tool-use" },
+    });
+
+    let toolResult: { content: unknown; isError?: boolean };
+    try {
+      const raw = await this.mcp.callTool(mcpServerId, mcpToolName, args);
+      toolResult = { content: raw.content, isError: raw.isError };
+    } catch (err) {
+      await this.failWithReason(entry.id, err);
+      throw err;
+    }
+
+    const toolResultText = stringifyToolContent(toolResult.content);
+    const resumeMessages: ChatMessage[] = [
+      ...messages,
+      {
+        role: "user",
+        content:
+          `[System] Tool '${mcpToolName}' wurde ausgeführt. ` +
+          `Ergebnis: ${toolResultText}. ` +
+          `Bitte gib jetzt die finale Antwort an den User basierend auf diesem Ergebnis.`,
+      },
+    ];
+
+    try {
+      // enableMcpTools: false — wir wollen keine zweite Tool-Use-Iteration im
+      // Resume. LLM antwortet mit Text basierend auf dem Tool-Result.
+      const reply = await this.runModel(persona, resumeMessages);
+      await this.deps.audit.complete(entry.id, {
+        reply: reply.content,
+        toolCall: { mcpServerId, mcpToolName, args },
+        toolResult: toolResult.content,
+        toolIsError: toolResult.isError ?? false,
+        providerMetadata: reply.metadata,
+      });
+      this.deps.bus.emit({ type: "twin.idle", payload: {} });
+      return {
+        auditId: entry.id,
+        message: { role: "assistant", content: reply.content },
+        reply: reply.content,
+      };
+    } catch (err) {
+      await this.failWithReason(entry.id, err);
+      throw err;
+    }
+  }
 
   private async approveDefault(entry: AuditEntry, persona: Persona): Promise<ApproveResult> {
     const messages = extractMessages(entry, "messages");
@@ -913,9 +1084,11 @@ export class TwinService {
     //   3. skillsBlock (Skill-Erweiterungen, ergänzen Persona)
     //   4. LANGUAGE_DIRECTIVE (Anti-"weiss"-statt-"weiß", gilt für alle Twins)
     // Direktive ans Ende, weil LLMs den letzten System-Block stärker gewichten.
-    const mcpTools = options.enableMcpTools
+    const mcpToolsResult = options.enableMcpTools
       ? buildMcpToolsFromSkills({ skills, mcpManager: this.mcp })
-      : {};
+      : { tools: {}, skillByToolKey: new Map<string, Skill>() };
+    const mcpTools = mcpToolsResult.tools;
+    const skillByToolKey = mcpToolsResult.skillByToolKey;
     const hasTools = Object.keys(mcpTools).length > 0;
     if (hasTools) {
       console.log(
@@ -964,6 +1137,23 @@ const TOOL_USE_DIRECTIVE = hasTools
         ? { tools: mcpTools, stopWhen: stepCountIs(5) }
         : {}),
     });
+
+    // 3.2.F Marker-Pattern: AI SDK 6 propagiert execute()-Throws nicht nach
+    // oben — sie landen als output:null tool-result beim LLM. tool-bridge
+    // returnt deshalb bei requiresApproval=true einen Marker im content.
+    // Wir scannen result.toolCalls + result.toolResults nach dem Marker und
+    // werfen `McpToolApprovalRequiredError` lokal — der existierende Catch
+    // im runOwnerDirect übernimmt den Pending-Audit-Pfad.
+    if (hasTools) {
+      const pending = detectPendingToolCall(result, skillByToolKey);
+      if (pending) {
+        throw new McpToolApprovalRequiredError(
+          pending.mcpServerId,
+          pending.mcpToolName,
+          pending.input,
+        );
+      }
+    }
 
     // Tool-Use-Detail in die Audit-Metadata. Der Audit-Insert in den
     // Approve-/OwnerDirect-Pfaden packt metadata komplett ins audit.output —
@@ -1125,6 +1315,123 @@ Niemals "ae", "oe", "ue" oder "ss" als Ersatz verwenden.
 Auch nicht "ae" für Eigennamen wie "Bär" oder Begriffe wie
 "beschäftigt", "Größe", "schön".
 `.trim();
+
+// 3.2.F: Shape des Pending-Audit-Input für mcp-tool-use. Lokal als Type-
+// Alias, damit der Cast in approveMcpToolUse / reject-Branch lesbar bleibt.
+// Der Persistenz-Schema lebt zentral in `@twin-lab/shared`
+// (`AuditMcpToolUseInputSchema`); diesen lokalen Shape ziehen wir bewusst
+// nicht aus dem zod-Schema, weil die Inbox-Display-Felder (lastMessage,
+// originalCapability) mitgespeichert werden, ohne den Frontend-Typ zu
+// erweitern.
+interface AuditMcpToolUseInputShape {
+  messages?: ChatMessage[];
+  lastMessage?: string;
+  toolCall?: {
+    mcpServerId: string;
+    mcpToolName: string;
+    args: Record<string, unknown>;
+  };
+  conversationId?: string | null;
+  pendingReply?: string;
+  originalCapability?: string;
+}
+
+/**
+ * 3.2.F Marker-Detect: scannt das `generateText`-Result auf Tool-Calls, deren
+ * Result den `MCP_PENDING_APPROVAL_MARKER` enthält. Der LLM hat das Tool
+ * aufgerufen, AI SDK hat den Marker als output an den LLM zurückgereicht
+ * (statt unseren execute-Throw zu propagieren). Wir picken den ersten
+ * Treffer und werfen lokal `McpToolApprovalRequiredError`, damit der
+ * existierende Catch-Pfad in runOwnerDirect den Pending-Audit baut.
+ *
+ * Edge-Case bei mehreren parallelen Tool-Calls in einem Step: der erste
+ * Marker gewinnt; andere Tool-Results werden verworfen. Approval-Tools sind
+ * destruktiv (=schreibend), Read-only-Tools laufen mit
+ * defaultRequiresApproval=false ohnehin direkt durch — die Mischung in einem
+ * Step ist akzeptable Vereinfachung für Pilot.
+ */
+type GenerateTextOutcome = Awaited<ReturnType<typeof generateText>>;
+
+function detectPendingToolCall(
+  result: GenerateTextOutcome,
+  skillByToolKey: Map<string, Skill>,
+): {
+  mcpServerId: string;
+  mcpToolName: string;
+  input: Record<string, unknown>;
+} | null {
+  for (const toolCall of result.toolCalls ?? []) {
+    const matching = result.toolResults?.find(
+      (r) => r.toolCallId === toolCall.toolCallId,
+    );
+    if (!matching) continue;
+    const output = matching.output as
+      | { content?: Array<{ type?: string; text?: string }> }
+      | undefined;
+    if (!output || !Array.isArray(output.content)) continue;
+    const hasMarker = output.content.some(
+      (c) => c?.type === "text" && c?.text === MCP_PENDING_APPROVAL_MARKER,
+    );
+    if (!hasMarker) continue;
+    const skill = skillByToolKey.get(toolCall.toolName);
+    if (!skill?.mcpServerId || !skill?.mcpToolName) continue;
+    return {
+      mcpServerId: skill.mcpServerId,
+      mcpToolName: skill.mcpToolName,
+      input: (toolCall.input ?? {}) as Record<string, unknown>,
+    };
+  }
+  return null;
+}
+
+/**
+ * 3.2.F: vorlautet die Wartemeldung an den User, wenn ein Tool-Call auf
+ * Approval wartet. Bewusst kurz; Inline-Tool-Args helfen dem User, das in
+ * der Inbox/Chat-Warteschlange zuzuordnen.
+ */
+function composeToolApprovalRequest(
+  toolName: string,
+  args: Record<string, unknown>,
+): string {
+  let argsPreview: string;
+  try {
+    argsPreview = JSON.stringify(args);
+  } catch {
+    argsPreview = "(args nicht serialisierbar)";
+  }
+  if (argsPreview.length > 200) argsPreview = argsPreview.slice(0, 197) + "…";
+  return (
+    `Ich möchte das Tool '${toolName}' mit Argumenten ${argsPreview} nutzen, ` +
+    `brauche aber deine Genehmigung. Bitte schau in der Inbox.`
+  );
+}
+
+/**
+ * 3.2.F: konvertiert die MCP-Tool-Result-Content-Liste in einen einzeiligen
+ * String, damit wir ihn dem Resume-LLM als Klartext-Kontext servieren können.
+ * Text-Parts werden konkateniert, andere Content-Typen (z.B. image) werden
+ * als JSON serialisiert — die Pilot-Tools liefern alle Text.
+ */
+function stringifyToolContent(content: unknown): string {
+  if (!Array.isArray(content)) {
+    try {
+      return JSON.stringify(content);
+    } catch {
+      return String(content);
+    }
+  }
+  const parts = content.map((p: unknown) => {
+    if (p && typeof p === "object" && "text" in p && typeof (p as { text?: unknown }).text === "string") {
+      return (p as { text: string }).text;
+    }
+    try {
+      return JSON.stringify(p);
+    } catch {
+      return String(p);
+    }
+  });
+  return parts.join(" ");
+}
 
 function extractMessages(entry: { input: Record<string, unknown> }, key: string): ChatMessage[] {
   const value = entry.input[key];

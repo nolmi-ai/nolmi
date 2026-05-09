@@ -1,0 +1,7 @@
+{
+  "name": "everything-approval",
+  "transport": "stdio",
+  "command": "npx",
+  "args": ["-y", "@modelcontextprotocol/server-everything"],
+  "defaultRequiresApproval": true
+}
