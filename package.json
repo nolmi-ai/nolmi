@@ -10,6 +10,10 @@
     "lint": "pnpm -r lint",
     "typecheck": "pnpm -r typecheck",
     "db:init": "pnpm --filter @twin-lab/runtime db:init",
+    "twin:mcp-add": "pnpm --filter @twin-lab/runtime twin:mcp-add",
+    "twin:mcp-list": "pnpm --filter @twin-lab/runtime twin:mcp-list",
+    "twin:mcp-refresh": "pnpm --filter @twin-lab/runtime twin:mcp-refresh",
+    "twin:mcp-remove": "pnpm --filter @twin-lab/runtime twin:mcp-remove",
     "bridge:dev": "pnpm --filter @twin-lab/bridge dev",
     "bridge:db:init": "pnpm --filter @twin-lab/bridge db:init",
     "clean": "pnpm -r clean && rm -rf node_modules"
