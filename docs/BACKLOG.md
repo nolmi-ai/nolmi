@@ -1,6 +1,6 @@
 # Backlog Phase 2.5 und später
 
-Stand: 8. Mai 2026, abend (Tag 9) — Test-Hygiene-Block (#71b + #80 + #84 + #85) abgeschlossen. Sechs Commits über fünf Sub-Schritte plus UX-Polish plus Cleanup+Doku. Konversations-Modellierung als Ersatz für die flache Audit-History; Skill-Toggle-Tests sind jetzt sauber. Pfad frei für 3.2-Strategie-Session (MCP-Client). Items insgesamt: 80 (78 + #84 + #85), davon vier heute abgeschlossen (#71b, #80, #84, #85).
+Stand: 9. Mai 2026, vormittag (Tag 10) — Phase 3.2 Sub-Schritte A bis D abgeschlossen (`2bf1ee0` Schema+Repo, `daa03b7` Client+Lifecycle, `cd5b295` Tool-Discovery+Skill-Sync, `366ca93` Tool-Execution via AI-SDK-Tool-Bridge). MCP-Foundation komplett funktional: pro Twin verschlüsselte Server-Configs, Lazy-Spawn-Manager mit Idle-Disconnect, Tool-Discovery + Skill-Sync, AI-SDK-Tool-Bridge mit Multi-Provider-Support. End-to-End nachgewiesen mit `@modelcontextprotocol/server-everything` (13 Tools, Spawn 1.4s, Tool-Result via toolChoice='required' validiert). Items insgesamt: 84 (80 + #86 + #87 + #88 + #89), davon vier heute neu eröffnet, keines abgeschlossen.
 
 Format: Punkte mit Größe (S/M/L/XL) und Priorität (must/should/nice).
 
@@ -779,6 +779,47 @@ Argument dagegen: Reply-Detection wurde explizit eingebaut um Loop-Risiko zu ver
 **Größe:** M (Variante 1, mit UI-Refactor) / XS (Variante 2, Frontend-Quickfix) · **Priorität:** should · **Aus:** Tag-8-Production-Smoke-Test, korrigierte Diagnose Tag-9-Vormittag
 
 **Status-Erkenntnis aus der Diagnose:** Der gestern als „echte Production-Regression" eingeordnete Bug ist keine Regression — die `trusted-bypass`-Architektur war seit 2.5.4.1 stabil und hat heute morgen im Test sauber funktioniert. Was geändert wurde: die UI-Verkettungs-Logik im Frontend produziert seit irgendwann (vermutlich Phase 2.5.5 mit Konversations-UI-Refactor) immer ein `in_reply_to`. Das versteckt den Twin-Trigger-Pfad bei allen Folge-Fragen. Ist also ein UX-Bug, nicht Architektur-Bug. Plus eine wichtige Lesson: Reply-Detection greift sowohl bei semantischen Replies („okay, danke!") als auch bei neuen Fragen, weil das Frontend nicht zwischen beiden unterscheidet. Differenzierung braucht UI-Konzept-Arbeit, nicht nur Backend-Fix.
+
+---
+
+## Aus Phase 3.2 entstanden
+
+### 86. UI-Editor für Skills (Manifest + Markdown)
+Heute werden Skills via CLI angelegt und über die UI nur als Read-Only-Liste mit Aktiv-Toggle dargestellt. Sub-Schritt 3.2.E erweitert das nicht — die CLI bleibt der primäre Einstiegspunkt für MCP-Server-Setup.
+
+Was fehlt: Skill-Detail-View mit Markdown-Editor für SKILL.md, Form-Fields für Manifest, PATCH-Endpoint analog zu Persona-Reload-CLI (#78). Vorbedingung: Skill-Sync-Endpoint aus #75. Verknüpft mit #76 (Skill-Edit/Delete via UI), könnte gemeinsam adressiert werden.
+
+**Größe:** L · **Priorität:** should · **Aus:** 3.2-Strategie-Session, langfristige UI-Editierbarkeit
+
+### 87. UI-Konfigurator für MCP-Server pro Twin
+Heute werden MCP-Server via CLI/SQL hinzugefügt (Sub-Schritt 3.2.E baut die CLI). Langfristig brauchen non-tech-User eine UI: Server-Add-Form mit Transport-Wahl (stdio/http), Command + Args, optionalen ENV-Vars (verschlüsselt analog zu API-Key), Default-Approval-Setting. Plus Server-Liste mit Aktiv-Toggle, Refresh-Tool-Discovery-Button, Server-Remove mit Cascade-Confirm.
+
+Konzeptionell parallel zu #86 — beide sind Backend-getriebene Configs, die heute via CLI laufen, langfristig UI brauchen. Schema und Repo (3.2.A) sind so designed, dass UI später ohne Refactor möglich ist (`hasEnv`-Marker statt Plain-ENV im Output, Encrypted-Storage, Validation im Repo).
+
+**Größe:** L · **Priorität:** should · **Aus:** 3.2-Strategie-Session
+
+### 88. Multi-Provider Tool-Use-Adapter
+Aktuelle Tool-Bridge (3.2.D) nutzt das AI-SDK direkt — `generateText({tools})` abstrahiert die Provider-API-Schemata für Anthropic/OpenAI/Google/Groq/Ollama. Funktioniert für die bestehenden Provider Out-of-the-Box ohne eigenen Adapter.
+
+Sollte ein Provider in Zukunft Tool-Use-Spezifika haben, die das AI SDK noch nicht abdeckt (z.B. neue Function-Calling-Formate, Streaming-Tool-Calls mit Provider-spezifischen Erweiterungen, oder direkter Anthropic-Tool-Use ohne SDK), bauen wir hier einen Adapter-Layer ein. Für jetzt: das SDK macht es, kein Adapter nötig.
+
+**Größe:** M · **Priorität:** nice · **Aus:** 3.2-Strategie-Session, Tag-10-Vormittag
+
+### 89. LLM-Tool-Use-Verhalten tunen — Tools werden ignoriert
+Beim Sub-Schritt-3.2.D-Verifikations-Test mit Claude Opus 4.7 ist aufgefallen: der LLM ruft Tools selbst dann nicht auf, wenn sie explizit angefordert werden. Bei „Bitte rufe das simulate-research-query Tool auf" antwortet er stattdessen mit einer halluzinierten Erklärung warum das Tool angeblich nicht funktioniert (technisch klingender Bullshit über `client.experimental.tasks.callToolStream()`).
+
+Selbst mit aggressiver TOOL_USE_DIRECTIVE im System-Prompt („Behaupte nicht, dass ein Tool nicht funktioniert ohne es tatsächlich aufgerufen zu haben") ignoriert er die Anweisung. Mit `toolChoice: 'required'` ruft er Tools (Beweistest hat funktioniert), aber dann gibt er nach Tool-Result keinen finalen User-Text mehr aus — `finishReason: tool-calls`, leere Reply-Bubble.
+
+**Diagnose:** Architektur ist korrekt (Tools werden gerendered, MCP-Call passiert bei `required`, Result fließt zurück). Das ist ein **LLM-Prompting-Problem**, nicht ein Code-Problem. Mögliche Ansätze:
+
+1. **Aggressivere System-Prompt-Direktive** mit konkreten Negativ-Beispielen („Antworte nicht: 'Tool-Result: ...' wenn kein Tool gerufen wurde")
+2. **Per-Tool-Hints im User-Prompt** statt System-Prompt — der LLM gewichtet User-Anweisungen oft stärker
+3. **`toolChoice: { type: 'tool', toolName: '...' }`** für UI-getriggerte Tool-Calls (User klickt Button → Tool wird zwingend gerufen, kein LLM-Ermessen)
+4. **Multi-Step-Strategy:** erster Step mit `toolChoice: 'required'` für Tool-Use, zweiter Step mit `auto` für die finale Antwort
+
+Punkt 3 ist die robusteste Lösung, weil sie das LLM-Ermessen aus der Tool-Use-Frage rausnimmt. Verknüpft mit dem Approval-Flow aus 3.2.F — User klickt „Approve" auf einen Tool-Call, dann wird er forciert ausgeführt.
+
+**Größe:** M · **Priorität:** should · **Aus:** Tag-10-Vormittag 3.2.D-Verifikations-Test
 
 ---
 
