@@ -1,6 +1,6 @@
 # twin-lab Roadmap
 
-Stand: 6. Mai 2026 Mittag, nach Phase 3.1 (Skill-System Engine + Pilot) komplett.
+Stand: 9. Mai 2026 Mittag, nach Phase 3.2 (MCP-Client als Skill-Provider) komplett.
 
 ---
 
@@ -39,6 +39,18 @@ Macht Twins inhaltlich tiefer. Reihenfolge ist klar: **Skill-System ist Fundamen
 
 **UI-Editierbarkeit:** Phase-3-Ende oder Phase 4. In 3.1 nur Read-only-Anzeige der Skills. Skills werden via CLI angelegt, später UI-fähig.
 
+### Architektur-Entscheidungen (9. Mai 2026, vor Phase 3.2)
+
+**MCP-Client pro Twin (Multi-Tenant).** Jeder Twin hat eigene Server-Configs in `mcp_servers`-Tabelle, eigenen ClientManager-Pool. Konsistent mit allen Konfigurationen pro Twin (`apiKeyEncrypted`, Skills, Persona).
+
+**Lazy-Spawn beim ersten Tool-Call, Idle-Timeout 5 Min.** Server startet erst, wenn Twin ihn braucht. Idle-Disconnect schont Ressourcen. ENV-tunable für Production-Tuning.
+
+**Pre-Call-Approval, kein Post-Call-Reject.** Schreibende Tools sind das eigentliche Risiko, Post-Call wäre zu spät. Read-only-Tools können mit `requires_approval=false` direkt durchgewunken werden. Owner-Bypass für Tool-Approval explizit NICHT implementiert — konsistent mit Tag-3-Architektur für `send_to_twin`.
+
+**Async via Audit-State + LLM-Re-Run, nicht synchroner Block.** Pending-State persistiert via Audit, überlebt Server-Restart. Resume nach Approve startet neuen `runOwnerDirect`-Call mit angereichter Message-History (System-Tool-Result als User-Message, provider-agnostisch).
+
+**Marker-Pattern als Primary für Approval-Trigger.** AI SDK 6 propagiert Throws aus `execute()` nicht nach oben (Smoke-Test verifiziert). Marker-String im content-Array ist provider-agnostisch und eindeutig identifizierbar. Throw-Pfad bleibt als Defense-in-Depth.
+
 ---
 
 ## Phase 3 — Sub-Schritte
@@ -61,23 +73,36 @@ Macht Twins inhaltlich tiefer. Reihenfolge ist klar: **Skill-System ist Fundamen
 
 **Aufgedeckter Architektur-Befund:** Persona-Skill-Doppelung. Wenn Persona dasselbe Wissen enthält wie ein Skill, ist der Skill-Toggle wirkungslos — Twin antwortet aus Persona. Backlog-Item #74 für sauberes Layering (Persona = identitäts-stabiles Wissen, Skill = austauschbares).
 
-### 3.2 — MCP-Client als Skill-Provider
-**Größe:** L · **Zeitfenster:** 1-2 Wochen
+### 3.2 — MCP-Client als Skill-Provider ✅
+**Abgeschlossen 9. Mai 2026 (Tag 10).** Sieben Sub-Schritte (3.2.A bis 3.2.G) an einem Tag durch — kompletter MCP-Client als Skill-Provider mit Approval-Workflow plus Inline-UI. Acht Commits insgesamt plus BACKLOG-Update.
 
-MCP ist das Standard-Protokoll für LLM-Tools (Anthropic-getrieben, breite Adoption). Twin als MCP-Client kann externe Tools nutzen.
+- **3.2.A** ✅ MCP-Schema + Repo (Commit `2bf1ee0`)
+  Migration 011 mit `mcp_servers`-Tabelle, Multi-Tenant-Isolation pro Twin via FK. McpServersRepo mit AES-256-GCM-ENV-Encryption analog apiKeyEncrypted, Master-Key per Constructor injected.
+- **3.2.B** ✅ MCP-Client + Lifecycle-Manager (Commit `daa03b7`)
+  `@modelcontextprotocol/sdk` Dependency, McpClient für stdio-Transport. McpClientManager pro Twin mit Lazy-Spawn beim ersten Tool-Call, Idle-Disconnect nach 5 Min, pendingSpawns-Mutex gegen Concurrent-Spawns. ENV-Tunables. Registry-disposeAll() beim Shutdown.
+- **3.2.C** ✅ Tool-Discovery + Skill-Sync (Commit `cd5b295`)
+  Migration 012 erweitert `skills`-Tabelle um `mcp_server_id`/`mcp_tool_name`. McpSkillSync mit syncOnAdd() plus refresh()-Diff. Synthetisches Skill-Manifest mit `capability: "mcp_tool"` als Marker. Skill-Naming `mcp:<server>:<tool>`.
+- **3.2.D** ✅ Tool-Execution via AI-SDK-Tool-Bridge (Commit `366ca93`)
+  `tool-bridge.ts` mit buildMcpToolsFromSkills(). MCP-Skills NICHT mehr im System-Prompt-Block, stattdessen via AI-SDK-Tools an LLM übergeben. TOOL_USE_DIRECTIVE bei Tool-Call. Tool-Naming-Bug-Fix (Doppelpunkte zu Underscores für AI-SDK).
+- **3.2.E** ✅ MCP-Server-CLI (Commit `43258cf`)
+  Vier CLI-Skripte: `twin:mcp-add`, `twin:mcp-list` (mit `--json`), `twin:mcp-refresh`, `twin:mcp-remove` (mit `--yes`). JSON-Spec-Format mit Transport/Command/Args/Env, ENV-`?`-Marker für Interactive-Prompt. REPO_ROOT-Helper für pnpm-Filter-CWD-Bug.
+- **3.2.F** ✅ MCP-Tool-Approval-Workflow (Commit `b58df94`)
+  Pre-Call-Approval-Pattern mit Marker-String als Primary, Throw-Pattern als Defense-in-Depth (AI SDK 6 propagiert Throws nicht). Twin-Service detectPendingToolCall() erkennt Marker, baut Pending-Audit mit `capability='mcp-tool-use'`. Approve/Reject-Endpoints, Resume via User-Message provider-agnostisch. Inbox-UI erweitert.
+- **3.2.G** ✅ Inline-Approval-UI im Chat (Commit `bce54fb`)
+  McpToolCallBox-Component für Pending-Audits im Chat. Hybrid-Render plus Persistent-Visualization (Box bleibt nach Approve/Reject sichtbar mit Status-Indicator). buildChatBlocksFromAudits() mapped vier Capability/Status-Varianten auf Block-Sequenzen. 5s-Polling plus manueller Trigger nach send/approve/reject.
 
-- MCP-Protokoll-Implementation (Client-Side)
-- MCP-Server-Konfiguration pro Twin (analog zu LLM-Config)
-- MCP-Tools werden als Skills im Skill-System registriert (`source: "mcp"`)
-- Pilot-MCP-Server (z.B. Filesystem oder Time)
-- Mandate-Gates für MCP-Tool-Calls
+**Aufgedeckte LLM-Verhaltens-Probleme während 3.2:**
+- Item #89: Claude Opus 4.7 ruft Tools selbst bei expliziter Anforderung nicht (mit `toolChoice: 'auto'`). Workaround: `toolChoice: 'required'` für Beweistests, langfristig User-getriggerte Approval-Forcierung über UI.
+- Item #90: Bei trivialen Math-Problemen ignoriert der LLM Reject-Resume-Signale. Architektur ist korrekt, Reject-Prompt-Tuning steht aus.
+
+**End-to-End-Verifikation:** Sub-Schritt-3.2.G-Smoke-Test mit `everything-approval`-Pilot-Server: Tool-Call-Box im Chat, Approve mit echtem Tool-Result, Reject mit Begründung, Cross-Stellen-Test (Inbox-Approve → Chat-Polling-Refresh).
 
 ### 3.3 — Memory: Conversation + Semantic
 **Größe:** L · **Zeitfenster:** 2-3 Wochen
 
 Erste zwei Memory-Schichten — schneller ROI.
 
-- **Conversation-Memory:** Sliding-Window mit Auto-Summary. Bei jedem Chat werden die letzten N Messages plus zusammengefasste ältere Messages in Kontext geladen. Pro `(twin_id, partner_handle)`-Paar separater Verlauf.
+- **Conversation-Memory:** Sliding-Window mit Auto-Summary. Bei jedem Chat werden die letzten N Messages plus zusammengefasste ältere Messages in Kontext geladen. Pro `(twin_id, partner_handle)`-Paar separater Verlauf. Aufbauend auf `conversations`-Tabelle aus 3.1-Konversations-Refactor (Tag 9).
 - **Semantic-Memory:** KV-Store + `facts.md`. Persistente Fakten ("Markus' Frau heißt X", "Florians Geburtstag ist Y"). Vom User editierbar (UI), vom Twin schreibbar mit Approval-Gate.
 
 ### 3.4 — Memory: Episodic
@@ -93,10 +118,10 @@ Vector-Embeddings für „Twin erinnert sich an spezifische Events".
 ### 3.5 — Hyperbrowser als MCP-Skill
 **Größe:** M · **Zeitfenster:** 1 Woche
 
-Cloud-Browser-Infrastruktur (hyperbrowser.ai) als MCP-Server eingebunden. Twin navigiert autonom im Web.
+Cloud-Browser-Infrastruktur (hyperbrowser.ai) als MCP-Server eingebunden. Twin navigiert autonom im Web. Aufbauend auf MCP-Foundation aus 3.2 — sollte ein direkter Drop-In sein, mit ENV-Wert für Hyperbrowser-API-Key.
 
-- Hyperbrowser-MCP-Server konfigurieren
-- Mandate-Gate: Web-Aktionen brauchen Approval
+- Hyperbrowser-MCP-Server konfigurieren (JSON-Spec für `pnpm twin:mcp-add`)
+- Mandate-Gate: Web-Aktionen brauchen Approval (default `requires_approval=true`)
 - Test-Cases: Web-Research, Form-Filling, Scraping
 
 ### 3.6 — Procedural Memory (optional, ggf. Phase 4)
@@ -112,7 +137,7 @@ Lerngedächtnis. Twin lernt aus Approves/Rejects/Edits, schreibt Skills selbst. 
 **Realistisch:** 2-3 Monate bei aktuellem Tempo.
 **Definition of Done für Phase 3:**
 - [x] Skill-System läuft mit Pilot-Skill (3.1.A-F) ✅
-- [ ] MCP-Client als Skill-Provider integriert (3.2)
+- [x] MCP-Client als Skill-Provider integriert (3.2.A-G) ✅
 - [ ] Conversation-Memory + Semantic-Memory live (3.3)
 - [ ] Episodic-Memory mit sqlite-vec (3.4)
 - [ ] Hyperbrowser als MCP-Skill (3.5)
@@ -166,20 +191,26 @@ Bei realistischem Tempo (2-3 Sessions pro Woche, je 2-4h):
 **Bis Ende Juli/August 2026:** Phase 3 abgeschlossen.
 **Bis Ende 2026:** Phase 4 weitgehend fertig.
 
+**Realität nach Tag 10:** Phase 3.1 + 3.2 komplett — fast die Hälfte der Phase-3-Sub-Schritte in 4 Tagen Arbeit (Tag 7 + Tag 10) durch. Tempo höher als geplant, weil Patterns wieder verwendbar waren und die Sub-Schritt-Aufteilung mit eigenen Tests pro Layer bei beiden großen Refactors gehalten hat.
+
 ---
 
 ## Was als Nächstes konkret kommt
 
-**Heute (6. Mai) Vormittag:** Phase 3.1 komplett abgeschlossen ✅
+**Heute (9. Mai) nach 3.2:** Production-Deploy von Phase 3.2 als nächster großer Block. Pre-Deploy-Checklist:
+- Migrations 009-012 in Production-DB anwenden lassen (Auto-Bootstrap aus #77)
+- Pilot-Server-Setup auf Production-DB (separater @markus-Production-Twin)
+- ENV-Tunables für MCP-Lifecycle setzen (`MCP_IDLE_TIMEOUT_MS`, `MCP_SPAWN_TIMEOUT_MS`)
+- Smoke-Test in Production: ein everything-Server adden, Tool-Call-Test über Chat-UI
 
 **Nächste Sessions:**
-- Pause / Mittagspause heute, dann ggf. weitere Polish-Arbeit oder direkt Phase 3.2
-- Phase 3.2 (MCP-Client) starten — eigene Strategie-Session vorab nötig: MCP-Protokoll-Implementation, MCP-Server-Konfiguration pro Twin (analog LLM-Config), Pilot-MCP-Server (z.B. Filesystem oder Time), Mandate-Gates für Tool-Calls
-- Vor 3.2: Persona-Skill-Layering klären (Backlog #74) — Wissens-Bereinigung oder explizite Layering-Doku
+- Phase 3.2-Polish-Items (#89, #90, #91) abarbeiten — sind nice-to-have, nicht blockierend für 3.3
+- Strategie-Session vor 3.3 (Conversation- + Semantic-Memory) — Pre-Implementation-Diskussion mit konkreten Festlegungen zu Auto-Summary-Schwelle, KV-Store-Lifecycle, facts.md-Schreibrechte
+- Phase 3.3 (Memory: Conversation + Semantic) starten
 
 **Was als Hintergrund läuft:**
-- Backlog-Items in Priorität abarbeiten (#71b kumulative Audit-Messages, #65 Reverse-Proxy, #74 Persona-Skill-Layering)
-- Production-Update fällig — Tag-7-Commits noch nicht deployed, beim nächsten Pull mitnehmen
+- Backlog-Items in Priorität abarbeiten
+- Production-Updates fällig nach jedem zusammenhängenden Block
 - Production-Erfahrung sammeln, neue Items dokumentieren
 
 ---
@@ -188,7 +219,7 @@ Bei realistischem Tempo (2-3 Sessions pro Woche, je 2-4h):
 
 Phase 3 ist abgeschlossen, wenn:
 - [x] Skill-System mit Pilot-Skill (3.1) ✅
-- [ ] MCP-Client als Skill-Provider (3.2)
+- [x] MCP-Client als Skill-Provider (3.2) ✅
 - [ ] Memory: Conversation + Semantic (3.3)
 - [ ] Memory: Episodic (3.4)
 - [ ] Hyperbrowser als MCP-Skill (3.5)

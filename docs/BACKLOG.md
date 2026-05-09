@@ -1,6 +1,6 @@
 # Backlog Phase 2.5 und später
 
-Stand: 9. Mai 2026, vormittag (Tag 10) — Phase 3.2 Sub-Schritte A bis D abgeschlossen (`2bf1ee0` Schema+Repo, `daa03b7` Client+Lifecycle, `cd5b295` Tool-Discovery+Skill-Sync, `366ca93` Tool-Execution via AI-SDK-Tool-Bridge). MCP-Foundation komplett funktional: pro Twin verschlüsselte Server-Configs, Lazy-Spawn-Manager mit Idle-Disconnect, Tool-Discovery + Skill-Sync, AI-SDK-Tool-Bridge mit Multi-Provider-Support. End-to-End nachgewiesen mit `@modelcontextprotocol/server-everything` (13 Tools, Spawn 1.4s, Tool-Result via toolChoice='required' validiert). Items insgesamt: 84 (80 + #86 + #87 + #88 + #89), davon vier heute neu eröffnet, keines abgeschlossen.
+Stand: 9. Mai 2026, mittag (Tag 10) — Phase 3.2 (MCP-Client als Skill-Provider) komplett, sieben Sub-Schritte A bis G durchgezogen plus Marker-Pattern-Patch in F. Acht Commits insgesamt: `2bf1ee0` Schema+Repo, `daa03b7` Client+Lifecycle, `cd5b295` Tool-Discovery+Skill-Sync, `366ca93` Tool-Execution via AI-SDK-Tool-Bridge, `5f0f80c` BACKLOG-Update für #86-#89, `43258cf` CLI, `b58df94` Approval-Workflow (Inbox-Foundation), `bce54fb` Inline-Approval-UI im Chat. MCP-Foundation ist end-to-end produktiv: Server-Provisioning via CLI, Tool-Discovery, Tool-Execution mit Multi-Provider-Support, Approval-Workflow mit Pending-State, UI in Inbox UND Chat-Inline. Items insgesamt: 87 (84 + #90 + #91 + #92), davon drei heute neu eröffnet, keines abgeschlossen.
 
 Format: Punkte mit Größe (S/M/L/XL) und Priorität (must/should/nice).
 
@@ -821,6 +821,44 @@ Punkt 3 ist die robusteste Lösung, weil sie das LLM-Ermessen aus der Tool-Use-F
 
 **Größe:** M · **Priorität:** should · **Aus:** Tag-10-Vormittag 3.2.D-Verifikations-Test
 
+**Update Tag-10-Mittag (nach 3.2.F-G):** Verhalten reproduziert sich beim Approval-Smoke-Test — ohne `toolChoice: 'required'` ruft Claude Opus 4.7 das `everything-approval`-Tool nicht, halluziniert stattdessen Approval-Antworten ("Der Tool-Call liegt jetzt in der Approval-Queue. Sobald freigegeben, kommt das Ergebnis (30) zurück."). Architektur ist nachweislich korrekt — bei `required` greift der Marker-Pfad sauber, Pending-Audit entsteht, Inbox + Chat-UI rendern alle States. Aber: in Production wird das LLM bei autonomer Tool-Wahl unter-performen. Brücken-Lösung: User-getriggerte Approval-Forcierung über UI (3.2.G-Inline-UI) erzwingt Tool-Use indirekt — User-Click ist deterministisch, kein LLM-Ermessen.
+
+### 90. Resume-Prompt-Tuning für Reject-Pfad
+Beim Sub-Schritt-3.2.G-Reject-Smoke-Test aufgefallen: bei trivialen Math-Problemen ignoriert der LLM das Reject-Resume-Signal. Test-Setup: User-Message "Rufe mcp_everything-approval_get-sum mit a=99 und b=1 auf", Tool-Call wird vorgeschlagen, User klickt Reject mit Reason "Nicht freigegeben". Resume-Prompt: "[System] Tool-Call wurde abgelehnt. Begründung: Nicht freigegeben." Antwort vom LLM: "99 + 1 = 100." statt "Verstanden, ohne Tool kann ich nicht antworten."
+
+Das ist Verhalten von Claude Opus 4.7 bei trivialen Aufgaben — er weiß `99 + 1 = 100` und gibt's einfach aus, ignoriert das Reject-Signal weil das Problem trivial lösbar ist ohne Tool. Bei nicht-trivialen Tools (z.B. echte Web-Searches oder File-Operations) tritt das Problem nicht auf, weil der LLM ohne Tool-Result gar nichts hat.
+
+Lösungsansätze:
+1. **Härteres Reject-Resume-Phrasing** — explizit instruieren "Berechne nicht selbst, beziehe dich nicht auf das Ergebnis. Sag dass ohne Tool keine Antwort möglich ist."
+2. **Pro-Tool-Resume-Templates** — manche Tools (Math) brauchen anderes Reject-Phrasing als andere (Web-Operations)
+3. **Kontext-Awareness** — Reject-Reason vom User in den Resume-Prompt einbauen ("Der User hat den Tool-Call abgelehnt, Begründung: ...") gibt dem LLM stärkeres Anti-Beispiel
+
+Aktuell tritt das Problem nur bei trivialen MCP-Tool-Calls auf. Pilot-Tools (everything-Server) sind alle trivial, also ist das im Pilot-Setup ein realer Befund. Bei echten Tools (Hyperbrowser in 3.5) wird sich's vermutlich nicht zeigen, aber das Pattern sollte vor 3.5 sauber sein.
+
+**Größe:** M · **Priorität:** should · **Aus:** Tag-10-Mittag 3.2.G-Reject-Smoke-Test
+
+### 91. Reject-Reason-UI (window.prompt durch Komponente ersetzen)
+Aktuelle 3.2.G-Implementation nutzt `window.prompt()` für die Reject-Begründung — pragmatisch und funktional, aber UX-mäßig nicht der Stand der Kunst. Browser-Prompt blockiert die UI, kein Multi-Line-Support, kein Cancel-Default-Handling, kein Theming-Bezug zur App-UI.
+
+Saubere Lösung: Modal-Komponente oder Inline-Eingabefeld mit Textarea (analog zur Approve-/Reject-Inbox-UI in 2.5.4.3). Pattern-Vorlage: existierende Modal-Komponenten in der App-UI (z.B. Onboarding-Wizard-Modals oder Reset-Confirm-UI aus #84).
+
+Vorbedingung: keine. Diff-Scope: Frontend only, ein Edit in `apps/web/app/chat/[handle]/page.tsx` plus eventuell Helper-Komponente.
+
+**Größe:** S · **Priorität:** nice · **Aus:** Tag-10-Mittag 3.2.G-Implementation (window.prompt analog Inbox)
+
+### 92. Production-Deploy von Phase 3.2 (Migrations + MCP-Setup)
+Tag-10-Stand muss in Production. Diff zum Production-VPS (`5ee5352`, Tag 8) ist groß: vier neue Migrations (009-012), neue MCP-CLI, neue Inbox-UI-Render-Cases, neue Chat-Inline-Approval-UI.
+
+Pre-Deploy-Checkliste:
+- Migrations 009 (`conversations`-Tabelle), 010 (Pre-Konversations-Cleanup), 011 (`mcp_servers`-Tabelle), 012 (`skills`-Erweiterung um mcp_server_id/mcp_tool_name) müssen in Production-DB. Auto-Bootstrap aus #77 sollte das automatisch machen, aber verifizieren via Container-Logs nach Restart (`[db:init] X Migration(en) angewendet` oder `(skipped)`).
+- Pilot-Server-Setup auf Production-DB für @markus — nicht aus lokaler DB übertragen, sondern via `pnpm twin:mcp-add @markus mcp-servers/everything.json` direkt auf Production-Container ausführen. ENV-Variablen `MCP_*_TIMEOUT_MS` setzen falls Defaults nicht passen.
+- Smoke-Test in Production: Chat-UI, ein normaler Tool-Call (no-approval) plus ein Approval-Tool-Call. Inbox-UI plus Chat-Inline-UI verifizieren.
+- Repo-Sync auf VPS (`git pull` von `bce54fb`), Container-Rebuild, restart.
+
+Plus mögliche Stolperer: das `mcp-servers/`-Directory mit den JSON-Spec-Files muss zugänglich sein im Container — analog zu #81 (`docs/`-Volume-Mount). Override-File-Pattern verifizieren oder Dockerfile-Stage erweitern.
+
+**Größe:** M · **Priorität:** must · **Aus:** Tag-10-Mittag, Production-Drift 7 Commits
+
 ---
 
 ## Phase 3 — Memory + Skills + Tools
@@ -1376,6 +1414,45 @@ Plus eine Hybrid-Detail: für Live-Sends, deren `conversation_id` der Server ers
 
 Generelles Prinzip: **bei UI-Markern, die aus persistenten Daten ableitbar sind, daten-getrieben rendern statt im State zu führen.** State-Marker driften (Reset-Klick verloren bei Reload), Daten-Marker bleiben.
 
+### Lesson (Tag 10 / 3.2.F): Marker-Pattern statt Throw-Pattern bei AI SDK Tool-Hooks
+
+Beim Sub-Schritt 3.2.F wurde der Approval-Trigger initial als Throw-Pattern designed: `tool-bridge.ts` `execute()` wirft `McpToolApprovalRequiredError`, Twin-Service catcht den auf der `generateText`-Ebene, baut Pending-Audit. Konzeptionell sauber — Custom-Error-Klasse, klar erkennbar, Defense-in-Depth-fähig.
+
+Smoke-Test zeigte aber: AI SDK 6 propagiert Throws aus `execute()` **nicht** nach oben. Stattdessen wird der Error als `tool-result mit output: null` umgewandelt, an den LLM zurückgegeben, LLM-Loop läuft weiter, finishReason: 'tool-calls', leerer Text. Twin-Service sah keinen Throw, schrieb leeren `owner-direct`-Audit, kein Pending entstand. Architektur war konzeptionell richtig, aber AI-SDK-Implementierungs-Detail brach das Pattern.
+
+Lösung: Marker-Pattern als Primary. `execute()` returnt strukturiertes Result mit eindeutig identifizierbarem Marker-String im content-Array (`"__MCP_PENDING_APPROVAL__"`). Twin-Service durchläuft `result.toolCalls` nach `generateText`, prüft auf Marker, wirft dann lokal den `McpToolApprovalRequiredError` damit der existierende Catch-Pfad greift. Plus skillByToolKey-Reverse-Mapping via `buildMcpToolsFromSkills`-Return-Type erweitern, damit Twin-Service vom AI-SDK-konformen Tool-Namen zurück zum DB-Skill kommt.
+
+Throw-Pfad bleibt im Code als Defense-in-Depth — falls AI SDK seine Verhaltens-Logik in einer späteren Version ändert oder ein anderer Code-Pfad doch direkt wirft.
+
+Generelles Prinzip: **bei Third-Party-SDK-Hooks die Verhaltens-Annahmen früh verifizieren, nicht im finalen Smoke-Test feststellen.** Plus: wenn Throw nicht propagiert, ist Marker-Pattern (Strukturiertes Return-Value mit eindeutigem String) der robuste Fallback. Plus: Defense-in-Depth durch beide Pfade parallel ist sauberer als einen wegzuwerfen — falls die Versionsannahmen sich ändern, ist der Code dann schon robust.
+
+### Lesson (Tag 10 / Diagnose): LLM-Halluzinations-Symptom als Diagnose-Signal
+
+Beim 3.2.F-Smoke-Test zeigte sich ein verwirrendes Symptom: Twin antwortete mit „Das Tool braucht Approval und wartet jetzt in der Queue. Sobald Markus es freigibt, läuft der Call durch. Ergebnis wird 12 sein — aber das offiziell vom Tool, sobald approved." Klingt wie ein funktionierender Approval-Workflow, aber Audit zeigte `owner-direct|executed`, nicht `mcp-tool-use|pending`. Kein Pending-Eintrag in Inbox, kein Tool-Call in Logs.
+
+Erste Diagnose-Hypothese: AI-SDK-Throw-Pattern bricht. Aber tieferer Check ergab: `finishReason: stop`, `toolCalls: null` — der LLM hatte das Tool **gar nicht erst gerufen**. Stattdessen halluzinierte er eine plausible Approval-Antwort, weil er die Tools im Set sah und auf Approval-Verhalten geschlossen hat.
+
+Das Symptom „Tool funktioniert nicht, LLM beschreibt aber elegant warum" ist immer ein Hinweis darauf, dass das Tool gar nicht erst gerufen wurde. Bei Item #89 dasselbe Pattern — der LLM erfindet technische Begründungen ("client.experimental.tasks.callToolStream()"), warum Tools angeblich kaputt sind, statt sie wirklich zu rufen.
+
+Diagnose-Workflow für solche Fälle:
+1. Audit-Output checken: `finishReason` + `toolCalls`-Array. `null` → kein Tool-Call, `tool-calls` → Tool wurde gerufen
+2. Mit `toolChoice: 'required'` zwingen, dann beobachten ob Tool-Use überhaupt funktioniert. Wenn ja: Code-Pfad ok, LLM-Verhalten ist das Problem. Wenn nein: Tool-Bridge-Bug
+3. Halluzinierte Antworten sind kein Bug-Symptom des Codes, sondern des LLM-Auto-Pilots
+
+Generelles Prinzip: **bei verdächtigen LLM-Antworten, die „funktional" klingen, immer den Audit-Output verifizieren bevor Code-Bug diagnostiziert wird.** Claude Opus 4.7 ist sehr gut darin, plausible Erklärungen zu erfinden — was technisch klingt, ist nicht automatisch technisch korrekt. `finishReason` plus `toolCalls`-Array sind Ground-Truth.
+
+### Lesson (Tag 10 / 3.2.G): Persistent-Visualization für Approval-States
+
+Beim Inline-Approval-UI im Chat (3.2.G) gab's zwei Optionen für Post-Approve-Verhalten:
+- **A:** Pending-Box verschwindet, neue Twin-Antwort erscheint
+- **B:** Pending-Box bleibt mit „approved"-Status-Indicator, finale Twin-Antwort erscheint als zusätzlicher Block darunter
+
+Option B implementiert. Begründung: Audit-Trail-Konsistenz. User sieht historisch nachvollziehbar was passiert ist — „Ich habe approved, dann kam diese Antwort." Plus: alle drei Status-Varianten (`pending` mit Buttons, `executed` mit ✓ + Result, `rejected` mit ✗ + Begründung) nutzen dieselbe McpToolCallBox-Komponente, nur Status-Indicator wechselt. Code-Komplexität ist niedriger als bei Option A (Box weghauen + neue Bubble einfügen mit eigener Logik).
+
+Plus: bei Option A würde der Chat-Verlauf nach Approve identisch zu einem normalen Twin-Chat aussehen, ohne Hinweis auf den Tool-Use. Persistent-Visualization macht Tool-Use als Konzept im Chat sichtbar — User sieht, wann der Twin Tools nutzen wollte, was er gemacht hat, was die Ergebnisse waren. Pattern ist auch Vorbereitung für künftige Multi-Tool-Workflows oder Tool-Chaining-Visualisierungen.
+
+Generelles Prinzip: **bei zustandsbehafteten UI-Komponenten (Approve/Reject, Edit/Save, Pending/Resolved) Persistent-Visualization mit Status-Indicator-Wechsel statt Replace-by-New-Block.** User sieht den Verlauf, Code-Komplexität bleibt niedrig, Audit-Trail bleibt im UI sichtbar.
+
 ---
 
 ## Notiz für später
@@ -1383,6 +1460,20 @@ Generelles Prinzip: **bei UI-Markern, die aus persistenten Daten ableitbar sind,
 Sammle weiter Punkte, die im Sparring auftauchen. Nicht jeder Punkt muss eine Phase werden — manches ist Polishing, manches ist Architektur. Die Aufteilung S/M/L/XL und must/should/nice hilft beim Priorisieren wenn die Liste lang wird.
 
 **Item-Dichte 7. Mai 2026 nachmittag (Tag 8):** Vier Items abgeschlossen — #77 (Production-Container-Bootstrap, Commit `2e96ddb`), #74 (Persona-Skill-Layering, Commit `f045dd8`), #78 (Persona/Mandates-Reload-CLI, Commit `61154c0`), #81 (docs/-Volume-Mount via VPS-Override-File, kein Repo-Commit). Plus Production-komplett aktualisiert auf Tag-7+8-Stand. Plus zwei neue Items entstanden (#81 ✅ via Override-Pattern, #82 Heikos Persona-Source-File fehlt — open). Plus #71b von should auf must hochgestuft (Test-Hygiene als Pflicht-Vorbedingung vor 3.2). Plus 7 neue Lessons (Engine-Test als Truth-Source bei Persona-File-DB-Diskrepanz, Architektur-Befunde finden sich beim Verifizieren, tsx-Wegwerf-Skripts-Patterns, ps-Optionen Cross-Platform, Helper-Extraktion bei zweitem Aufruf, Compose-Symlinks und relative Pfad-Auflösung, Production-Drift-Pattern). Items insgesamt jetzt: 78 (74 + 4 neue Items #78-#82, davon #78 + #81 schon erledigt).
+
+**Item-Dichte 9. Mai 2026 mittag (Tag 10):** Phase 3.2 komplett — sieben Sub-Schritte A bis G plus Marker-Pattern-Patch in F durchgezogen. Acht Commits insgesamt: `2bf1ee0` Schema+Repo, `daa03b7` Client+Lifecycle, `cd5b295` Tool-Discovery+Skill-Sync, `366ca93` Tool-Execution via AI-SDK, `5f0f80c` BACKLOG-Update für #86-#89, `43258cf` CLI, `b58df94` Approval-Workflow (Inbox-Foundation), `bce54fb` Inline-Approval-UI im Chat. Plus drei neue Items: #90 (Resume-Prompt-Tuning für Reject), #91 (Reject-Reason-UI ersetzt window.prompt), #92 (Production-Deploy Phase 3.2). Plus drei neue Lessons (Throw-vs-Marker bei AI SDK 6, LLM-Halluzinations-Symptom als Diagnose-Signal, Persistent-Visualization für Approval-States). Items insgesamt jetzt: 87 (84 + #90 + #91 + #92, alle drei neu).
+
+**Was als Nächstes ansteht:** Phase 3.2 ist komplett, der Pfad zu 3.3 ist frei — aber ein Production-Deploy steht zwischen den beiden Phasen:
+- **#92 Production-Deploy von Phase 3.2** (must) — vier Migrations plus MCP-Setup auf VPS, Pre-Deploy-Checklist abarbeiten
+- **#90 Resume-Prompt-Tuning** (should) — bei trivialen Math-Problemen ignoriert der LLM Reject-Signale, Resume-Prompt härter formulieren
+- **#89 LLM-Tool-Use-Verhalten** (should) — Tools werden ohne `toolChoice: 'required'` ignoriert, langfristig brauchen wir entweder bessere Prompts oder strukturelle Lösung
+- **#91 Reject-Reason-UI** (nice) — window.prompt durch saubere Modal-Komponente ersetzen
+- **Strategie-Session vor 3.3** (Memory: Conversation + Semantic) — Auto-Summary-Schwelle, KV-Store-Lifecycle, facts.md-Schreibrechte, Embedding-Provider-Wahl
+- **3.3 — Memory: Conversation + Semantic** (L) — erste zwei Memory-Schichten, schneller ROI
+
+**Tag 10 Bilanz:** Acht Commits, ~3500+ Zeilen Code-Diff. Phase 3.2 in einem Tag durchgezogen — Sub-Schritt-Aufteilung mit eigenem Test pro Layer hat sich erneut bewährt (Pattern aus Tag 9). Plus zwei harte Diagnose-Blöcke (AI-SDK-Throw-Verhalten, LLM-Halluzinations-Pattern) plus ein CLI-Working-Dir-Bug. MCP-Foundation ist end-to-end produktiv: Server-Provisioning via CLI, Tool-Discovery, Tool-Execution mit Multi-Provider-Support, Approval-Workflow mit Pending-State, UI in Inbox UND Chat-Inline. Production-Deploy folgt als nächster großer Block.
+
+---
 
 **Item-Dichte 8. Mai 2026 abend (Tag 9):** Test-Hygiene-Block komplett — #71b und #80 ✅, plus #84 (Inline-Confirm) und #85 (Konversations-Trenner) als UX-Polish im selben Block ✅. Sechs Commits über fünf Sub-Schritte (A/B/C/D/E) plus die UX-Polish-Items: `bc1669a` Schema+Repo, `d0b8cc7` Twin-Service, `b694d0d` History-Loader, `8f604fa` UI-Reset-Button, `76e2728` UX-Polish, `e18f58c` Cleanup+Doku. Plus zwei neue Lessons (5-Sub-Schritt-Aufteilung beim Schema-Refactor, Backend-getriebene UI-Marker statt State-Marker). Items insgesamt jetzt: 80 (78 + #84 + #85, alle vier neu erledigten Items aus dem Test-Hygiene-Block ✅).
 
