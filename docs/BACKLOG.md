@@ -1,6 +1,6 @@
 # Backlog Phase 2.5 und später
 
-Stand: 9. Mai 2026, mittag (Tag 10) — Phase 3.2 (MCP-Client als Skill-Provider) komplett, sieben Sub-Schritte A bis G durchgezogen plus Marker-Pattern-Patch in F. Acht Commits insgesamt: `2bf1ee0` Schema+Repo, `daa03b7` Client+Lifecycle, `cd5b295` Tool-Discovery+Skill-Sync, `366ca93` Tool-Execution via AI-SDK-Tool-Bridge, `5f0f80c` BACKLOG-Update für #86-#89, `43258cf` CLI, `b58df94` Approval-Workflow (Inbox-Foundation), `bce54fb` Inline-Approval-UI im Chat. MCP-Foundation ist end-to-end produktiv: Server-Provisioning via CLI, Tool-Discovery, Tool-Execution mit Multi-Provider-Support, Approval-Workflow mit Pending-State, UI in Inbox UND Chat-Inline. Items insgesamt: 87 (84 + #90 + #91 + #92), davon drei heute neu eröffnet, keines abgeschlossen.
+Stand: 10. Mai 2026, vormittag (Tag 11) — Phase 3.2 in Production deployed (#92 ✅). Tag-10-Stand komplett auf VPS aktiv, Pilot-MCP-Server (everything + everything-approval, 26 Tools) für @markus angelegt. Migrations 011/012 sauber eingespielt, Image-Rebuild, Container-Recreate, Override-File um `mcp-servers/`-Volume-Mount erweitert (analog #81). Production-Smoke-Test bestätigt: Architektur ist deployed, aber Item #89 reproduziert sich auch in Production (LLM ruft Tools nicht autonom, halluziniert Antworten — neue Variante: Internal-Marker `__MCP_PENDING_APPROVAL__` als Halluzinations-Material). Plus Items #90, #91, #92 aus Tag-10-Mittag-Update gelandet. Items insgesamt: 87, davon #92 erledigt, #89 erweitert um Production-Befund.
 
 Format: Punkte mit Größe (S/M/L/XL) und Priorität (must/should/nice).
 
@@ -823,6 +823,10 @@ Punkt 3 ist die robusteste Lösung, weil sie das LLM-Ermessen aus der Tool-Use-F
 
 **Update Tag-10-Mittag (nach 3.2.F-G):** Verhalten reproduziert sich beim Approval-Smoke-Test — ohne `toolChoice: 'required'` ruft Claude Opus 4.7 das `everything-approval`-Tool nicht, halluziniert stattdessen Approval-Antworten ("Der Tool-Call liegt jetzt in der Approval-Queue. Sobald freigegeben, kommt das Ergebnis (30) zurück."). Architektur ist nachweislich korrekt — bei `required` greift der Marker-Pfad sauber, Pending-Audit entsteht, Inbox + Chat-UI rendern alle States. Aber: in Production wird das LLM bei autonomer Tool-Wahl unter-performen. Brücken-Lösung: User-getriggerte Approval-Forcierung über UI (3.2.G-Inline-UI) erzwingt Tool-Use indirekt — User-Click ist deterministisch, kein LLM-Ermessen.
 
+**Update Tag-11-Vormittag (nach #92 Production-Deploy):** Item ist UX-mäßig dringlicher als gedacht. In Production reproduziert sich das Verhalten exakt wie lokal — der LLM ruft Tools nicht autonom, halluziniert plausible Antworten. **Neue Beobachtung:** der LLM erfindet sogar Code-interne Marker-Strings als plausibles Halluzinations-Material. Beim Approval-Smoke-Test in Production antwortete Claude mit `"Tool-Call ist raus und hängt jetzt in der Approval-Queue (\`__MCP_PENDING_APPROVAL__\`). Sobald du freigibst, kommt das Ergebnis zurück. Approval-Workflow funktioniert also wie erwartet."`. Verifiziert dass der Marker NICHT im System-Prompt oder in einer Tool-Description leakt — der LLM erfindet ihn selbst, vermutlich aus Training-Korpus mit Approval-Pattern-Konventionen plus dem Tool-Namen "approval". UX-mäßig gefährlich: User könnte denken Approval-Workflow läuft, dabei ist nichts passiert. **Selbst mit nicht-trivialen Tools** (Echo-Test in Production: `Bitte rufe das mcp_everything_echo Tool auf`) halluziniert er das Tool-Output — er weiß aus Training-Daten dass Echo-Tools `Echo: <input>` zurückgeben, gibt das zurück, sagt explizit „Tool läuft" obwohl nichts läuft.
+
+Strukturelle Lösung über UI (Punkt 3 oben) wird nach Tag-11-Erfahrung zur klaren Top-Wahl: User-getriggerte Tool-Buttons im Chat, die `toolChoice: { type: 'tool', toolName: '...' }` forcieren. Nimmt das LLM-Ermessen komplett raus. Plus eventuell stärkere TOOL_USE_DIRECTIVE als Sofort-Polish (kostet wenig, hilft vermutlich nur teilweise).
+
 ### 90. Resume-Prompt-Tuning für Reject-Pfad
 Beim Sub-Schritt-3.2.G-Reject-Smoke-Test aufgefallen: bei trivialen Math-Problemen ignoriert der LLM das Reject-Resume-Signal. Test-Setup: User-Message "Rufe mcp_everything-approval_get-sum mit a=99 und b=1 auf", Tool-Call wird vorgeschlagen, User klickt Reject mit Reason "Nicht freigegeben". Resume-Prompt: "[System] Tool-Call wurde abgelehnt. Begründung: Nicht freigegeben." Antwort vom LLM: "99 + 1 = 100." statt "Verstanden, ohne Tool kann ich nicht antworten."
 
@@ -846,16 +850,26 @@ Vorbedingung: keine. Diff-Scope: Frontend only, ein Edit in `apps/web/app/chat/[
 
 **Größe:** S · **Priorität:** nice · **Aus:** Tag-10-Mittag 3.2.G-Implementation (window.prompt analog Inbox)
 
-### 92. Production-Deploy von Phase 3.2 (Migrations + MCP-Setup)
-Tag-10-Stand muss in Production. Diff zum Production-VPS (`5ee5352`, Tag 8) ist groß: vier neue Migrations (009-012), neue MCP-CLI, neue Inbox-UI-Render-Cases, neue Chat-Inline-Approval-UI.
+### 92. Production-Deploy von Phase 3.2 (Migrations + MCP-Setup) ✅ Tag 11
+**Erledigt 10. Mai 2026 vormittag (Tag 11), kein Repo-Commit für VPS-Override-Update.**
 
-Pre-Deploy-Checkliste:
-- Migrations 009 (`conversations`-Tabelle), 010 (Pre-Konversations-Cleanup), 011 (`mcp_servers`-Tabelle), 012 (`skills`-Erweiterung um mcp_server_id/mcp_tool_name) müssen in Production-DB. Auto-Bootstrap aus #77 sollte das automatisch machen, aber verifizieren via Container-Logs nach Restart (`[db:init] X Migration(en) angewendet` oder `(skipped)`).
-- Pilot-Server-Setup auf Production-DB für @markus — nicht aus lokaler DB übertragen, sondern via `pnpm twin:mcp-add @markus mcp-servers/everything.json` direkt auf Production-Container ausführen. ENV-Variablen `MCP_*_TIMEOUT_MS` setzen falls Defaults nicht passen.
-- Smoke-Test in Production: Chat-UI, ein normaler Tool-Call (no-approval) plus ein Approval-Tool-Call. Inbox-UI plus Chat-Inline-UI verifizieren.
-- Repo-Sync auf VPS (`git pull` von `bce54fb`), Container-Rebuild, restart.
+Tag-10-Stand auf Production-VPS gebracht. Sequenz: Repo-Pull (`7ed573d → 20aaa36`), Override-File erweitert um `mcp-servers/`-Volume-Mount (lebt nur auf VPS, analog #81), Image-Rebuild Runtime + Web (57.7s + 75.7s), Container-Recreate via `docker compose up -d`. Migrations 011 (`mcp_servers`-Tabelle) und 012 (`skills`-Erweiterung) frisch eingespielt — 010 Migrations waren überraschenderweise bereits drin (Production-DB hatte den Tag-9-Stand schon, vermutlich durch früheren Container-Restart). Schema-Stand jetzt 12 Migrations.
 
-Plus mögliche Stolperer: das `mcp-servers/`-Directory mit den JSON-Spec-Files muss zugänglich sein im Container — analog zu #81 (`docs/`-Volume-Mount). Override-File-Pattern verifizieren oder Dockerfile-Stage erweitern.
+MCP-Server provisioniert für @markus via CLI im Container:
+- `mcp_Psd-MfjYN7UJkIPM` — `everything` (no-approval, 13 Tools, Spawn 5.3s erstmalig)
+- `mcp_TdslZrvQccflqHzS` — `everything-approval` (approval-required, 13 Tools, Spawn 1.4s — npx-Cache warm)
+- 26 Tools insgesamt aktiv in Production
+
+Production-Smoke-Test verifiziert die Architektur, aber nicht den End-to-End-Tool-Use:
+- Tool-Aufforderung im Chat: `mcp_everything_get-sum` mit a=10, b=20 → Twin antwortet `30.`, aber `tool_calls: null` (Halluzination)
+- Approval-Tool im Chat: `mcp_everything-approval_get-sum` → Twin halluziniert Approval-Bestätigung mit Internal-Marker `__MCP_PENDING_APPROVAL__`, kein Pending-Audit, keine Pending-Box
+- Echo-Test (nicht-trivial): Twin halluziniert Echo-Output
+
+Befund: Architektur ist sauber deployed, aber Item #89 (LLM ruft Tools nicht autonom) reproduziert sich auch in Production. Marker-Code-Leak ausgeschlossen (Verifikation: Marker erscheint nur in `tool-bridge.js` Zeile 16/55 und `twin-service.js` Zeile 1065, NIRGENDWO in System-Prompt oder Tool-Description). LLM erfindet den Marker-String selbst.
+
+VPS-Override-File `/docker/twin-lab-web/docker-compose.override.yml` hat jetzt zwei bind-mounts (lebt nur auf VPS, nicht im Repo): `docs/` (#81) plus `mcp-servers/` (#92).
+
+Plus eine kleine Lesson zur Compose-Diagnose: `docker compose config` zeigt Override-Volume-Mounts NICHT an, obwohl sie aktiv sind. `docker inspect <container>` ist die zuverlässige Wahrheit. Beim Diagnostizieren in #92 erst irritierend.
 
 **Größe:** M · **Priorität:** must · **Aus:** Tag-10-Mittag, Production-Drift 7 Commits
 
@@ -1453,6 +1467,20 @@ Plus: bei Option A würde der Chat-Verlauf nach Approve identisch zu einem norma
 
 Generelles Prinzip: **bei zustandsbehafteten UI-Komponenten (Approve/Reject, Edit/Save, Pending/Resolved) Persistent-Visualization mit Status-Indicator-Wechsel statt Replace-by-New-Block.** User sieht den Verlauf, Code-Komplexität bleibt niedrig, Audit-Trail bleibt im UI sichtbar.
 
+### Lesson (Tag 11 / #92): docker compose config zeigt Override-Mounts manchmal nicht — docker inspect ist Truth-Source
+
+Beim Production-Deploy von Phase 3.2 (#92) gab es eine konfuse Diagnose-Phase. Override-File `docker-compose.override.yml` mit zwei Volume-Mounts (docs/ + neu mcp-servers/) war auf VPS angelegt, syntaktisch korrekt. Aber `docker compose config` zeigte NUR das `twin-lab-web-data`-Volume — keine bind-mounts. Ich war eine Weile auf der falschen Spur (Symlink-Pfad-Probleme, YAML-Indentation-Bug, Override-Auto-Discovery-Bug etc.) bevor mir einfiel: `docker inspect <container>` ist die zuverlässige Wahrheit, nicht `compose config`.
+
+Verifikation: `docker inspect twin-lab-runtime --format='{{json .Mounts}}'` zeigte beide bind-mounts (docs UND mcp-servers), exakt wie das Override es spezifizierte. Der laufende Container hatte alles korrekt — nur `compose config` lügt aus irgendeinem Grund (vermutlich Symlink-Auflösung oder ähnlich subtiles Verhalten beim Lesen der Project-Files).
+
+Praktisch heißt das: bei Volume-Mount-Diagnose immer beide Tools nutzen:
+1. `docker compose config` — zeigt was Compose sich aus den YAML-Files zusammen-merged
+2. `docker inspect <container>` — zeigt was Docker tatsächlich am laufenden Container hat
+
+Wenn beide übereinstimmen: alles gut. Wenn (1) was fehlt aber (2) hat es: läuft trotzdem korrekt, `compose config` ist nur unzuverlässig. Wenn (1) hat es aber (2) nicht: Container muss recreated werden, Compose hat den Mount noch nicht ausgerollt.
+
+Generelles Prinzip: **bei Container-Diagnose ist der laufende Container die Truth-Source, nicht die Configuration-Datei.** `docker inspect` ist dafür das richtige Tool. `compose config` zeigt Konfiguration auf dem Papier, was der Container tatsächlich macht ist eine separate Frage.
+
 ---
 
 ## Notiz für später
@@ -1460,20 +1488,6 @@ Generelles Prinzip: **bei zustandsbehafteten UI-Komponenten (Approve/Reject, Edi
 Sammle weiter Punkte, die im Sparring auftauchen. Nicht jeder Punkt muss eine Phase werden — manches ist Polishing, manches ist Architektur. Die Aufteilung S/M/L/XL und must/should/nice hilft beim Priorisieren wenn die Liste lang wird.
 
 **Item-Dichte 7. Mai 2026 nachmittag (Tag 8):** Vier Items abgeschlossen — #77 (Production-Container-Bootstrap, Commit `2e96ddb`), #74 (Persona-Skill-Layering, Commit `f045dd8`), #78 (Persona/Mandates-Reload-CLI, Commit `61154c0`), #81 (docs/-Volume-Mount via VPS-Override-File, kein Repo-Commit). Plus Production-komplett aktualisiert auf Tag-7+8-Stand. Plus zwei neue Items entstanden (#81 ✅ via Override-Pattern, #82 Heikos Persona-Source-File fehlt — open). Plus #71b von should auf must hochgestuft (Test-Hygiene als Pflicht-Vorbedingung vor 3.2). Plus 7 neue Lessons (Engine-Test als Truth-Source bei Persona-File-DB-Diskrepanz, Architektur-Befunde finden sich beim Verifizieren, tsx-Wegwerf-Skripts-Patterns, ps-Optionen Cross-Platform, Helper-Extraktion bei zweitem Aufruf, Compose-Symlinks und relative Pfad-Auflösung, Production-Drift-Pattern). Items insgesamt jetzt: 78 (74 + 4 neue Items #78-#82, davon #78 + #81 schon erledigt).
-
-**Item-Dichte 9. Mai 2026 mittag (Tag 10):** Phase 3.2 komplett — sieben Sub-Schritte A bis G plus Marker-Pattern-Patch in F durchgezogen. Acht Commits insgesamt: `2bf1ee0` Schema+Repo, `daa03b7` Client+Lifecycle, `cd5b295` Tool-Discovery+Skill-Sync, `366ca93` Tool-Execution via AI-SDK, `5f0f80c` BACKLOG-Update für #86-#89, `43258cf` CLI, `b58df94` Approval-Workflow (Inbox-Foundation), `bce54fb` Inline-Approval-UI im Chat. Plus drei neue Items: #90 (Resume-Prompt-Tuning für Reject), #91 (Reject-Reason-UI ersetzt window.prompt), #92 (Production-Deploy Phase 3.2). Plus drei neue Lessons (Throw-vs-Marker bei AI SDK 6, LLM-Halluzinations-Symptom als Diagnose-Signal, Persistent-Visualization für Approval-States). Items insgesamt jetzt: 87 (84 + #90 + #91 + #92, alle drei neu).
-
-**Was als Nächstes ansteht:** Phase 3.2 ist komplett, der Pfad zu 3.3 ist frei — aber ein Production-Deploy steht zwischen den beiden Phasen:
-- **#92 Production-Deploy von Phase 3.2** (must) — vier Migrations plus MCP-Setup auf VPS, Pre-Deploy-Checklist abarbeiten
-- **#90 Resume-Prompt-Tuning** (should) — bei trivialen Math-Problemen ignoriert der LLM Reject-Signale, Resume-Prompt härter formulieren
-- **#89 LLM-Tool-Use-Verhalten** (should) — Tools werden ohne `toolChoice: 'required'` ignoriert, langfristig brauchen wir entweder bessere Prompts oder strukturelle Lösung
-- **#91 Reject-Reason-UI** (nice) — window.prompt durch saubere Modal-Komponente ersetzen
-- **Strategie-Session vor 3.3** (Memory: Conversation + Semantic) — Auto-Summary-Schwelle, KV-Store-Lifecycle, facts.md-Schreibrechte, Embedding-Provider-Wahl
-- **3.3 — Memory: Conversation + Semantic** (L) — erste zwei Memory-Schichten, schneller ROI
-
-**Tag 10 Bilanz:** Acht Commits, ~3500+ Zeilen Code-Diff. Phase 3.2 in einem Tag durchgezogen — Sub-Schritt-Aufteilung mit eigenem Test pro Layer hat sich erneut bewährt (Pattern aus Tag 9). Plus zwei harte Diagnose-Blöcke (AI-SDK-Throw-Verhalten, LLM-Halluzinations-Pattern) plus ein CLI-Working-Dir-Bug. MCP-Foundation ist end-to-end produktiv: Server-Provisioning via CLI, Tool-Discovery, Tool-Execution mit Multi-Provider-Support, Approval-Workflow mit Pending-State, UI in Inbox UND Chat-Inline. Production-Deploy folgt als nächster großer Block.
-
----
 
 **Item-Dichte 8. Mai 2026 abend (Tag 9):** Test-Hygiene-Block komplett — #71b und #80 ✅, plus #84 (Inline-Confirm) und #85 (Konversations-Trenner) als UX-Polish im selben Block ✅. Sechs Commits über fünf Sub-Schritte (A/B/C/D/E) plus die UX-Polish-Items: `bc1669a` Schema+Repo, `d0b8cc7` Twin-Service, `b694d0d` History-Loader, `8f604fa` UI-Reset-Button, `76e2728` UX-Polish, `e18f58c` Cleanup+Doku. Plus zwei neue Lessons (5-Sub-Schritt-Aufteilung beim Schema-Refactor, Backend-getriebene UI-Marker statt State-Marker). Items insgesamt jetzt: 80 (78 + #84 + #85, alle vier neu erledigten Items aus dem Test-Hygiene-Block ✅).
 
@@ -1485,3 +1499,22 @@ Sammle weiter Punkte, die im Sparring auftauchen. Nicht jeder Punkt muss eine Ph
 - Optional: **#83 UI-Reply-Verkettung** — wartet auf weitere Reproduktion, kein akuter Blocker
 
 **Tag 9 Bilanz:** Sechs Commits über fünf Sub-Schritte plus UX-Polish, plus dieser Cleanup-+-Doku-Commit (`e18f58c`). Test-Hygiene-Block ist Schema-Refactor mit Migration 009 (`conversations`-Tabelle + `audit.conversation_id`), Migration 010 (Bestand-Cleanup), neuem Repo (`ConversationsRepo`), umgestelltem History-Loader (server-seitig per Konversation gefiltert mit 40-Messages-Cap), neuem UI-Reset-Button mit Inline-Confirm und Konversations-Trenner. Hauptpunkt erreicht: Skill-Toggle-Tests sind sauber, kein Memory-Leak nach Reset. Plus eine wichtige Architektur-Erkenntnis: bei Multi-Layer-Refactors zahlt sich die Sub-Schritt-Aufteilung mit eigenen Test-Skripten pro Layer aus — Bugs fallen sofort an der richtigen Stelle auf. Production-Update folgt beim nächsten regulären Pull (Tag-9-Stand ist nicht produktionskritisch).
+
+---
+
+**Item-Dichte 9. Mai 2026 mittag (Tag 10):** Phase 3.2 komplett — sieben Sub-Schritte A bis G plus Marker-Pattern-Patch in F durchgezogen. Acht Commits insgesamt: `2bf1ee0` Schema+Repo, `daa03b7` Client+Lifecycle, `cd5b295` Tool-Discovery+Skill-Sync, `366ca93` Tool-Execution via AI-SDK, `5f0f80c` BACKLOG-Update für #86-#89, `43258cf` CLI, `b58df94` Approval-Workflow (Inbox-Foundation), `bce54fb` Inline-Approval-UI im Chat, plus `20aaa36` Doku-Update. Plus drei neue Items: #90 (Resume-Prompt-Tuning für Reject), #91 (Reject-Reason-UI ersetzt window.prompt), #92 (Production-Deploy Phase 3.2). Plus drei neue Lessons (Throw-vs-Marker bei AI SDK 6, LLM-Halluzinations-Symptom als Diagnose-Signal, Persistent-Visualization für Approval-States). Items insgesamt jetzt: 87 (84 + #90 + #91 + #92, alle drei neu).
+
+**Tag 10 Bilanz:** Acht Commits, ~3500+ Zeilen Code-Diff. Phase 3.2 in einem Tag durchgezogen — Sub-Schritt-Aufteilung mit eigenem Test pro Layer hat sich erneut bewährt (Pattern aus Tag 9). Plus zwei harte Diagnose-Blöcke (AI-SDK-Throw-Verhalten, LLM-Halluzinations-Pattern) plus ein CLI-Working-Dir-Bug. MCP-Foundation ist end-to-end produktiv: Server-Provisioning via CLI, Tool-Discovery, Tool-Execution mit Multi-Provider-Support, Approval-Workflow mit Pending-State, UI in Inbox UND Chat-Inline. Production-Deploy folgt als nächster großer Block.
+
+---
+
+**Item-Dichte 10. Mai 2026 vormittag (Tag 11):** #92 erledigt — Production-Deploy von Phase 3.2 in ~60 Min durchgezogen. VPS-Override-File erweitert um zweiten bind-mount (`mcp-servers/`, analog #81-Pattern). Image-Rebuild Runtime + Web (57.7s + 75.7s), Container-Recreate, Migrations 011/012 sauber eingespielt (010 Migrations waren schon drin), Pilot-MCP-Server für Production-@markus angelegt (everything + everything-approval, 26 Tools). Production-Smoke-Test verifiziert die Architektur-Komponenten, aber Item #89 reproduziert sich auch in Production — Twin halluziniert Tool-Outputs inklusive Code-internen Marker-String `__MCP_PENDING_APPROVAL__` als plausibles Halluzinations-Material (ohne dass der Marker im System-Prompt leakt). #89 ist UX-mäßig dringlicher geworden. Plus neue Lesson zum Tag-11-Diagnose-Blocker (`docker compose config` zeigt Override-Mounts manchmal nicht, `docker inspect` ist Truth-Source). Items insgesamt jetzt: 87, davon #92 ✅, #89 erweitert um Production-Befund.
+
+**Was als Nächstes ansteht:** Phase 3.2 ist sowohl lokal als auch in Production komplett. Pfad zu 3.3 ist frei, aber #89 wird zur Top-Priorität:
+- **#89 LLM-Tool-Use-Verhalten tunen** (should, M) — Klar geworden in Tag-11-Production-Deploy: Tool-Use ohne strukturelle Lösung ist UX-mäßig kaputt. Lösungspfad jetzt klar: User-getriggerte Tool-Buttons im Chat mit `toolChoice: { type: 'tool', toolName: '...' }`. Plus eventuell härtere TOOL_USE_DIRECTIVE als Sofort-Polish.
+- **#90 Resume-Prompt-Tuning** (should, M) — kann nach #89 kommen, wenn der Tool-Call-Pfad sauber ist
+- **#91 Reject-Reason-UI** (nice, S) — kommt mit #90 zusammen
+- **Strategie-Session vor 3.3** (Memory: Conversation + Semantic) — Pre-Implementation-Diskussion zu Auto-Summary-Schwelle, KV-Store-Lifecycle, facts.md-Schreibrechte
+- **3.3 — Memory: Conversation + Semantic** (L) — erste zwei Memory-Schichten, schneller ROI
+
+**Tag 11 Bilanz:** Ein Block, ~60 Min: Production-Deploy von Phase 3.2 erfolgreich. Migrations + Image-Rebuild + Container-Recreate + MCP-Server-Provisioning + Smoke-Test. Override-Pattern für VPS-spezifische Mounts erneut bewährt. Architektur ist deployed, Item #89 ist klar als nächstes anzugehen — UX-mäßig wichtiger als gedacht.
