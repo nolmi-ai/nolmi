@@ -2,6 +2,7 @@ import type {
   AuditEntry,
   AuditToolCall,
   ChatMessage,
+  ForcedToolChoice,
   Mandate,
   Persona,
   Skill,
@@ -109,6 +110,12 @@ export interface ApproveResult {
 /** Optional: wer hat den Chat ausgelöst (für Owner-Bypass). */
 export interface ChatRequestContext {
   requesterUserId?: string;
+  /**
+   * 3.2.H: User-getriggerte Tool-Use über den Picker. Wenn gesetzt, reichen
+   * wir das Feld bis runModel/generateText durch und erzwingen den Tool-Call.
+   * Default-Auto bleibt für reguläre Chats.
+   */
+  forcedToolChoice?: ForcedToolChoice;
 }
 
 export class TwinService {
@@ -182,7 +189,9 @@ export class TwinService {
     const ownerBypass = isOwner && detection.capability !== "send_to_twin";
 
     if (ownerBypass) {
-      return this.runOwnerDirect(detection.capability, messages, lastUser);
+      return this.runOwnerDirect(detection.capability, messages, lastUser, {
+        forcedToolChoice: ctx.forcedToolChoice,
+      });
     }
 
     // 3. Mandate-Check (External-Pfad — Owner-Bypass schon oben abgehandelt)
@@ -265,6 +274,7 @@ export class TwinService {
     originalCapability: string,
     messages: ChatMessage[],
     lastUser: string,
+    options: { forcedToolChoice?: ForcedToolChoice } = {},
   ): Promise<{ message: ChatMessage; auditId: string; pending: boolean }> {
     // #71b/#80: Direct-Chat-Audits werden mit der aktiven Konversation
     // verknüpft. ownerUserId muss gesetzt sein, weil Owner-Bypass nur greift
@@ -311,7 +321,10 @@ export class TwinService {
         this.deps.persona,
         llmMessages,
         undefined,
-        { enableMcpTools: true },
+        {
+          enableMcpTools: true,
+          forcedToolChoice: options.forcedToolChoice,
+        },
       );
       const audit = await this.deps.audit.start({
         capability: "owner-direct",
@@ -1058,7 +1071,17 @@ export class TwinService {
     persona: Persona,
     messages: ChatMessage[],
     extraSystem?: string,
-    options: { enableMcpTools?: boolean } = {},
+    options: {
+      enableMcpTools?: boolean;
+      /**
+       * 3.2.H: User-getriggerte Tool-Use über den Picker. Wird als
+       * `toolChoice` an `generateText` durchgereicht und erzwingt den
+       * spezifischen Tool-Call (kein LLM-Ermessen). Nur wirksam, wenn auch
+       * `enableMcpTools=true` ist und das Tool im aktiven Skill-Set
+       * existiert — sonst ignoriert (LLM-Default-Auto greift).
+       */
+      forcedToolChoice?: ForcedToolChoice;
+    } = {},
   ): Promise<{ content: string; metadata: Record<string, unknown> }> {
     // Skills landen zwischen Persona und LANGUAGE_DIRECTIVE: sie ergänzen die
     // Persona ("wer der Twin ist") um Wissen/Verhalten ("was er zusätzlich
@@ -1129,12 +1152,34 @@ const TOOL_USE_DIRECTIVE = hasTools
     // Default in AI-SDK-6 ist stepCountIs(1) — also genau ein LLM-Call.
     // Mit Tool-Use brauchen wir mehrere Steps (call → result → call → ...);
     // 5 ist der Briefing-Default und reicht für die Pilot-Tools allemal.
+    //
+    // 3.2.H: forcedToolChoice nur wenn das Ziel-Tool im aktuellen Tool-Set
+    // existiert. AI SDK 6 wirft sonst einen NoSuchToolError; lieber lautlos
+    // auf Auto zurückfallen und im Audit als ganz normaler LLM-Antwort-Pfad
+    // landen, statt dem User einen 500 zu zeigen wenn sein Picker-Skill
+    // gerade deaktiviert wurde.
+    const forcedTool =
+      hasTools &&
+      options.forcedToolChoice &&
+      mcpTools[options.forcedToolChoice.toolName] !== undefined
+        ? options.forcedToolChoice
+        : null;
+    if (options.forcedToolChoice && !forcedTool) {
+      console.warn(
+        `[mcp:tools] forcedToolChoice ${options.forcedToolChoice.toolName} ` +
+          `nicht im aktiven Tool-Set — fallback auf toolChoice='auto'`,
+      );
+    }
     const result = await generateText({
       model: this.deps.model,
       system,
       messages: toModelMessages(messages),
       ...(hasTools
-        ? { tools: mcpTools, stopWhen: stepCountIs(5) }
+        ? {
+            tools: mcpTools,
+            stopWhen: stepCountIs(5),
+            ...(forcedTool ? { toolChoice: forcedTool } : {}),
+          }
         : {}),
     });
 
@@ -1144,6 +1189,11 @@ const TOOL_USE_DIRECTIVE = hasTools
     // Wir scannen result.toolCalls + result.toolResults nach dem Marker und
     // werfen `McpToolApprovalRequiredError` lokal — der existierende Catch
     // im runOwnerDirect übernimmt den Pending-Audit-Pfad.
+    //
+    // WICHTIG: muss VOR dem Multi-Step-Followup laufen. Bei Approval-Tools
+    // ist `text` zwar leer und `finishReason='tool-calls'` — würde die
+    // Followup-Bedingung treffen — aber wir wollen statt Followup einen
+    // Pending-Audit. Reihenfolge: erst Marker-Check (Throw), dann Followup.
     if (hasTools) {
       const pending = detectPendingToolCall(result, skillByToolKey);
       if (pending) {
@@ -1155,10 +1205,49 @@ const TOOL_USE_DIRECTIVE = hasTools
       }
     }
 
+    // 3.2.H Patch: bei forciertem toolChoice macht AI SDK 6 nur EINEN Step.
+    // Tool wird gerufen, Result kommt zurück, finishReason='tool-calls' —
+    // aber kein Synthese-Step für die finale Text-Antwort, also `text=""`.
+    // stopWhen greift hier nicht, weil das forced-Tool-Verhalten den Step
+    // explizit beendet. Wir hängen einen Followup-Call dran (toolChoice
+    // 'auto', also Default), der mit der bisherigen Konversation + den
+    // assistant-Tool-Call- und tool-Result-Messages weiterarbeitet und den
+    // Final-Text liefert. stepCountIs(2) reicht: ein einziger Text-Step
+    // ohne weiteres Tool-Use ist alles was wir brauchen.
+    const needsFollowUp =
+      forcedTool !== null &&
+      result.text === "" &&
+      result.toolCalls.length > 0 &&
+      result.finishReason === "tool-calls";
+
+    let followupResult: typeof result | null = null;
+    if (needsFollowUp) {
+      console.log(
+        `[mcp:tools] forcedToolChoice + finishReason=tool-calls — running followup for final text (twin=${this.deps.twinId})`,
+      );
+      followupResult = await generateText({
+        model: this.deps.model,
+        system,
+        // response.messages enthält die assistant-Tool-Call- und
+        // tool-Result-Messages aus dem ersten Step — direkt anhängen, dann
+        // ist der Kontext komplett.
+        messages: [
+          ...toModelMessages(messages),
+          ...result.response.messages,
+        ],
+        tools: mcpTools,
+        stopWhen: stepCountIs(2),
+        // Kein toolChoice → Default 'auto'. LLM darf jetzt frei antworten.
+      });
+    }
+
     // Tool-Use-Detail in die Audit-Metadata. Der Audit-Insert in den
     // Approve-/OwnerDirect-Pfaden packt metadata komplett ins audit.output —
     // damit landen Tool-Calls automatisch im Audit-Trail, ohne weitere
     // Anpassung. AI-SDK 6 nutzt input/output (nicht args/result).
+    //
+    // Tool-Calls/-Results kommen aus dem ERSTEN Call (das ist das
+    // erzwungene Tool); Final-Text aus dem Followup, falls vorhanden.
     const toolCallsForAudit: AuditToolCall[] = result.toolCalls.map((tc) => {
       const matchingResult = result.toolResults.find(
         (tr) => tr.toolCallId === tc.toolCallId,
@@ -1170,12 +1259,20 @@ const TOOL_USE_DIRECTIVE = hasTools
       };
     });
 
+    const finalText = followupResult ? followupResult.text : result.text;
+    const finalFinishReason = followupResult
+      ? followupResult.finishReason
+      : result.finishReason;
+    const mergedUsage = followupResult
+      ? mergeTokenUsage(result.usage, followupResult.usage)
+      : result.usage;
+
     return {
-      content: result.text,
+      content: finalText,
       metadata: {
         provider: this.deps.modelLabel,
-        usage: result.usage,
-        finishReason: result.finishReason,
+        usage: mergedUsage,
+        finishReason: finalFinishReason,
         ...(toolCallsForAudit.length > 0
           ? { toolCalls: toolCallsForAudit }
           : {}),
@@ -1404,6 +1501,30 @@ function composeToolApprovalRequest(
     `Ich möchte das Tool '${toolName}' mit Argumenten ${argsPreview} nutzen, ` +
     `brauche aber deine Genehmigung. Bitte schau in der Inbox.`
   );
+}
+
+/**
+ * 3.2.H Patch: summiert Token-Stats aus zwei `generateText`-Calls (erster
+ * Call mit forciertem Tool, zweiter Call für Final-Text). AI SDK 6 hält die
+ * Felder `inputTokens`/`outputTokens`/`totalTokens` als optional-number; wir
+ * addieren defensiv mit 0-Default und behalten alle übrigen Felder aus dem
+ * ersten Call (z.B. cached-Tokens-Varianten je nach Provider) bei.
+ *
+ * Form-Toleranz: nicht-numerische Werte fallen auf 0 zurück, damit ein
+ * Provider-Update mit anderem Schema uns nicht crasht.
+ */
+function mergeTokenUsage(
+  a: GenerateTextOutcome["usage"],
+  b: GenerateTextOutcome["usage"],
+): GenerateTextOutcome["usage"] {
+  const sum = (x: number | undefined, y: number | undefined) =>
+    (typeof x === "number" ? x : 0) + (typeof y === "number" ? y : 0);
+  return {
+    ...a,
+    inputTokens: sum(a.inputTokens, b.inputTokens),
+    outputTokens: sum(a.outputTokens, b.outputTokens),
+    totalTokens: sum(a.totalTokens, b.totalTokens),
+  };
 }
 
 /**

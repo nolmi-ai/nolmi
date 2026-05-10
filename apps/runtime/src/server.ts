@@ -5,7 +5,12 @@ import { nanoid } from "nanoid";
 import { z } from "zod";
 import type Database from "better-sqlite3";
 import type { AuditRepository } from "./repository/types.js";
-import { ChatRequestSchema, type AuditEntry } from "@twin-lab/shared";
+import {
+  ChatRequestSchema,
+  type AuditEntry,
+  type TwinToolListItem,
+} from "@twin-lab/shared";
+import { McpServersRepo } from "./mcp/repo.js";
 import type { RegistryEntry, TwinServiceRegistry } from "./twin-service-registry.js";
 import { TwinProfilesRepo } from "./twin-profiles-repo.js";
 import { encrypt } from "./crypto-utils.js";
@@ -74,6 +79,8 @@ export interface ServerDeps {
   skillRepo: SkillRepo;
   /** Für /twins/:handle/conversations/reset — geteilte Instanz mit der Registry. */
   conversationsRepo: ConversationsRepo;
+  /** 3.2.H — für GET /twins/:handle/tools (Server-Name pro Skill). */
+  mcpServersRepo: McpServersRepo;
 }
 
 export async function createServer(deps: ServerDeps) {
@@ -207,8 +214,11 @@ export async function createServer(deps: ServerDeps) {
         // requesterUserId triggert den Owner-Bypass im TwinService — heute
         // immer der Owner (requireOwner stellt das sicher), aber explizit
         // weiterzureichen ist robuster, falls die Route mal aufgemacht wird.
+        // 3.2.H: forcedToolChoice (vom Tool-Picker) wird durchgereicht; ohne
+        // greift Default-Auto.
         return await entry.service.chat(parsed.data.messages, {
           requesterUserId: user.userId,
+          forcedToolChoice: parsed.data.forcedToolChoice,
         });
       } catch (err) {
         const msg = err instanceof Error ? err.message : "Unknown error";
@@ -222,6 +232,9 @@ export async function createServer(deps: ServerDeps) {
 
   // ─── Skills (3.1.E) ────────────────────────────────────────────────────────
   registerSkillRoutes(app, deps, requireOwner);
+
+  // ─── Tools (3.2.H — Tool-Picker-UI) ───────────────────────────────────────
+  registerToolRoutes(app, deps, requireOwner);
 
   // ─── A2A-Conversations (2.5.4.2) ──────────────────────────────────────────
   registerConversationRoutes(app, deps, requireOwner);
@@ -993,6 +1006,77 @@ function registerSkillRoutes(
         return reply.status(500).send({ error: "Skill nach Update nicht gefunden" });
       }
       return toSkillUiPayload(updated);
+    },
+  );
+}
+
+// ─── TOOL ROUTES (3.2.H — Tool-Picker-UI) ────────────────────────────────────
+//
+// Liefert die aktiven MCP-Tools des Twins für den Tool-Picker im Chat-Input.
+// Filter: source='mcp' AND is_active=true. Pro Skill resolven wir den Server-
+// Namen über mcpServersRepo (Join wäre eleganter, aber das Volumen ist klein
+// genug, dass ein In-Memory-Lookup über Map<id, name> ausreicht).
+//
+// inputSchema kommt aus dem Skill-Manifest (`mcpInputSchema`, befüllt von
+// McpSkillSync.syncOnAdd seit 3.2.C). Picker-Frontend baut daraus die
+// typisierte Args-Form. toolName ist der AI-SDK-Key (`mcp_<server>_<tool>` —
+// derselbe Schlüssel, mit dem buildMcpToolsFromSkills die Tools registriert),
+// damit forcedToolChoice 1:1 matcht.
+
+function registerToolRoutes(
+  app: FastifyInstance,
+  deps: ServerDeps,
+  requireOwner: (
+    request: FastifyRequest,
+    reply: FastifyReply,
+    handle: string,
+  ) => Promise<{ entry: RegistryEntry; user: User } | null>,
+) {
+  app.get<{ Params: { handle: string } }>(
+    "/twins/:handle/tools",
+    async (request, reply) => {
+      const ctx = await requireOwner(request, reply, request.params.handle);
+      if (!ctx) return;
+      const { entry } = ctx;
+
+      const skills = deps.skillRepo.list(entry.twinId, {
+        activeOnly: true,
+        source: "mcp",
+      });
+
+      // Server-Namen vorab in eine Map laden — N+1 vermeiden, weil ein Twin
+      // typischerweise wenige MCP-Server hat aber dutzende Tools.
+      const servers = deps.mcpServersRepo.list(entry.twinId);
+      const serverNameById = new Map(servers.map((s) => [s.id, s.name]));
+
+      const tools: TwinToolListItem[] = [];
+      for (const skill of skills) {
+        if (!skill.mcpServerId || !skill.mcpToolName) continue;
+        const serverName = serverNameById.get(skill.mcpServerId);
+        if (!serverName) continue; // Server gelöscht aber Skill noch da — skippen
+        const toolKey = skill.name.replaceAll(":", "_");
+        const inputSchema = skill.manifestJson.mcpInputSchema ?? null;
+        tools.push({
+          skillId: skill.skillId,
+          skillName: skill.name,
+          toolName: toolKey,
+          description: skill.manifestJson.description ?? skill.description ?? null,
+          inputSchema,
+          serverName,
+          requiresApproval: skill.manifestJson.requiresApproval,
+        });
+      }
+
+      // Stabile Sortierung: Server-Name, dann Tool-Name. Macht den Picker
+      // beim mehrmaligen Öffnen vorhersehbar.
+      tools.sort((a, b) => {
+        if (a.serverName !== b.serverName) {
+          return a.serverName.localeCompare(b.serverName);
+        }
+        return a.skillName.localeCompare(b.skillName);
+      });
+
+      return { tools };
     },
   );
 }

@@ -149,8 +149,21 @@ export const ChatMessageSchema = z.object({
   content: z.string(),
 });
 
+// 3.2.H: User-getriggerte Tool-Use über den Tool-Picker. Wenn gesetzt, reicht
+// TwinService das Feld als `toolChoice` an `generateText` durch — AI SDK 6
+// erzwingt damit den genannten Tool-Call. Default-Auto bleibt unverändert,
+// wenn das Feld nicht gesetzt ist (LLM entscheidet selbst). Nur die Tool-Form
+// wird heute unterstützt; 'required'/'none'/'auto' brauchen wir nicht, weil
+// das LLM-Default-Verhalten der Picker explizit umgeht.
+export const ForcedToolChoiceSchema = z.object({
+  type: z.literal("tool"),
+  toolName: z.string().min(1),
+});
+export type ForcedToolChoice = z.infer<typeof ForcedToolChoiceSchema>;
+
 export const ChatRequestSchema = z.object({
   messages: z.array(ChatMessageSchema),
+  forcedToolChoice: ForcedToolChoiceSchema.optional(),
 });
 
 export const ChatResponseSchema = z.object({
@@ -161,6 +174,26 @@ export const ChatResponseSchema = z.object({
 export type ChatMessage = z.infer<typeof ChatMessageSchema>;
 export type ChatRequest = z.infer<typeof ChatRequestSchema>;
 export type ChatResponse = z.infer<typeof ChatResponseSchema>;
+
+// 3.2.H: GET /twins/:handle/tools — Antwort-Format für den Tool-Picker. Pro
+// aktivem MCP-Skill ein Eintrag mit dem AI-SDK-Tool-Key (`toolName`) und dem
+// JSON-Schema, aus dem das Frontend die Args-Form generiert. serverName aus
+// dem zugehörigen mcp_servers-Eintrag, requiresApproval aus dem Manifest.
+export const TwinToolListItemSchema = z.object({
+  skillId: z.string(),
+  skillName: z.string(),
+  toolName: z.string(),
+  description: z.string().nullable(),
+  inputSchema: z.unknown().nullable(),
+  serverName: z.string(),
+  requiresApproval: z.boolean(),
+});
+export type TwinToolListItem = z.infer<typeof TwinToolListItemSchema>;
+
+export const TwinToolListResponseSchema = z.object({
+  tools: z.array(TwinToolListItemSchema),
+});
+export type TwinToolListResponse = z.infer<typeof TwinToolListResponseSchema>;
 
 // ─── CONVERSATIONS (Phase 3 / #71b + #80) ────────────────────────────────────
 //

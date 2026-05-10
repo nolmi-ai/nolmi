@@ -10,6 +10,7 @@ import {
   useState,
 } from "react";
 import type { AuditEntry, ChatMessage, TwinEvent } from "@twin-lab/shared";
+import { ToolPicker } from "./ToolPicker";
 
 const RUNTIME_URL = process.env.NEXT_PUBLIC_RUNTIME_URL ?? "http://localhost:4000";
 
@@ -781,8 +782,15 @@ function DirectChat({ handle, resetSeq }: { handle: string; resetSeq: number }) 
   async function send() {
     if (!input.trim() || busy) return;
     const userText = input;
-    setOptimisticUser(userText);
     setInput("");
+    await sendChat(userText);
+  }
+
+  async function sendChat(
+    userText: string,
+    forcedToolChoice?: { type: "tool"; toolName: string },
+  ) {
+    setOptimisticUser(userText);
     setBusy(true);
     setError(null);
 
@@ -794,8 +802,11 @@ function DirectChat({ handle, resetSeq }: { handle: string; resetSeq: number }) 
         // Backend rekonstruiert die LLM-History server-seitig aus der aktiven
         // Konversation (#71b/#80 Sub-Schritt C); wir schicken minimal die
         // letzte User-Message mit, damit das alte Schema kompatibel bleibt.
+        // 3.2.H: forcedToolChoice nur bei Picker-Submit gesetzt — für normale
+        // Texteingaben bleibt es undefined → Default-Auto im Backend.
         body: JSON.stringify({
           messages: [{ role: "user", content: userText }],
+          ...(forcedToolChoice ? { forcedToolChoice } : {}),
         }),
       });
       if (!res.ok) {
@@ -811,6 +822,18 @@ function DirectChat({ handle, resetSeq }: { handle: string; resetSeq: number }) 
       setOptimisticUser(null);
       setBusy(false);
     }
+  }
+
+  // 3.2.H: Tool-Picker-Submit. Baut die User-Message als '[Tool-Aufruf]' +
+  // Args-JSON, sendet mit forcedToolChoice. Backend zwingt LLM zum Tool-Call,
+  // Tool-Result wird vom LLM interpretiert und als finale Antwort
+  // zurückgegeben. Approval-Pfad bleibt transparent.
+  async function sendToolFromPicker(
+    toolName: string,
+    args: Record<string, unknown>,
+  ) {
+    const userText = `[Tool-Aufruf] ${toolName} mit Args ${JSON.stringify(args)}`;
+    await sendChat(userText, { type: "tool", toolName });
   }
 
   async function handleApprove(auditId: string) {
@@ -929,6 +952,9 @@ function DirectChat({ handle, resetSeq }: { handle: string; resetSeq: number }) 
           className="flex-1 h-full bg-bg border border-border rounded px-3 py-2 text-sm text-text resize-none focus:outline-none focus:border-accent"
           rows={2}
         />
+        {/* 3.2.H: Tool-Picker zwischen Input und Send. Klick öffnet Modal mit
+            aktiven MCP-Tools, Submit zwingt den Tool-Call. */}
+        <ToolPicker handle={handle} disabled={busy} onSend={sendToolFromPicker} />
         <button
           onClick={send}
           disabled={busy || !input.trim()}

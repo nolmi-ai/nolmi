@@ -75,6 +75,7 @@ async function main() {
     trustRepo,
     skillRepo,
     conversationsRepo,
+    mcpServersRepo,
   });
 
   // 5. Registry mit allen aktiven Twins füllen — entschlüsselt API-Keys.
