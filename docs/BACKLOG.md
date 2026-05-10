@@ -1,6 +1,6 @@
 # Backlog Phase 2.5 und später
 
-Stand: 10. Mai 2026, vormittag (Tag 11) — Phase 3.2 in Production deployed (#92 ✅). Tag-10-Stand komplett auf VPS aktiv, Pilot-MCP-Server (everything + everything-approval, 26 Tools) für @markus angelegt. Migrations 011/012 sauber eingespielt, Image-Rebuild, Container-Recreate, Override-File um `mcp-servers/`-Volume-Mount erweitert (analog #81). Production-Smoke-Test bestätigt: Architektur ist deployed, aber Item #89 reproduziert sich auch in Production (LLM ruft Tools nicht autonom, halluziniert Antworten — neue Variante: Internal-Marker `__MCP_PENDING_APPROVAL__` als Halluzinations-Material). Plus Items #90, #91, #92 aus Tag-10-Mittag-Update gelandet. Items insgesamt: 87, davon #92 erledigt, #89 erweitert um Production-Befund.
+Stand: 10. Mai 2026, mittag (Tag 11) — Phase 3.2 sowohl lokal als auch in Production komplett. Tag-11-Vormittag: #92 Production-Deploy von Phase 3.2 (A-G) auf VPS. Tag-11-Mittag: 3.2 Sub-Schritt H Tool-Picker-UI als strukturelle Lösung für Item #89 (UI-Pfad), plus Multi-Step-Followup-Patch bei forcedToolChoice, plus TOOL_USE_DIRECTIVE-Polish (Defense-in-Depth gegen Marker-Halluzination). Drei Tag-11-Commits: `f3532e8` Doku Tag 11 Vormittag, `b97ae80` 3.2.H Tool-Picker, `2e7c1d0` Direktive-Polish. Items insgesamt: 87, davon #92 ✅, #89 strukturell gelöst für UI-Pfad (bleibt offen für Natural-Language-Pfad).
 
 Format: Punkte mit Größe (S/M/L/XL) und Priorität (must/should/nice).
 
@@ -821,30 +821,36 @@ Punkt 3 ist die robusteste Lösung, weil sie das LLM-Ermessen aus der Tool-Use-F
 
 **Größe:** M · **Priorität:** should · **Aus:** Tag-10-Vormittag 3.2.D-Verifikations-Test
 
-**Update Tag-10-Mittag (nach 3.2.F-G):** Verhalten reproduziert sich beim Approval-Smoke-Test — ohne `toolChoice: 'required'` ruft Claude Opus 4.7 das `everything-approval`-Tool nicht, halluziniert stattdessen Approval-Antworten ("Der Tool-Call liegt jetzt in der Approval-Queue. Sobald freigegeben, kommt das Ergebnis (30) zurück."). Architektur ist nachweislich korrekt — bei `required` greift der Marker-Pfad sauber, Pending-Audit entsteht, Inbox + Chat-UI rendern alle States. Aber: in Production wird das LLM bei autonomer Tool-Wahl unter-performen. Brücken-Lösung: User-getriggerte Approval-Forcierung über UI (3.2.G-Inline-UI) erzwingt Tool-Use indirekt — User-Click ist deterministisch, kein LLM-Ermessen.
+**Update Tag-10-Mittag (nach 3.2.F-G):** Verhalten reproduziert sich beim Approval-Smoke-Test — ohne `toolChoice: 'required'` ruft Claude Opus 4.7 das `everything-approval`-Tool nicht, halluziniert stattdessen Approval-Antworten. Architektur ist nachweislich korrekt — bei `required` greift der Marker-Pfad sauber, Pending-Audit entsteht, Inbox + Chat-UI rendern alle States. Brücken-Lösung: User-getriggerte Approval-Forcierung über UI (3.2.G-Inline-UI) erzwingt Tool-Use indirekt.
 
-**Update Tag-11-Vormittag (nach #92 Production-Deploy):** Item ist UX-mäßig dringlicher als gedacht. In Production reproduziert sich das Verhalten exakt wie lokal — der LLM ruft Tools nicht autonom, halluziniert plausible Antworten. **Neue Beobachtung:** der LLM erfindet sogar Code-interne Marker-Strings als plausibles Halluzinations-Material. Beim Approval-Smoke-Test in Production antwortete Claude mit `"Tool-Call ist raus und hängt jetzt in der Approval-Queue (\`__MCP_PENDING_APPROVAL__\`). Sobald du freigibst, kommt das Ergebnis zurück. Approval-Workflow funktioniert also wie erwartet."`. Verifiziert dass der Marker NICHT im System-Prompt oder in einer Tool-Description leakt — der LLM erfindet ihn selbst, vermutlich aus Training-Korpus mit Approval-Pattern-Konventionen plus dem Tool-Namen "approval". UX-mäßig gefährlich: User könnte denken Approval-Workflow läuft, dabei ist nichts passiert. **Selbst mit nicht-trivialen Tools** (Echo-Test in Production: `Bitte rufe das mcp_everything_echo Tool auf`) halluziniert er das Tool-Output — er weiß aus Training-Daten dass Echo-Tools `Echo: <input>` zurückgeben, gibt das zurück, sagt explizit „Tool läuft" obwohl nichts läuft.
+**Update Tag-11-Vormittag (nach #92 Production-Deploy):** Item ist UX-mäßig dringlicher als gedacht. In Production reproduziert sich das Verhalten exakt wie lokal — der LLM ruft Tools nicht autonom, halluziniert plausible Antworten. **Neue Beobachtung:** der LLM erfindet sogar Code-interne Marker-Strings als plausibles Halluzinations-Material. Beim Approval-Smoke-Test in Production antwortete Claude mit `__MCP_PENDING_APPROVAL__` als „Beweis" für eine angebliche Approval-Queue. Verifiziert dass der Marker NICHT im System-Prompt oder Tool-Description leakt — der LLM erfindet ihn selbst. Plus Echo-Test: Twin halluziniert das Tool-Output (`Echo: Hello Production`), sagt explizit „Tool läuft" obwohl nichts läuft. UX-mäßig gefährlich.
 
-Strukturelle Lösung über UI (Punkt 3 oben) wird nach Tag-11-Erfahrung zur klaren Top-Wahl: User-getriggerte Tool-Buttons im Chat, die `toolChoice: { type: 'tool', toolName: '...' }` forcieren. Nimmt das LLM-Ermessen komplett raus. Plus eventuell stärkere TOOL_USE_DIRECTIVE als Sofort-Polish (kostet wenig, hilft vermutlich nur teilweise).
+**Update Tag-11-Mittag (3.2.H + Direktive-Polish):** **Strukturell gelöst für UI-Pfad** via 3.2.H Tool-Picker-UI (Commit `b97ae80`). User klickt Plus-Button im Chat-Input, Modal mit Tool-Liste (nach Server gruppiert mit Approval-Markern), Args-Form aus JSON-Schema, Submit triggert Tool-Call mit `forcedToolChoice: { type: 'tool', toolName: '...' }`. Tool wird deterministisch gerufen, kein LLM-Ermessen. Plus Multi-Step-Followup-Patch: nach forciertem Tool-Call mit leerem Text wird zweiter `generateText`-Call mit `response.messages` und `toolChoice: 'auto'` ausgelöst, damit LLM Final-Text aus Tool-Result synthetisiert.
+
+**Direktive-Polish-Befund (Commit `2e7c1d0`):** TOOL_USE_DIRECTIVE härter formuliert mit REGEL 4 (keine Marker erfinden) und REGEL 6 (Tool MUSS gerufen werden bei expliziter Aufforderung). Smoke-Test gemischt:
+- ✓ REGEL 4 wirkt: Marker-Strings werden nicht mehr in Halluzinationen eingebaut. Twin antwortet jetzt User-freundlich („Liegt in der Approval-Queue. Markus muss das freigeben") statt mit Internal-Markern
+- ✗ REGEL 6 wirkungslos: Tool wird trotz expliziter Aufforderung weiter nicht gerufen bei trivial-lösbaren Anfragen (10+20). Halluzination ist UX-mäßig fast schlimmer geworden, weil plausibler
+
+Direktive ist marginal effektiv — Defense-in-Depth gegen Marker-Pollution, aber NICHT die Lösung. **Strukturelle Lösung bleibt UI-Picker.** Item bleibt OPEN für Natural-Language-Pfad — User der „Bitte rufe Tool X auf" tippt kriegt weiter Halluzinationen. Mögliche Folge-Lösung: Auto-Detection von „rufe das X-Tool auf"-Pattern im User-Text → automatisches `toolChoice: 'required'` für diesen Send. Ist Backlog-Material, vermutlich nicht akut nötig (Pilot-User können trainiert werden, Picker zu nutzen).
 
 ### 90. Resume-Prompt-Tuning für Reject-Pfad
 Beim Sub-Schritt-3.2.G-Reject-Smoke-Test aufgefallen: bei trivialen Math-Problemen ignoriert der LLM das Reject-Resume-Signal. Test-Setup: User-Message "Rufe mcp_everything-approval_get-sum mit a=99 und b=1 auf", Tool-Call wird vorgeschlagen, User klickt Reject mit Reason "Nicht freigegeben". Resume-Prompt: "[System] Tool-Call wurde abgelehnt. Begründung: Nicht freigegeben." Antwort vom LLM: "99 + 1 = 100." statt "Verstanden, ohne Tool kann ich nicht antworten."
 
-Das ist Verhalten von Claude Opus 4.7 bei trivialen Aufgaben — er weiß `99 + 1 = 100` und gibt's einfach aus, ignoriert das Reject-Signal weil das Problem trivial lösbar ist ohne Tool. Bei nicht-trivialen Tools (z.B. echte Web-Searches oder File-Operations) tritt das Problem nicht auf, weil der LLM ohne Tool-Result gar nichts hat.
+Verhalten von Claude Opus 4.7 bei trivialen Aufgaben — er weiß `99 + 1 = 100` und gibt's einfach aus. Bei nicht-trivialen Tools (echte Web-Searches oder File-Operations) tritt das Problem nicht auf, weil der LLM ohne Tool-Result gar nichts hat.
 
 Lösungsansätze:
 1. **Härteres Reject-Resume-Phrasing** — explizit instruieren "Berechne nicht selbst, beziehe dich nicht auf das Ergebnis. Sag dass ohne Tool keine Antwort möglich ist."
 2. **Pro-Tool-Resume-Templates** — manche Tools (Math) brauchen anderes Reject-Phrasing als andere (Web-Operations)
-3. **Kontext-Awareness** — Reject-Reason vom User in den Resume-Prompt einbauen ("Der User hat den Tool-Call abgelehnt, Begründung: ...") gibt dem LLM stärkeres Anti-Beispiel
+3. **Kontext-Awareness** — Reject-Reason vom User in den Resume-Prompt einbauen
 
-Aktuell tritt das Problem nur bei trivialen MCP-Tool-Calls auf. Pilot-Tools (everything-Server) sind alle trivial, also ist das im Pilot-Setup ein realer Befund. Bei echten Tools (Hyperbrowser in 3.5) wird sich's vermutlich nicht zeigen, aber das Pattern sollte vor 3.5 sauber sein.
+Pattern ähnlich zu #89 — vermutlich auch nur partiell wirksam wie die TOOL_USE_DIRECTIVE-Härtung. Bei echten Tools (Hyperbrowser in 3.5) wird sich's vermutlich nicht zeigen, aber das Pattern sollte vor 3.5 sauber sein.
 
 **Größe:** M · **Priorität:** should · **Aus:** Tag-10-Mittag 3.2.G-Reject-Smoke-Test
 
 ### 91. Reject-Reason-UI (window.prompt durch Komponente ersetzen)
 Aktuelle 3.2.G-Implementation nutzt `window.prompt()` für die Reject-Begründung — pragmatisch und funktional, aber UX-mäßig nicht der Stand der Kunst. Browser-Prompt blockiert die UI, kein Multi-Line-Support, kein Cancel-Default-Handling, kein Theming-Bezug zur App-UI.
 
-Saubere Lösung: Modal-Komponente oder Inline-Eingabefeld mit Textarea (analog zur Approve-/Reject-Inbox-UI in 2.5.4.3). Pattern-Vorlage: existierende Modal-Komponenten in der App-UI (z.B. Onboarding-Wizard-Modals oder Reset-Confirm-UI aus #84).
+Saubere Lösung: Modal-Komponente oder Inline-Eingabefeld mit Textarea (analog zur Approve-/Reject-Inbox-UI in 2.5.4.3). Pattern-Vorlage: existierende Modal-Komponenten in der App-UI (z.B. Onboarding-Wizard-Modals oder Reset-Confirm-UI aus #84, oder ToolPicker-Modal aus 3.2.H).
 
 Vorbedingung: keine. Diff-Scope: Frontend only, ein Edit in `apps/web/app/chat/[handle]/page.tsx` plus eventuell Helper-Komponente.
 
@@ -862,12 +868,12 @@ MCP-Server provisioniert für @markus via CLI im Container:
 
 Production-Smoke-Test verifiziert die Architektur, aber nicht den End-to-End-Tool-Use:
 - Tool-Aufforderung im Chat: `mcp_everything_get-sum` mit a=10, b=20 → Twin antwortet `30.`, aber `tool_calls: null` (Halluzination)
-- Approval-Tool im Chat: `mcp_everything-approval_get-sum` → Twin halluziniert Approval-Bestätigung mit Internal-Marker `__MCP_PENDING_APPROVAL__`, kein Pending-Audit, keine Pending-Box
+- Approval-Tool im Chat: Twin halluziniert Approval-Bestätigung mit Internal-Marker `__MCP_PENDING_APPROVAL__`
 - Echo-Test (nicht-trivial): Twin halluziniert Echo-Output
 
-Befund: Architektur ist sauber deployed, aber Item #89 (LLM ruft Tools nicht autonom) reproduziert sich auch in Production. Marker-Code-Leak ausgeschlossen (Verifikation: Marker erscheint nur in `tool-bridge.js` Zeile 16/55 und `twin-service.js` Zeile 1065, NIRGENDWO in System-Prompt oder Tool-Description). LLM erfindet den Marker-String selbst.
+Befund: Architektur sauber deployed, aber Item #89 reproduziert sich auch in Production. Marker-Code-Leak ausgeschlossen (Verifikation: Marker erscheint nur in `tool-bridge.js` Zeile 16/55 und `twin-service.js` Zeile 1065, NIRGENDWO in System-Prompt oder Tool-Description). LLM erfindet den Marker-String selbst.
 
-VPS-Override-File `/docker/twin-lab-web/docker-compose.override.yml` hat jetzt zwei bind-mounts (lebt nur auf VPS, nicht im Repo): `docs/` (#81) plus `mcp-servers/` (#92).
+VPS-Override-File `/docker/twin-lab-web/docker-compose.override.yml` hat jetzt zwei bind-mounts: `docs/` (#81) plus `mcp-servers/` (#92).
 
 Plus eine kleine Lesson zur Compose-Diagnose: `docker compose config` zeigt Override-Volume-Mounts NICHT an, obwohl sie aktiv sind. `docker inspect <container>` ist die zuverlässige Wahrheit. Beim Diagnostizieren in #92 erst irritierend.
 
@@ -1428,59 +1434,6 @@ Plus eine Hybrid-Detail: für Live-Sends, deren `conversation_id` der Server ers
 
 Generelles Prinzip: **bei UI-Markern, die aus persistenten Daten ableitbar sind, daten-getrieben rendern statt im State zu führen.** State-Marker driften (Reset-Klick verloren bei Reload), Daten-Marker bleiben.
 
-### Lesson (Tag 10 / 3.2.F): Marker-Pattern statt Throw-Pattern bei AI SDK Tool-Hooks
-
-Beim Sub-Schritt 3.2.F wurde der Approval-Trigger initial als Throw-Pattern designed: `tool-bridge.ts` `execute()` wirft `McpToolApprovalRequiredError`, Twin-Service catcht den auf der `generateText`-Ebene, baut Pending-Audit. Konzeptionell sauber — Custom-Error-Klasse, klar erkennbar, Defense-in-Depth-fähig.
-
-Smoke-Test zeigte aber: AI SDK 6 propagiert Throws aus `execute()` **nicht** nach oben. Stattdessen wird der Error als `tool-result mit output: null` umgewandelt, an den LLM zurückgegeben, LLM-Loop läuft weiter, finishReason: 'tool-calls', leerer Text. Twin-Service sah keinen Throw, schrieb leeren `owner-direct`-Audit, kein Pending entstand. Architektur war konzeptionell richtig, aber AI-SDK-Implementierungs-Detail brach das Pattern.
-
-Lösung: Marker-Pattern als Primary. `execute()` returnt strukturiertes Result mit eindeutig identifizierbarem Marker-String im content-Array (`"__MCP_PENDING_APPROVAL__"`). Twin-Service durchläuft `result.toolCalls` nach `generateText`, prüft auf Marker, wirft dann lokal den `McpToolApprovalRequiredError` damit der existierende Catch-Pfad greift. Plus skillByToolKey-Reverse-Mapping via `buildMcpToolsFromSkills`-Return-Type erweitern, damit Twin-Service vom AI-SDK-konformen Tool-Namen zurück zum DB-Skill kommt.
-
-Throw-Pfad bleibt im Code als Defense-in-Depth — falls AI SDK seine Verhaltens-Logik in einer späteren Version ändert oder ein anderer Code-Pfad doch direkt wirft.
-
-Generelles Prinzip: **bei Third-Party-SDK-Hooks die Verhaltens-Annahmen früh verifizieren, nicht im finalen Smoke-Test feststellen.** Plus: wenn Throw nicht propagiert, ist Marker-Pattern (Strukturiertes Return-Value mit eindeutigem String) der robuste Fallback. Plus: Defense-in-Depth durch beide Pfade parallel ist sauberer als einen wegzuwerfen — falls die Versionsannahmen sich ändern, ist der Code dann schon robust.
-
-### Lesson (Tag 10 / Diagnose): LLM-Halluzinations-Symptom als Diagnose-Signal
-
-Beim 3.2.F-Smoke-Test zeigte sich ein verwirrendes Symptom: Twin antwortete mit „Das Tool braucht Approval und wartet jetzt in der Queue. Sobald Markus es freigibt, läuft der Call durch. Ergebnis wird 12 sein — aber das offiziell vom Tool, sobald approved." Klingt wie ein funktionierender Approval-Workflow, aber Audit zeigte `owner-direct|executed`, nicht `mcp-tool-use|pending`. Kein Pending-Eintrag in Inbox, kein Tool-Call in Logs.
-
-Erste Diagnose-Hypothese: AI-SDK-Throw-Pattern bricht. Aber tieferer Check ergab: `finishReason: stop`, `toolCalls: null` — der LLM hatte das Tool **gar nicht erst gerufen**. Stattdessen halluzinierte er eine plausible Approval-Antwort, weil er die Tools im Set sah und auf Approval-Verhalten geschlossen hat.
-
-Das Symptom „Tool funktioniert nicht, LLM beschreibt aber elegant warum" ist immer ein Hinweis darauf, dass das Tool gar nicht erst gerufen wurde. Bei Item #89 dasselbe Pattern — der LLM erfindet technische Begründungen ("client.experimental.tasks.callToolStream()"), warum Tools angeblich kaputt sind, statt sie wirklich zu rufen.
-
-Diagnose-Workflow für solche Fälle:
-1. Audit-Output checken: `finishReason` + `toolCalls`-Array. `null` → kein Tool-Call, `tool-calls` → Tool wurde gerufen
-2. Mit `toolChoice: 'required'` zwingen, dann beobachten ob Tool-Use überhaupt funktioniert. Wenn ja: Code-Pfad ok, LLM-Verhalten ist das Problem. Wenn nein: Tool-Bridge-Bug
-3. Halluzinierte Antworten sind kein Bug-Symptom des Codes, sondern des LLM-Auto-Pilots
-
-Generelles Prinzip: **bei verdächtigen LLM-Antworten, die „funktional" klingen, immer den Audit-Output verifizieren bevor Code-Bug diagnostiziert wird.** Claude Opus 4.7 ist sehr gut darin, plausible Erklärungen zu erfinden — was technisch klingt, ist nicht automatisch technisch korrekt. `finishReason` plus `toolCalls`-Array sind Ground-Truth.
-
-### Lesson (Tag 10 / 3.2.G): Persistent-Visualization für Approval-States
-
-Beim Inline-Approval-UI im Chat (3.2.G) gab's zwei Optionen für Post-Approve-Verhalten:
-- **A:** Pending-Box verschwindet, neue Twin-Antwort erscheint
-- **B:** Pending-Box bleibt mit „approved"-Status-Indicator, finale Twin-Antwort erscheint als zusätzlicher Block darunter
-
-Option B implementiert. Begründung: Audit-Trail-Konsistenz. User sieht historisch nachvollziehbar was passiert ist — „Ich habe approved, dann kam diese Antwort." Plus: alle drei Status-Varianten (`pending` mit Buttons, `executed` mit ✓ + Result, `rejected` mit ✗ + Begründung) nutzen dieselbe McpToolCallBox-Komponente, nur Status-Indicator wechselt. Code-Komplexität ist niedriger als bei Option A (Box weghauen + neue Bubble einfügen mit eigener Logik).
-
-Plus: bei Option A würde der Chat-Verlauf nach Approve identisch zu einem normalen Twin-Chat aussehen, ohne Hinweis auf den Tool-Use. Persistent-Visualization macht Tool-Use als Konzept im Chat sichtbar — User sieht, wann der Twin Tools nutzen wollte, was er gemacht hat, was die Ergebnisse waren. Pattern ist auch Vorbereitung für künftige Multi-Tool-Workflows oder Tool-Chaining-Visualisierungen.
-
-Generelles Prinzip: **bei zustandsbehafteten UI-Komponenten (Approve/Reject, Edit/Save, Pending/Resolved) Persistent-Visualization mit Status-Indicator-Wechsel statt Replace-by-New-Block.** User sieht den Verlauf, Code-Komplexität bleibt niedrig, Audit-Trail bleibt im UI sichtbar.
-
-### Lesson (Tag 11 / #92): docker compose config zeigt Override-Mounts manchmal nicht — docker inspect ist Truth-Source
-
-Beim Production-Deploy von Phase 3.2 (#92) gab es eine konfuse Diagnose-Phase. Override-File `docker-compose.override.yml` mit zwei Volume-Mounts (docs/ + neu mcp-servers/) war auf VPS angelegt, syntaktisch korrekt. Aber `docker compose config` zeigte NUR das `twin-lab-web-data`-Volume — keine bind-mounts. Ich war eine Weile auf der falschen Spur (Symlink-Pfad-Probleme, YAML-Indentation-Bug, Override-Auto-Discovery-Bug etc.) bevor mir einfiel: `docker inspect <container>` ist die zuverlässige Wahrheit, nicht `compose config`.
-
-Verifikation: `docker inspect twin-lab-runtime --format='{{json .Mounts}}'` zeigte beide bind-mounts (docs UND mcp-servers), exakt wie das Override es spezifizierte. Der laufende Container hatte alles korrekt — nur `compose config` lügt aus irgendeinem Grund (vermutlich Symlink-Auflösung oder ähnlich subtiles Verhalten beim Lesen der Project-Files).
-
-Praktisch heißt das: bei Volume-Mount-Diagnose immer beide Tools nutzen:
-1. `docker compose config` — zeigt was Compose sich aus den YAML-Files zusammen-merged
-2. `docker inspect <container>` — zeigt was Docker tatsächlich am laufenden Container hat
-
-Wenn beide übereinstimmen: alles gut. Wenn (1) was fehlt aber (2) hat es: läuft trotzdem korrekt, `compose config` ist nur unzuverlässig. Wenn (1) hat es aber (2) nicht: Container muss recreated werden, Compose hat den Mount noch nicht ausgerollt.
-
-Generelles Prinzip: **bei Container-Diagnose ist der laufende Container die Truth-Source, nicht die Configuration-Datei.** `docker inspect` ist dafür das richtige Tool. `compose config` zeigt Konfiguration auf dem Papier, was der Container tatsächlich macht ist eine separate Frage.
-
 ---
 
 ## Notiz für später
@@ -1500,21 +1453,89 @@ Sammle weiter Punkte, die im Sparring auftauchen. Nicht jeder Punkt muss eine Ph
 
 **Tag 9 Bilanz:** Sechs Commits über fünf Sub-Schritte plus UX-Polish, plus dieser Cleanup-+-Doku-Commit (`e18f58c`). Test-Hygiene-Block ist Schema-Refactor mit Migration 009 (`conversations`-Tabelle + `audit.conversation_id`), Migration 010 (Bestand-Cleanup), neuem Repo (`ConversationsRepo`), umgestelltem History-Loader (server-seitig per Konversation gefiltert mit 40-Messages-Cap), neuem UI-Reset-Button mit Inline-Confirm und Konversations-Trenner. Hauptpunkt erreicht: Skill-Toggle-Tests sind sauber, kein Memory-Leak nach Reset. Plus eine wichtige Architektur-Erkenntnis: bei Multi-Layer-Refactors zahlt sich die Sub-Schritt-Aufteilung mit eigenen Test-Skripten pro Layer aus — Bugs fallen sofort an der richtigen Stelle auf. Production-Update folgt beim nächsten regulären Pull (Tag-9-Stand ist nicht produktionskritisch).
 
+### Lesson (Tag 10 / 3.2.F): Marker-Pattern statt Throw-Pattern bei AI SDK Tool-Hooks
+
+Beim Sub-Schritt 3.2.F wurde der Approval-Trigger initial als Throw-Pattern designed: `tool-bridge.ts` `execute()` wirft `McpToolApprovalRequiredError`, Twin-Service catcht den auf der `generateText`-Ebene, baut Pending-Audit. Konzeptionell sauber.
+
+Smoke-Test zeigte: AI SDK 6 propagiert Throws aus `execute()` **nicht** nach oben. Stattdessen wird der Error als `tool-result mit output: null` umgewandelt, an den LLM zurückgegeben, LLM-Loop läuft weiter, finishReason: 'tool-calls', leerer Text.
+
+Lösung: Marker-Pattern als Primary. `execute()` returnt strukturiertes Result mit eindeutig identifizierbarem Marker-String im content-Array (`"__MCP_PENDING_APPROVAL__"`). Twin-Service durchläuft `result.toolCalls` nach `generateText`, prüft auf Marker, wirft dann lokal den `McpToolApprovalRequiredError`.
+
+Throw-Pfad bleibt im Code als Defense-in-Depth.
+
+Generelles Prinzip: **bei Third-Party-SDK-Hooks die Verhaltens-Annahmen früh verifizieren, nicht im finalen Smoke-Test feststellen.** Plus: wenn Throw nicht propagiert, ist Marker-Pattern (Strukturiertes Return-Value mit eindeutigem String) der robuste Fallback.
+
+### Lesson (Tag 10 / Diagnose): LLM-Halluzinations-Symptom als Diagnose-Signal
+
+Beim 3.2.F-Smoke-Test zeigte sich ein verwirrendes Symptom: Twin antwortete mit „Das Tool braucht Approval und wartet jetzt in der Queue. Ergebnis wird 12 sein". Klingt wie ein funktionierender Approval-Workflow, aber Audit zeigte `owner-direct|executed`, nicht `mcp-tool-use|pending`. Kein Pending-Eintrag in Inbox.
+
+Diagnose: `finishReason: stop`, `toolCalls: null` — der LLM hatte das Tool **gar nicht erst gerufen**. Stattdessen halluzinierte er eine plausible Approval-Antwort, weil er die Tools im Set sah und auf Approval-Verhalten geschlossen hat.
+
+Generelles Prinzip: **bei verdächtigen LLM-Antworten, die „funktional" klingen, immer den Audit-Output verifizieren bevor Code-Bug diagnostiziert wird.** Claude Opus 4.7 ist sehr gut darin, plausible Erklärungen zu erfinden — was technisch klingt, ist nicht automatisch technisch korrekt. `finishReason` plus `toolCalls`-Array sind Ground-Truth.
+
+### Lesson (Tag 10 / 3.2.G): Persistent-Visualization für Approval-States
+
+Beim Inline-Approval-UI im Chat (3.2.G) gab's zwei Optionen für Post-Approve-Verhalten:
+- **A:** Pending-Box verschwindet, neue Twin-Antwort erscheint
+- **B:** Pending-Box bleibt mit „approved"-Status-Indicator, finale Twin-Antwort erscheint als zusätzlicher Block darunter
+
+Option B implementiert. Begründung: Audit-Trail-Konsistenz. User sieht historisch nachvollziehbar was passiert ist. Plus: alle drei Status-Varianten (`pending` mit Buttons, `executed` mit ✓ + Result, `rejected` mit ✗ + Begründung) nutzen dieselbe McpToolCallBox-Komponente, nur Status-Indicator wechselt. Code-Komplexität ist niedriger als bei Option A.
+
+Generelles Prinzip: **bei zustandsbehafteten UI-Komponenten (Approve/Reject, Edit/Save, Pending/Resolved) Persistent-Visualization mit Status-Indicator-Wechsel statt Replace-by-New-Block.**
+
+### Lesson (Tag 11 / #92): docker compose config zeigt Override-Mounts manchmal nicht — docker inspect ist Truth-Source
+
+Beim Production-Deploy von Phase 3.2 (#92) gab es eine konfuse Diagnose-Phase. Override-File mit zwei Volume-Mounts (docs/ + neu mcp-servers/) war auf VPS angelegt, syntaktisch korrekt. Aber `docker compose config` zeigte NUR das `twin-lab-web-data`-Volume — keine bind-mounts. War eine Weile auf der falschen Spur (Symlink-Pfad-Probleme, YAML-Indentation-Bug, Override-Auto-Discovery-Bug).
+
+Verifikation: `docker inspect twin-lab-runtime --format='{{json .Mounts}}'` zeigte beide bind-mounts (docs UND mcp-servers), exakt wie das Override es spezifizierte. Der laufende Container hatte alles korrekt — nur `compose config` lügt aus irgendeinem Grund (vermutlich Symlink-Auflösung).
+
+Generelles Prinzip: **bei Container-Diagnose ist der laufende Container die Truth-Source, nicht die Configuration-Datei.** `docker inspect` ist dafür das richtige Tool. `compose config` zeigt Konfiguration auf dem Papier.
+
+### Lesson (Tag 11 / 3.2.H): AI-SDK Multi-Step bei forcedToolChoice braucht Manual-Followup
+
+Beim 3.2.H-Smoke-Test mit `toolChoice: { type: 'tool', toolName: '...' }`: Tool wird gerufen, Result kommt zurück, aber LLM gibt keinen Final-Text aus. `finishReason: 'tool-calls'`, `text: ""`. User sieht im Chat eine leere Twin-Bubble nach Tool-Call.
+
+Ursache: AI SDK 6 mit forciertem `toolChoice` führt nur Single-Step durch. `stopWhen: stepCountIs(5)` greift nicht — der Tool-Choice forciert das Tool im ersten Step, danach hört der LLM auf statt Synthese-Step zu machen.
+
+Lösung: manueller Multi-Step via `response.messages` (offizielles AI-SDK-Pattern). Nach erstem `generateText`: prüfen ob Followup nötig (forcedToolChoice + leerer Text + toolCalls da + finishReason 'tool-calls'). Wenn ja: zweiter `generateText`-Call mit `messages: [...originalMessages, ...result.response.messages]` und `toolChoice: 'auto'` (Default). LLM darf jetzt frei antworten, synthetisiert Final-Text aus Tool-Result.
+
+Wichtig: Approval-Pfad muss VOR Followup-Check laufen (`detectPendingToolCall` läuft als erstes nach `generateText`). Wenn Marker erkannt: Throw, kein Followup. Wenn kein Pending: Followup-Check entscheidet.
+
+Plus Token-Usage-Merge: zwei `generateText`-Calls bedeuten doppelte Input-Tokens. Im Audit-Metadata aufsummieren via `mergeTokenUsage()`-Helper, sonst wirken die Stats irreführend.
+
+Generelles Prinzip: **AI SDK 6 hat verschiedene Verhaltens-Modi für `toolChoice`-Varianten.** `'auto'` und `'required'` mit `stopWhen` greifen Multi-Step-Loop. `{ type: 'tool', toolName: ... }` greift nur Single-Step. Wenn Final-Text gebraucht wird, manueller Followup nötig. Pattern ist wiederverwendbar für künftige UI-getriggerte Tool-Calls.
+
+### Lesson (Tag 11 / Direktive-Polish): LLM-Prompt-Tuning ist Whack-a-Mole
+
+Beim TOOL_USE_DIRECTIVE-Polish (Commit `2e7c1d0`) wurden zwei neue Regeln eingeführt:
+- REGEL 4: keine technischen Marker erfinden (`__PENDING__`, `approved`, `queued`)
+- REGEL 6: bei expliziter User-Aufforderung MUSS Tool gerufen werden
+
+Smoke-Test-Befund: REGEL 4 hat eine konkrete Halluzinations-Variante (Marker-Strings) unterbunden. Aber LLM hat eine andere gefunden — User-freundliche Approval-Halluzination („Liegt in der Approval-Queue. Markus muss das freigeben"). REGEL 6 wurde komplett ignoriert bei trivial-lösbaren Anfragen.
+
+Plus eine Lehre: User-freundliche Halluzinationen sind **UX-mäßig fast schlimmer** als Internal-Marker-Halluzinationen. Markers sind verdächtig (`__MCP_PENDING_APPROVAL__` riecht nach Bug), User-freundlicher Text klingt plausibel und wird geglaubt.
+
+Generelles Prinzip: **strukturelle Lösungen schlagen Prompt-Tuning.** Item #89 ist das Lehrstück: drei Tage Prompt-Tuning haben graduelle Verbesserungen gebracht, aber nie das Kernproblem gelöst. UI-Picker (3.2.H) hat es in einem Tag strukturell weggenommen — User-Intent wird deterministisch übersetzt, kein LLM-Ermessen mehr.
+
+Heißt nicht „Prompt-Tuning ist nutzlos" — als Defense-in-Depth ist es wertvoll. Aber als primäre Lösung für nicht-deterministisches LLM-Verhalten ist es eine Sackgasse. Strukturelle Fixes sind robuster.
+
 ---
 
-**Item-Dichte 9. Mai 2026 mittag (Tag 10):** Phase 3.2 komplett — sieben Sub-Schritte A bis G plus Marker-Pattern-Patch in F durchgezogen. Acht Commits insgesamt: `2bf1ee0` Schema+Repo, `daa03b7` Client+Lifecycle, `cd5b295` Tool-Discovery+Skill-Sync, `366ca93` Tool-Execution via AI-SDK, `5f0f80c` BACKLOG-Update für #86-#89, `43258cf` CLI, `b58df94` Approval-Workflow (Inbox-Foundation), `bce54fb` Inline-Approval-UI im Chat, plus `20aaa36` Doku-Update. Plus drei neue Items: #90 (Resume-Prompt-Tuning für Reject), #91 (Reject-Reason-UI ersetzt window.prompt), #92 (Production-Deploy Phase 3.2). Plus drei neue Lessons (Throw-vs-Marker bei AI SDK 6, LLM-Halluzinations-Symptom als Diagnose-Signal, Persistent-Visualization für Approval-States). Items insgesamt jetzt: 87 (84 + #90 + #91 + #92, alle drei neu).
+**Item-Dichte 9. Mai 2026 mittag (Tag 10):** Phase 3.2 komplett (lokal) — sieben Sub-Schritte A bis G plus Marker-Pattern-Patch in F. Acht Commits insgesamt: `2bf1ee0` Schema+Repo, `daa03b7` Client+Lifecycle, `cd5b295` Tool-Discovery+Skill-Sync, `366ca93` Tool-Execution via AI-SDK, `5f0f80c` BACKLOG-Update für #86-#89, `43258cf` CLI, `b58df94` Approval-Workflow, `bce54fb` Inline-Approval-UI, plus `20aaa36` Doku. Plus drei neue Items: #90, #91, #92. Plus drei neue Lessons (Throw-vs-Marker bei AI SDK 6, LLM-Halluzinations-Symptom als Diagnose-Signal, Persistent-Visualization für Approval-States). Items insgesamt jetzt: 87.
 
-**Tag 10 Bilanz:** Acht Commits, ~3500+ Zeilen Code-Diff. Phase 3.2 in einem Tag durchgezogen — Sub-Schritt-Aufteilung mit eigenem Test pro Layer hat sich erneut bewährt (Pattern aus Tag 9). Plus zwei harte Diagnose-Blöcke (AI-SDK-Throw-Verhalten, LLM-Halluzinations-Pattern) plus ein CLI-Working-Dir-Bug. MCP-Foundation ist end-to-end produktiv: Server-Provisioning via CLI, Tool-Discovery, Tool-Execution mit Multi-Provider-Support, Approval-Workflow mit Pending-State, UI in Inbox UND Chat-Inline. Production-Deploy folgt als nächster großer Block.
+**Tag 10 Bilanz:** Acht Commits, ~3500+ Zeilen Code-Diff. Phase 3.2 in einem Tag durchgezogen — Sub-Schritt-Aufteilung mit eigenem Test pro Layer hat sich erneut bewährt. MCP-Foundation ist end-to-end produktiv: Server-Provisioning via CLI, Tool-Discovery, Tool-Execution mit Multi-Provider-Support, Approval-Workflow mit Pending-State, UI in Inbox UND Chat-Inline.
 
 ---
 
-**Item-Dichte 10. Mai 2026 vormittag (Tag 11):** #92 erledigt — Production-Deploy von Phase 3.2 in ~60 Min durchgezogen. VPS-Override-File erweitert um zweiten bind-mount (`mcp-servers/`, analog #81-Pattern). Image-Rebuild Runtime + Web (57.7s + 75.7s), Container-Recreate, Migrations 011/012 sauber eingespielt (010 Migrations waren schon drin), Pilot-MCP-Server für Production-@markus angelegt (everything + everything-approval, 26 Tools). Production-Smoke-Test verifiziert die Architektur-Komponenten, aber Item #89 reproduziert sich auch in Production — Twin halluziniert Tool-Outputs inklusive Code-internen Marker-String `__MCP_PENDING_APPROVAL__` als plausibles Halluzinations-Material (ohne dass der Marker im System-Prompt leakt). #89 ist UX-mäßig dringlicher geworden. Plus neue Lesson zum Tag-11-Diagnose-Blocker (`docker compose config` zeigt Override-Mounts manchmal nicht, `docker inspect` ist Truth-Source). Items insgesamt jetzt: 87, davon #92 ✅, #89 erweitert um Production-Befund.
+**Item-Dichte 10. Mai 2026 vormittag (Tag 11):** #92 erledigt — Production-Deploy von Phase 3.2 (A-G) in ~60 Min. VPS-Override-File erweitert um `mcp-servers/`-bind-mount (analog #81). Image-Rebuild Runtime + Web, Container-Recreate, Migrations 011/012 sauber eingespielt, Pilot-MCP-Server für Production-@markus angelegt (everything + everything-approval, 26 Tools). Production-Smoke-Test: Item #89 reproduziert sich auch in Production — Twin halluziniert Tool-Outputs inklusive Code-internen Marker-String `__MCP_PENDING_APPROVAL__`. #89 UX-mäßig dringlicher geworden. Plus eine neue Lesson zum Tag-11-Diagnose-Blocker (`docker compose config` zeigt Override-Mounts manchmal nicht).
 
-**Was als Nächstes ansteht:** Phase 3.2 ist sowohl lokal als auch in Production komplett. Pfad zu 3.3 ist frei, aber #89 wird zur Top-Priorität:
-- **#89 LLM-Tool-Use-Verhalten tunen** (should, M) — Klar geworden in Tag-11-Production-Deploy: Tool-Use ohne strukturelle Lösung ist UX-mäßig kaputt. Lösungspfad jetzt klar: User-getriggerte Tool-Buttons im Chat mit `toolChoice: { type: 'tool', toolName: '...' }`. Plus eventuell härtere TOOL_USE_DIRECTIVE als Sofort-Polish.
-- **#90 Resume-Prompt-Tuning** (should, M) — kann nach #89 kommen, wenn der Tool-Call-Pfad sauber ist
+**Item-Dichte 10. Mai 2026 mittag (Tag 11):** 3.2 Sub-Schritt H — Tool-Picker-UI als strukturelle Lösung für #89-UI-Pfad. Plus-Button im Chat-Input, Modal mit Tool-Liste nach Server gruppiert, Auto-generated Args-Form, Submit mit `forcedToolChoice`. Multi-Step-Followup-Patch nötig (AI SDK 6 macht bei forciertem ToolChoice nur Single-Step, Final-Text fehlt — Lösung via `response.messages` und zweitem `generateText`-Call). Plus UX-Polish (Server-Sections, Approval-Marker prominent, Plus-Button rechts vom Input). Commit `b97ae80` für 3.2.H+Patch+Polish gemeinsam (~821 insertions). Plus TOOL_USE_DIRECTIVE-Polish (Commit `2e7c1d0`) als Defense-in-Depth gegen Marker-Halluzination — REGEL 4 wirkt (kein Marker-Erfinden mehr), REGEL 6 wirkungslos. Plus zwei neue Lessons (AI-SDK Multi-Step bei forcedToolChoice, Prompt-Tuning ist Whack-a-Mole). Item #89 ist strukturell gelöst für UI-Pfad, bleibt offen für Natural-Language-Pfad. Items insgesamt unverändert: 87, davon #92 ✅.
+
+**Was als Nächstes ansteht:** Phase 3.2 ist sowohl lokal als auch in Production komplett (lokal mit 3.2.H, Production mit 3.2.A-G). Tag-11-Mittag-Stand muss noch in Production:
+- **Production-Deploy 3.2.H + Direktive-Polish** (must) — Tag-11-Mittag-Stand auf VPS. Sequenz wie Tag-11-Vormittag, aber kein neuer Volume-Mount nötig (mcp-servers/ ist schon da). Geschätzt 30-40 Min.
+- **#90 Resume-Prompt-Tuning** (should, M) — Pattern wie Direktive-Polish, vermutlich auch nur partiell wirksam
 - **#91 Reject-Reason-UI** (nice, S) — kommt mit #90 zusammen
-- **Strategie-Session vor 3.3** (Memory: Conversation + Semantic) — Pre-Implementation-Diskussion zu Auto-Summary-Schwelle, KV-Store-Lifecycle, facts.md-Schreibrechte
-- **3.3 — Memory: Conversation + Semantic** (L) — erste zwei Memory-Schichten, schneller ROI
+- **Strategie-Session vor 3.3** (Memory: Conversation + Semantic) — Auto-Summary-Schwelle, KV-Store-Lifecycle, facts.md-Schreibrechte
+- **3.3 — Memory: Conversation + Semantic** (L) — erste zwei Memory-Schichten
 
-**Tag 11 Bilanz:** Ein Block, ~60 Min: Production-Deploy von Phase 3.2 erfolgreich. Migrations + Image-Rebuild + Container-Recreate + MCP-Server-Provisioning + Smoke-Test. Override-Pattern für VPS-spezifische Mounts erneut bewährt. Architektur ist deployed, Item #89 ist klar als nächstes anzugehen — UX-mäßig wichtiger als gedacht.
+**Tag 11 Bilanz:** Drei Commits (`f3532e8` Doku Vormittag, `b97ae80` 3.2.H, `2e7c1d0` Direktive). Vormittag: Production-Deploy von Phase 3.2 (~60 Min). Mittag: 3.2.H Tool-Picker-UI als strukturelle Lösung für Item #89 plus Multi-Step-Followup-Patch plus UX-Polish plus Direktive-Polish (~2h). Wichtigste Erkenntnis: strukturelle Lösungen schlagen Prompt-Tuning. Drei Tage Item-#89-Ringen mit Direktiven hat partielle Verbesserungen gebracht, aber UI-Picker hat das Problem in einem Tag strukturell weggenommen. Pattern für künftige LLM-Verhaltens-Probleme: erst nach struktureller Lösung suchen (UI, Forced-Choice, Pre-Validation), Prompt-Tuning nur als Defense-in-Depth.
