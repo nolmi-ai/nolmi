@@ -1119,17 +1119,27 @@ export class TwinService {
       );
     }
 
-    // Tool-Use-Direktive: nur wenn Tools übergeben werden. Sagt dem LLM klar
-    // dass er Tools tatsächlich aufrufen soll, statt Outputs zu simulieren.
-    // Ohne diese Direktive haben Tests gezeigt: LLM antwortet inhaltlich
-    // plausibel, ruft aber kein Tool auf. Phase 3.2.D-Lesson.
+    // Tool-Use-Direktive: nur wenn Tools übergeben werden. Tag-11-Befund hat
+    // gezeigt, dass Claude Opus 4.7 ohne harten Schutz sogar Code-interne
+    // Marker-Strings (z.B. __MCP_PENDING_APPROVAL__) und Tool-Outputs
+    // ("Echo: …") halluziniert — Pattern aus dem Training-Korpus, das auf
+    // Basis der Tool-Namen plausibel rekonstruiert wird. REGEL 4 + 6 sind
+    // explizit gegen diese Befunde formuliert. Phrasing knapp, sechs nummerierte
+    // Punkte — länger dilutiert die Wirkung.
 const TOOL_USE_DIRECTIVE = hasTools
-      ? `Du hast Werkzeuge (Tools) zur Verfügung. WICHTIG:
+      ? `Du hast Werkzeuge (Tools) zur Verfügung. STRIKT BEFOLGEN:
 
-- Wenn eine Anfrage durch ein Tool gelöst werden kann, RUFE ES AUF — beschreibe nicht, was es tun würde.
-- Wenn du etwas nicht aus eigenem Wissen exakt beantworten kannst, nutze ein passendes Tool statt zu raten oder zu halluzinieren.
-- Simuliere niemals Tool-Outputs ("Tool-Result: ..."). Wenn du das Tool nicht aufrufst, hast du auch kein Tool-Result.
-- Behaupte nicht, dass ein Tool nicht funktioniert oder unterstützt wird, ohne es tatsächlich aufgerufen zu haben.`
+REGEL 1: Wenn eine Anfrage durch ein Tool gelöst werden kann, RUFE ES AUF. Beschreibe nicht, was es tun würde — RUFE.
+
+REGEL 2: Wenn du nicht selbst die exakte Information hast, nutze ein passendes Tool statt zu raten.
+
+REGEL 3 (Anti-Halluzination): Erfinde NIEMALS Tool-Outputs. Wenn du kein Tool aufgerufen hast, hast du kein Tool-Result. Schreibe NIEMALS "Tool-Result: ...", "Echo: ...", oder ähnliche Output-Imitationen.
+
+REGEL 4 (Anti-Marker-Halluzination): Erfinde NIEMALS technische Marker oder Status-Strings wie "__PENDING__", "__MCP_PENDING_APPROVAL__", "approved", "queued". Diese sind interne System-Konventionen, die nur durch echte Tool-Calls entstehen.
+
+REGEL 5: Behaupte nicht, dass ein Tool nicht funktioniert, ohne es tatsächlich aufgerufen zu haben. Wenn du es nicht versucht hast, weißt du es nicht.
+
+REGEL 6: Wenn der User dich explizit bittet, ein Tool zu nutzen ("rufe das X-Tool auf", "nutze Y"), MUSST du es rufen. Verweigere nicht und ersetze nicht durch eigene Antworten.`
       : null;
 
     // Fünf Schichten, Reihenfolge bewusst:
