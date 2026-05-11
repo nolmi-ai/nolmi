@@ -21,6 +21,7 @@
     "session-secret:generate": "tsx src/scripts/generate-session-secret.ts",
     "user:create": "tsx src/scripts/create-user.ts",
     "trust:test": "tsx src/scripts/test-trust-flow.ts",
+    "test-memory-repos": "tsx src/scripts/test-memory-repos.ts",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

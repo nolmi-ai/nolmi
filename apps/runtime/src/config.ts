@@ -68,3 +68,61 @@ function parsePort(raw: string | undefined, fallback: number): number {
   }
   return parsed;
 }
+
+// ─── CONVERSATION-MEMORY TUNABLES (Phase 3.3) ────────────────────────────────
+//
+// Drei Schwellwerte für die Sliding-Window-Auto-Summary-Engine. Defaults sind
+// das Ergebnis der Strategie-Session: Trigger bei >50 Messages, Summary der
+// ältesten 40, Live-Window von 10. ENV-Überschreibung pro Twin-Instanz für
+// Tuning ohne Code-Change. In 3.3.A nur registriert — die Werte werden in
+// 3.3.B (Summary-Engine) und 3.3.C (History-Loader) genutzt.
+
+/**
+ * Trigger-Schwelle für Auto-Summary: wenn eine Konversation mehr Messages
+ * als diesen Wert akkumuliert, fasst der Twin das ältere Segment zusammen.
+ * Default 50 entspricht ~25 User-Twin-Turns.
+ */
+export const CONVERSATION_SUMMARY_THRESHOLD = parseIntEnv(
+  process.env.CONVERSATION_SUMMARY_THRESHOLD,
+  50,
+  "CONVERSATION_SUMMARY_THRESHOLD",
+);
+
+/**
+ * Wie viele der ältesten Messages werden in einer Summary verdichtet. Bei
+ * 100 Messages und Default-40 entstehen 2 Summaries + verbleibende 20 als
+ * Live-Window (10 davon nach Default-LIVE_WINDOW, 10 als Buffer).
+ */
+export const CONVERSATION_SUMMARY_BATCH_SIZE = parseIntEnv(
+  process.env.CONVERSATION_SUMMARY_BATCH_SIZE,
+  40,
+  "CONVERSATION_SUMMARY_BATCH_SIZE",
+);
+
+/**
+ * Anzahl der jüngsten Messages, die verbatim am Ende des LLM-Kontexts
+ * bleiben (kein Summary-Replacement). Garantiert, dass der unmittelbare
+ * Gesprächs-Kontext nie verdichtet wird.
+ */
+export const CONVERSATION_LIVE_WINDOW = parseIntEnv(
+  process.env.CONVERSATION_LIVE_WINDOW,
+  10,
+  "CONVERSATION_LIVE_WINDOW",
+);
+
+/**
+ * Parser für nicht-negative Integer-ENVs. Gleiche Fehlerstrenge wie
+ * parsePort: ungültige Werte wirfen, keine stille Default-Verwendung — sonst
+ * läuft Production mit falscher Konfiguration und niemand merkt's.
+ */
+function parseIntEnv(raw: string | undefined, fallback: number, name: string): number {
+  const trimmed = raw?.trim();
+  if (!trimmed) return fallback;
+  const parsed = Number(trimmed);
+  if (!Number.isInteger(parsed) || parsed < 1) {
+    throw new Error(
+      `${name} muss eine positive Integer-Zahl sein (got: "${raw}")`,
+    );
+  }
+  return parsed;
+}

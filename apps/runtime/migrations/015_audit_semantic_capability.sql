@@ -1,0 +1,32 @@
+-- Migration 015: audit.capability erweitert um 'semantic-fact-write' (3.3.A).
+--
+-- Schema-No-op: `audit.capability` ist seit Migration 001 als offenes
+-- `TEXT NOT NULL` deklariert, ohne CHECK-Constraint auf konkrete Capability-
+-- Werte. Neue Capabilities wie 'semantic-fact-write' können also direkt
+-- geschrieben werden, ohne Schema-Änderung.
+--
+-- Diese Migration ist trotzdem als File angelegt, damit die Migration-Sequence
+-- mit der Phase-3.3-Foundation konsistent ist und die Capability-Liste an
+-- einer auffindbaren Stelle dokumentiert wird.
+--
+-- Capability-Werte nach 3.3.A:
+--   - respond_to_chat        (Phase 1)
+--   - draft_linkedin_post    (Phase 1, mandate-gated)
+--   - summarize_topic        (Phase 1)
+--   - send_to_twin           (Phase 2 Bridge-Send)
+--   - respond_to_twin_message (Phase 2 Bridge-Receive)
+--   - owner-direct           (Tag 6 Konsolidierung)
+--   - owner-direct-send      (Direct A2A vom Owner)
+--   - trust-added / trust-removed
+--   - trusted-bypass         (Trust-Layer)
+--   - system-message / system-message-received  (Wartemeldungen)
+--   - reply-received         (A2A-Inbox)
+--   - mcp-tool-use           (3.2.F Approval-Gate)
+--   - semantic-fact-write    (NEU 3.3.A — Twin-initiierte Fakt-Schreibung,
+--                            Approval-pflichtig, kommt in 3.3.F live)
+--
+-- Sollte später ein CHECK-Constraint eingeführt werden, muss diese Liste
+-- (plus Migration mit Table-Rebuild) entsprechend gepflegt werden.
+
+-- Kein DDL hier — Schema ist bereits konform.
+SELECT 'audit.capability schema permits "semantic-fact-write"' AS migration_015_noop;
