@@ -1,6 +1,6 @@
 # twin-lab Roadmap
 
-Stand: 9. Mai 2026 Mittag, nach Phase 3.2 (MCP-Client als Skill-Provider) komplett.
+Stand: 11. Mai 2026 Abend, nach Phase 3.3 (Memory: Conversation + Semantic) komplett lokal.
 
 ---
 
@@ -51,59 +51,72 @@ Macht Twins inhaltlich tiefer. Reihenfolge ist klar: **Skill-System ist Fundamen
 
 **Marker-Pattern als Primary für Approval-Trigger.** AI SDK 6 propagiert Throws aus `execute()` nicht nach oben (Smoke-Test verifiziert). Marker-String im content-Array ist provider-agnostisch und eindeutig identifizierbar. Throw-Pfad bleibt als Defense-in-Depth.
 
+### Architektur-Entscheidungen (11. Mai 2026, vor Phase 3.3)
+
+**Eigen-Bau für Memory-Schichten statt Cognee/Dreams-Adoption.** Geprüft: Cognee (16.6k Stars, Apache 2.0, Knowledge-Graph + Vector-Search + Ontology) und Anthropic Managed-Agents-Dreams (Memory-Stores plus Async-Reflection-Jobs). Beide konzeptionell wertvoll. Entscheidung: Eigen-Bau für 3.3, Begründung — Anti-Lock-in, Provider-Agnostik (Cognee Python-Stack, Dreams Anthropic-only), Pilot-Größe rechtfertigt keine komplexe externe Integration, eigene Implementation gibt volle Kontrolle über Multi-Tenant-Architektur. Beide als Backlog-Items (#93 Cognee als optionaler MCP-Skill für Knowledge-Recall, #94 Dream-Pattern für periodische Memory-Kuratierung) für Phase 3.6+ oder Phase 4.
+
+**Conversation-Memory: Sliding-Window mit Auto-Summary.** Trigger >50 zählende Messages, Summary-Block der ältesten 40, Live-Window 10. Multiple Summary-Segmente pro Konversation möglich. Twin selbst macht Summary-LLM-Call (Persona-Konsistenz, Provider-Agnostik statt Anthropic-Prompt-Caching). Sync vor LLM-Call (Edge-Case bei >50 Messages, Latenz okay). Failure-Fallback auf Hard-Cap. Function-Injection für Test-Mocking.
+
+**Semantic-Memory: KV-Store als Truth-Source, keine echte facts.md-Datei.** Tabelle `facts` mit Multi-Tenant-Isolation pro twin_id, UNIQUE(twin_id, fact_key). source ∈ {user, twin, import}, confidence ∈ {approved, pending, auto, rejected}. UI rendert als Liste mit Status-Sektionen, kein File-Pattern.
+
+**Facts als Persona-konstitutiv im System-Prompt.** Facts werden direkt nach Persona kombiniert via `personaWithFacts` als 2. Schicht (statt eigene 7. Schicht). Begründung: Facts sind Identitäts-Wissen, nicht Conversation-Kontext. Smoke-Test bestätigt: Twin reichert Facts mit Persona-Stimme an statt sie als isolierte Daten auszuspucken.
+
+**Twin-getriebene Fact-Extraction via Approval-Pattern aus 3.2.F.** Pattern wiederverwendet: pro Fact ein Pending-Audit mit `capability='semantic-fact-write'`, Approve via generischen `/audit/:id/approve|reject`-Routen mit capability-Switch. `confidence='rejected'` (Migration 016) verhindert Endlos-Loop bei abgelehnten Facts (Twin sieht rejected-Liste, schlägt nicht erneut vor).
+
 ---
 
 ## Phase 3 — Sub-Schritte
 
 ### 3.1 — Skill-System Engine + Pilot ✅
-**Abgeschlossen 6. Mai 2026 (Tag 7 Vormittag).** Fünf Sub-Schritte (3.1.A bis 3.1.F) an einem Vormittag durch — die Hälfte von Phase 3 in einer Session. Tempo höher als geplant, weil das Pattern aus 2.5.4.1 (Trust-Repo + Routes) als Vorlage gepasst hat und Claude Code die Implementations-Schritte zügig durchgereicht hat.
+**Abgeschlossen 6. Mai 2026 (Tag 7 Vormittag).** Fünf Sub-Schritte (3.1.A bis 3.1.F) an einem Vormittag durch. Pattern aus 2.5.4.1 (Trust-Repo + Routes) als Vorlage.
 
 - **3.1.A** ✅ DB-Schema + Skill-Repo (Commit `2c1cfd0`)
-  Migration `008_skills.sql` mit `UNIQUE(twin_id, name)`, FK auf `twin_profiles` mit `ON DELETE CASCADE`. SkillRepo mit `add/remove/list/findById/findByName/setActive/update`. Test-Skript mit 9 Steps grün.
 - **3.1.B+C** ✅ Engine + System-Prompt-Integration (Commit `b2b796e`)
-  `prompt-builder.ts` baut Skills-Block, `runModel()` lädt Skills bei jedem Call frisch. Vierte Schicht im System-Prompt zwischen Persona und Language-Directive. Mock-LLM-Test mit Reihenfolge-Check und setActive-Verifikation grün. 3.1.C fiel zusammen mit 3.1.B — Engine-Integration und Prompt-Integration sind ein Schritt.
 - **3.1.D** ✅ CLI-Tool zum Importieren (Commit `7c65c41`)
-  `pnpm twin:skill-create <handle> <skill-dir> [--force]` mit YAML-Manifest-Parser, snake→camel-Mapping, Conflict-Detection. Verzeichnis-Konvention `skills-templates/<name>/manifest.yaml + SKILL.md (+ optional script.ts)`. Pattern angelehnt an agentskills.io.
 - **3.1.E** ✅ Read-only UI + Toggle (Commit `5fbf254`)
-  Settings-Section mit Skills-Liste, Aktiv-Toggle pro Skill, Optimistic-Update mit Revert-bei-Error. Backend-Routes `GET /twins/:handle/skills` + `PATCH /twins/:handle/skills/:skillId/active`, beide Owner-gated. UI-Payload schneidet Markdown raus (chars-Count statt Inhalt). Cross-Twin-Isolation verifiziert.
 - **3.1.F** ✅ Pilot-Skill HARWAY-Workshop-Kontext (kein Commit, Skill-Files gitignored)
-  Skill in `apps/runtime/skills-templates/harway-workshops/` lokal, via CLI in @markus' DB importiert. skillId `skill_2-T2zqvxf3m-0bbD`, 1800 chars Instructions. Browser-Test mit drei Workshop-Fragen: Twin antwortet sauber im Markus-Stil, keine Halluzinationen, keine erfundenen Tagessätze.
 
-**Architektur-Entscheidung Strategie B (vor 3.1.B festgelegt):** Alle aktiven Skills permanent im System-Prompt. Migrationspfad zu C (Hybrid Core/On-demand) dokumentiert für später, wenn Token-Volumen es erzwingt. Heute kein Klassifikator-Call vor jedem Chat — würde unnötige Latenz und Kosten verursachen bei aktuell wenigen Skills pro Twin.
+**Architektur-Entscheidung Strategie B:** Alle aktiven Skills permanent im System-Prompt. Migrationspfad zu C (Hybrid Core/On-demand) dokumentiert für später.
 
-**Aufgedeckter Architektur-Befund:** Persona-Skill-Doppelung. Wenn Persona dasselbe Wissen enthält wie ein Skill, ist der Skill-Toggle wirkungslos — Twin antwortet aus Persona. Backlog-Item #74 für sauberes Layering (Persona = identitäts-stabiles Wissen, Skill = austauschbares).
+**Aufgedeckter Architektur-Befund:** Persona-Skill-Doppelung. Backlog-Item #74.
 
 ### 3.2 — MCP-Client als Skill-Provider ✅
-**Abgeschlossen 9. Mai 2026 (Tag 10).** Sieben Sub-Schritte (3.2.A bis 3.2.G) an einem Tag durch — kompletter MCP-Client als Skill-Provider mit Approval-Workflow plus Inline-UI. Acht Commits insgesamt plus BACKLOG-Update.
+**Abgeschlossen 9. Mai 2026 (Tag 10).** Sieben Sub-Schritte (3.2.A bis 3.2.G) an einem Tag durch — kompletter MCP-Client plus Approval-Workflow plus Inline-UI. Tag 11 ergänzt 3.2.H Tool-Picker-UI als strukturelle Lösung für Item #89.
 
 - **3.2.A** ✅ MCP-Schema + Repo (Commit `2bf1ee0`)
-  Migration 011 mit `mcp_servers`-Tabelle, Multi-Tenant-Isolation pro Twin via FK. McpServersRepo mit AES-256-GCM-ENV-Encryption analog apiKeyEncrypted, Master-Key per Constructor injected.
 - **3.2.B** ✅ MCP-Client + Lifecycle-Manager (Commit `daa03b7`)
-  `@modelcontextprotocol/sdk` Dependency, McpClient für stdio-Transport. McpClientManager pro Twin mit Lazy-Spawn beim ersten Tool-Call, Idle-Disconnect nach 5 Min, pendingSpawns-Mutex gegen Concurrent-Spawns. ENV-Tunables. Registry-disposeAll() beim Shutdown.
 - **3.2.C** ✅ Tool-Discovery + Skill-Sync (Commit `cd5b295`)
-  Migration 012 erweitert `skills`-Tabelle um `mcp_server_id`/`mcp_tool_name`. McpSkillSync mit syncOnAdd() plus refresh()-Diff. Synthetisches Skill-Manifest mit `capability: "mcp_tool"` als Marker. Skill-Naming `mcp:<server>:<tool>`.
 - **3.2.D** ✅ Tool-Execution via AI-SDK-Tool-Bridge (Commit `366ca93`)
-  `tool-bridge.ts` mit buildMcpToolsFromSkills(). MCP-Skills NICHT mehr im System-Prompt-Block, stattdessen via AI-SDK-Tools an LLM übergeben. TOOL_USE_DIRECTIVE bei Tool-Call. Tool-Naming-Bug-Fix (Doppelpunkte zu Underscores für AI-SDK).
 - **3.2.E** ✅ MCP-Server-CLI (Commit `43258cf`)
-  Vier CLI-Skripte: `twin:mcp-add`, `twin:mcp-list` (mit `--json`), `twin:mcp-refresh`, `twin:mcp-remove` (mit `--yes`). JSON-Spec-Format mit Transport/Command/Args/Env, ENV-`?`-Marker für Interactive-Prompt. REPO_ROOT-Helper für pnpm-Filter-CWD-Bug.
-- **3.2.F** ✅ MCP-Tool-Approval-Workflow (Commit `b58df94`)
-  Pre-Call-Approval-Pattern mit Marker-String als Primary, Throw-Pattern als Defense-in-Depth (AI SDK 6 propagiert Throws nicht). Twin-Service detectPendingToolCall() erkennt Marker, baut Pending-Audit mit `capability='mcp-tool-use'`. Approve/Reject-Endpoints, Resume via User-Message provider-agnostisch. Inbox-UI erweitert.
+- **3.2.F** ✅ MCP-Tool-Approval-Workflow (Commit `b58df94`) — Marker-Pattern
 - **3.2.G** ✅ Inline-Approval-UI im Chat (Commit `bce54fb`)
-  McpToolCallBox-Component für Pending-Audits im Chat. Hybrid-Render plus Persistent-Visualization (Box bleibt nach Approve/Reject sichtbar mit Status-Indicator). buildChatBlocksFromAudits() mapped vier Capability/Status-Varianten auf Block-Sequenzen. 5s-Polling plus manueller Trigger nach send/approve/reject.
+- **3.2.H** ✅ Tool-Picker-UI im Chat (Commit `b97ae80`, Tag 11 Mittag) — strukturelle Lösung für Item #89 UI-Pfad
 
-**Aufgedeckte LLM-Verhaltens-Probleme während 3.2:**
-- Item #89: Claude Opus 4.7 ruft Tools selbst bei expliziter Anforderung nicht (mit `toolChoice: 'auto'`). Workaround: `toolChoice: 'required'` für Beweistests, langfristig User-getriggerte Approval-Forcierung über UI.
-- Item #90: Bei trivialen Math-Problemen ignoriert der LLM Reject-Resume-Signale. Architektur ist korrekt, Reject-Prompt-Tuning steht aus.
+**Aufgedeckte LLM-Verhaltens-Probleme:** Item #89 (Tool-Call-Verhalten), Item #90 (Reject-Resume).
 
-**End-to-End-Verifikation:** Sub-Schritt-3.2.G-Smoke-Test mit `everything-approval`-Pilot-Server: Tool-Call-Box im Chat, Approve mit echtem Tool-Result, Reject mit Begründung, Cross-Stellen-Test (Inbox-Approve → Chat-Polling-Refresh).
+### 3.3 — Memory: Conversation + Semantic ✅
+**Abgeschlossen 11. Mai 2026 (Tag 12).** Sieben Sub-Schritte (3.3.A bis 3.3.G3) an einem Tag durch — Schema/Repos, Summary-Engine, History-Loader, Facts-API, Facts-im-Prompt, Twin-Extraction mit Approval-Gate, plus drei UI-Sub-Schritte. Neun Commits insgesamt.
 
-### 3.3 — Memory: Conversation + Semantic
-**Größe:** L · **Zeitfenster:** 2-3 Wochen
+- **3.3.A** ✅ Schema + Repos (Commit `9b4d5c5`)
+  Migrations 013-015 (conversation_summaries, facts, audit-capability-Doku). ConversationSummariesRepo + FactsRepo. ENV-Tunables. 13 Tests grün.
+- **3.3.B** ✅ Summary-Engine im Send-Path (Commit `9fc1ebb`)
+  Sliding-Window-Memory mit Auto-Summary. Function-Injection für LLM (Test-Mock). Counting nur respond_to_chat + owner-direct. Cursor via Timestamp wegen nanoid-Sortier-Problem. Sync vor LLM-Call, Failure-Fallback. 6 Tests grün.
+- **3.3.C** ✅ History-Loader liest Summaries (Commit `0eb941e`)
+  Cursor-basiertes Sliding-Window via `listByConversationAfter`. Doppelter Try-Catch defensive Fallback. Bugfix Repo-Sortierung nach `created_at` (nanoid-Lesson reproduziert). 7 Tests grün.
+- **3.3.D** ✅ Facts-API + CLI (Commit `49fe0b7`)
+  Vier REST-Endpoints (Owner-gated, create-only mit 409, PATCH ohne source-Drift). Vier CLI-Skripte (list/add/remove/import). Bulk-Import via Flat-JSON.
+- **3.3.E** ✅ Facts in Twin-Prompt (Commit `1a8a128`)
+  `humanizeFactKey` + `buildFactsBlock`. Facts als 2. System-Prompt-Schicht via `personaWithFacts`. Smoke-Test: Twin nutzt Facts und reichert sie mit Persona-Stimme an. 5 Tests grün.
+- **3.3.F** ✅ Twin-Fact-Extraction mit Approval-Gate (Commit `f1cfa65`)
+  Migration 016 (confidence='rejected'). ExtractionEngine mit `generateObject`+Zod-Schema. Pattern aus 3.2.F: Pending-Audit + capability='semantic-fact-write'. Skip-Logic. Approve/Reject über generische Routen mit Switch. Smoke-Test: 4 hochwertige Facts aus Toskana-Konversation extrahiert. 8 Tests grün.
+- **3.3.G1** ✅ Inbox-Render für semantic-fact-write (Commit `bf7b6d5`)
+  FactProposalBody inline in inbox/page.tsx. Capability-Switch zeigt factKey/factValue/reasoning. Pattern analog McpToolCallBox.
+- **3.3.G2** ✅ Facts-Settings-View (Commit `fc3f6b3`)
+  Eigene Page `/facts?twin=@handle`. CRUD plus Approve/Reject plus Reactivate. AddFactModal + EditFactModal + ModalWrapper. SSE-Live-Reaktivität. TopNav-Counter-Split (Inbox vs Facts).
+- **3.3.G3** ✅ Manual-Extract-Button + Reset-Confirm-Dialog (Commit `a3c868b`)
+  "Reflektieren"-Button im Chat-Header. Reset-Modal mit drei Optionen (Abbrechen/Nur beenden/Reflektieren+Beenden). ModalWrapper zu shared Component extrahiert. DirectChatResetButton-Inline-Confirm komplett ersetzt.
 
-Erste zwei Memory-Schichten — schneller ROI.
-
-- **Conversation-Memory:** Sliding-Window mit Auto-Summary. Bei jedem Chat werden die letzten N Messages plus zusammengefasste ältere Messages in Kontext geladen. Pro `(twin_id, partner_handle)`-Paar separater Verlauf. Aufbauend auf `conversations`-Tabelle aus 3.1-Konversations-Refactor (Tag 9).
-- **Semantic-Memory:** KV-Store + `facts.md`. Persistente Fakten ("Markus' Frau heißt X", "Florians Geburtstag ist Y"). Vom User editierbar (UI), vom Twin schreibbar mit Approval-Gate.
+**End-to-End-Verifikation:** Konversation über Toskana-Urlaub geführt, vier Facts extrahiert (business_partner, company_headquarters, business_partner_wife, planned_vacation_2026). UI-Pfade Add/Edit/Delete/Approve/Reject/Reactivate alle grün. Plus zweite Smoke-Konversation über Bayreuther-Festspielhaus-Karten → `contact_bayreuth`-Fact mit Kontext-Kapselung. Twin reichert Facts mit Persona-Wissen an, vermeidet Trivia, respektiert Skip-Logic.
 
 ### 3.4 — Memory: Episodic
 **Größe:** L · **Zeitfenster:** 1-2 Wochen
@@ -114,6 +127,8 @@ Vector-Embeddings für „Twin erinnert sich an spezifische Events".
 - Embedding-Provider-Wahl (OpenAI vs. Anthropic vs. lokal — kein Vendor-Lock)
 - Retrieval-Logik: Similarity-Search pro Konversation
 - Update-Strategie: was wird embedded, wann
+
+**Vorbedingung Strategie-Session:** Embedding-Provider, Embedding-Granularität (pro Message / pro Konversation / pro Audit), Retrieval-Pattern.
 
 ### 3.5 — Hyperbrowser als MCP-Skill
 **Größe:** M · **Zeitfenster:** 1 Woche
@@ -129,6 +144,8 @@ Cloud-Browser-Infrastruktur (hyperbrowser.ai) als MCP-Server eingebunden. Twin n
 
 Lerngedächtnis. Twin lernt aus Approves/Rejects/Edits, schreibt Skills selbst. Konzeptionell anspruchsvoll, vermutlich erst nach Phase 4 sinnvoll.
 
+Plus möglicher Andock-Punkt für #94 (Dream-Pattern) als periodischer LLM-Job zur Facts-Sammlungs-Kuratierung.
+
 ---
 
 ## Phase 3 Total
@@ -137,8 +154,8 @@ Lerngedächtnis. Twin lernt aus Approves/Rejects/Edits, schreibt Skills selbst. 
 **Realistisch:** 2-3 Monate bei aktuellem Tempo.
 **Definition of Done für Phase 3:**
 - [x] Skill-System läuft mit Pilot-Skill (3.1.A-F) ✅
-- [x] MCP-Client als Skill-Provider integriert (3.2.A-G) ✅
-- [ ] Conversation-Memory + Semantic-Memory live (3.3)
+- [x] MCP-Client als Skill-Provider integriert (3.2.A-H) ✅
+- [x] Conversation-Memory + Semantic-Memory live (3.3.A-G3) ✅
 - [ ] Episodic-Memory mit sqlite-vec (3.4)
 - [ ] Hyperbrowser als MCP-Skill (3.5)
 - [ ] Twin merkt sich Konversationen, kennt Fakten, nutzt externe Tools, navigiert das Web mit Approval-Gates
@@ -191,22 +208,22 @@ Bei realistischem Tempo (2-3 Sessions pro Woche, je 2-4h):
 **Bis Ende Juli/August 2026:** Phase 3 abgeschlossen.
 **Bis Ende 2026:** Phase 4 weitgehend fertig.
 
-**Realität nach Tag 10:** Phase 3.1 + 3.2 komplett — fast die Hälfte der Phase-3-Sub-Schritte in 4 Tagen Arbeit (Tag 7 + Tag 10) durch. Tempo höher als geplant, weil Patterns wieder verwendbar waren und die Sub-Schritt-Aufteilung mit eigenen Tests pro Layer bei beiden großen Refactors gehalten hat.
+**Realität nach Tag 12:** Phase 3.1 + 3.2 + 3.3 komplett — drei von fünf Phase-3-Sub-Schritten in 5 Tagen Arbeit (Tag 7 + Tag 10 + Tag 11 + Tag 12). Tempo deutlich höher als geplant, weil Patterns wiederverwendbar waren (Sub-Schritt-Aufteilung mit Tests pro Layer, Marker-Pattern für Approvals, Function-Injection für LLM-Calls).
 
 ---
 
 ## Was als Nächstes konkret kommt
 
-**Heute (9. Mai) nach 3.2:** Production-Deploy von Phase 3.2 als nächster großer Block. Pre-Deploy-Checklist:
-- Migrations 009-012 in Production-DB anwenden lassen (Auto-Bootstrap aus #77)
-- Pilot-Server-Setup auf Production-DB (separater @markus-Production-Twin)
-- ENV-Tunables für MCP-Lifecycle setzen (`MCP_IDLE_TIMEOUT_MS`, `MCP_SPAWN_TIMEOUT_MS`)
-- Smoke-Test in Production: ein everything-Server adden, Tool-Call-Test über Chat-UI
+**Tag 13 / nächste Session:** Production-Deploy Phase 3.3 auf VPS. Pre-Deploy-Checklist:
+- Tag-11-Mittag-Stand prüfen ob in Production deployed (3.2.H + Direktive)
+- Migrations 013-016 in Production-DB anwenden lassen
+- Image-Rebuild Runtime + Web, Container-Recreate
+- Smoke-Test in Production: Facts-Add via UI, Konversation führen, Reflektieren-Button, Approve via Inbox
 
 **Nächste Sessions:**
-- Phase 3.2-Polish-Items (#89, #90, #91) abarbeiten — sind nice-to-have, nicht blockierend für 3.3
-- Strategie-Session vor 3.3 (Conversation- + Semantic-Memory) — Pre-Implementation-Diskussion mit konkreten Festlegungen zu Auto-Summary-Schwelle, KV-Store-Lifecycle, facts.md-Schreibrechte
-- Phase 3.3 (Memory: Conversation + Semantic) starten
+- Optional Polish-Items aus Backlog (#90, #91, evtl. Toast-Framework statt alert)
+- Strategie-Session vor 3.4 (Memory: Episodic) — Embedding-Provider, Embedding-Granularität, Retrieval-Strategie
+- Phase 3.4 (Memory: Episodic) starten
 
 **Was als Hintergrund läuft:**
 - Backlog-Items in Priorität abarbeiten
@@ -220,7 +237,7 @@ Bei realistischem Tempo (2-3 Sessions pro Woche, je 2-4h):
 Phase 3 ist abgeschlossen, wenn:
 - [x] Skill-System mit Pilot-Skill (3.1) ✅
 - [x] MCP-Client als Skill-Provider (3.2) ✅
-- [ ] Memory: Conversation + Semantic (3.3)
+- [x] Memory: Conversation + Semantic (3.3) ✅
 - [ ] Memory: Episodic (3.4)
 - [ ] Hyperbrowser als MCP-Skill (3.5)
 

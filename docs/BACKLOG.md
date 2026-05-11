@@ -1,6 +1,6 @@
 # Backlog Phase 2.5 und später
 
-Stand: 10. Mai 2026, mittag (Tag 11) — Phase 3.2 sowohl lokal als auch in Production komplett. Tag-11-Vormittag: #92 Production-Deploy von Phase 3.2 (A-G) auf VPS. Tag-11-Mittag: 3.2 Sub-Schritt H Tool-Picker-UI als strukturelle Lösung für Item #89 (UI-Pfad), plus Multi-Step-Followup-Patch bei forcedToolChoice, plus TOOL_USE_DIRECTIVE-Polish (Defense-in-Depth gegen Marker-Halluzination). Drei Tag-11-Commits: `f3532e8` Doku Tag 11 Vormittag, `b97ae80` 3.2.H Tool-Picker, `2e7c1d0` Direktive-Polish. Items insgesamt: 87, davon #92 ✅, #89 strukturell gelöst für UI-Pfad (bleibt offen für Natural-Language-Pfad).
+Stand: 11. Mai 2026, abend (Tag 12) — Phase 3.3 (Memory: Conversation + Semantic) lokal komplett. Neun Tag-12-Commits: 3.3.A-G3 durch — Schema/Repos, Summary-Engine, History-Loader, Facts-API+CLI, Facts-im-Prompt, Twin-Extraction mit Approval-Gate, plus drei UI-Sub-Schritte (Inbox-Render, Facts-Settings-View, Manual-Extract + Reset-Modal). Phase 3 Definition of Done: 3 von 5 Häkchen (3.1 + 3.2 + 3.3). Items insgesamt: 89, davon #92 ✅, #89 strukturell gelöst für UI-Pfad. Zwei neue Items aus Tag-12-Recherche (#93 Cognee als optionaler MCP-Skill, #94 Dream-Pattern für Memory-Kuratierung), beide nice/L für Phase 3.6+ oder später.
 
 Format: Punkte mit Größe (S/M/L/XL) und Priorität (must/should/nice).
 
@@ -1539,3 +1539,114 @@ Heißt nicht „Prompt-Tuning ist nutzlos" — als Defense-in-Depth ist es wertv
 - **3.3 — Memory: Conversation + Semantic** (L) — erste zwei Memory-Schichten
 
 **Tag 11 Bilanz:** Drei Commits (`f3532e8` Doku Vormittag, `b97ae80` 3.2.H, `2e7c1d0` Direktive). Vormittag: Production-Deploy von Phase 3.2 (~60 Min). Mittag: 3.2.H Tool-Picker-UI als strukturelle Lösung für Item #89 plus Multi-Step-Followup-Patch plus UX-Polish plus Direktive-Polish (~2h). Wichtigste Erkenntnis: strukturelle Lösungen schlagen Prompt-Tuning. Drei Tage Item-#89-Ringen mit Direktiven hat partielle Verbesserungen gebracht, aber UI-Picker hat das Problem in einem Tag strukturell weggenommen. Pattern für künftige LLM-Verhaltens-Probleme: erst nach struktureller Lösung suchen (UI, Forced-Choice, Pre-Validation), Prompt-Tuning nur als Defense-in-Depth.
+
+---
+
+## Tag-12-Items (Recherche-getrieben, beide nice für Phase 3.6+ oder später)
+
+### #93 Cognee als optionaler MCP-Skill für Knowledge-Recall (L, nice)
+
+Wenn ein Twin größere Doc-Sets braucht (Workshop-Materialien, Notizen, Wissens-Korpus), kann Cognee (cognee.ai, 16.6k Stars, Apache 2.0) als MCP-Server pro Twin angebunden werden. Pattern identisch zu `everything`-Server aus 3.2 — `mcp_cognee_remember`, `mcp_cognee_recall` als Tools, optional `mcp_cognee_forget`. Pro Twin eigenes Cognee-Dataset, Isolation via Dataset-ID. Voraussetzung: 3.3 Conversation+Semantic-Memory steht (✅), plus 3.5 zeigt dass MCP-Pattern für externe Tools robust ist. Erst danach evaluieren ob Cognee echten Mehrwert über unsere Eigen-Implementation hinaus bringt (Knowledge-Graph, Ontology, Auto-Routing zwischen Session/Graph). Aus Tag-12-Recherche.
+
+### #94 Dream-Pattern für Memory-Kuratierung (L, nice)
+
+Periodischer LLM-Job pro Twin der die Facts-Sammlung verdichtet, dedupliziert und mit Konversations-Insights ergänzt. Pattern adaptiert von Anthropic Managed-Agents-Dreams (Research Preview, claude.com/docs/managed-agents/dreams). Eigen-implementiert ohne Vendor-Lock. Architektur:
+- Cron-Job oder On-Demand-Trigger pro Twin
+- LLM-Call mit Persona + aktueller Facts-Liste + Konversations-Summary-Sample
+- Prompt: „Hier ist deine Faktensammlung. Hier sind 50 zufällige Konversations-Auszüge. Welche Fakten sollten aktualisiert, dedupliziert oder ergänzt werden? Schreibe vorgeschlagene neue Facts-Liste."
+- Output → Diff-Vorschlag im UI → User approved/rejected pro Fact
+- Andockpunkt vermutlich Phase 3.6 (Procedural Memory) oder Phase 4
+
+Vorbedingung: 3.3 komplett ✅, plus Pilot-Phase mit ~50+ Fakten pro Twin gelaufen, damit der Job sinnvolle Eingangsdaten hat. Aktuell @markus mit ~8 Facts — noch zu wenig für Job-Auslastung. Aus Tag-12-Recherche.
+
+---
+
+### Lesson (Tag 12 / 3.3.B+C): nanoid-IDs sind NICHT lexikografisch sortierbar
+
+Bei 3.3.B (Summary-Engine) wurde der Cursor zwischen Summary-Runs zunächst via `segment_end_audit_id` (nanoid) gesetzt, in der Annahme dass nanoid-Strings lexikografisch sortierbar wären. Falsch — nanoid generiert random URL-safe-Strings, die NICHT zeitlich monoton wachsen. Cursor-Logik via String-Vergleich liefert falsche „neueste" ID.
+
+Lösung in 3.3.B: Cursor via `timestamp`-Wert des Audits (ISO-String, lexikografisch sortierbar weil ISO-8601). 
+
+Plus Bugfix in 3.3.C: `ConversationSummariesRepo.listByConversation` sortierte initial nach `segment_start_audit_id ASC` (nanoid!). Bei Multi-Summary-Konversation kam falsche Reihenfolge raus. Umgestellt auf `created_at ASC`. 3.3.A-Test-Coverage war zu dünn für Multi-Summary-Szenario — wurde erst in 3.3.C-Tests gefangen.
+
+Generelles Prinzip: **sortiere nach `created_at`/`updated_at`/`timestamp`-Spalten, niemals nach nanoid-PK-Spalten.** Plus Test-Coverage-Lesson: Multi-Row-Sortier-Tests sind Pflicht bei Repos die `listByX()`-Methoden haben — eine Row reicht nicht, um Sortierung zu verifizieren.
+
+### Lesson (Tag 12 / 3.3.B+F): Function-Injection für LLM-Calls
+
+Bei Engine-Komponenten die einen LLM-Call machen (SummaryEngine, ExtractionEngine) wurde ein Pattern etabliert: der LLM-Call ist eine **injizierte Funktion**, nicht ein direkter `generateText`/`generateObject`-Aufruf in der Klasse.
+
+```typescript
+type SummaryGenerator = (params: { system: string; prompt: string }) => Promise<string>;
+
+class SummaryEngine {
+  constructor(deps, private generate: SummaryGenerator) {}
+}
+```
+
+Production-Wiring: `summarize: async (p) => (await generateText({...p, model})).text`.
+Test-Wiring: `summarize: async () => "Mock summary"` oder `async () => { throw new Error("LLM down") }`.
+
+Vorteile:
+- Tests brauchen kein Mock-LLM-Framework, kein API-Stub, keinen Real-Provider
+- Provider-Agnostik bleibt erhalten (kein Lock-in im Engine-Code)
+- Failure-Pfade sind trivial testbar (Mock-Throw)
+
+Pattern in 3.3.B etabliert, in 3.3.F wiederverwendet (ExtractionEngine mit `ExtractionGenerator`). Pattern für künftige LLM-getriebene Komponenten.
+
+### Lesson (Tag 12 / 3.3.E): Facts als Persona-konstitutiv, nicht als Daten-Block
+
+Strategie-Vote vor 3.3.E hatte drei Optionen für Facts-Position im System-Prompt:
+- A) direkt nach Persona kombiniert (`personaWithFacts`)
+- B) als eigene 7. Schicht ans Ende
+- C) als allererste System-Message
+
+Vote A gewählt — Begründung: Facts sind Identitäts-Wissen („Markus' Frau heißt Anna"), kein Conversation-Kontext.
+
+Smoke-Test bestätigt: Twin reichert Facts mit Persona-Stimme an. Frage „Wo arbeitest du?" → „HARWAY Experience. Eigene Bude, zusammen mit Florian gegründet. Sitz in Hamburg, ich selbst sitze in Roding." — nicht nur „Harway Experience" als trockenes Datum. Twin integriert die `company`-Fact mit Persona-Wissen über Florian und die Gründungs-Geschichte plus eigener Wohn-Situation.
+
+Generelles Prinzip: **wo Information im System-Prompt landet, beeinflusst wie sie genutzt wird.** Daten direkt nach Persona werden als „eigenes Wissen" interpretiert und mit Persona-Stimme angereichert. Daten am Ende werden als „externer Kontext" gelesen und distanziert wiedergegeben. Für User-relevante Facts ist Persona-Position richtig.
+
+### Lesson (Tag 12 / 3.3.G): Inline-Components vs eigene Files
+
+3.3.G1, G2, G3 haben unterschiedliche Component-Strategien gewählt:
+- G1: FactProposalBody inline in `inbox/page.tsx` (kleiner Capability-Check, kein Refactor)
+- G2: FactSection + FactRow + Modals alle inline in `facts/page.tsx` (~600 Zeilen self-contained)
+- G3: ModalWrapper aus `facts/page.tsx` extrahiert nach `components/ModalWrapper.tsx`, weil Chat-Page ihn auch braucht
+
+Lesson: **Inline ist okay bis Wiederverwendung anliegt.** Premature Component-Extraktion macht Imports kompliziert ohne Gewinn. Erst wenn 2+ Pages dasselbe brauchen, Component extrahieren.
+
+Plus: Self-contained Pages mit ~600 Zeilen sind okay wenn sie zusammenhängende State-Logic haben (z.B. Facts-Page mit CRUD + Modals + SSE-Subscription). Aufsplittung würde Cross-File-Coupling erhöhen, nicht reduzieren.
+
+### Lesson (Tag 12 / 3.3.G3): Defensive Fallbacks mehrstufig
+
+`loadConversationHistory` aus 3.3.C hat doppelten Try-Catch:
+1. Versuch mit Cursor (Summaries-basiert)
+2. Bei Exception: zweiter Versuch mit Hard-Cap (fallbackLimit)
+3. Bei zweiter Exception: leere History zurückgeben
+
+Plus in 3.3.G3 die „Reflektieren + Beenden"-Sequenz: Extract fail → trotzdem Reset (User-Intention war beenden), Toast informiert über Lücke.
+
+Generelles Prinzip: **bei User-kritischen Aktionen (Send, Reset) lieber mehrstufiger Fallback statt eine Exception killt alles.** Pattern: try → fallback → safe-default. Mit klarem Logging auf jeder Stufe.
+
+### Lesson (Tag 12 / Doku): zsh + eckige Klammern + git
+
+Beim Commit von 3.3.G3 wollte `git add apps/web/app/chat/[handle]/page.tsx` nicht funktionieren — zsh interpretiert `[...]` als Globbing-Pattern und meldet „no matches found" wenn die Klammer nicht zu einem Filesystem-Match wird.
+
+Lösung: Single-Quotes um Pfade mit eckigen Klammern: `git add 'apps/web/app/chat/[handle]/page.tsx'`. Oder Escapen: `apps/web/app/chat/\[handle\]/page.tsx`.
+
+Lesson: **bei Next.js dynamic routes (`[param]`-Verzeichnisnamen) im git-Workflow auf zsh-Quoting achten.** Doku-Hinweis für künftige Sessions.
+
+---
+
+**Item-Dichte 11. Mai 2026 abend (Tag 12):** Phase 3.3 komplett — sieben Sub-Schritte (A, B, C, D, E, F, G1, G2, G3) plus eine Strategie-Session am Anfang. Neun Commits insgesamt: `9b4d5c5` Schema+Repos, `9fc1ebb` Summary-Engine, `0eb941e` History-Loader, `49fe0b7` Facts-API+CLI, `1a8a128` Facts-im-Prompt, `f1cfa65` Twin-Extraction, `bf7b6d5` Inbox-Render, `fc3f6b3` Facts-Page, `a3c868b` Manual-Extract+Reset-Modal. Plus zwei neue Items (#93 Cognee, #94 Dream-Pattern, beide nice/L). Plus sechs neue Lessons (nanoid-Sortierung, Function-Injection, Facts-Position, Inline vs Files, Mehrstufiger Fallback, zsh-Quoting). Items insgesamt jetzt: 89, davon Phase 3.3 komplett offen für Production-Deploy.
+
+**Tag 12 Bilanz:** Neun Commits, ~6000+ Zeilen Code-Diff. Phase 3.3 in einer Session durchgezogen — Sub-Schritt-Aufteilung mit Tests pro Layer hat sich bei dreifacher Anwendung (3.1, 3.2, 3.3) komplett bewährt. Memory-Foundation ist end-to-end produktiv: Conversation-Memory mit Auto-Summary (Sliding-Window), Semantic-Memory mit User-CRUD plus Twin-Extraction, beide im System-Prompt aktiv. UI komplett mit Inbox-Render, Facts-Settings-View, Manual-Extract-Button, Reset-Confirm-Modal. End-to-End-Smoke-Test mit echtem Twin: vier qualitativ hochwertige Facts aus Toskana-Konversation extrahiert (Skip-Logic + Trivia-Vermeidung verifiziert), plus zweite Konversation über Parsifal-Karten → `contact_bayreuth`-Fact mit Kontext-Kapselung. Wichtigste Erkenntnis: das Pattern „kleiner Sub-Schritt mit eigenem Test plus klarem Briefing pro Schritt" skaliert auch über neun Schritte in einer Session — Tempo bleibt hoch, Architektur bleibt sauber, Tests bleiben grün.
+
+**Was als Nächstes ansteht:** Production-Deploy Phase 3.3 (must) — Tag-12-Stand auf VPS. Plus ggf. Tag-11-Mittag (3.2.H + Direktive-Polish) nachholen falls noch nicht in Production. Sequenz analog Tag 11 Vormittag: Repo-Pull, Image-Rebuild Runtime + Web, Container-Recreate, Migrations 013-016 anwenden lassen. KEIN neuer Volume-Mount nötig. Geschätzt 60-90 Min.
+
+Danach:
+- **Strategie-Session vor 3.4** (Memory: Episodic mit sqlite-vec) — Embedding-Provider-Wahl (OpenAI vs Anthropic vs lokal), Embedding-Granularität (pro Message vs pro Konversation vs pro Audit), Retrieval-Strategie
+- **3.4 — Memory: Episodic** (L) — dritte Memory-Schicht mit Vector-Embeddings
+- **#90 Resume-Prompt-Tuning** (should, M) — 5-Min-Edit
+- **#91 Reject-Reason-UI** (nice, S) — window.prompt durch Modal ersetzen (ModalWrapper aus 3.3.G3 verfügbar)
+
