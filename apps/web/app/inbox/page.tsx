@@ -210,9 +210,9 @@ function InboxInner() {
         ) : (
           <ul className="space-y-3">
             {pending.map((entry) => {
-              const lastMessage = extractLastMessage(entry);
               const header = formatPendingHeader(entry);
               const isBusy = busy[entry.id] ?? false;
+              const isFactWrite = entry.capability === "semantic-fact-write";
               return (
                 <li key={entry.id} className="border border-border rounded p-4 space-y-3">
                   <div className="flex items-start justify-between gap-3">
@@ -223,9 +223,17 @@ function InboxInner() {
                       <div className="text-xs text-muted">
                         {new Date(entry.timestamp).toLocaleString()}
                       </div>
-                      <div className="text-sm text-text mt-2 whitespace-pre-wrap">
-                        {lastMessage}
-                      </div>
+                      {/* 3.3.G1: Capability-spezifisches Content-Display.
+                          semantic-fact-write zeigt Fact-Pair + Reasoning
+                          prominent; alle anderen Capabilities behalten den
+                          generischen lastMessage-Pfad. */}
+                      {isFactWrite ? (
+                        <FactProposalBody entry={entry} />
+                      ) : (
+                        <div className="text-sm text-text mt-2 whitespace-pre-wrap">
+                          {extractLastMessage(entry)}
+                        </div>
+                      )}
                     </div>
                     <div className="flex gap-2 flex-shrink-0">
                       <button
@@ -457,6 +465,12 @@ function formatCapability(entry: AuditEntry): string {
         ? `MCP-Tool: ${toolCall.mcpToolName}`
         : "MCP-Tool";
     }
+    case "semantic-fact-write": {
+      const factInput = entry.input as { factKey?: string };
+      return factInput.factKey
+        ? `Fakt-Vorschlag: ${factInput.factKey}`
+        : "Fakt-Vorschlag";
+    }
     default:
       return entry.capability;
   }
@@ -465,6 +479,57 @@ function formatCapability(entry: AuditEntry): string {
 function hasReply(entry: AuditEntry): boolean {
   const output = entry.output as { reply?: string } | null;
   return typeof output?.reply === "string" && output.reply.length > 0;
+}
+
+// ─── FactProposalBody (3.3.G1) ──────────────────────────────────────────────
+//
+// Render-Card für Pending-Audits mit capability='semantic-fact-write'.
+// Zeigt den Twin-Vorschlag prominent: factKey in Mono (für DB-Edit-
+// Wiedererkennbarkeit) + factValue + Reasoning. Approve/Reject-Buttons sind
+// im Container (Pending-Item) — diese Component liefert nur das Content-
+// Display.
+//
+// Reasoning kann bis 500 Zeichen lang werden (Zod-Constraint aus 3.3.F);
+// kein Truncate, white-space: pre-wrap. Lieber ausführlich anzeigen — User
+// braucht volle Begründung für informierte Approval.
+function FactProposalBody({ entry }: { entry: AuditEntry }) {
+  const input = entry.input as {
+    factKey?: string;
+    factValue?: string;
+    reasoning?: string;
+  };
+  const factKey = input.factKey ?? "(unbekannter Key)";
+  const factValue = input.factValue ?? "(unbekannter Wert)";
+  const reasoning = input.reasoning ?? "";
+
+  return (
+    <div className="mt-2 space-y-3">
+      <div>
+        <div className="text-[10px] text-muted uppercase tracking-wider mb-1">
+          Vorgeschlagener Fakt
+        </div>
+        <div className="text-sm flex flex-wrap items-baseline gap-2">
+          <code className="font-mono text-text bg-bg border border-border rounded px-1.5 py-0.5">
+            {factKey}
+          </code>
+          <span className="text-muted">→</span>
+          <span className="text-text whitespace-pre-wrap break-words">
+            {factValue}
+          </span>
+        </div>
+      </div>
+      {reasoning && (
+        <div>
+          <div className="text-[10px] text-muted uppercase tracking-wider mb-1">
+            Begründung
+          </div>
+          <div className="text-sm text-muted whitespace-pre-wrap break-words leading-relaxed">
+            {reasoning}
+          </div>
+        </div>
+      )}
+    </div>
+  );
 }
 
 function extractReply(entry: AuditEntry): string {
