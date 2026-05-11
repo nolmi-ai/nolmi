@@ -13,6 +13,7 @@ import {
   type LanguageModel,
   type ModelMessage,
 } from "ai";
+import type Database from "better-sqlite3";
 import { checkMandate } from "./mandates/service.js";
 import { AuditService } from "./audit/service.js";
 import type { EventBus } from "./events/bus.js";
@@ -23,6 +24,8 @@ import type { TrustRepo } from "./trust/trust-repo.js";
 import type { SkillRepo } from "./skills/repo.js";
 import { buildSkillsBlock } from "./skills/prompt-builder.js";
 import type { ConversationsRepo } from "./conversations/repo.js";
+import type { ConversationSummariesRepo } from "./conversations/summaries-repo.js";
+import { SummaryEngine } from "./conversations/summary-engine.js";
 import type { McpServersRepo } from "./mcp/repo.js";
 import type { McpClientFactory } from "./mcp/client-factory.js";
 import { McpClientManager } from "./mcp/client-manager.js";
@@ -92,6 +95,17 @@ export interface TwinServiceDeps {
    */
   mcpServersRepo: McpServersRepo;
   /**
+   * 3.3.B: gemeinsame DB-Connection für SummaryEngine-SQL-Counts (capability-
+   * gefilterte audit-Aggregationen, die das AuditRepository-Interface
+   * bewusst nicht abbildet).
+   */
+  db: Database.Database;
+  /**
+   * 3.3.B: Conversation-Summaries-Repo. Wird vom SummaryEngine im Send-Path
+   * gelesen + geschrieben; im History-Loader (3.3.C) zum Prompt-Aufbau gelesen.
+   */
+  conversationSummaries: ConversationSummariesRepo;
+  /**
    * Factory für McpClient-Instanzen (3.2.B). Production: defaultMcpClient-
    * Factory; Tests injecten Mock-Factory, sodass keine echten Subprocesses
    * gespawnt werden.
@@ -138,6 +152,14 @@ export class TwinService {
    */
   public readonly mcpSkillSync: McpSkillSync;
 
+  /**
+   * 3.3.B: Sliding-Window-Auto-Summary für lange Konversationen. Wird im
+   * Owner-Direct-Send-Pfad vor dem LLM-Call konsultiert; bei Threshold-
+   * Überschreitung läuft die Verdichtung synchron. Mock-fähig via injizierter
+   * summarize-Funktion, die hier ad hoc um generateText gewrappt wird.
+   */
+  public readonly summaryEngine: SummaryEngine;
+
   constructor(private deps: TwinServiceDeps) {
     this.mcp = new McpClientManager(
       deps.twinId,
@@ -150,6 +172,22 @@ export class TwinService {
       this.mcp,
       deps.twinId,
     );
+    this.summaryEngine = new SummaryEngine({
+      db: deps.db,
+      summariesRepo: deps.conversationSummaries,
+      summarize: async (system, user) => {
+        // Summary-LLM nutzt denselben Provider/Modell wie der Twin selbst —
+        // Persona-Konsistenz und Provider-Agnostik. Wir packen `system` als
+        // Prompt-System und `user` als einzige user-Message — kein Tool-Use,
+        // kein Multi-Step.
+        const result = await generateText({
+          model: deps.model,
+          system,
+          messages: [{ role: "user", content: user }],
+        });
+        return { text: result.text };
+      },
+    });
   }
 
   /**
@@ -292,6 +330,26 @@ export class TwinService {
         this.deps.twinId,
       );
       conversationId = conv.id;
+      // 3.3.B: Summary-Check VOR dem History-Load — wenn der Threshold
+      // überschritten ist, persistiert die SummaryEngine die ältesten
+      // Messages noch in dieser Send-Latenz. Sync, weil Edge-Case
+      // (>50 zählende Messages). Sub-Schritt 3.3.C wird den frisch
+      // erzeugten Summary in den System-Prompt einbinden; in 3.3.B
+      // bleibt die History-Logik unverändert (Live-Window-Hard-Cap).
+      // Failures schluckt die Engine intern und loggt — Caller fährt
+      // einfach mit dem heutigen Verhalten weiter.
+      if (await this.summaryEngine.shouldSummarize(conv.id)) {
+        console.log(
+          `[summary] threshold reached for conversation=${conv.id}, generating summary...`,
+        );
+        await this.summaryEngine.generateSummary(conv.id, {
+          twinName: this.deps.persona.name,
+          partnerHandle: this.deps.persona.handle.startsWith("@")
+            ? this.deps.persona.handle
+            : `@${this.deps.persona.handle}`,
+        });
+      }
+
       // Sliding-Window: jüngste HISTORY_AUDIT_LIMIT-Audits der aktiven
       // Konversation als LLM-Kontext.
       const past = await this.deps.audit.repo.listByConversation(

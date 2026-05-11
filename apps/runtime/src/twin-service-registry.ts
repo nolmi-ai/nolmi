@@ -23,6 +23,7 @@ import type { BridgeConfig } from "./bridge/types.js";
 import type { TrustRepo } from "./trust/trust-repo.js";
 import type { SkillRepo } from "./skills/repo.js";
 import type { ConversationsRepo } from "./conversations/repo.js";
+import { ConversationSummariesRepo } from "./conversations/summaries-repo.js";
 import type { McpServersRepo } from "./mcp/repo.js";
 import {
   defaultMcpClientFactory,
@@ -357,6 +358,13 @@ export class TwinServiceRegistry {
     };
     const bridgeClient = new BridgeClient(bridgeConfig, logger);
 
+    // 3.3.B: ConversationSummariesRepo wird pro Twin ad-hoc gebaut auf der
+    // geteilten db-Connection. Der Repo selbst ist zustandslos, also kein
+    // Pool-Effekt zwischen Twins — wir vermeiden nur, ihn durch die
+    // RegistryDeps-Plumbing zu schleifen.
+    const db = this.deps!.db;
+    const conversationSummaries = new ConversationSummariesRepo(db);
+
     const service = new TwinService({
       twinId: profile.twinId,
       ownerUserId: profile.ownerUserId,
@@ -372,6 +380,8 @@ export class TwinServiceRegistry {
       conversations: conversationsRepo,
       mcpServersRepo,
       mcpClientFactory,
+      db,
+      conversationSummaries,
     });
 
     const bridgeStream = new BridgeStream(
