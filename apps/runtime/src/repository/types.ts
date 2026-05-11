@@ -48,6 +48,23 @@ export interface AuditRepository {
    * chronologisch um.
    */
   listByConversation(conversationId: string, limit: number): Promise<AuditEntry[]>;
+  /**
+   * 3.3.C: Audits einer Konversation, deren Timestamp echt nach dem Cursor-
+   * Audit liegt — gedacht für das Sliding-Window über bereits summarized
+   * Segmente hinaus. Cursor wird über die ID des letzten summarized Audits
+   * angegeben; SQL resolvt selbst den Timestamp dazu. Sortierung ASC
+   * (älteste zuerst), damit der Caller direkt chronologisch in den LLM-
+   * Kontext schiebt — kein zusätzlicher Reverse nötig.
+   *
+   * Kein Limit: das Live-Window ist durch den Summary-Trigger
+   * (CONVERSATION_SUMMARY_THRESHOLD) ohnehin gedeckelt. Bei Cursor-ID, die
+   * nicht in der DB existiert, liefert die Sub-Query NULL → Filter `> NULL`
+   * matched nichts → leere Liste. Defensiv, kein Crash.
+   */
+  listByConversationAfter(
+    conversationId: string,
+    cursorAuditId: string,
+  ): Promise<AuditEntry[]>;
 }
 
 export interface RepositoryBundle {

@@ -24,8 +24,16 @@ import type { TrustRepo } from "./trust/trust-repo.js";
 import type { SkillRepo } from "./skills/repo.js";
 import { buildSkillsBlock } from "./skills/prompt-builder.js";
 import type { ConversationsRepo } from "./conversations/repo.js";
-import type { ConversationSummariesRepo } from "./conversations/summaries-repo.js";
+import type {
+  ConversationSummariesRepo,
+  ConversationSummary,
+} from "./conversations/summaries-repo.js";
 import { SummaryEngine } from "./conversations/summary-engine.js";
+import {
+  auditsToOwnerDirectMessagesChronological,
+  buildSummaryBlock,
+  loadConversationHistory,
+} from "./conversations/history-loader.js";
 import type { McpServersRepo } from "./mcp/repo.js";
 import type { McpClientFactory } from "./mcp/client-factory.js";
 import { McpClientManager } from "./mcp/client-manager.js";
@@ -321,6 +329,7 @@ export class TwinService {
     // Test-Pfad nicht still mit conversation_id=NULL durchläuft.
     let conversationId: string | null = null;
     let history: ChatMessage[] = [];
+    let summaries: ConversationSummary[] = [];
     if (this.deps.ownerUserId) {
       const conv = this.deps.conversations.getOrStart(
         this.deps.ownerUserId,
@@ -333,11 +342,10 @@ export class TwinService {
       // 3.3.B: Summary-Check VOR dem History-Load — wenn der Threshold
       // überschritten ist, persistiert die SummaryEngine die ältesten
       // Messages noch in dieser Send-Latenz. Sync, weil Edge-Case
-      // (>50 zählende Messages). Sub-Schritt 3.3.C wird den frisch
-      // erzeugten Summary in den System-Prompt einbinden; in 3.3.B
-      // bleibt die History-Logik unverändert (Live-Window-Hard-Cap).
-      // Failures schluckt die Engine intern und loggt — Caller fährt
-      // einfach mit dem heutigen Verhalten weiter.
+      // (>50 zählende Messages). 3.3.C zieht den frisch erzeugten Summary
+      // direkt im folgenden loadConversationHistory()-Call mit in den
+      // System-Prompt. Failures schluckt die Engine intern und loggt —
+      // Caller fährt einfach mit dem heutigen Verhalten weiter.
       if (await this.summaryEngine.shouldSummarize(conv.id)) {
         console.log(
           `[summary] threshold reached for conversation=${conv.id}, generating summary...`,
@@ -350,13 +358,27 @@ export class TwinService {
         });
       }
 
-      // Sliding-Window: jüngste HISTORY_AUDIT_LIMIT-Audits der aktiven
-      // Konversation als LLM-Kontext.
-      const past = await this.deps.audit.repo.listByConversation(
+      // 3.3.C: Sliding-Window-History mit optionalem Summary-Block.
+      // Wenn Summaries existieren, kommt das Live-Window via Cursor (alle
+      // Audits NACH dem letzten summarized Audit, ASC). Ohne Summaries:
+      // Fallback auf Hard-Cap wie bisher. Failure-Pfad in
+      // loadConversationHistory schluckt Exceptions und liefert leere
+      // Summaries + Hard-Cap-Audits.
+      const loaded = await loadConversationHistory(
+        {
+          summariesRepo: this.deps.conversationSummaries,
+          auditRepo: this.deps.audit.repo,
+          fallbackLimit: HISTORY_AUDIT_LIMIT,
+        },
         conv.id,
-        HISTORY_AUDIT_LIMIT,
       );
-      history = auditsToOwnerDirectMessages(past);
+      summaries = loaded.summaries;
+      history = auditsToOwnerDirectMessagesChronological(loaded.liveAuditsAsc);
+      if (summaries.length > 0) {
+        console.log(
+          `[history] loaded conversation=${conv.id} with ${summaries.length} summaries + ${loaded.liveAuditsAsc.length} live audits`,
+        );
+      }
     }
 
     // 3.2.F: audit.start() VOR runModel würde bei Approval-Pending einen
@@ -382,6 +404,7 @@ export class TwinService {
         {
           enableMcpTools: true,
           forcedToolChoice: options.forcedToolChoice,
+          summaryBlock: buildSummaryBlock(summaries),
         },
       );
       const audit = await this.deps.audit.start({
@@ -1139,6 +1162,14 @@ export class TwinService {
        * existiert — sonst ignoriert (LLM-Default-Auto greift).
        */
       forcedToolChoice?: ForcedToolChoice;
+      /**
+       * 3.3.C: Conversation-Summary-Block für lange Konversationen. Wenn
+       * gesetzt, fließt er als 6. System-Prompt-Schicht hinter
+       * LANGUAGE_DIRECTIVE ein — der Twin kennt damit die verdichtete
+       * Vorgeschichte. Bei `null`/`undefined` greift nichts (alte
+       * Hard-Cap-Semantik).
+       */
+      summaryBlock?: string | null;
     } = {},
   ): Promise<{ content: string; metadata: Record<string, unknown> }> {
     // Skills landen zwischen Persona und LANGUAGE_DIRECTIVE: sie ergänzen die
@@ -1200,18 +1231,21 @@ REGEL 5: Behaupte nicht, dass ein Tool nicht funktioniert, ohne es tatsächlich 
 REGEL 6: Wenn der User dich explizit bittet, ein Tool zu nutzen ("rufe das X-Tool auf", "nutze Y"), MUSST du es rufen. Verweigere nicht und ersetze nicht durch eigene Antworten.`
       : null;
 
-    // Fünf Schichten, Reihenfolge bewusst:
+    // Sechs Schichten, Reihenfolge bewusst:
     //   1. extraSystem (situativer Bridge-Kontext, optional)
     //   2. persona.systemPrompt (wer der Twin ist)
     //   3. skillsBlock (Skill-Erweiterungen, ergänzen Persona — nur Manual-Skills)
     //   4. TOOL_USE_DIRECTIVE (nur wenn Tools übergeben werden)
     //   5. LANGUAGE_DIRECTIVE (Anti-"weiss"-statt-"weiß", gilt für alle Twins)
+    //   6. summaryBlock (3.3.C — verdichtete Vorgeschichte langer Konversationen,
+    //      nur wenn Summaries existieren; sonst null und via filter rausgenommen)
     const system = [
       extraSystem,
       persona.systemPrompt,
       skillsBlock,
       TOOL_USE_DIRECTIVE,
       LANGUAGE_DIRECTIVE,
+      options.summaryBlock ?? null,
     ]
       .filter(Boolean)
       .join("\n\n");
@@ -1442,30 +1476,6 @@ REGEL 6: Wenn der User dich explizit bittet, ein Tool zu nutzen ("rufe das X-Too
 // Config-Option exponieren — für jetzt fix.
 const HISTORY_MESSAGE_CAP = 40;
 const HISTORY_AUDIT_LIMIT = Math.ceil(HISTORY_MESSAGE_CAP / 2);
-
-/**
- * Konvertiert die DESC-sortierte Audit-Liste der aktiven Konversation in
- * eine chronologisch sortierte `ChatMessage[]`-Liste (User + Assistant pro
- * Audit). Filtert defensiv auf `executed` mit String-`reply` — pending oder
- * failed Audits sind keine valide Konversations-Historie.
- */
-function auditsToOwnerDirectMessages(audits: AuditEntry[]): ChatMessage[] {
-  const result: ChatMessage[] = [];
-  // Repo gibt DESC zurück; wir wollen ASC für die LLM-Eingabe.
-  for (let i = audits.length - 1; i >= 0; i--) {
-    const a = audits[i];
-    if (!a) continue;
-    if (a.status !== "executed") continue;
-    const userText =
-      typeof a.input.lastMessage === "string" ? a.input.lastMessage : null;
-    const reply =
-      a.output && typeof a.output.reply === "string" ? a.output.reply : null;
-    if (!userText || !reply) continue;
-    result.push({ role: "user", content: userText });
-    result.push({ role: "assistant", content: reply });
-  }
-  return result;
-}
 
 // Globale Sprach-Direktive — wird an JEDE Persona-System-Prompt angehängt,
 // unabhängig von Twin oder Modell. Anlass: Anthropic-Modelle haben in mehreren

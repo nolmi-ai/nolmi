@@ -22,7 +22,7 @@ export function createSqliteRepository(dbPath: string): RepositoryBundle {
 
 // ─── AUDIT ───────────────────────────────────────────────────────────────────
 
-class SqliteAuditRepository implements AuditRepository {
+export class SqliteAuditRepository implements AuditRepository {
   constructor(private db: Database.Database) {}
 
   async append(entry: AuditEntry): Promise<void> {
@@ -109,6 +109,26 @@ class SqliteAuditRepository implements AuditRepository {
           LIMIT ?`,
       )
       .all(conversationId, limit) as AuditRow[];
+    return rows.map((r) => mergeColumns(r));
+  }
+
+  async listByConversationAfter(
+    conversationId: string,
+    cursorAuditId: string,
+  ): Promise<AuditEntry[]> {
+    // SQL-Pattern: Sub-Query resolved Cursor-Timestamp. nanoid-Audit-IDs
+    // sind nicht lexikografisch sortierbar (3.3.B-Lesson), Timestamp ist
+    // die einzige verlässliche Chronologie. Cursor-ID, die in der DB nicht
+    // existiert: Sub-Query → NULL, `> NULL` matched nichts → leere Liste.
+    const rows = this.db
+      .prepare(
+        `SELECT data, read_at, conversation_id
+           FROM audit
+          WHERE conversation_id = ?
+            AND timestamp > (SELECT timestamp FROM audit WHERE id = ?)
+          ORDER BY timestamp ASC`,
+      )
+      .all(conversationId, cursorAuditId) as AuditRow[];
     return rows.map((r) => mergeColumns(r));
   }
 

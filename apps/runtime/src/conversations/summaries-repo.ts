@@ -83,18 +83,18 @@ export class ConversationSummariesRepo {
 
   /**
    * Listet alle Summaries einer Konversation in chronologischer Reihenfolge
-   * (ältestes Segment zuerst). Sortiert nach segment_start_audit_id, was
-   * äquivalent zu „chronologisch ältester Audit zuerst" ist, weil Audit-IDs
-   * über die Zeit aufsteigend vergeben werden (nanoid mit Timestamp-Prefix in
-   * der Audit-Service). created_at als sekundäre Tiebreaker-Sortierung
-   * absichert den Edge-Case identischer Start-Audit-IDs (Re-Summaries).
+   * (ältestes Segment zuerst). Sortierung nach `created_at` — Audit-IDs sind
+   * nanoid und damit NICHT lex-sortierbar, also nicht als Sort-Key tauglich
+   * (3.3.B-Lesson, im 3.3.C-Test zum ersten Mal mit Stichprobe reproduziert).
+   * created_at ist deterministisch chronologisch, weil der Repo bei Insert
+   * `new Date().toISOString()` setzt.
    */
   listByConversation(conversationId: string): ConversationSummary[] {
     const rows = this.db
       .prepare(
         `SELECT * FROM conversation_summaries
            WHERE conversation_id = ?
-           ORDER BY segment_start_audit_id ASC, created_at ASC`,
+           ORDER BY created_at ASC`,
       )
       .all(conversationId) as ConversationSummaryRow[];
     return rows.map(rowToSummary);

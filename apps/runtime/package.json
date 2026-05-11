@@ -23,6 +23,7 @@
     "trust:test": "tsx src/scripts/test-trust-flow.ts",
     "test-memory-repos": "tsx src/scripts/test-memory-repos.ts",
     "test-summary-engine": "tsx src/scripts/test-summary-engine.ts",
+    "test-history-with-summary": "tsx src/scripts/test-history-with-summary.ts",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
