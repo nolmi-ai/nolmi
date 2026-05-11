@@ -420,3 +420,49 @@ export const McpServerUpdateInputSchema = McpServerAddInputSchema
   .omit({ twinId: true, transport: true })
   .partial();
 export type McpServerUpdateInput = z.infer<typeof McpServerUpdateInputSchema>;
+
+// ─── FACTS (Phase 3.3 — Semantic-Memory KV-Store) ────────────────────────────
+//
+// API-Verträge für die Facts-Endpoints aus 3.3.D. Source/Confidence-Enums
+// spiegeln die CHECK-Constraints aus Migration 014.
+//
+// factKey/factValue-Längen: bewusst großzügig (200 / 10000). Pilot-Facts sind
+// kurz ("Anna", "Harway Experience"), aber Reserve für gelegentliche
+// längere Werte (Adressen, Notizen) — ohne dass wir uns die Tabelle mit
+// Volltext-Werten zumüllen.
+
+export const FactSourceSchema = z.enum(["user", "twin", "import"]);
+export type FactSource = z.infer<typeof FactSourceSchema>;
+
+export const FactConfidenceSchema = z.enum(["approved", "pending", "auto"]);
+export type FactConfidence = z.infer<typeof FactConfidenceSchema>;
+
+export const FactItemSchema = z.object({
+  id: z.string(),
+  factKey: z.string(),
+  factValue: z.string(),
+  source: FactSourceSchema,
+  confidence: FactConfidenceSchema,
+  createdAt: z.string(),
+  updatedAt: z.string(),
+});
+export type FactItem = z.infer<typeof FactItemSchema>;
+
+export const FactListResponseSchema = z.object({
+  facts: z.array(FactItemSchema),
+});
+export type FactListResponse = z.infer<typeof FactListResponseSchema>;
+
+export const FactCreateRequestSchema = z.object({
+  factKey: z.string().min(1).max(200),
+  factValue: z.string().min(1).max(10000),
+  source: FactSourceSchema.optional().default("user"),
+  confidence: FactConfidenceSchema.optional().default("approved"),
+});
+export type FactCreateRequest = z.infer<typeof FactCreateRequestSchema>;
+
+export const FactUpdateRequestSchema = z.object({
+  factValue: z.string().min(1).max(10000),
+  confidence: FactConfidenceSchema.optional(),
+});
+export type FactUpdateRequest = z.infer<typeof FactUpdateRequestSchema>;

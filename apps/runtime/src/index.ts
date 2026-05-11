@@ -10,6 +10,7 @@ import { TrustRepo } from "./trust/trust-repo.js";
 import { SkillRepo } from "./skills/repo.js";
 import { ConversationsRepo } from "./conversations/repo.js";
 import { McpServersRepo } from "./mcp/repo.js";
+import { FactsRepo } from "./facts/repo.js";
 import { EncryptionKeyMissingError, loadMasterKey } from "./crypto-utils.js";
 
 // ─── BOOTSTRAP ───────────────────────────────────────────────────────────────
@@ -66,6 +67,7 @@ async function main() {
   const skillRepo = new SkillRepo(repo.db);
   const conversationsRepo = new ConversationsRepo(repo.db);
   const mcpServersRepo = new McpServersRepo(repo.db, masterKey);
+  const factsRepo = new FactsRepo(repo.db);
   const app = await createServer({
     audit: repo.audit,
     registry,
@@ -76,6 +78,7 @@ async function main() {
     skillRepo,
     conversationsRepo,
     mcpServersRepo,
+    factsRepo,
   });
 
   // 5. Registry mit allen aktiven Twins füllen — entschlüsselt API-Keys.

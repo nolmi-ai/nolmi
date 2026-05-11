@@ -7,10 +7,15 @@ import type Database from "better-sqlite3";
 import type { AuditRepository } from "./repository/types.js";
 import {
   ChatRequestSchema,
+  FactCreateRequestSchema,
+  FactUpdateRequestSchema,
   type AuditEntry,
+  type FactConfidence,
+  type FactItem,
   type TwinToolListItem,
 } from "@twin-lab/shared";
 import { McpServersRepo } from "./mcp/repo.js";
+import { FactsRepo } from "./facts/repo.js";
 import type { RegistryEntry, TwinServiceRegistry } from "./twin-service-registry.js";
 import { TwinProfilesRepo } from "./twin-profiles-repo.js";
 import { encrypt } from "./crypto-utils.js";
@@ -81,6 +86,8 @@ export interface ServerDeps {
   conversationsRepo: ConversationsRepo;
   /** 3.2.H — für GET /twins/:handle/tools (Server-Name pro Skill). */
   mcpServersRepo: McpServersRepo;
+  /** 3.3.D — für /twins/:handle/facts-Endpoints (CRUD-API für Semantic-Memory). */
+  factsRepo: FactsRepo;
 }
 
 export async function createServer(deps: ServerDeps) {
@@ -235,6 +242,9 @@ export async function createServer(deps: ServerDeps) {
 
   // ─── Tools (3.2.H — Tool-Picker-UI) ───────────────────────────────────────
   registerToolRoutes(app, deps, requireOwner);
+
+  // ─── Facts (3.3.D — Semantic-Memory CRUD) ─────────────────────────────────
+  registerFactRoutes(app, deps, requireOwner);
 
   // ─── A2A-Conversations (2.5.4.2) ──────────────────────────────────────────
   registerConversationRoutes(app, deps, requireOwner);
@@ -1077,6 +1087,166 @@ function registerToolRoutes(
       });
 
       return { tools };
+    },
+  );
+}
+
+// ─── FACT ROUTES (3.3.D — Semantic-Memory CRUD) ──────────────────────────────
+//
+// Owner-gated CRUD für die facts-Tabelle aus Migration 014. Read-Pfad
+// optional gefiltert nach confidence (Query-Param `?status=`). Create ist
+// explizit non-upsert: bei existierendem (twin, key) gibt's 409 statt
+// stilles UPDATE — der UI-Flow für "Wert ändern" geht über PATCH. Repo-
+// upsert verwenden wir aber trotzdem als Insert-Pfad (Pre-Check vorher).
+//
+// `factKey` darf alle URL-safe Zeichen enthalten; im PATCH/DELETE-Pfad
+// wird er via Fastify-Param dekodiert. Bei Pilot-Convention (lowercase +
+// Underscore) sind keine encoding-Sonderfälle zu erwarten.
+
+const FACT_STATUS_VALUES = ["approved", "pending", "auto"] as const;
+type FactStatusFilter = (typeof FACT_STATUS_VALUES)[number];
+
+function isFactStatus(v: unknown): v is FactStatusFilter {
+  return typeof v === "string" && (FACT_STATUS_VALUES as readonly string[]).includes(v);
+}
+
+function toFactItem(f: {
+  id: string;
+  factKey: string;
+  factValue: string;
+  source: FactItem["source"];
+  confidence: FactItem["confidence"];
+  createdAt: string;
+  updatedAt: string;
+}): FactItem {
+  return {
+    id: f.id,
+    factKey: f.factKey,
+    factValue: f.factValue,
+    source: f.source,
+    confidence: f.confidence,
+    createdAt: f.createdAt,
+    updatedAt: f.updatedAt,
+  };
+}
+
+function registerFactRoutes(
+  app: FastifyInstance,
+  deps: ServerDeps,
+  requireOwner: (
+    request: FastifyRequest,
+    reply: FastifyReply,
+    handle: string,
+  ) => Promise<{ entry: RegistryEntry; user: User } | null>,
+) {
+  // ─── LIST ────────────────────────────────────────────────────────────────
+  app.get<{
+    Params: { handle: string };
+    Querystring: { status?: string };
+  }>("/twins/:handle/facts", async (request, reply) => {
+    const ctx = await requireOwner(request, reply, request.params.handle);
+    if (!ctx) return;
+    const { entry } = ctx;
+
+    const rawStatus = request.query.status?.trim();
+    if (rawStatus && !isFactStatus(rawStatus)) {
+      return reply.status(400).send({
+        error: `status muss eines von ${FACT_STATUS_VALUES.join(", ")} sein`,
+      });
+    }
+    const statusFilter = isFactStatus(rawStatus) ? rawStatus : null;
+
+    // FactsRepo.listByTwin hat nur `onlyApproved` — restliche Filter machen
+    // wir hier post-hoc. Bei null/undefined → alle Facts.
+    const all = deps.factsRepo.listByTwin(entry.twinId);
+    const filtered = statusFilter
+      ? all.filter((f) => f.confidence === statusFilter)
+      : all;
+    return { facts: filtered.map(toFactItem) };
+  });
+
+  // ─── CREATE (create-only, 409 bei Konflikt) ──────────────────────────────
+  app.post<{ Params: { handle: string } }>(
+    "/twins/:handle/facts",
+    async (request, reply) => {
+      const ctx = await requireOwner(request, reply, request.params.handle);
+      if (!ctx) return;
+      const { entry } = ctx;
+
+      const parsed = FactCreateRequestSchema.safeParse(request.body);
+      if (!parsed.success) {
+        return reply.status(400).send({ error: parsed.error.message });
+      }
+      const { factKey, factValue, source, confidence } = parsed.data;
+
+      // Pre-Check: UPSERT würde stilles UPDATE machen — für den Create-Pfad
+      // soll der Caller explizit PATCH nehmen, daher 409.
+      const existing = deps.factsRepo.get(entry.twinId, factKey);
+      if (existing) {
+        return reply.status(409).send({
+          error: `Fact '${factKey}' existiert bereits — nutze PATCH zum Aktualisieren`,
+          code: "FACT_ALREADY_EXISTS",
+        });
+      }
+
+      const fact = deps.factsRepo.upsert({
+        twinId: entry.twinId,
+        factKey,
+        factValue,
+        source,
+        confidence,
+      });
+      return reply.status(201).send({ fact: toFactItem(fact) });
+    },
+  );
+
+  // ─── UPDATE (Value + optional Confidence) ────────────────────────────────
+  app.patch<{ Params: { handle: string; factKey: string } }>(
+    "/twins/:handle/facts/:factKey",
+    async (request, reply) => {
+      const ctx = await requireOwner(request, reply, request.params.handle);
+      if (!ctx) return;
+      const { entry } = ctx;
+
+      const factKey = decodeURIComponent(request.params.factKey);
+      const parsed = FactUpdateRequestSchema.safeParse(request.body);
+      if (!parsed.success) {
+        return reply.status(400).send({ error: parsed.error.message });
+      }
+
+      const existing = deps.factsRepo.get(entry.twinId, factKey);
+      if (!existing) {
+        return reply.status(404).send({ error: `Fact '${factKey}' nicht gefunden` });
+      }
+
+      const nextConfidence: FactConfidence =
+        parsed.data.confidence ?? existing.confidence;
+      const fact = deps.factsRepo.upsert({
+        twinId: entry.twinId,
+        factKey,
+        factValue: parsed.data.factValue,
+        // source bleibt beim Original — PATCH ändert nie die Provenance.
+        source: existing.source,
+        confidence: nextConfidence,
+      });
+      return reply.status(200).send({ fact: toFactItem(fact) });
+    },
+  );
+
+  // ─── DELETE ──────────────────────────────────────────────────────────────
+  app.delete<{ Params: { handle: string; factKey: string } }>(
+    "/twins/:handle/facts/:factKey",
+    async (request, reply) => {
+      const ctx = await requireOwner(request, reply, request.params.handle);
+      if (!ctx) return;
+      const { entry } = ctx;
+
+      const factKey = decodeURIComponent(request.params.factKey);
+      const removed = deps.factsRepo.delete(entry.twinId, factKey);
+      if (!removed) {
+        return reply.status(404).send({ error: `Fact '${factKey}' nicht gefunden` });
+      }
+      return reply.status(204).send();
     },
   );
 }

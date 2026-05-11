@@ -14,6 +14,10 @@
     "twin:mcp-list": "pnpm --filter @twin-lab/runtime twin:mcp-list",
     "twin:mcp-refresh": "pnpm --filter @twin-lab/runtime twin:mcp-refresh",
     "twin:mcp-remove": "pnpm --filter @twin-lab/runtime twin:mcp-remove",
+    "twin:facts-list": "pnpm --filter @twin-lab/runtime twin:facts-list",
+    "twin:facts-add": "pnpm --filter @twin-lab/runtime twin:facts-add",
+    "twin:facts-remove": "pnpm --filter @twin-lab/runtime twin:facts-remove",
+    "twin:facts-import": "pnpm --filter @twin-lab/runtime twin:facts-import",
     "bridge:dev": "pnpm --filter @twin-lab/bridge dev",
     "bridge:db:init": "pnpm --filter @twin-lab/bridge db:init",
     "clean": "pnpm -r clean && rm -rf node_modules"
