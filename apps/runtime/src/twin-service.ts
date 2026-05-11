@@ -36,6 +36,8 @@ import {
 } from "./conversations/history-loader.js";
 import type { McpServersRepo } from "./mcp/repo.js";
 import type { McpClientFactory } from "./mcp/client-factory.js";
+import type { FactsRepo } from "./facts/repo.js";
+import { buildFactsBlock } from "./facts/prompt-builder.js";
 import { McpClientManager } from "./mcp/client-manager.js";
 import { McpSkillSync } from "./mcp/skill-sync.js";
 import {
@@ -113,6 +115,13 @@ export interface TwinServiceDeps {
    * gelesen + geschrieben; im History-Loader (3.3.C) zum Prompt-Aufbau gelesen.
    */
   conversationSummaries: ConversationSummariesRepo;
+  /**
+   * 3.3.E: Facts-Repo für Semantic-Memory. Pro Send werden die approved
+   * Facts geladen und als Block direkt nach der Persona in den System-Prompt
+   * eingebaut. Pending-/Auto-Facts werden bewusst NICHT geladen (Trennung
+   * User-bestätigt vs. Twin-vorgeschlagen).
+   */
+  facts: FactsRepo;
   /**
    * Factory für McpClient-Instanzen (3.2.B). Production: defaultMcpClient-
    * Factory; Tests injecten Mock-Factory, sodass keine echten Subprocesses
@@ -396,6 +405,19 @@ export class TwinService {
       payload: { capability: "owner-direct" },
     });
 
+    // 3.3.E: Facts-Block für den System-Prompt — approved-only, alphabetisch
+    // sortiert, leerer Block bei keinen Facts. Sync-Lookup (~1-2ms pro Send,
+    // kein Caching nötig). Pending/Auto-Facts werden bewusst NICHT geladen.
+    const approvedFacts = this.deps.facts.listByTwin(this.deps.twinId, {
+      onlyApproved: true,
+    });
+    if (approvedFacts.length > 0) {
+      console.log(
+        `[facts] loaded ${approvedFacts.length} approved facts for twin=${this.deps.twinId}`,
+      );
+    }
+    const factsBlock = buildFactsBlock(approvedFacts);
+
     try {
       const reply = await this.runModel(
         this.deps.persona,
@@ -405,6 +427,7 @@ export class TwinService {
           enableMcpTools: true,
           forcedToolChoice: options.forcedToolChoice,
           summaryBlock: buildSummaryBlock(summaries),
+          factsBlock,
         },
       );
       const audit = await this.deps.audit.start({
@@ -1170,6 +1193,14 @@ export class TwinService {
        * Hard-Cap-Semantik).
        */
       summaryBlock?: string | null;
+      /**
+       * 3.3.E: Facts-Block aus dem Semantic-Memory. Wenn gesetzt, wird er
+       * direkt an den Persona-System-Prompt angehängt (gleiche Schicht) —
+       * Facts sind Persona-konstitutiv und profitieren von der
+       * Attention-Position am Prompt-Anfang. Bei `null`/`undefined` bleibt
+       * der reine Persona-Prompt.
+       */
+      factsBlock?: string | null;
     } = {},
   ): Promise<{ content: string; metadata: Record<string, unknown> }> {
     // Skills landen zwischen Persona und LANGUAGE_DIRECTIVE: sie ergänzen die
@@ -1233,15 +1264,20 @@ REGEL 6: Wenn der User dich explizit bittet, ein Tool zu nutzen ("rufe das X-Too
 
     // Sechs Schichten, Reihenfolge bewusst:
     //   1. extraSystem (situativer Bridge-Kontext, optional)
-    //   2. persona.systemPrompt (wer der Twin ist)
+    //   2. persona.systemPrompt + factsBlock (combined) — Facts sind Persona-
+    //      konstitutiv und profitieren von der Attention-Position am
+    //      Prompt-Anfang. 3.3.E
     //   3. skillsBlock (Skill-Erweiterungen, ergänzen Persona — nur Manual-Skills)
     //   4. TOOL_USE_DIRECTIVE (nur wenn Tools übergeben werden)
     //   5. LANGUAGE_DIRECTIVE (Anti-"weiss"-statt-"weiß", gilt für alle Twins)
     //   6. summaryBlock (3.3.C — verdichtete Vorgeschichte langer Konversationen,
     //      nur wenn Summaries existieren; sonst null und via filter rausgenommen)
+    const personaWithFacts = options.factsBlock
+      ? `${persona.systemPrompt}\n\n${options.factsBlock}`
+      : persona.systemPrompt;
     const system = [
       extraSystem,
-      persona.systemPrompt,
+      personaWithFacts,
       skillsBlock,
       TOOL_USE_DIRECTIVE,
       LANGUAGE_DIRECTIVE,

@@ -7,6 +7,7 @@ import { TrustRepo } from "../trust/trust-repo.js";
 import { SkillRepo } from "../skills/repo.js";
 import { ConversationsRepo } from "../conversations/repo.js";
 import { ConversationSummariesRepo } from "../conversations/summaries-repo.js";
+import { FactsRepo } from "../facts/repo.js";
 import { TwinService } from "../twin-service.js";
 import { AuditService } from "../audit/service.js";
 import { EventBus } from "../events/bus.js";
@@ -50,6 +51,7 @@ async function main() {
   const trustRepo = new TrustRepo(db);
   const conversationsRepo = new ConversationsRepo(db);
   const conversationSummariesRepo = new ConversationSummariesRepo(db);
+  const factsRepo = new FactsRepo(db);
   const masterKey = loadMasterKey();
   const mcpServersRepo = new McpServersRepo(db, masterKey);
   const repo = createSqliteRepository(config.dbPath);
@@ -147,6 +149,7 @@ async function main() {
     mcpClientFactory: defaultMcpClientFactory,
     db,
     conversationSummaries: conversationSummariesRepo,
+    facts: factsRepo,
   });
 
   // ─── STEP 3: chat() durch Owner-Bypass ────────────────────────────────────
