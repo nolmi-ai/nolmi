@@ -9,8 +9,10 @@ import {
   useRef,
   useState,
 } from "react";
+import Link from "next/link";
 import type { AuditEntry, ChatMessage, TwinEvent } from "@twin-lab/shared";
 import { ToolPicker } from "./ToolPicker";
+import { ModalWrapper } from "../../../components/ModalWrapper";
 
 const RUNTIME_URL = process.env.NEXT_PUBLIC_RUNTIME_URL ?? "http://localhost:4000";
 
@@ -149,6 +151,11 @@ function ChatLayout({ handle }: { handle: string }) {
   // letztem Server-Audit und neuer Live-Message ohne Page-Reload. Nach Reload
   // hat der Server die echten conversation_ids und übersteuert die Local-IDs.
   const [directChatResetSeq, setDirectChatResetSeq] = useState(0);
+  // 3.3.G3: aktive Direct-Chat-Conversation-ID, geliftet aus DirectChat.
+  // Wird vom Conversation-Header für Extract-Calls gebraucht (POST
+  // /facts/extract verlangt eine echte conversationId). null wenn frisch
+  // gemountet ohne bisherige Audits — Extract-Button bleibt dann disabled.
+  const [directChatConvId, setDirectChatConvId] = useState<string | null>(null);
 
   const loadConversations = useCallback(async () => {
     try {
@@ -243,10 +250,15 @@ function ChatLayout({ handle }: { handle: string }) {
           selection={selection}
           partnerDisplayName={partnerDisplayName}
           partnerIsTrusted={partnerIsTrusted}
+          directChatConvId={directChatConvId}
           onDirectChatReset={() => setDirectChatResetSeq((s) => s + 1)}
         />
         {selection.kind === "direct" ? (
-          <DirectChat handle={handle} resetSeq={directChatResetSeq} />
+          <DirectChat
+            handle={handle}
+            resetSeq={directChatResetSeq}
+            onConvIdChange={setDirectChatConvId}
+          />
         ) : (
           <A2AChat
             handle={handle}
@@ -276,12 +288,15 @@ function ConversationHeader({
   selection,
   partnerDisplayName,
   partnerIsTrusted,
+  directChatConvId,
   onDirectChatReset,
 }: {
   handle: string;
   selection: Selection;
   partnerDisplayName: string | null;
   partnerIsTrusted: boolean;
+  /** 3.3.G3: aktive Direct-Chat-Conv-ID für Extract-Aufrufe. */
+  directChatConvId?: string | null;
   onDirectChatReset?: () => void;
 }) {
   if (selection.kind === "direct") {
@@ -293,8 +308,9 @@ function ConversationHeader({
           </div>
           <div className="text-xs text-muted font-mono truncate">{handle}</div>
         </div>
-        <DirectChatResetButton
+        <DirectChatActions
           handle={handle}
+          conversationId={directChatConvId ?? null}
           onResetSuccess={onDirectChatReset}
         />
         <span className="text-[10px] uppercase tracking-wider text-muted border border-border rounded px-2 py-0.5">
@@ -340,15 +356,26 @@ function ConversationDivider() {
   );
 }
 
-// ─── Direct-Chat-Reset-Button (#71b/#80 Sub-Schritt D + #84 Inline-Confirm) ─
+// ─── Direct-Chat-Actions (3.3.G3) ───────────────────────────────────────────
 //
 // Beendet die aktive Direct-Chat-Konversation des Owners mit seinem eigenen
-// Twin. Lazy-Start der nächsten Konversation passiert im Backend beim
-// nächsten Send (TwinService.runOwnerDirect → conversations.getOrStart).
+// Twin (Pattern aus #71b/#80) und triggert auf Wunsch die Twin-Fact-
+// Extraction (3.3.F) vor dem Reset.
 //
-// #84: Inline-Confirm statt window.confirm() — Klick toggled in einen
-// Zwei-Knopf-Modus „Bestätigen / Abbrechen". 5-Sekunden-Timeout, falls der
-// User in dem Zustand wegklickt, ohne explizit abzubrechen. Kein Modal.
+// Drei UI-Flows:
+//   1. „Reflektieren"-Button (allein) → POST /facts/extract, Toast mit Resultat
+//   2. „Neu starten" → Modal mit drei Buttons:
+//        - Abbrechen (Modal zu, nichts passiert)
+//        - Nur beenden (Reset ohne Extract)
+//        - Reflektieren + Beenden (Extract, dann Reset; bei Extract-Failure
+//          trotzdem Reset, weil User-Intention "beenden" war)
+//
+// Toast-Fallback: das Projekt hat (noch) keine Toast-Library — wir nutzen
+// `alert()` als pragmatischen Ersatz. Modal-Komponente kommt aus
+// `apps/web/components/ModalWrapper`.
+//
+// 3.3.G3 ersetzt den vorherigen #84-Inline-Confirm-Button durch das Modal-
+// Pattern — drei Optionen passen nicht mehr in den zwei-Knopf-Inline-Modus.
 //
 // Wir leeren `messages[]` im DirectChat NICHT — der visuelle Verlauf bleibt
 // scrollbar. Nur der Backend-Loader (filtert nach conversation_id) sieht die
@@ -357,30 +384,59 @@ function ConversationDivider() {
 // einer neuen Local-Conv-ID taggt — Trenner-Marker (#85) erscheint dann
 // nach dem nächsten Send ohne Page-Reload.
 
-const RESET_CONFIRM_TIMEOUT_MS = 5000;
-
-function DirectChatResetButton({
+function DirectChatActions({
   handle,
+  conversationId,
   onResetSuccess,
 }: {
   handle: string;
+  conversationId: string | null;
   onResetSuccess?: () => void;
 }) {
   const [busy, setBusy] = useState(false);
-  const [confirming, setConfirming] = useState(false);
+  const [extracting, setExtracting] = useState(false);
+  const [modalOpen, setModalOpen] = useState(false);
 
-  // Auto-Reset des Confirm-Modus nach Timeout. Cleanup beim Unmount oder bei
-  // erneutem Wechsel — useEffect-Return räumt den Timer ab. Verhindert ein
-  // stehengebliebenes „Bestätigen", wenn der User einfach woanders weiterklickt.
-  useEffect(() => {
-    if (!confirming) return;
-    const t = setTimeout(() => setConfirming(false), RESET_CONFIRM_TIMEOUT_MS);
-    return () => clearTimeout(t);
-  }, [confirming]);
+  const hasConversation = conversationId !== null;
+
+  function showToast(msg: string) {
+    // Pragmatischer Fallback: alert(). Wenn das Projekt später ein Toast-
+    // System bekommt (z.B. sonner), an dieser Stelle umstellen.
+    alert(msg);
+  }
+
+  async function performExtract(): Promise<{
+    extracted: number;
+    error?: string;
+  }> {
+    if (!conversationId) {
+      return { extracted: 0, error: "Keine aktive Konversation." };
+    }
+    try {
+      const res = await fetch(
+        `${RUNTIME_URL}/twins/${handle}/facts/extract`,
+        {
+          method: "POST",
+          credentials: "include",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ conversationId }),
+        },
+      );
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({ error: "Unknown error" }));
+        return { extracted: 0, error: body.error ?? `HTTP ${res.status}` };
+      }
+      const data = (await res.json()) as { extracted: number };
+      return { extracted: data.extracted ?? 0 };
+    } catch (err) {
+      return {
+        extracted: 0,
+        error: err instanceof Error ? err.message : "Reflexion fehlgeschlagen",
+      };
+    }
+  }
 
   async function performReset() {
-    if (busy) return;
-    setBusy(true);
     try {
       await fetch(`${RUNTIME_URL}/twins/${handle}/conversations/reset`, {
         method: "POST",
@@ -392,47 +448,167 @@ function DirectChatResetButton({
       // Konversation jetzt jedenfalls leer).
       onResetSuccess?.();
     } catch {
-      // Silent: kein Toast-Mechanismus im Codebase.
+      // Silent: Bridge-Down oder Server-Hiccup — beim nächsten Send legt
+      // das Backend ohnehin lazy eine neue Konversation an.
+    }
+  }
+
+  async function handleReflectOnly() {
+    if (busy || extracting || !hasConversation) return;
+    setExtracting(true);
+    setBusy(true);
+    try {
+      const result = await performExtract();
+      if (result.error) {
+        showToast(`Reflexion fehlgeschlagen: ${result.error}`);
+      } else if (result.extracted === 0) {
+        showToast("Keine neuen Facts extrahiert.");
+      } else {
+        showToast(
+          `${result.extracted} neue Fact${result.extracted === 1 ? "" : "s"} extrahiert. Review in /facts.`,
+        );
+      }
     } finally {
-      setConfirming(false);
+      setExtracting(false);
       setBusy(false);
     }
   }
 
-  if (confirming) {
-    return (
-      <span
-        className="inline-flex items-center gap-1"
-        title="Konversation beenden — Twin startet beim nächsten Send ohne Erinnerung"
-      >
-        <span className="text-xs text-muted hidden sm:inline">Wirklich?</span>
-        <button
-          onClick={performReset}
-          disabled={busy}
-          className="text-xs text-accent border border-accent rounded px-2 py-1 hover:bg-accent hover:text-bg disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
-        >
-          ✓ Bestätigen
-        </button>
-        <button
-          onClick={() => setConfirming(false)}
-          disabled={busy}
-          className="text-xs text-muted border border-border rounded px-2 py-1 hover:border-warn hover:text-warn disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
-        >
-          Abbrechen
-        </button>
-      </span>
-    );
+  async function handleResetOnly() {
+    if (busy) return;
+    setBusy(true);
+    try {
+      await performReset();
+      setModalOpen(false);
+    } finally {
+      setBusy(false);
+    }
   }
 
+  async function handleReflectAndReset() {
+    if (busy || extracting) return;
+    setExtracting(true);
+    setBusy(true);
+    try {
+      const result = await performExtract();
+      // Briefing-Entscheidung: bei Extract-Failure trotzdem Reset — User
+      // wollte beenden, Extract war Nebenziel. Toast informiert über Lücke.
+      if (result.error) {
+        showToast(
+          `Reflexion fehlgeschlagen: ${result.error}\nKonversation wird trotzdem beendet.`,
+        );
+      } else if (result.extracted > 0) {
+        showToast(
+          `${result.extracted} neue Fact${result.extracted === 1 ? "" : "s"} extrahiert. Review in /facts.`,
+        );
+      }
+      await performReset();
+      setModalOpen(false);
+    } finally {
+      setExtracting(false);
+      setBusy(false);
+    }
+  }
+
+  // Modal-Close-Guard: während Extract/Reset läuft, kein Schließen via
+  // Backdrop oder ESC — sonst landet der User in einem inkonsistenten Zustand.
+  const modalClose = () => {
+    if (extracting || busy) return;
+    setModalOpen(false);
+  };
+
   return (
-    <button
-      onClick={() => setConfirming(true)}
-      disabled={busy}
-      title="Konversation beenden — Twin startet beim nächsten Send ohne Erinnerung"
-      className="text-xs text-muted border border-border rounded px-2 py-1 hover:border-accent hover:text-accent disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
-    >
-      ↻ Neu starten
-    </button>
+    <>
+      <button
+        onClick={handleReflectOnly}
+        disabled={busy || extracting || !hasConversation}
+        title={
+          !hasConversation
+            ? "Noch keine Konversation aktiv"
+            : "Twin reflektiert und schlägt neue Facts vor"
+        }
+        className="text-xs text-muted border border-border rounded px-2 py-1 hover:border-accent hover:text-accent disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+      >
+        {extracting ? "Reflektiere…" : "Reflektieren"}
+      </button>
+      <button
+        onClick={() => setModalOpen(true)}
+        disabled={busy}
+        title="Konversation beenden — Twin startet beim nächsten Send ohne Erinnerung"
+        className="text-xs text-muted border border-border rounded px-2 py-1 hover:border-accent hover:text-accent disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+      >
+        ↻ Neu starten
+      </button>
+
+      {modalOpen && (
+        <ModalWrapper onClose={modalClose}>
+          <div className="p-4 space-y-3">
+            <div className="flex items-center justify-between">
+              <h2 className="text-sm text-text font-medium">
+                Konversation beenden
+              </h2>
+              <button
+                type="button"
+                onClick={modalClose}
+                disabled={extracting || busy}
+                className="text-muted hover:text-text text-sm disabled:opacity-30 disabled:cursor-not-allowed"
+                aria-label="Schließen"
+              >
+                ✕
+              </button>
+            </div>
+            <p className="text-sm text-muted leading-relaxed">
+              Soll der Twin noch über die Konversation reflektieren? Er kann
+              dabei neue Facts vorschlagen, die du in{" "}
+              <Link
+                href={`/facts?twin=${encodeURIComponent(handle)}`}
+                className="text-accent hover:underline"
+              >
+                /facts
+              </Link>{" "}
+              reviewen kannst.
+            </p>
+            {extracting && (
+              <div className="text-xs text-accent italic">
+                Twin reflektiert… bitte warten.
+              </div>
+            )}
+            {!hasConversation && (
+              <div className="text-xs text-muted">
+                (Reflektieren ist nicht verfügbar, weil noch keine Konversation
+                aktiv ist.)
+              </div>
+            )}
+            <div className="flex items-center justify-end gap-2 pt-1 flex-wrap">
+              <button
+                type="button"
+                onClick={modalClose}
+                disabled={extracting || busy}
+                className="px-3 py-1.5 text-xs border border-border text-muted rounded hover:text-text hover:border-text transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+              >
+                Abbrechen
+              </button>
+              <button
+                type="button"
+                onClick={handleResetOnly}
+                disabled={extracting || busy}
+                className="px-3 py-1.5 text-xs border border-warn text-warn rounded hover:bg-warn hover:text-bg transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+              >
+                Nur beenden
+              </button>
+              <button
+                type="button"
+                onClick={handleReflectAndReset}
+                disabled={extracting || busy || !hasConversation}
+                className="px-3 py-1.5 text-xs border border-accent text-accent rounded hover:bg-accent hover:text-bg transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+              >
+                {extracting ? "Reflektiere…" : "Reflektieren + Beenden"}
+              </button>
+            </div>
+          </div>
+        </ModalWrapper>
+      )}
+    </>
   );
 }
 
@@ -688,7 +864,17 @@ function buildChatBlocksFromAudits(entries: AuditEntry[]): {
   return { blocks, newestConvId };
 }
 
-function DirectChat({ handle, resetSeq }: { handle: string; resetSeq: number }) {
+function DirectChat({
+  handle,
+  resetSeq,
+  onConvIdChange,
+}: {
+  handle: string;
+  resetSeq: number;
+  /** 3.3.G3: liftet die jüngste Conv-ID nach oben, damit der Conversation-
+   *  Header sie für Extract-Calls nutzen kann. */
+  onConvIdChange?: (id: string | null) => void;
+}) {
   const [auditEntries, setAuditEntries] = useState<AuditEntry[]>([]);
   // 3.2.G Optimistic-Pfad: User-Text wird sofort als pseudo-Bubble angehängt,
   // beim nächsten erfolgreichen loadAudits() ersetzt der Server-Audit ihn.
@@ -766,6 +952,14 @@ function DirectChat({ handle, resetSeq }: { handle: string; resetSeq: number }) 
   useEffect(() => {
     setActiveConvId(newestConvId);
   }, [newestConvId]);
+
+  // 3.3.G3: aktive Conv-ID nach oben lifften, damit der Conversation-Header
+  // sie für Extract-Calls nutzen kann. Wir geben nur ECHTE Server-IDs raus
+  // (newestConvId), nicht die synthetischen local-after-reset-IDs aus
+  // resetSeq — Backend-Extract braucht eine persistierte conversationId.
+  useEffect(() => {
+    onConvIdChange?.(newestConvId);
+  }, [newestConvId, onConvIdChange]);
 
   // #85: Reset-Bump aus dem Parent. Synthetische Local-ID mit `resetSeq` —
   // bei jedem Increment einzigartig. activeConvId weicht damit von der

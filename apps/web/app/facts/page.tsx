@@ -10,6 +10,7 @@ import {
 } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import type { AuditEntry, FactItem, TwinEvent } from "@twin-lab/shared";
+import { ModalWrapper } from "../../components/ModalWrapper";
 
 const RUNTIME_URL = process.env.NEXT_PUBLIC_RUNTIME_URL ?? "http://localhost:4000";
 
@@ -510,37 +511,7 @@ function FactRow({
   );
 }
 
-// ─── Modal-Wrapper + Add/Edit-Modals ────────────────────────────────────────
-
-function ModalWrapper({
-  children,
-  onClose,
-}: {
-  children: React.ReactNode;
-  onClose: () => void;
-}) {
-  useEffect(() => {
-    const handler = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
-    };
-    document.addEventListener("keydown", handler);
-    return () => document.removeEventListener("keydown", handler);
-  }, [onClose]);
-
-  return (
-    <div
-      onClick={onClose}
-      className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4"
-    >
-      <div
-        onClick={(e) => e.stopPropagation()}
-        className="bg-surface border border-border rounded shadow-xl max-w-md w-full"
-      >
-        {children}
-      </div>
-    </div>
-  );
-}
+// ─── Add/Edit-Modals (ModalWrapper aus components/) ─────────────────────────
 
 function AddFactModal({
   twinHandle,
