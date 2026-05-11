@@ -18,6 +18,7 @@
     "twin:facts-add": "pnpm --filter @twin-lab/runtime twin:facts-add",
     "twin:facts-remove": "pnpm --filter @twin-lab/runtime twin:facts-remove",
     "twin:facts-import": "pnpm --filter @twin-lab/runtime twin:facts-import",
+    "twin:facts-extract": "pnpm --filter @twin-lab/runtime twin:facts-extract",
     "bridge:dev": "pnpm --filter @twin-lab/bridge dev",
     "bridge:db:init": "pnpm --filter @twin-lab/bridge db:init",
     "clean": "pnpm -r clean && rm -rf node_modules"

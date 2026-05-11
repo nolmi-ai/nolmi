@@ -21,6 +21,7 @@
     "twin:facts-add": "tsx src/scripts/facts-add.ts",
     "twin:facts-remove": "tsx src/scripts/facts-remove.ts",
     "twin:facts-import": "tsx src/scripts/facts-import.ts",
+    "twin:facts-extract": "tsx src/scripts/facts-extract.ts",
     "key:generate": "tsx src/scripts/generate-master-key.ts",
     "session-secret:generate": "tsx src/scripts/generate-session-secret.ts",
     "user:create": "tsx src/scripts/create-user.ts",
@@ -29,6 +30,7 @@
     "test-summary-engine": "tsx src/scripts/test-summary-engine.ts",
     "test-history-with-summary": "tsx src/scripts/test-history-with-summary.ts",
     "test-prompt-builder": "tsx src/scripts/test-prompt-builder.ts",
+    "test-extraction-engine": "tsx src/scripts/test-extraction-engine.ts",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

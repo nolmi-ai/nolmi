@@ -8,6 +8,7 @@ import type { AuditRepository } from "./repository/types.js";
 import {
   ChatRequestSchema,
   FactCreateRequestSchema,
+  FactExtractRequestSchema,
   FactUpdateRequestSchema,
   type AuditEntry,
   type FactConfidence,
@@ -1247,6 +1248,35 @@ function registerFactRoutes(
         return reply.status(404).send({ error: `Fact '${factKey}' nicht gefunden` });
       }
       return reply.status(204).send();
+    },
+  );
+
+  // ─── EXTRACT (3.3.F — Twin-Vorschläge) ───────────────────────────────────
+  // Triggert die ExtractionEngine pro Konversation. Pending-Facts und Pending-
+  // Audits landen direkt; Approve/Reject läuft über die generischen
+  // `/twins/:handle/audit/:id/approve` und `.../reject`-Routes — kein
+  // dedizierter Endpoint nötig, weil der `TwinService.approvePending`-Switch
+  // den Capability-Branch `semantic-fact-write` schon kennt.
+  app.post<{ Params: { handle: string } }>(
+    "/twins/:handle/facts/extract",
+    async (request, reply) => {
+      const ctx = await requireOwner(request, reply, request.params.handle);
+      if (!ctx) return;
+      const { entry } = ctx;
+
+      const parsed = FactExtractRequestSchema.safeParse(request.body);
+      if (!parsed.success) {
+        return reply.status(400).send({ error: parsed.error.message });
+      }
+      try {
+        const result = await entry.service.extractionEngine.extractFromConversation(
+          parsed.data.conversationId,
+        );
+        return reply.send(result);
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : "Unknown error";
+        return reply.status(500).send({ error: msg });
+      }
     },
   );
 }

@@ -434,7 +434,16 @@ export type McpServerUpdateInput = z.infer<typeof McpServerUpdateInputSchema>;
 export const FactSourceSchema = z.enum(["user", "twin", "import"]);
 export type FactSource = z.infer<typeof FactSourceSchema>;
 
-export const FactConfidenceSchema = z.enum(["approved", "pending", "auto"]);
+// 3.3.F: 'rejected' kommt dazu — wenn der User einen Twin-Vorschlag ablehnt,
+// bleibt der Fact in der Tabelle mit confidence='rejected'. ExtractionEngine
+// nutzt die rejected-Liste als Negativ-Beispiele im LLM-Prompt, damit der
+// Twin denselben Vorschlag nicht im Loop erneut macht.
+export const FactConfidenceSchema = z.enum([
+  "approved",
+  "pending",
+  "auto",
+  "rejected",
+]);
 export type FactConfidence = z.infer<typeof FactConfidenceSchema>;
 
 export const FactItemSchema = z.object({
@@ -466,3 +475,17 @@ export const FactUpdateRequestSchema = z.object({
   confidence: FactConfidenceSchema.optional(),
 });
 export type FactUpdateRequest = z.infer<typeof FactUpdateRequestSchema>;
+
+// 3.3.F: Twin-Fact-Extraction. Endpoint POST /twins/:handle/facts/extract
+// triggert die ExtractionEngine; Approval läuft über den generischen Audit-
+// Approve-Pfad (capability='semantic-fact-write').
+export const FactExtractRequestSchema = z.object({
+  conversationId: z.string().min(1),
+});
+export type FactExtractRequest = z.infer<typeof FactExtractRequestSchema>;
+
+export const FactExtractResponseSchema = z.object({
+  extracted: z.number().int().nonnegative(),
+  pendingFactIds: z.array(z.string()),
+});
+export type FactExtractResponse = z.infer<typeof FactExtractResponseSchema>;

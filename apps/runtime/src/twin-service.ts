@@ -8,6 +8,7 @@ import type {
   Skill,
 } from "@twin-lab/shared";
 import {
+  generateObject,
   generateText,
   stepCountIs,
   type LanguageModel,
@@ -38,6 +39,11 @@ import type { McpServersRepo } from "./mcp/repo.js";
 import type { McpClientFactory } from "./mcp/client-factory.js";
 import type { FactsRepo } from "./facts/repo.js";
 import { buildFactsBlock } from "./facts/prompt-builder.js";
+import {
+  ExtractionEngine,
+  ExtractionResultSchema,
+  type ExtractionResult,
+} from "./facts/extraction-engine.js";
 import { McpClientManager } from "./mcp/client-manager.js";
 import { McpSkillSync } from "./mcp/skill-sync.js";
 import {
@@ -177,6 +183,15 @@ export class TwinService {
    */
   public readonly summaryEngine: SummaryEngine;
 
+  /**
+   * 3.3.F: Twin-Fact-Extraction. Wird vom Server-Endpoint
+   * `POST /twins/:handle/facts/extract` und vom CLI `facts-extract`
+   * aufgerufen. Strukturierter LLM-Output via `generateObject`, persistiert
+   * pro Vorschlag einen `confidence='pending'`-Fact plus einen pending-Audit
+   * mit `capability='semantic-fact-write'`.
+   */
+  public readonly extractionEngine: ExtractionEngine;
+
   constructor(private deps: TwinServiceDeps) {
     this.mcp = new McpClientManager(
       deps.twinId,
@@ -203,6 +218,24 @@ export class TwinService {
           messages: [{ role: "user", content: user }],
         });
         return { text: result.text };
+      },
+    });
+    this.extractionEngine = new ExtractionEngine({
+      facts: deps.facts,
+      conversationSummaries: deps.conversationSummaries,
+      auditService: deps.audit,
+      twinId: deps.twinId,
+      twinName: deps.persona.name,
+      extract: async ({ system, prompt }) => {
+        // Strukturierter Output via Zod-Schema. Twin-eigener Provider/Model
+        // analog zum SummaryEngine — Persona-Stimme bleibt konsistent.
+        const result = await generateObject({
+          model: deps.model,
+          schema: ExtractionResultSchema,
+          system,
+          prompt,
+        });
+        return result.object as ExtractionResult;
       },
     });
   }
@@ -749,6 +782,8 @@ export class TwinService {
         return this.approveTwinSend(entry, persona);
       case "mcp-tool-use":
         return this.approveMcpToolUse(entry, persona);
+      case "semantic-fact-write":
+        return this.approveSemanticFactWrite(entry);
       default:
         return this.approveDefault(entry, persona);
     }
@@ -775,6 +810,21 @@ export class TwinService {
           content: this.composeRejectMessage(),
           relatedAuditId: auditId,
         });
+      }
+      return;
+    }
+
+    // 3.3.F: Reject eines semantic-fact-write Pending → confidence='rejected'
+    // im Facts-Repo. Audit-Status ist bereits durch `audit.reject` oben auf
+    // 'rejected' gesetzt; wir markieren nur noch den Fact-Eintrag.
+    if (entry.capability === "semantic-fact-write") {
+      const input = entry.input as { factKey?: string };
+      if (input.factKey) {
+        this.deps.facts.setConfidence(
+          this.deps.twinId,
+          input.factKey,
+          "rejected",
+        );
       }
       return;
     }
@@ -894,6 +944,55 @@ export class TwinService {
       await this.failWithReason(entry.id, err);
       throw err;
     }
+  }
+
+  /**
+   * 3.3.F: Approve eines `semantic-fact-write`-Pending. Twin hatte den Fact
+   * als `confidence='pending'` mit `source='twin'` vorgeschlagen; der User
+   * bestätigt → confidence wechselt auf `approved`, der Audit wird auf
+   * `executed` gestellt. Der Fact-Wert bleibt unverändert — `source='twin'`
+   * markiert weiterhin die Twin-Herkunft.
+   *
+   * Edge-Case: wenn der Fact zwischen dem Pending-Insert und dem Approve via
+   * `twin:facts-remove` gelöscht wurde, ist `setConfidence` ein No-op
+   * (returnt false). Wir loggen das, completion läuft trotzdem — der User
+   * hat dem nicht-mehr-existierenden Fact zugestimmt, kein Schaden.
+   */
+  private async approveSemanticFactWrite(
+    entry: AuditEntry,
+  ): Promise<ApproveResult> {
+    const input = entry.input as {
+      factKey?: string;
+      factValue?: string;
+      factId?: string;
+      reasoning?: string;
+    };
+    if (!input.factKey) {
+      throw new Error(
+        `Audit ${entry.id} hat keinen factKey im Input — semantic-fact-write nicht approvable`,
+      );
+    }
+
+    const updated = this.deps.facts.setConfidence(
+      this.deps.twinId,
+      input.factKey,
+      "approved",
+    );
+    if (!updated) {
+      console.warn(
+        `[facts] approve: fact '${input.factKey}' nicht mehr in der DB — Audit wird trotzdem completed`,
+      );
+    }
+
+    await this.deps.audit.complete(entry.id, {
+      factKey: input.factKey,
+      factValue: input.factValue ?? null,
+      factId: input.factId ?? null,
+      reasoning: input.reasoning ?? null,
+    });
+    return {
+      auditId: entry.id,
+    };
   }
 
   private async approveDefault(entry: AuditEntry, persona: Persona): Promise<ApproveResult> {

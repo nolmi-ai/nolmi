@@ -1,5 +1,6 @@
 import type Database from "better-sqlite3";
 import { nanoid } from "nanoid";
+import type { FactConfidence, FactSource } from "@twin-lab/shared";
 
 // ─── FACTS REPOSITORY (3.3.A) ────────────────────────────────────────────────
 //
@@ -8,12 +9,13 @@ import { nanoid } from "nanoid";
 // dauerhaft kennen soll. UNIQUE (twin_id, fact_key) erzwingt Eindeutigkeit
 // pro Twin; Re-Writes derselben Combo gehen via ON CONFLICT als UPDATE durch.
 //
-// Sub-Schritt-A liefert Schema + Repo. API-Endpoints (3.3.D), UI (3.3.G),
-// LLM-Extraction (3.3.F) und System-Prompt-Integration (3.3.E) bauen darauf
-// auf.
+// Sub-Schritt-A liefert Schema + Repo. API-Endpoints (3.3.D), System-Prompt-
+// Integration (3.3.E), LLM-Extraction (3.3.F) und UI (3.3.G) bauen darauf auf.
+//
+// 3.3.F: FactConfidence/FactSource leben jetzt in @twin-lab/shared — die
+// Source-of-Truth ist beim Schema, Repo importiert nur den Type.
 
-export type FactSource = "user" | "twin" | "import";
-export type FactConfidence = "approved" | "pending" | "auto";
+export type { FactConfidence, FactSource };
 
 export interface Fact {
   id: string;
@@ -125,6 +127,30 @@ export class FactsRepo {
       " ORDER BY fact_key ASC";
     const rows = this.db.prepare(sql).all(params) as FactRow[];
     return rows.map(rowToFact);
+  }
+
+  /**
+   * 3.3.F: ändert nur die `confidence`-Spalte. Pattern für den Approval-Flow
+   * — User klickt approve auf einen pending Twin-Vorschlag → confidence
+   * von 'pending' auf 'approved' (oder 'rejected' bei Reject). Source und
+   * Value bleiben unverändert; `upsert` wäre hier ungeeignet, weil das die
+   * Provenance (source) überschreiben würde.
+   *
+   * Returns true bei erfolgreichem Update, false wenn der Fact nicht
+   * existiert. updated_at wird neu gesetzt.
+   */
+  setConfidence(
+    twinId: string,
+    factKey: string,
+    confidence: FactConfidence,
+  ): boolean {
+    const result = this.db
+      .prepare(
+        `UPDATE facts SET confidence = ?, updated_at = ?
+           WHERE twin_id = ? AND fact_key = ?`,
+      )
+      .run(confidence, new Date().toISOString(), twinId, factKey);
+    return result.changes > 0;
   }
 
   /**
