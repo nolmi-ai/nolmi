@@ -38,6 +38,11 @@ import {
 import type { McpServersRepo } from "./mcp/repo.js";
 import type { McpClientFactory } from "./mcp/client-factory.js";
 import type { FactsRepo } from "./facts/repo.js";
+import {
+  aggregateConversationForEmbedding,
+  type MemoryEmbeddingService,
+} from "./episodic/memory-embedding-service.js";
+import type { TwinDiaryService } from "./episodic/twin-diary-service.js";
 import { buildFactsBlock } from "./facts/prompt-builder.js";
 import {
   ExtractionEngine,
@@ -129,6 +134,19 @@ export interface TwinServiceDeps {
    */
   facts: FactsRepo;
   /**
+   * 3.4.D: Memory-Embedding-Service. Wird im Send-Path nach SummaryEngine-
+   * Generation aufgerufen, im Reset-Pfad für Konversationen ohne Segments,
+   * und vom TwinDiaryService nach Diary-Inserts. Failures werden geschluckt
+   * — Hauptoperation läuft weiter.
+   */
+  memoryEmbeddingService: MemoryEmbeddingService;
+  /**
+   * 3.4.D: Diary-Service-Wrapper (Insert + Auto-Embedding). Wird in 3.4.F
+   * vom CLI twin:diary-add genutzt; der Pattern-Phase Self-Reflection für
+   * Auto-Generierung steht er ebenfalls bereit.
+   */
+  twinDiaryService: TwinDiaryService;
+  /**
    * Factory für McpClient-Instanzen (3.2.B). Production: defaultMcpClient-
    * Factory; Tests injecten Mock-Factory, sodass keine echten Subprocesses
    * gespawnt werden.
@@ -192,6 +210,19 @@ export class TwinService {
    */
   public readonly extractionEngine: ExtractionEngine;
 
+  /**
+   * 3.4.D: Memory-Embedding-Service. Public, damit der Server-Reset-Pfad
+   * über `entry.service.memoryEmbeddingService.embedConversation()` darauf
+   * zugreifen kann. Send-Path benutzt es intern nach `summaryEngine`.
+   */
+  public readonly memoryEmbeddingService: MemoryEmbeddingService;
+
+  /**
+   * 3.4.D: Diary-Service. Public für CLI-Pfade (3.4.F) und künftige
+   * Pattern-Phase Self-Reflection. Insert + Auto-Embedding atomar.
+   */
+  public readonly twinDiaryService: TwinDiaryService;
+
   constructor(private deps: TwinServiceDeps) {
     this.mcp = new McpClientManager(
       deps.twinId,
@@ -238,6 +269,47 @@ export class TwinService {
         return result.object as ExtractionResult;
       },
     });
+    this.memoryEmbeddingService = deps.memoryEmbeddingService;
+    this.twinDiaryService = deps.twinDiaryService;
+  }
+
+  /**
+   * 3.4.D: Reset-Pfad mit Episodic-Memory-Pflege. Wenn die Konversation
+   * bereits Summary-Segments hat, sind die schon embedded (Send-Path
+   * triggert nach jeder Summary-Generation) — wir beenden nur die Konv.
+   * Ohne Segments (kurze Konversationen unter dem Threshold) wird die
+   * ganze Konversation in einen einzelnen Embedding-Eintrag verdichtet,
+   * sonst gäbe es keine Spur im Episodic-Memory.
+   *
+   * Failure-Verhalten: Embedding-Fehler unterbrechen das Reset nicht; der
+   * Service schluckt sie und setzt status='failed'.
+   */
+  async resetConversation(conversationId: string): Promise<void> {
+    const summaries =
+      this.deps.conversationSummaries.listByConversation(conversationId);
+    if (summaries.length === 0) {
+      // Audits laden — Repo gibt DESC zurück, wir brauchen ASC für die
+      // chronologische Aggregation. Limit 10_000 ist praktisch unbegrenzt
+      // (Reset bei kurzen Konversationen, weit unter dem Summary-Threshold).
+      const auditsDesc = await this.deps.audit.repo.listByConversation(
+        conversationId,
+        10_000,
+      );
+      const auditsAsc = [...auditsDesc].reverse();
+      const content = aggregateConversationForEmbedding(auditsAsc);
+      if (content.length > 0) {
+        await this.memoryEmbeddingService.embedConversation({
+          twinId: this.deps.twinId,
+          conversationId,
+          content,
+        });
+      } else {
+        console.log(
+          `[reset] conv=${conversationId} hatte keine zählenden Audits — kein Embedding nötig`,
+        );
+      }
+    }
+    this.deps.conversations.end(conversationId);
   }
 
   /**
@@ -392,12 +464,32 @@ export class TwinService {
         console.log(
           `[summary] threshold reached for conversation=${conv.id}, generating summary...`,
         );
-        await this.summaryEngine.generateSummary(conv.id, {
-          twinName: this.deps.persona.name,
-          partnerHandle: this.deps.persona.handle.startsWith("@")
-            ? this.deps.persona.handle
-            : `@${this.deps.persona.handle}`,
-        });
+        const summaryResult = await this.summaryEngine.generateSummary(
+          conv.id,
+          {
+            twinName: this.deps.persona.name,
+            partnerHandle: this.deps.persona.handle.startsWith("@")
+              ? this.deps.persona.handle
+              : `@${this.deps.persona.handle}`,
+          },
+        );
+        // 3.4.D: frisch erzeugtes Segment ins Episodic-Memory. Embedding-
+        // Failure schluckt der Service intern — Send-Path läuft unverändert
+        // weiter. `summaryEngine.generateSummary` selbst liefert bei eigenem
+        // Failure null; dann gibt's nichts zu embedden.
+        if (summaryResult) {
+          const segment = this.deps.conversationSummaries.listByConversation(
+            conv.id,
+          );
+          const fresh = segment.find((s) => s.id === summaryResult.summaryId);
+          if (fresh) {
+            await this.memoryEmbeddingService.embedSummarySegment({
+              twinId: this.deps.twinId,
+              segmentId: fresh.id,
+              content: fresh.summaryMd,
+            });
+          }
+        }
       }
 
       // 3.3.C: Sliding-Window-History mit optionalem Summary-Block.

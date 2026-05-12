@@ -31,6 +31,8 @@ interface ConversationRow {
   ended_at: string | null;
 }
 
+export type ConversationEmbeddingStatus = "pending" | "done" | "failed";
+
 export class ConversationNotFoundError extends Error {
   constructor(id: string) {
     super(`Konversation '${id}' nicht gefunden`);
@@ -195,6 +197,19 @@ export class ConversationsRepo {
       this.findById(id);
       // Existiert, aber war schon ended → idempotent durchwinken.
     }
+  }
+
+  /**
+   * 3.4.D: Setzt das embedding_status-Flag nach Reset-Embedding-Versuch.
+   * 'done' nach erfolgreichem Insert in `embeddings`, 'failed' bei Provider-
+   * oder DB-Failure. Wirft nicht — Caller (Memory-Embedding-Service) macht
+   * Best-Effort und loggt selbst.
+   */
+  updateEmbeddingStatus(id: string, status: ConversationEmbeddingStatus): boolean {
+    const result = this.db
+      .prepare(`UPDATE conversations SET embedding_status = ? WHERE id = ?`)
+      .run(status, id);
+    return result.changes > 0;
   }
 }
 

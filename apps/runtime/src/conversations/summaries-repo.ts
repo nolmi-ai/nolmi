@@ -10,6 +10,13 @@ import { nanoid } from "nanoid";
 //
 // Sub-Schritt-A liefert nur Schema + CRUD. Die Summary-Engine, die diese
 // Rows erzeugt, kommt in 3.3.B; History-Loader-Integration in 3.3.C.
+//
+// 3.4.A/D: Spalte `embedding_status` (Migration 018) wird vom Memory-
+// Embedding-Service nach Embed-Versuch gesetzt ('done' | 'failed'). Default
+// neuer Rows ist 'pending' (DB-Default); Bestands-Daten aus 3.3 sind ebenfalls
+// 'pending' und werden via twin:memory-embed-all (3.4.G) nachträglich embedded.
+
+export type SummaryEmbeddingStatus = "pending" | "done" | "failed";
 
 export interface ConversationSummary {
   id: string;
@@ -107,6 +114,21 @@ export class ConversationSummariesRepo {
       )
       .get(conversationId) as { c: number };
     return row.c;
+  }
+
+  /**
+   * 3.4.D: Setzt das Embedding-Status-Flag nach Embed-Versuch.
+   * 'done' nach erfolgreichem Insert in `embeddings`, 'failed' bei Provider-
+   * oder DB-Failure. Wirft nicht — Caller (Memory-Embedding-Service) macht
+   * Best-Effort und loggt selbst.
+   */
+  updateEmbeddingStatus(id: string, status: SummaryEmbeddingStatus): boolean {
+    const result = this.db
+      .prepare(
+        `UPDATE conversation_summaries SET embedding_status = ? WHERE id = ?`,
+      )
+      .run(status, id);
+    return result.changes > 0;
   }
 
   /**

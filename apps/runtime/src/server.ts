@@ -1423,7 +1423,10 @@ function registerConversationRoutes(
       if (!active) {
         return { reset: false, reason: "no_active_conversation" };
       }
-      deps.conversationsRepo.end(active.id);
+      // 3.4.D: resetConversation() macht den Embedding-Versuch für
+      // Konversationen ohne Segments und ruft danach conversationsRepo.end().
+      // Embedding-Failure unterbricht das Reset nicht.
+      await entry.service.resetConversation(active.id);
       request.log.info(
         { conversationId: active.id, twinId: entry.twinId },
         "[conversations] reset durch owner",

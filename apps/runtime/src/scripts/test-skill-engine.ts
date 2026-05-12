@@ -15,6 +15,10 @@ import { createSqliteRepository } from "../repository/index.js";
 import { McpServersRepo } from "../mcp/repo.js";
 import { defaultMcpClientFactory } from "../mcp/client-factory.js";
 import { loadMasterKey } from "../crypto-utils.js";
+import { EmbeddingsRepo } from "../episodic/embeddings-repo.js";
+import { TwinDiaryRepo } from "../episodic/twin-diary-repo.js";
+import { MemoryEmbeddingService } from "../episodic/memory-embedding-service.js";
+import { TwinDiaryService } from "../episodic/twin-diary-service.js";
 
 // ─── TEST: SKILL-ENGINE (Phase 3.1.B) ───────────────────────────────────────
 //
@@ -127,6 +131,26 @@ async function main() {
   const bus = new EventBus();
   const audit = new AuditService(repo.audit, bus, profile.twinId);
 
+  // 3.4.D: Episodic-Stack — TwinService verlangt jetzt
+  // memoryEmbeddingService + twinDiaryService. Hier minimal verkabelt mit
+  // einem Mock-Provider, der nie aufgerufen wird (Skill-Test triggert keine
+  // Summary-Generation, kein Reset).
+  const embeddingsRepo = new EmbeddingsRepo(db);
+  const twinDiaryRepo = new TwinDiaryRepo(db);
+  const memoryEmbeddingService = new MemoryEmbeddingService({
+    embeddingsRepo,
+    conversationSummariesRepo,
+    conversationsRepo,
+    twinDiaryRepo,
+    getProvider: () => {
+      throw new Error("Skill-Test sollte keinen Embedding-Provider triggern");
+    },
+  });
+  const twinDiaryService = new TwinDiaryService(
+    twinDiaryRepo,
+    memoryEmbeddingService,
+  );
+
   const service = new TwinService({
     twinId: profile.twinId,
     ownerUserId: profile.ownerUserId,
@@ -150,6 +174,8 @@ async function main() {
     db,
     conversationSummaries: conversationSummariesRepo,
     facts: factsRepo,
+    memoryEmbeddingService,
+    twinDiaryService,
   });
 
   // ─── STEP 3: chat() durch Owner-Bypass ────────────────────────────────────

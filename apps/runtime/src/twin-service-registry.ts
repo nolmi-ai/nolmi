@@ -30,6 +30,11 @@ import {
   defaultMcpClientFactory,
   type McpClientFactory,
 } from "./mcp/client-factory.js";
+import { EmbeddingsRepo } from "./episodic/embeddings-repo.js";
+import { TwinDiaryRepo } from "./episodic/twin-diary-repo.js";
+import { MemoryEmbeddingService } from "./episodic/memory-embedding-service.js";
+import { TwinDiaryService } from "./episodic/twin-diary-service.js";
+import { getEmbeddingProvider } from "./episodic/providers/index.js";
 
 // ─── TWIN SERVICE REGISTRY ──────────────────────────────────────────────────
 //
@@ -359,12 +364,30 @@ export class TwinServiceRegistry {
     };
     const bridgeClient = new BridgeClient(bridgeConfig, logger);
 
-    // 3.3.B/E: Repos pro Twin ad-hoc auf der geteilten db-Connection bauen.
-    // Beide sind zustandslos, also kein Pool-Effekt zwischen Twins — wir
+    // 3.3.B/E + 3.4.D: Repos pro Twin ad-hoc auf der geteilten db-Connection
+    // bauen. Alle zustandslos, also kein Pool-Effekt zwischen Twins — wir
     // vermeiden nur, sie durch die RegistryDeps-Plumbing zu schleifen.
     const db = this.deps!.db;
     const conversationSummaries = new ConversationSummariesRepo(db);
     const facts = new FactsRepo(db);
+    const embeddingsRepo = new EmbeddingsRepo(db);
+    const twinDiaryRepo = new TwinDiaryRepo(db);
+
+    // 3.4.D: Memory-Embedding-Service mit Lazy-Provider-Resolve. Der
+    // `getEmbeddingProvider()`-Call selbst ist billig (Factory-Lookup); das
+    // teure Modell-Loading passiert erst beim ersten echten Embed im
+    // Send-Path. Provider-Singleton ist global, also identisch über alle Twins.
+    const memoryEmbeddingService = new MemoryEmbeddingService({
+      embeddingsRepo,
+      conversationSummariesRepo: conversationSummaries,
+      conversationsRepo,
+      twinDiaryRepo,
+      getProvider: () => getEmbeddingProvider(),
+    });
+    const twinDiaryService = new TwinDiaryService(
+      twinDiaryRepo,
+      memoryEmbeddingService,
+    );
 
     const service = new TwinService({
       twinId: profile.twinId,
@@ -384,6 +407,8 @@ export class TwinServiceRegistry {
       db,
       conversationSummaries,
       facts,
+      memoryEmbeddingService,
+      twinDiaryService,
     });
 
     const bridgeStream = new BridgeStream(
