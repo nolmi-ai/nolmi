@@ -1,5 +1,6 @@
 import "dotenv/config";
 import Database from "better-sqlite3";
+import * as sqliteVec from "sqlite-vec";
 import { readdirSync, readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { mkdir } from "node:fs/promises";
@@ -28,6 +29,10 @@ async function main() {
   await mkdir(dirname(config.dbPath), { recursive: true });
 
   const db = new Database(config.dbPath);
+  // 3.4.A: sqlite-vec laden bevor irgendeine Migration läuft, sonst wirft
+  // 017_embeddings_and_fts.sql beim `CREATE VIRTUAL TABLE ... USING vec0(...)`
+  // mit "no such module: vec0".
+  sqliteVec.load(db);
   db.pragma("journal_mode = WAL");
   db.pragma("foreign_keys = ON");
 

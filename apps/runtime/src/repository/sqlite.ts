@@ -1,4 +1,5 @@
 import Database from "better-sqlite3";
+import * as sqliteVec from "sqlite-vec";
 import type { AuditListOpts, AuditRepository, RepositoryBundle } from "./types.js";
 import type { AuditEntry } from "@twin-lab/shared";
 
@@ -8,9 +9,15 @@ import type { AuditEntry } from "@twin-lab/shared";
 // Bundle exposed, damit andere Repos (TwinProfilesRepo etc.) dieselbe
 // Connection wiederverwenden können statt eine zweite auf dieselbe Datei zu
 // öffnen.
+//
+// 3.4.A: sqlite-vec wird direkt nach dem Connection-Open geladen — die
+// Extension stellt das `vec0`-Virtual-Table-Modul für Episodic-Memory bereit.
+// MUSS vor allen Repo-Aufrufen passieren, sonst wirft die erste vec0-Query
+// "no such module: vec0". init-db.ts lädt sie ebenfalls vor dem Migration-Loop.
 
 export function createSqliteRepository(dbPath: string): RepositoryBundle {
   const db = new Database(dbPath);
+  sqliteVec.load(db);
   db.pragma("journal_mode = WAL");
   db.pragma("foreign_keys = ON");
 

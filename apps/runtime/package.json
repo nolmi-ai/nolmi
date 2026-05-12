@@ -27,6 +27,7 @@
     "user:create": "tsx src/scripts/create-user.ts",
     "trust:test": "tsx src/scripts/test-trust-flow.ts",
     "test-memory-repos": "tsx src/scripts/test-memory-repos.ts",
+    "test-episodic-repos": "tsx src/scripts/test-episodic-repos.ts",
     "test-summary-engine": "tsx src/scripts/test-summary-engine.ts",
     "test-history-with-summary": "tsx src/scripts/test-history-with-summary.ts",
     "test-prompt-builder": "tsx src/scripts/test-prompt-builder.ts",
@@ -40,6 +41,7 @@
     "@ai-sdk/openai": "^3.0.0",
     "@fastify/cookie": "^11",
     "@fastify/cors": "^10.0.0",
+    "@huggingface/transformers": "^4.2.0",
     "@modelcontextprotocol/sdk": "^1.29.0",
     "@twin-lab/shared": "workspace:*",
     "ai": "^6.0.0",
@@ -51,6 +53,7 @@
     "iron-session": "^8.0.0",
     "nanoid": "^5.0.0",
     "ollama-ai-provider-v2": "^1.2.0",
+    "sqlite-vec": "^0.1.9",
     "yaml": "^2.5.0",
     "zod": "^3.23.0"
   },
