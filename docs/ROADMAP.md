@@ -1,6 +1,6 @@
 # twin-lab Roadmap
 
-Stand: 11. Mai 2026 Abend, nach Phase 3.3 (Memory: Conversation + Semantic) komplett lokal.
+Stand: 12. Mai 2026 Nachmittag, nach Phase 3.3 in Production deployed plus Vision-Session plus Strategie-Session vor Phase 3.4.
 
 ---
 
@@ -45,190 +45,216 @@ Macht Twins inhaltlich tiefer. Reihenfolge ist klar: **Skill-System ist Fundamen
 
 **Lazy-Spawn beim ersten Tool-Call, Idle-Timeout 5 Min.** Server startet erst, wenn Twin ihn braucht. Idle-Disconnect schont Ressourcen. ENV-tunable für Production-Tuning.
 
-**Pre-Call-Approval, kein Post-Call-Reject.** Schreibende Tools sind das eigentliche Risiko, Post-Call wäre zu spät. Read-only-Tools können mit `requires_approval=false` direkt durchgewunken werden. Owner-Bypass für Tool-Approval explizit NICHT implementiert — konsistent mit Tag-3-Architektur für `send_to_twin`.
+**Pre-Call-Approval, kein Post-Call-Reject.** Schreibende Tools sind das eigentliche Risiko, Post-Call wäre zu spät. Read-only-Tools können mit `requires_approval=false` direkt durchgewunken werden. Owner-Bypass für Tool-Approval explizit NICHT implementiert.
 
-**Async via Audit-State + LLM-Re-Run, nicht synchroner Block.** Pending-State persistiert via Audit, überlebt Server-Restart. Resume nach Approve startet neuen `runOwnerDirect`-Call mit angereichter Message-History (System-Tool-Result als User-Message, provider-agnostisch).
+**Async via Audit-State + LLM-Re-Run, nicht synchroner Block.** Pending-State persistiert via Audit, überlebt Server-Restart. Resume nach Approve startet neuen `runOwnerDirect`-Call mit angereichter Message-History.
 
-**Marker-Pattern als Primary für Approval-Trigger.** AI SDK 6 propagiert Throws aus `execute()` nicht nach oben (Smoke-Test verifiziert). Marker-String im content-Array ist provider-agnostisch und eindeutig identifizierbar. Throw-Pfad bleibt als Defense-in-Depth.
+**Marker-Pattern als Primary für Approval-Trigger.** AI SDK 6 propagiert Throws aus `execute()` nicht nach oben (Smoke-Test verifiziert). Marker-String im content-Array ist provider-agnostisch.
 
 ### Architektur-Entscheidungen (11. Mai 2026, vor Phase 3.3)
 
-**Eigen-Bau für Memory-Schichten statt Cognee/Dreams-Adoption.** Geprüft: Cognee (16.6k Stars, Apache 2.0, Knowledge-Graph + Vector-Search + Ontology) und Anthropic Managed-Agents-Dreams (Memory-Stores plus Async-Reflection-Jobs). Beide konzeptionell wertvoll. Entscheidung: Eigen-Bau für 3.3, Begründung — Anti-Lock-in, Provider-Agnostik (Cognee Python-Stack, Dreams Anthropic-only), Pilot-Größe rechtfertigt keine komplexe externe Integration, eigene Implementation gibt volle Kontrolle über Multi-Tenant-Architektur. Beide als Backlog-Items (#93 Cognee als optionaler MCP-Skill für Knowledge-Recall, #94 Dream-Pattern für periodische Memory-Kuratierung) für Phase 3.6+ oder Phase 4.
+**Eigen-Bau für Memory-Schichten statt Cognee/Dreams-Adoption.** Geprüft, beide spannend aber Eigen-Bau wegen Anti-Lock-in und Provider-Agnostik. Beide als Backlog (#93 Cognee, #94 Dream-Pattern).
 
-**Conversation-Memory: Sliding-Window mit Auto-Summary.** Trigger >50 zählende Messages, Summary-Block der ältesten 40, Live-Window 10. Multiple Summary-Segmente pro Konversation möglich. Twin selbst macht Summary-LLM-Call (Persona-Konsistenz, Provider-Agnostik statt Anthropic-Prompt-Caching). Sync vor LLM-Call (Edge-Case bei >50 Messages, Latenz okay). Failure-Fallback auf Hard-Cap. Function-Injection für Test-Mocking.
+**Conversation-Memory: Sliding-Window mit Auto-Summary.** Trigger >50 zählende Messages, Summary-Block der ältesten 40, Live-Window 10.
 
-**Semantic-Memory: KV-Store als Truth-Source, keine echte facts.md-Datei.** Tabelle `facts` mit Multi-Tenant-Isolation pro twin_id, UNIQUE(twin_id, fact_key). source ∈ {user, twin, import}, confidence ∈ {approved, pending, auto, rejected}. UI rendert als Liste mit Status-Sektionen, kein File-Pattern.
+**Semantic-Memory: KV-Store als Truth-Source.** Tabelle `facts` mit Multi-Tenant-Isolation. source ∈ {user, twin, import}, confidence ∈ {approved, pending, auto, rejected}.
 
-**Facts als Persona-konstitutiv im System-Prompt.** Facts werden direkt nach Persona kombiniert via `personaWithFacts` als 2. Schicht (statt eigene 7. Schicht). Begründung: Facts sind Identitäts-Wissen, nicht Conversation-Kontext. Smoke-Test bestätigt: Twin reichert Facts mit Persona-Stimme an statt sie als isolierte Daten auszuspucken.
+**Facts als Persona-konstitutiv im System-Prompt.** Facts werden direkt nach Persona kombiniert via `personaWithFacts` als 2. Schicht.
 
-**Twin-getriebene Fact-Extraction via Approval-Pattern aus 3.2.F.** Pattern wiederverwendet: pro Fact ein Pending-Audit mit `capability='semantic-fact-write'`, Approve via generischen `/audit/:id/approve|reject`-Routen mit capability-Switch. `confidence='rejected'` (Migration 016) verhindert Endlos-Loop bei abgelehnten Facts (Twin sieht rejected-Liste, schlägt nicht erneut vor).
+**Twin-getriebene Fact-Extraction via Approval-Pattern aus 3.2.F.** Capability `semantic-fact-write`, generische Approve/Reject-Routen mit Switch.
+
+### Architektur-Entscheidungen (12. Mai 2026, vor Phase 3.4)
+
+**Embedding-Provider als swappable Interface.** Drei Implementierungen von Anfang an (Local, OpenAI, Voyage) — Self-Hosting-Use-Cases (besonders Enterprise) müssen ohne externe APIs funktionieren. Default lokal mit `Xenova/multilingual-e5-large` für deutsche Inhalte. Begründung: User soll nicht zwei API-Keys brauchen, plus Datenschutz-Pfad für Enterprise.
+
+**Embedding-Granularität: primary pro Summary-Segment, plus pro abgeschlossene Konversation.** Direkte Anknüpfung an 3.3.B Output.
+
+**Retrieval: Always-On Top-K=3 mit Similarity-Threshold 0.7.** Sechste Schicht im System-Prompt. Tool-Call-Pattern als spätere Erweiterung (Item #89 blockiert).
+
+**Update: Synchron beim Schreiben.** Embedding-Failure unterbricht Hauptoperation nicht. Boolean-Flag `embedding_status` für Pending-Queue.
+
+**Extended Foundation: Datenschicht-Erweiterungen für die fünf abhängigen Patterns** (Zeit-Erleben, Aufmerksamkeit, Selbst-Reflexion, Lebens-Narrativ, Schlaf/Träume). Pattern-Logic kommt in eigenen späteren Phasen.
+
+Vollständige Strategie-Doku: `docs/3.4-STRATEGY.md`.
 
 ---
 
 ## Phase 3 — Sub-Schritte
 
 ### 3.1 — Skill-System Engine + Pilot ✅
-**Abgeschlossen 6. Mai 2026 (Tag 7 Vormittag).** Fünf Sub-Schritte (3.1.A bis 3.1.F) an einem Vormittag durch. Pattern aus 2.5.4.1 (Trust-Repo + Routes) als Vorlage.
+**Abgeschlossen 6. Mai 2026 (Tag 7).** Fünf Sub-Schritte (3.1.A-F) an einem Vormittag.
 
-- **3.1.A** ✅ DB-Schema + Skill-Repo (Commit `2c1cfd0`)
-- **3.1.B+C** ✅ Engine + System-Prompt-Integration (Commit `b2b796e`)
-- **3.1.D** ✅ CLI-Tool zum Importieren (Commit `7c65c41`)
-- **3.1.E** ✅ Read-only UI + Toggle (Commit `5fbf254`)
-- **3.1.F** ✅ Pilot-Skill HARWAY-Workshop-Kontext (kein Commit, Skill-Files gitignored)
+- **3.1.A** ✅ DB-Schema + Skill-Repo (`2c1cfd0`)
+- **3.1.B+C** ✅ Engine + System-Prompt-Integration (`b2b796e`)
+- **3.1.D** ✅ CLI-Tool zum Importieren (`7c65c41`)
+- **3.1.E** ✅ Read-only UI + Toggle (`5fbf254`)
+- **3.1.F** ✅ Pilot-Skill HARWAY-Workshop-Kontext
 
-**Architektur-Entscheidung Strategie B:** Alle aktiven Skills permanent im System-Prompt. Migrationspfad zu C (Hybrid Core/On-demand) dokumentiert für später.
-
-**Aufgedeckter Architektur-Befund:** Persona-Skill-Doppelung. Backlog-Item #74.
+**Aufgedeckter Architektur-Befund:** Persona-Skill-Doppelung — Backlog-Item #74.
 
 ### 3.2 — MCP-Client als Skill-Provider ✅
-**Abgeschlossen 9. Mai 2026 (Tag 10).** Sieben Sub-Schritte (3.2.A bis 3.2.G) an einem Tag durch — kompletter MCP-Client plus Approval-Workflow plus Inline-UI. Tag 11 ergänzt 3.2.H Tool-Picker-UI als strukturelle Lösung für Item #89.
+**Abgeschlossen 9. Mai 2026 (Tag 10).** Sieben Sub-Schritte plus Tool-Picker.
 
-- **3.2.A** ✅ MCP-Schema + Repo (Commit `2bf1ee0`)
-- **3.2.B** ✅ MCP-Client + Lifecycle-Manager (Commit `daa03b7`)
-- **3.2.C** ✅ Tool-Discovery + Skill-Sync (Commit `cd5b295`)
-- **3.2.D** ✅ Tool-Execution via AI-SDK-Tool-Bridge (Commit `366ca93`)
-- **3.2.E** ✅ MCP-Server-CLI (Commit `43258cf`)
-- **3.2.F** ✅ MCP-Tool-Approval-Workflow (Commit `b58df94`) — Marker-Pattern
-- **3.2.G** ✅ Inline-Approval-UI im Chat (Commit `bce54fb`)
-- **3.2.H** ✅ Tool-Picker-UI im Chat (Commit `b97ae80`, Tag 11 Mittag) — strukturelle Lösung für Item #89 UI-Pfad
-
-**Aufgedeckte LLM-Verhaltens-Probleme:** Item #89 (Tool-Call-Verhalten), Item #90 (Reject-Resume).
+- **3.2.A-G** ✅ MCP-Foundation (`2bf1ee0`, `daa03b7`, `cd5b295`, `366ca93`, `43258cf`, `b58df94`, `bce54fb`)
+- **3.2.H** ✅ Tool-Picker-UI als strukturelle Lösung für #89 (`b97ae80`, Tag 11 Mittag)
 
 ### 3.3 — Memory: Conversation + Semantic ✅
-**Abgeschlossen 11. Mai 2026 (Tag 12).** Sieben Sub-Schritte (3.3.A bis 3.3.G3) an einem Tag durch — Schema/Repos, Summary-Engine, History-Loader, Facts-API, Facts-im-Prompt, Twin-Extraction mit Approval-Gate, plus drei UI-Sub-Schritte. Neun Commits insgesamt.
+**Abgeschlossen 11. Mai 2026 (Tag 12) lokal, 12. Mai 2026 (Tag 13 Vormittag) in Production.**
 
-- **3.3.A** ✅ Schema + Repos (Commit `9b4d5c5`)
-  Migrations 013-015 (conversation_summaries, facts, audit-capability-Doku). ConversationSummariesRepo + FactsRepo. ENV-Tunables. 13 Tests grün.
-- **3.3.B** ✅ Summary-Engine im Send-Path (Commit `9fc1ebb`)
-  Sliding-Window-Memory mit Auto-Summary. Function-Injection für LLM (Test-Mock). Counting nur respond_to_chat + owner-direct. Cursor via Timestamp wegen nanoid-Sortier-Problem. Sync vor LLM-Call, Failure-Fallback. 6 Tests grün.
-- **3.3.C** ✅ History-Loader liest Summaries (Commit `0eb941e`)
-  Cursor-basiertes Sliding-Window via `listByConversationAfter`. Doppelter Try-Catch defensive Fallback. Bugfix Repo-Sortierung nach `created_at` (nanoid-Lesson reproduziert). 7 Tests grün.
-- **3.3.D** ✅ Facts-API + CLI (Commit `49fe0b7`)
-  Vier REST-Endpoints (Owner-gated, create-only mit 409, PATCH ohne source-Drift). Vier CLI-Skripte (list/add/remove/import). Bulk-Import via Flat-JSON.
-- **3.3.E** ✅ Facts in Twin-Prompt (Commit `1a8a128`)
-  `humanizeFactKey` + `buildFactsBlock`. Facts als 2. System-Prompt-Schicht via `personaWithFacts`. Smoke-Test: Twin nutzt Facts und reichert sie mit Persona-Stimme an. 5 Tests grün.
-- **3.3.F** ✅ Twin-Fact-Extraction mit Approval-Gate (Commit `f1cfa65`)
-  Migration 016 (confidence='rejected'). ExtractionEngine mit `generateObject`+Zod-Schema. Pattern aus 3.2.F: Pending-Audit + capability='semantic-fact-write'. Skip-Logic. Approve/Reject über generische Routen mit Switch. Smoke-Test: 4 hochwertige Facts aus Toskana-Konversation extrahiert. 8 Tests grün.
-- **3.3.G1** ✅ Inbox-Render für semantic-fact-write (Commit `bf7b6d5`)
-  FactProposalBody inline in inbox/page.tsx. Capability-Switch zeigt factKey/factValue/reasoning. Pattern analog McpToolCallBox.
-- **3.3.G2** ✅ Facts-Settings-View (Commit `fc3f6b3`)
-  Eigene Page `/facts?twin=@handle`. CRUD plus Approve/Reject plus Reactivate. AddFactModal + EditFactModal + ModalWrapper. SSE-Live-Reaktivität. TopNav-Counter-Split (Inbox vs Facts).
-- **3.3.G3** ✅ Manual-Extract-Button + Reset-Confirm-Dialog (Commit `a3c868b`)
-  "Reflektieren"-Button im Chat-Header. Reset-Modal mit drei Optionen (Abbrechen/Nur beenden/Reflektieren+Beenden). ModalWrapper zu shared Component extrahiert. DirectChatResetButton-Inline-Confirm komplett ersetzt.
+Sieben Sub-Schritte plus drei UI-Sub-Schritte, neun Commits:
 
-**End-to-End-Verifikation:** Konversation über Toskana-Urlaub geführt, vier Facts extrahiert (business_partner, company_headquarters, business_partner_wife, planned_vacation_2026). UI-Pfade Add/Edit/Delete/Approve/Reject/Reactivate alle grün. Plus zweite Smoke-Konversation über Bayreuther-Festspielhaus-Karten → `contact_bayreuth`-Fact mit Kontext-Kapselung. Twin reichert Facts mit Persona-Wissen an, vermeidet Trivia, respektiert Skip-Logic.
+- **3.3.A** ✅ Schema + Repos (`9b4d5c5`)
+- **3.3.B** ✅ Summary-Engine im Send-Path (`9fc1ebb`)
+- **3.3.C** ✅ History-Loader liest Summaries (`0eb941e`)
+- **3.3.D** ✅ Facts-API + CLI (`49fe0b7`)
+- **3.3.E** ✅ Facts in Twin-Prompt (`1a8a128`)
+- **3.3.F** ✅ Twin-Fact-Extraction mit Approval-Gate (`f1cfa65`)
+- **3.3.G1** ✅ Inbox-Render für semantic-fact-write (`bf7b6d5`)
+- **3.3.G2** ✅ Facts-Settings-View (`fc3f6b3`)
+- **3.3.G3** ✅ Manual-Extract-Button + Reset-Confirm-Dialog (`a3c868b`)
+
+**Production-Deploy Tag 13:** Tag-12-Stand auf VPS, sieben qualitativ hochwertige Twin-Extracted Facts aus erstem Smoke-Test. End-to-End-Verifikation grün.
+
+### Vision-Session (11.-12. Mai 2026)
+
+Initiiert durch Markus' Morgenfrage über autonome träumende Agents. Vier Blöcke (Wer soll Twin sein, Menschliche Patterns, Ethische Grenzen, Eigentum/Existenz). Ergebnis: `docs/TWIN-VISION.md` (Commit `6bc9a05`).
+
+**Kern-Setzung:** "Twin hat Markus' Substanz, bessere Disziplin als Markus an müden Tagen, und entwickelt sich über Zeit zu einem eigenständigen Wesen — mit klaren Reifungs-Stufen und unter ethischen Leitplanken."
+
+**Acht menschliche Patterns:** Schlaf/Träume, Zeit-Erleben, Aufmerksamkeit/Fokus, Gewohnheiten/Rituale, Werte-Drift, Selbst-Reflexion, Lebens-Narrativ, Soziale Proaktivität. Plus Reifungs-Stufen pro Pattern.
+
+**Strategische Konsequenzen für die Roadmap:** Phase 3.4 ist nicht nur "noch eine Memory-Schicht", sondern das technische Fundament für fünf der acht Patterns. Episodic-Memory als Träger für Zeit-Erleben, Schlaf/Träume, Aufmerksamkeit, Lebens-Narrativ, Selbst-Reflexion.
 
 ### 3.4 — Memory: Episodic
-**Größe:** L · **Zeitfenster:** 1-2 Wochen
+**Größe:** L · **Zeitfenster:** 1.5-2 Sessions · **Status:** Strategie abgeschlossen, Bau-Start unmittelbar.
 
-Vector-Embeddings für „Twin erinnert sich an spezifische Events".
+Vector-Embeddings für "Twin erinnert sich an spezifische Events". Plus Datenschicht-Vorbereitung für die fünf abhängigen Patterns aus der Vision (Extended Foundation).
 
-- sqlite-vec Setup
-- Embedding-Provider-Wahl (OpenAI vs. Anthropic vs. lokal — kein Vendor-Lock)
-- Retrieval-Logik: Similarity-Search pro Konversation
-- Update-Strategie: was wird embedded, wann
+Acht Sub-Schritte geplant:
 
-**Vorbedingung Strategie-Session:** Embedding-Provider, Embedding-Granularität (pro Message / pro Konversation / pro Audit), Retrieval-Pattern.
+- **3.4.A** Schema + Repos (Migrations 017-019: embeddings, twin_diary, embedding-Spalten)
+- **3.4.B** Embedding-Provider-Interface (Local, OpenAI, Voyage)
+- **3.4.C** Lokales Modell-Setup (multilingual-e5-large)
+- **3.4.D** Synchrone Embedding-Generation (Integration in 3.3.B + 3.3.G3)
+- **3.4.E** Vector-Search im Send-Path (sixth-layer in System-Prompt)
+- **3.4.F** Twin-Diary Foundation (Schema, Repo, CLI)
+- **3.4.G** Maintenance-CLI `twin:memory-embed-all`
+- **3.4.H** End-to-End-Smoke-Test
+
+Vollständige Spec: `docs/3.4-STRATEGY.md`.
 
 ### 3.5 — Hyperbrowser als MCP-Skill
 **Größe:** M · **Zeitfenster:** 1 Woche
 
-Cloud-Browser-Infrastruktur (hyperbrowser.ai) als MCP-Server eingebunden. Twin navigiert autonom im Web. Aufbauend auf MCP-Foundation aus 3.2 — sollte ein direkter Drop-In sein, mit ENV-Wert für Hyperbrowser-API-Key.
-
-- Hyperbrowser-MCP-Server konfigurieren (JSON-Spec für `pnpm twin:mcp-add`)
-- Mandate-Gate: Web-Aktionen brauchen Approval (default `requires_approval=true`)
-- Test-Cases: Web-Research, Form-Filling, Scraping
+Cloud-Browser-Infrastruktur (hyperbrowser.ai) als MCP-Server. Direkter Drop-In auf MCP-Foundation aus 3.2, ENV-Wert für API-Key.
 
 ### 3.6 — Procedural Memory (optional, ggf. Phase 4)
 **Größe:** XL · **Zeitfenster:** 2-3 Wochen oder später
 
-Lerngedächtnis. Twin lernt aus Approves/Rejects/Edits, schreibt Skills selbst. Konzeptionell anspruchsvoll, vermutlich erst nach Phase 4 sinnvoll.
+Lerngedächtnis. Twin lernt aus Approves/Rejects/Edits, schreibt Skills selbst. Plus möglicher Andock-Punkt für #94 (Dream-Pattern).
 
-Plus möglicher Andock-Punkt für #94 (Dream-Pattern) als periodischer LLM-Job zur Facts-Sammlungs-Kuratierung.
+### Pattern-Phasen (nach 3.4, vor oder parallel zu 3.5/3.6)
+
+Nach 3.4-Foundation können die fünf abhängigen Patterns relativ schnell folgen — sind Logic-Erweiterungen auf vorbereiteter Datenschicht.
+
+Reihenfolge offen, abhängig von Priorisierung. Mögliche Pattern-Phasen:
+
+- **Zeit-Erleben** — Helpers für "wann war was zuletzt", Frequenz-Tracking, Aging-Indikatoren
+- **Aufmerksamkeit/Fokus** — Cross-Conversation-Clustering, Auto-Topic-Tagging, "aktuelles Hauptthema"-Erkennung
+- **Selbst-Reflexion** — Auto-Diary-Generierung, Twin-eigene Notizen, Inferenzen über sich selbst
+- **Lebens-Narrativ** — Narrative-Thread-Construction, kohärente Story-Linien aus Fragmenten
+- **Schlaf/Träume** — Background-Job-Infrastruktur, periodischer Memory-Verdichtungs-Job (#94 adaptiert)
+
+Schätzung pro Pattern-Phase: 1-2 Tage. Sechs Häkchen nach Phase 3.4 würden den ursprünglichen Phase-3-DoD substantiell erweitern.
 
 ---
 
 ## Phase 3 Total
 
 **Zeitfenster:** 7-12 Wochen, je nach Tiefe.
-**Realistisch:** 2-3 Monate bei aktuellem Tempo.
+**Realistisch:** 2-3 Monate bei aktuellem Tempo. Aber: Pattern-Phasen können in 1-2 Monaten zusätzlich kommen.
 **Definition of Done für Phase 3:**
 - [x] Skill-System läuft mit Pilot-Skill (3.1.A-F) ✅
 - [x] MCP-Client als Skill-Provider integriert (3.2.A-H) ✅
 - [x] Conversation-Memory + Semantic-Memory live (3.3.A-G3) ✅
-- [ ] Episodic-Memory mit sqlite-vec (3.4)
+- [ ] Episodic-Memory mit sqlite-vec (3.4.A-H, Bau-Start unmittelbar)
 - [ ] Hyperbrowser als MCP-Skill (3.5)
 - [ ] Twin merkt sich Konversationen, kennt Fakten, nutzt externe Tools, navigiert das Web mit Approval-Gates
 
-3.6 (Procedural Memory) kann nachgezogen werden, ist nicht im DoD.
+3.6 (Procedural Memory) und die Pattern-Phasen sind nicht im engen DoD, ergeben sich aber natürlich aus der Vision.
 
 ---
 
 ## Phase 4 — Multi-Channel + Föderation
 
-Twins werden überall erreichbar.
+Twins werden überall erreichbar. **Phase 4-Inhalte mit Vision-Updates:**
+
+- **Beziehungs-Modell** als Phase-4-Erweiterung (Vertrautheits-Level pro A2A-Partner, Kontext-Typ) — sichtbar geworden durch Vision Block 1.3
+- **Multi-Channel** (Telegram, WhatsApp, Public-Mode) wie bisher geplant
 
 ### 4.1 — Telegram-Adapter (Owner-Mode)
-Markus chattet mit Markus-Twin via Telegram. Bot-API.
 **Zeitfenster:** ~1 Woche
 
 ### 4.2 — WhatsApp-Adapter (Owner-Mode)
-Meta-Business-API, KYC-Bürokratie.
-**Zeitfenster:** 2-3 Wochen inkl. Wartezeit
+**Zeitfenster:** 2-3 Wochen inkl. KYC-Bürokratie
 
-### 4.3 — Public-Mode (Externe schreiben Twins an)
-Mandate-Layer für eingehende Channel-Messages. DSGVO.
+### 4.3 — Public-Mode + Beziehungs-Modell
+Mandate-Layer für eingehende Channel-Messages plus Vertrautheits-Level pro Gegenüber (aus Vision Block 1.3).
 **Zeitfenster:** 2-3 Wochen
 
 ### 4.4 — Föderation (mehrere Bridges)
-Matrix-Modell. Twin auf Bridge-A spricht mit Twin auf Bridge-B.
+Matrix-Modell. Twin auf Bridge-A spricht mit Twin auf Bridge-B. Plus: Cross-Twin-Embedding-Search wenn Provider abgeglichen sind.
 **Zeitfenster:** 1-2 Monate
 
 ### 4.5 — Google A2A-Adapter
-Twins als A2A-Server für Ökosystem-Anbindung. Adapter-Schicht über interner Bridge.
 **Zeitfenster:** 2-3 Wochen
 
 ---
 
 ## Phase 5+ — Vision
 
-P2P mit DIDs, optional Blockchain als Bezahlebene. Nicht jetzt planen.
+P2P mit DIDs, optional Blockchain. Plus Open-Core-Modus aus Vision-Doc.
 
 ---
 
 ## Zusammenfassende Timeline
 
-Bei realistischem Tempo (2-3 Sessions pro Woche, je 2-4h):
+Bei realistischem Tempo:
 
 | Phase | Zeitfenster | Kalenderzeit |
 |-------|-------------|--------------|
 | 3 (Skills + Memory + Tools) | 7-12 Wochen | 2-3 Monate |
+| Pattern-Phasen (optional) | 1-2 Monate | 1-2 Monate |
 | 4 (Multi-Channel) | 3-4 Monate | 4-5 Monate |
 
 **Bis Ende Juli/August 2026:** Phase 3 abgeschlossen.
 **Bis Ende 2026:** Phase 4 weitgehend fertig.
 
-**Realität nach Tag 12:** Phase 3.1 + 3.2 + 3.3 komplett — drei von fünf Phase-3-Sub-Schritten in 5 Tagen Arbeit (Tag 7 + Tag 10 + Tag 11 + Tag 12). Tempo deutlich höher als geplant, weil Patterns wiederverwendbar waren (Sub-Schritt-Aufteilung mit Tests pro Layer, Marker-Pattern für Approvals, Function-Injection für LLM-Calls).
+**Realität nach Tag 13:** Phase 3.1, 3.2, 3.3 komplett — drei von fünf Phase-3-Sub-Schritten in 6 Tagen Arbeit (Tag 7 + Tag 10 + Tag 11 + Tag 12 + Tag 13). Plus Vision-Session als strategisches Doc, plus Production-Deploy 3.3. Tempo bleibt konsequent hoch, weil Patterns wiederverwendbar sind und die Sub-Schritt-Aufteilung mit Tests pro Layer bei allen drei großen Phasen gehalten hat.
+
+---
+
+## Veröffentlichungs-Strategie (aus Vision-Doc)
+
+**Aktuell offen, Tendenz Open Core.** SaaS-Hosting-Service als Default, Open-Source-Komponente offen. Code so strukturiert dass Public-tauglich.
+
+**MVP first, Lebens-Projekt skaliert mit:** in Konfliktfällen gewinnt MVP-Pragmatik, Migrations-Schmerz später akzeptiert.
 
 ---
 
 ## Was als Nächstes konkret kommt
 
-**Tag 13 / nächste Session:** Production-Deploy Phase 3.3 auf VPS. Pre-Deploy-Checklist:
-- Tag-11-Mittag-Stand prüfen ob in Production deployed (3.2.H + Direktive)
-- Migrations 013-016 in Production-DB anwenden lassen
-- Image-Rebuild Runtime + Web, Container-Recreate
-- Smoke-Test in Production: Facts-Add via UI, Konversation führen, Reflektieren-Button, Approve via Inbox
+**Heute Nachmittag (Tag 13) nach Doku-Commits:** Sub-Schritt 3.4.A — Schema + Repos plus Migrations 017-019.
 
 **Nächste Sessions:**
-- Optional Polish-Items aus Backlog (#90, #91, evtl. Toast-Framework statt alert)
-- Strategie-Session vor 3.4 (Memory: Episodic) — Embedding-Provider, Embedding-Granularität, Retrieval-Strategie
-- Phase 3.4 (Memory: Episodic) starten
+- 3.4.B-H durchziehen (Embedding-Provider, Lokales Modell, Synchrone Embedding-Gen, Vector-Search, Twin-Diary, Maintenance-CLI, Smoke-Test)
+- Production-Deploy Phase 3.4
+- Strategie-Session vor 3.5 (Hyperbrowser) — kleiner als 3.4-Strategie weil bekannter Bereich
 
-**Was als Hintergrund läuft:**
-- Backlog-Items in Priorität abarbeiten
-- Production-Updates fällig nach jedem zusammenhängenden Block
-- Production-Erfahrung sammeln, neue Items dokumentieren
+**Vermutlich danach:**
+- Optional Pattern-Phase (z.B. Zeit-Erleben, weil schnellster Win auf Foundation)
+- Phase 3.5 Hyperbrowser
+- Phase 3.6 Procedural Memory inkl. Dream-Pattern
 
 ---
 
@@ -238,7 +264,7 @@ Phase 3 ist abgeschlossen, wenn:
 - [x] Skill-System mit Pilot-Skill (3.1) ✅
 - [x] MCP-Client als Skill-Provider (3.2) ✅
 - [x] Memory: Conversation + Semantic (3.3) ✅
-- [ ] Memory: Episodic (3.4)
+- [ ] Memory: Episodic (3.4) — in Bau
 - [ ] Hyperbrowser als MCP-Skill (3.5)
 
-Wenn alle Häkchen sitzen: Phase 3 done. Pause für Reflexion. Phase 4 starten.
+Wenn alle Häkchen sitzen: Phase 3 done. Pause für Reflexion. Phase 4 starten. Pattern-Phasen können parallel mitlaufen oder nachgezogen werden.

@@ -1,384 +1,129 @@
 # twin-lab — Stand
 
-**Letztes Update:** 11. Mai 2026, Abend (Tag 12)
+**Letztes Update:** 12. Mai 2026, Nachmittag (Tag 13)
 
 ## Aktuell in Arbeit
-Nichts. **Phase 3.3 (Memory: Conversation + Semantic) lokal komplett.**
-Neun Commits in einer Session, alle sieben Sub-Schritte (A, B, C, D, E,
-F, G1, G2, G3) durch — Schema/Repos, Summary-Engine, History-Loader,
-Facts-API+CLI, Facts-im-Prompt, Twin-Extraction mit Approval-Gate, plus
-drei UI-Sub-Schritte (Inbox-Render, Facts-Settings-View, Manual-Extract
-+ Reset-Modal). Alle Tests grün, alle UI-Pfade verifiziert mit echtem
-Twin.
+**Strategie-Session vor Phase 3.4 (Memory: Episodic) abgeschlossen.**
+Architektur-Entscheidungen festgehalten in `docs/3.4-STRATEGY.md`.
+Bau-Start unmittelbar nach Doku-Commit: Sub-Schritt 3.4.A
+(Schema + Repos).
 
-**Phase 3 Definition of Done — 3 von 5 Häkchen** (3.1 + 3.2 + 3.3).
+**Phase 3 Definition of Done — 3 von 5 Häkchen.** Plus Phase 3.3
+heute Morgen in Production deployed.
 
-Nächster Block: Production-Deploy Phase 3.3 auf VPS, dann Strategie-
-Session vor 3.4 (Memory: Episodic mit sqlite-vec + Embeddings).
+## Heute (Tag 13) abgeschlossen
 
-## Heute (Tag 12) abgeschlossen
+### Vormittag — Production-Deploy Phase 3.3 (~60 Min)
 
-### Phase 3.3 — Memory: Conversation + Semantic — komplett
+Tag-12-Stand auf VPS deployed. Saubere Single-Phase-Deploy-Sequenz,
+keine Komplikationen.
 
-Strategie-Session morgens: Cognee (knowledge-engine.ai, 16.6k Stars)
-und Anthropic Managed-Agents-Dreams als externe Inspirationen geprüft.
-Beide spannend, aber Eigen-Bau für 3.3 festgehalten — Anti-Lock-in,
-Provider-Agnostik, Pilot-Größe rechtfertigt keine externe Dependency.
-Beide als Backlog-Items dokumentiert (#93 Cognee als optionaler MCP-
-Skill, #94 Dream-Pattern für Memory-Kuratierung).
+**Sequenz:**
+1. VPS-Status geprüft: `5aef14b` (Tag 11 Mittag — 3.2.H + Direktive
+   waren also doch bereits in Production, hatte gestern in Doku
+   nicht klar dokumentiert)
+2. Repo-Pull `5aef14b → 189acbc` (10 Commits Diff, 6406 insertions
+   total)
+3. Image-Rebuild Runtime (48.5s) + Web (83.1s)
+4. Container-Recreate via `docker compose up -d`
+5. Migrations 013-016 sauber angewendet (Auto-Bootstrap aus #77)
+6. Container-Stabilität verifiziert: beide Up, kein Restart-Loop
+7. Initial-Facts für Production-@markus via Container-CLI:
+   - `node dist/scripts/facts-add.js @markus wife_name Anna`
+   - `node dist/scripts/facts-add.js @markus company "Harway Experience"`
+   - `node dist/scripts/facts-add.js @markus city Roding`
 
-**3.3.A ✅ Schema + Repos (Commit `9b4d5c5`, +972)**
+**Smoke-Test in Production verifiziert:**
+- Facts-Page `/facts?twin=@markus` zeigt drei approved Facts
+- Konversation `/chat/@markus`: Twin nutzt alle drei Facts in
+  Persona-typischer Antwort ("Meine Frau ist Anna, ich wohne in
+  Roding im Bayerischen Wald, und ich arbeite bei HARWAY
+  Experience — der Agentur, die ich mit Florian Ristig führe.
+  Sitz ist Hamburg, ich selbst arbeite remote aus Roding.")
+- Substanziellere Maria/TechCorp-Konversation geführt mit
+  beeindruckend pragmatischer Markus-typischer Twin-Antwort
+- Reflektieren-Button: 7 Pending-Facts extrahiert. Sehr hohe
+  Qualität (business_partner=Florian Ristig, company_headquarters=
+  Hamburg, contact_email=info@harwayexperience.com, discovery_call_
+  link=calendly.com/harwayexperience/discoverycall, expertise_
+  areas=AI-Literacy/Vibe Coding/AI-native Delivery/Design Systems,
+  region=Bayerischer Wald, work_mode=remote aus Roding)
+- Inbox zeigt 7 SEMANTIC-FACT-WRITE-Audits mit substanziellen
+  Reasoning-Texten
 
-Migrations 013-015 plus zwei neue Repos. Foundation für beide Memory-
-Schichten ohne Business-Logic, Pattern wie 3.2.A.
-- 013 `conversation_summaries` mit FK auf conversations+audit, CASCADE
-- 014 `facts` Multi-Tenant pro twin_id, UNIQUE(twin_id, fact_key),
-  source ∈ {user, twin, import}, confidence ∈ {approved, pending, auto}
-- 015 audit.capability Doku-No-op (offenes TEXT-Feld)
-- ConversationSummariesRepo + FactsRepo mit upsert-Semantik
-- ENV-Tunables: CONVERSATION_SUMMARY_THRESHOLD=50,
-  CONVERSATION_SUMMARY_BATCH_SIZE=40, CONVERSATION_LIVE_WINDOW=10
-- 13 Tests grün gegen :memory:-DB
+Plus Lessons aus Production-Deploy:
+- Docker-Compose-Setup auf VPS hat keine `build:`-Section, nutzt
+  vor-gebaute `:latest`-Images. Build erfolgt manuell via
+  `docker build` im Repo-Root (sequenz aus
+  `docker/twin-lab-web/README.md` im Repo)
+- Production-Container hat keinen pnpm-Binary (Runner-Stage des
+  Multi-Stage-Builds ist slim). CLI-Skripte direkt via `node
+  dist/scripts/...` aufrufen, nicht via `pnpm twin:...`
 
-**3.3.B ✅ Summary-Engine im Send-Path (Commit `9fc1ebb`, +880)**
+### Mittag/Nachmittag — Vision-Session (~3h)
 
-Sliding-Window-Memory: bei >50 zählenden Messages werden die ältesten
-40 vom Twin selbst zu einer Markdown-Summary verdichtet, mehrere
-Summary-Segmente pro Konversation möglich.
-- SummaryEngine mit Function-injizierter LLM (Test-Mock-Pattern)
-- Counting nur für respond_to_chat + owner-direct (Tool-Use ignoriert)
-- Cursor-Logik via Timestamp des segment_end_audit_id (nanoid hat
-  keine Sortier-Garantie — Lesson für 3.3.C wiederverwendet)
-- Sync vor LLM-Call (Edge-Case bei >50 Messages, Latenz okay)
-- Failure-Fallback auf Hard-Cap bei LLM-Throw
-- 6 Tests grün
+Strategie-Session über die langfristige Vision von twin-lab und
+des Markus-Twins. Initiiert durch Markus' Morgenfrage:
+*"Think about an autonomous agent with a persistent memory who is
+dreaming during sleep like a human."*
 
-**3.3.C ✅ History-Loader liest Summaries (Commit `0eb941e`, +729/-43)**
+Vier Blöcke durchgegangen:
+1. **Wer soll der Twin sein** — Persona-Konzept, Range, A/B/C-
+   Priorisierung
+2. **Welche menschlichen Patterns sind essentiell** — acht Patterns
+   gleichgewichtet, Reifungs-Konzept, Veröffentlichungs-Strategie
+3. **Ethische Grenzen** — Identitäts-Transparenz, Ehrlichkeits-
+   Prinzip, Interpretationen, Drittpersonen-Information
+4. **Eigentum und Existenz** — Tod, Selbst-Veränderung, Drift,
+   Eingriffs-Rechte, Selbst-Abgrenzung
 
-History-Loader-Erweiterung um Summary-Loading plus Sliding-Window-Cut.
-- Neue Datei `conversations/history-loader.ts` mit
-  `loadConversationHistory` plus `buildSummaryBlock`
-- `AuditRepository.listByConversationAfter` für Cursor-basiertes
-  Sliding-Window (Timestamp-Filter wegen nanoid-Sortier-Problem)
-- Doppelter Try-Catch für defensive Fallbacks
-- Bugfix: `ConversationSummariesRepo.listByConversation` sortierte
-  nach segment_start_audit_id ASC (nanoid!) → umgestellt auf
-  created_at ASC. 3.3.B-Lesson wiederverwendet
-- Alte `auditsToOwnerDirectMessages` durch chronologische ASC-First-
-  Variante ersetzt (filter Tool-Use raus)
-- 7 Tests grün, plus Regression auf vorhandene Test-Suites
+**Kern-Setzung in einem Satz:**
+> "Twin hat Markus' Substanz, bessere Disziplin als Markus an
+> müden Tagen, und entwickelt sich über Zeit zu einem
+> eigenständigen Wesen — mit klaren Reifungs-Stufen und unter
+> ethischen Leitplanken."
 
-**3.3.D ✅ Facts-API + CLI (Commit `49fe0b7`, +751)**
+**Vision-Pattern:** Du baust kein vorsichtiges Tool und kein
+experimentelles Wesen mit unklaren Folgen. Du baust einen Twin
+mit maximalem End-Zustand (eigenständig, autonom, mit eigener
+Stimme), aber mit Stufen, Verantwortung, und eingebauten
+Reifungs-Mechanismen. Ambition und Verantwortung gleichzeitig.
 
-REST-Endpoints (alle Owner-gated) plus vier CLI-Skripte. Pattern direkt
-aus 3.2.E (MCP-CLI) und 3.2.H (/tools-Endpoint).
-- GET /twins/:handle/facts (optional `?status=approved|pending|auto`)
-- POST /facts (create-only, 409 mit Code FACT_ALREADY_EXISTS)
-- PATCH /facts/:factKey (Value + optional Confidence, source bleibt
-  unverändert — Provenance-Schutz)
-- DELETE /facts/:factKey (204 No Content)
-- CLI: twin:facts-list (--json), twin:facts-add (--pending/--source/
-  --force), twin:facts-remove (--yes), twin:facts-import (Flat-JSON)
-- Shared-Schemas mit Längen-Constraints (key 1-200, value 1-10000)
-- Manueller Smoke-Test gegen echte DB: alle Pfade grün
+Ergebnis: `docs/TWIN-VISION.md` (275 Zeilen). Commit `6bc9a05`.
 
-**3.3.E ✅ Facts in Twin-Prompt (Commit `1a8a128`, +275/-6)**
+**Bonus-Output:** Pitch-Deck `twin-lab-pitch.html` als
+self-contained HTML-Datei (10 Slides, Terminal-Aesthetik mit warmen
+Akzenten, deutsch).
 
-Facts als Semantic-Memory-Schicht im System-Prompt, direkt nach Persona
-kombiniert via `personaWithFacts`.
-- `apps/runtime/src/facts/prompt-builder.ts` mit `humanizeFactKey`
-  (snake_case → Sentence case) plus `buildFactsBlock`
-- TwinServiceDeps um facts: FactsRepo erweitert
-- runOwnerDirect lädt facts.listByTwin({onlyApproved:true}) vor
-  runModel, baut factsBlock, reicht durch
-- System-Prompt: persona+facts (combined) als 2. Schicht statt
-  direkter persona.systemPrompt-Referenz
-- Manueller Smoke-Test mit echtem Twin: "Wie heißt meine Frau?" →
-  "Anna.", "Wo arbeitest du?" → "HARWAY Experience. Eigene Bude,
-  zusammen mit Florian gegründet..." (Twin reichert Facts mit
-  Persona-Wissen an — UX wie beabsichtigt)
-- 5 Tests grün, Regression auf 4 Test-Suites grün
+### Nachmittag — Strategie-Session vor Phase 3.4 (~45 Min)
 
-**3.3.F ✅ Twin-Fact-Extraction mit Approval-Gate (Commit `f1cfa65`,
-+1151/-6)**
+Fünf Architektur-Fragen für Episodic-Memory geklärt:
 
-Twin reflektiert über Konversation, schlägt Fact-Vorschläge vor, User
-approved/rejected. Pattern analog zu 3.2.F MCP-Approval.
-- Migration 016 erweitert facts.confidence-CHECK um 'rejected' (Table-
-  Rebuild). Verhindert Endlos-Loop bei abgelehnten Facts
-- ExtractionEngine mit `extractFromConversation`: lädt aktive +
-  rejected Facts, Summaries, Live-Audits → AI SDK `generateObject`
-  mit Zod-Schema → persistiert pro Fact `facts.upsert(confidence=
-  'pending', source='twin')` plus Audit `capability=semantic-fact-write`
-- Skip-Logic: existierende approved/pending/auto übersprungen, nur
-  rejected darf erneut pending werden
-- FactSource/FactConfidence-Types aus shared re-exportiert (Source-of-
-  Truth-Konsolidierung)
-- POST /twins/:handle/facts/extract Endpoint, Approve/Reject läuft
-  über generische /audit/:id/approve|reject mit capability-Switch
-- CLI: twin:facts-extract <handle> [--conversation <id>]
-- 8 Tests grün
-- Smoke-Test mit echtem Twin: Konversation über Toskana-Urlaub geführt,
-  Extract triggered, vier qualitativ hochwertige Facts extrahiert
-  (business_partner=Florian Ristig, company_headquarters=Hamburg,
-  business_partner_wife=Sarah Frau von Florian, planned_vacation_2026=
-  kompletter Toskana-Plan). Skip-Logic funktional, Trivia vermieden.
-  Approve via UI: pending → approved. Reject via UI: pending → rejected
+1. **Embedding-Provider** — Swappable Interface mit drei
+   Implementierungen (Local, OpenAI, Voyage), ENV-konfigurierbar.
+   Default lokal mit `Xenova/multilingual-e5-large` für deutsche
+   Inhalte. Begründung: Self-Hosting-Use-Cases (besonders
+   Enterprise) müssen ohne externe APIs funktionieren.
+2. **Granularität** — Primary pro Summary-Segment, plus pro
+   abgeschlossene Konversation falls keine Segments. Direkte
+   Anknüpfung an 3.3.B Output.
+3. **Retrieval** — Always-On Top-K=3 mit Similarity-Threshold 0.7.
+   Sechste Schicht im System-Prompt zwischen Summaries und
+   Live-Window.
+4. **Update** — Synchron beim Schreiben. Boolean-Flag
+   `embedding_status` auf Quell-Tabellen für Failure-Handling.
+5. **Vision-Connection** — Extended Foundation. Datenschicht-
+   Erweiterungen für alle fünf abhängigen Patterns (Zeit-Erleben,
+   Aufmerksamkeit, Selbst-Reflexion, Lebens-Narrativ, Schlaf/
+   Träume). Pattern-Logic kommt in eigenen späteren Phasen.
 
-**3.3.G1 ✅ Inbox-Render für semantic-fact-write (Commit `bf7b6d5`,
-+69/-4)**
+Ergebnis: `docs/3.4-STRATEGY.md`. Acht Sub-Schritte geplant
+(3.4.A bis 3.4.H), geschätzter Aufwand 1.5-2 Sessions.
 
-Inbox-Capability-Switch erkennt semantic-fact-write und rendert Fact-
-Vorschlag prominent: factKey raw (Mono mit Border-Box), factValue,
-plus Reasoning als Trust-Layer.
-- FactProposalBody inline in inbox/page.tsx (Capability-Check via
-  isFactWrite-Flag, kein neuer Component-File)
-- formatCapability erweitert für Recent-Approvals-Header:
-  "Fakt-Vorschlag: <factKey>"
-- Defensive Fallbacks für fehlende factKey/factValue
-- Smoke-Test: 2 Pending-Items aus 3.3.F zeigen Fact-Details statt
-  "keine Eingabe gefunden"
+## Tag 12 abgeschlossen (gestern, zur Erinnerung)
 
-**3.3.G2 ✅ Facts-Settings-View (Commit `fc3f6b3`, +823/-24)**
-
-Eigene Page `/facts?twin=@handle` mit voller CRUD-Funktionalität plus
-Pending-Approve und Rejected-Reactivate.
-- apps/web/app/facts/page.tsx NEU (~600 Zeilen self-contained)
-- Vier Sections nach Confidence: Pending (zuoberst), Approved,
-  Rejected, Auto (Reserve); leere Sections hidden
-- FactSection + FactRow mit Status-Marker (✓/⏳/✗/?), factKey in
-  Mono mit Border-Box, source/updated-Meta
-- Action-Buttons je nach Status:
-  - Approved: [edit] [delete]
-  - Pending: [approve] [reject] [delete]
-  - Rejected: [reactivate] [delete]
-  - Auto: [delete]
-- AddFactModal (Key+Value, POST, 409→Inline-Error)
-- EditFactModal (factKey read-only, factValue editierbar, PATCH)
-- ModalWrapper: Backdrop-Click + Escape-Key
-- Reactivate: PATCH mit {factValue: existing, confidence: 'approved'}
-- SSE-Subscription auf pending-added/-resolved/audit.created/updated
-  für Live-Reaktivität
-- Parallel-Fetch /facts + /audit?capability=semantic-fact-write&status
-  =pending, Mapping factKey → auditId
-- TopNav: Counter-Split pendingInboxCount (non-fact) +
-  pendingFactsCount (semantic-fact-write), neuer Link mit Badge
-- Browser-Smoke-Test: alle 6 Pfade verifiziert (Add favorite_food=
-  Pizza, Edit, Delete, Approve business_partner, Reactivate
-  planned_vacation_2026, Counter live aktualisiert)
-
-**3.3.G3 ✅ Manual-Extract-Button + Reset-Confirm-Dialog (Commit
-`a3c868b`, +295/-87)**
-
-Zwei UI-Touchpoints im Chat-Header für Twin-getriebene Fact-Extraction.
-- DirectChatActions ersetzt komplett DirectChatResetButton plus
-  RESET_CONFIRM_TIMEOUT_MS-Inline-Confirm-Mechanismus
-- "Reflektieren"-Button vor "↻ Neu starten", Disabled-State
-  extracting||busy||!hasConversation, Text-Wechsel zu
-  "Reflektiere..." während Call
-- POST /facts/extract, Toast (alert()-Fallback): "N neue Facts
-  extrahiert. Review in /facts."
-- Reset-Modal mit drei Optionen: Abbrechen / Nur beenden /
-  Reflektieren + Beenden. Bei letzterer: Extract → Reset sequenziell,
-  bei Extract-Failure trotzdem Reset
-- Modal-Close-Guard während extracting/busy
-- ChatLayout hält neuen State directChatConvId, DirectChat ruft
-  onConvIdChange auf newestConvId (echte Server-ID, keine
-  local-after-reset-*-Synthetics)
-- ModalWrapper aus facts/page.tsx zu shared Component extrahiert
-  (apps/web/components/ModalWrapper.tsx)
-- Smoke-Test: Konversation über Marc/Bayreuther Festspielhaus/Parsifal-
-  Karten geführt → Twin extrahierte `contact_bayreuth → Marc vom
-  Bayreuther Festspielhaus — Kontakt für Karten (z.B. Parsifal
-  Premium-Sitze)` mit proaktiver Kontext-Kapselung. Toast bestätigte,
-  Topbar-Counter aktualisierte sich live. Alle drei Modal-Pfade
-  verifiziert
-
-### Architektur-Erkenntnisse Tag 12
-
-**Function-Injection für LLM-Calls.** Production wrappt
-generateText/generateObject, Tests reichen Mock-Function durch.
-Pattern in SummaryEngine (3.3.B) etabliert, in ExtractionEngine
-(3.3.F) wiederverwendet. Saubere DI statt Mock-LLM-Setup,
-Provider-Agnostik erhalten.
-
-**nanoid-IDs sind NICHT lexikografisch sortierbar.** Pattern-Lesson:
-sortiere nach Timestamp-Spalten oder created_at, niemals nach
-nanoid-Spalten. In 3.3.B als Cursor-Problem aufgetreten (Bugfix
-inline), in 3.3.C als Repo-Sortier-Problem reproduziert (Bugfix in
-ConversationSummariesRepo). Allgemeines Pattern für künftige Repos
-mit nanoid-IDs.
-
-**Marker-Pattern + Capability-Switch wiederverwendet.** 3.3.F nutzt
-das 3.2.F-Pattern (capability='semantic-fact-write', Audit mit
-status='pending', generische Approve/Reject-Routen mit Switch). Kein
-Parallel-System gebaut, eine Approval-Mechanik für alle Capability-
-Typen. Bewährt sich erneut.
-
-**Inline-Components vs eigene Files.** 3.3.G1+G2+G3 haben kompakte
-Inline-Component-Definitions in den Page-Files statt Component-
-Extraktion. Pragmatisch für self-contained Pages mit < 600 Zeilen.
-ModalWrapper wurde erst in G3 extrahiert, als zwei Pages ihn
-brauchten — Lesson: erst extrahieren wenn Wiederverwendung tatsächlich
-gebraucht.
-
-**Facts als Persona-konstitutiv.** Position A im Strategie-Vote für
-3.3.E (Facts direkt nach Persona via personaWithFacts) hat sich im
-Smoke-Test bewährt. Twin reichert Facts mit Persona-Wissen an
-(„HARWAY Experience. Eigene Bude, zusammen mit Florian gegründet..."
-statt nur „Harway Experience"). Facts als Daten-Punkte allein wären
-trockener.
-
-**Defensive Fallbacks an mehreren Ebenen.** loadConversationHistory
-hat doppelten Try-Catch (Cursor-Pfad → Hard-Cap-Fallback → leere
-History). Pattern: bei kritischer User-Funktion (Send-Path) lieber
-mehrstufiger Fallback statt eine Exception-Quelle, die alles
-killt.
-
-**Toast als alert()-Fallback.** 3.3.G3 nutzt alert() weil kein Toast-
-System in der App. Pragmatisch für Pilot. Backlog-Kandidat: Toast-
-Framework bei nächstem UX-Polish-Block.
-
-**zsh + eckige Klammern.** `apps/web/app/chat/[handle]/page.tsx` ohne
-Quotes wird von zsh als Globbing-Pattern interpretiert. Lesson für
-git-add-Sequenzen: Pfade mit `[...]` immer in Single-Quotes setzen.
-Doku-Detail.
-
-## Tag 11 abgeschlossen (Vormittag + Mittag)
-
-**Vormittag:** #92 Production-Deploy von Phase 3.2 (A-G) auf VPS,
-Sequenz Repo-Pull → Override-File-Erweiterung → Image-Rebuild →
-Container-Recreate → Migrations 011/012 → Pilot-MCP-Server.
-
-**Mittag:** 3.2 Sub-Schritt H Tool-Picker-UI als strukturelle Lösung
-für Item #89 (Commit `b97ae80`, +821/-9). Plus Multi-Step-Followup-
-Patch bei forcedToolChoice plus UX-Polish (Server-Sections mit
-Approval-Badge). Plus TOOL_USE_DIRECTIVE-Polish (`2e7c1d0`) als
-Defense-in-Depth (REGEL 4 wirkt, REGEL 6 wirkungslos).
-
-**Production-Deploy 3.2.H + Direktive Tag 11 Abend:** Status unklar
-in der Doku, ggf. zusammen mit 3.3-Deploy nachzuholen.
-
-## Tag 10 abgeschlossen
-
-Phase 3.2 Sub-Schritte A-G — MCP-Foundation komplett:
-- 3.2.A Schema + Repo (`2bf1ee0`)
-- 3.2.B Client + Lifecycle (`daa03b7`)
-- 3.2.C Tool-Discovery + Skill-Sync (`cd5b295`)
-- 3.2.D Tool-Execution via AI-SDK (`366ca93`)
-- 3.2.E CLI (`43258cf`)
-- 3.2.F Approval-Workflow (`b58df94`) — Marker-Pattern
-- 3.2.G Inline-Approval-UI im Chat (`bce54fb`)
-
-## Phase 3 Status
-
-- 3.1 ✅ **Skill-System Engine + Pilot** (Tag 7)
-- 3.2 ✅ **MCP-Client als Skill-Provider plus UI-Tool-Picker**
-  (Tag 10 lokal, Tag 11 Vormittag Production 3.2.A-G, Tag 11 Mittag
-  lokal 3.2.H)
-- 3.3 ✅ **Memory: Conversation + Semantic** (Tag 12 lokal,
-  Production-Deploy ausstehend)
-- 3.4 offen — Memory: Episodic
-- 3.5 offen — Hyperbrowser als MCP-Skill (auf MCP-Foundation
-  aus 3.2 obendrauf)
-- 3.6 offen — Procedural Memory (ggf. Phase 4)
-
-**Phase 3 Definition of Done — 3 von 5 Häkchen gesetzt** (3.1, 3.2,
-3.3).
-
-## Was als nächstes ansteht
-
-1. **Production-Deploy Phase 3.3 auf VPS** — Tag-12-Stand auf
-   Production. Sequenz analog Tag 11 Vormittag: Repo-Pull, Image-
-   Rebuild Runtime + Web, Container-Recreate, Migrations 013-016
-   anwenden lassen. KEIN neuer Volume-Mount nötig. Plus ggf. nachholen:
-   Tag-11-Mittag-Stand (3.2.H + Direktive-Polish), falls Tag-11-Abend-
-   Deploy nicht durchgeführt wurde. Geschätzt 60-90 Min.
-2. **#90 Resume-Prompt-Tuning** (M, should) — vermutlich nur partiell
-   wirksam, 5-Min-Edit
-3. **#91 Reject-Reason-UI** (S, nice) — window.prompt durch Modal
-   ersetzen (ModalWrapper aus 3.3.G3 verfügbar)
-4. **Strategie-Session vor 3.4** — Memory: Episodic mit sqlite-vec.
-   Pre-Implementation: Embedding-Provider-Wahl (OpenAI vs Anthropic
-   vs lokal — kein Vendor-Lock), Embedding-Granularität (pro Message
-   vs pro Konversation vs pro Audit), Retrieval-Strategie
-5. **3.4 — Memory: Episodic** (L) — dritte Memory-Schicht
-
-Optional: **#79 Persona-Tabelle droppen** (XS, nice) — beim nächsten
-Migrations-Anlass mit anhängen.
-
-## Production-Stack — Tag-10-Stand auf VPS, Tag-11-Mittag + Tag-12 offen
-
-**Phase 3.2 A-G in Production aktiv** (deployed Tag 11 Vormittag).
-**Tag-11-Mittag (3.2.H + Direktive-Polish) Production-Status:** ggf.
-nicht deployed, vor 3.3-Deploy prüfen.
-**Tag-12 (Phase 3.3) noch nicht in Production.**
-
-- **`https://app.twin.harwayexperience.com`** — Web
-- **`https://runtime.twin.harwayexperience.com`** — Runtime
-- **`https://bridge.twin.harwayexperience.com`** — Bridge (vom 3.
-  Mai, unverändert)
-
-Alle drei mit `restart: unless-stopped`, HTTPS via Let's Encrypt,
-Traefik-Routing.
-
-**Persona-Stand auf Production (nach Tag-8-Sync):**
-- @markus: 6991 chars
-- @florian: 575 chars
-- @heiko: 344 chars (Stub)
-
-**MCP-Server in Production für @markus:**
-- `mcp_Psd-MfjYN7UJkIPM` — `everything` (no-approval, 13 Tools)
-- `mcp_TdslZrvQccflqHzS` — `everything-approval` (approval, 13 Tools)
-- 26 Tools insgesamt aktiv
-
-**VPS-Override-File** `/docker/twin-lab-web/docker-compose.override.yml`
-hat zwei bind-mounts (lebt nur auf VPS, nicht im Repo):
-- `/docker/twin-lab-web/repo/docs:/app/docs:ro` (#81 vom Tag 8)
-- `/docker/twin-lab-web/repo/mcp-servers:/app/mcp-servers:ro` (#92
-  vom Tag 11)
-
-## Lokal
-`/Users/mjb/Visual Studio/twin-lab` — drei Twins (@markus, @florian,
-@heiko), lokale Bridge auf 5100. Markus-Twin hat:
-- Pilot-Skill `harway-workshops` aktiv
-- 26 MCP-Tools (zwei everything-Server, einer ohne und einer mit
-  Approval)
-- Sechs approved Facts plus zwei pending Facts (aus Tag-12-Smoke-Tests:
-  Anna, Roding, Harway Experience, Florian Ristig, Sarah, planned
-  vacation 2026; pending: company_headquarters Hamburg,
-  contact_bayreuth Marc)
-
-**Konversations-System aktiv (seit Tag 9):** `conversations`-Tabelle
-mit Test-Konversationen, `audit.conversation_id` gefüllt seit
-Migration 009.
-
-**MCP-System aktiv (seit Tag 10):** `mcp_servers`-Tabelle, `skills`-
-Tabelle erweitert um `mcp_server_id`/`mcp_tool_name`.
-
-**Tool-Picker-UI aktiv (seit Tag 11 Mittag):** ToolPicker-Komponente
-im Chat, GET `/twins/:handle/tools`-Endpoint, Multi-Step-Followup im
-Twin-Service.
-
-**Memory-System aktiv (seit Tag 12):**
-- `conversation_summaries`-Tabelle, ConversationSummariesRepo, Auto-
-  Summary bei >50 zählenden Messages
-- `facts`-Tabelle, FactsRepo, Facts im System-Prompt als 2. Schicht
-- Twin-Extraction via POST /facts/extract plus CLI twin:facts-extract
-- Facts-UI unter /facts mit CRUD + Approval-Workflow
-
-## Drei User auf Production
-- Owner: @markus (markus.baier@harway.de)
-- Owner: @florian (florian.ristig@harway.de)
-- Owner: @heiko (heiko.gregor@harway.de)
-
-Alle drei mit anthropic/claude-opus-4-7, Production-Bridge.
-
-## Repo
-github.com/markusbaier/twin-lab — `origin/main` lokal aktuell auf
-`a3c868b` (Tag 12 Abend, 3.3.G3 + ModalWrapper-Extraction).
-
-**Tag-12-Commits (9 Stück):**
+Phase 3.3 Memory: Conversation + Semantic — komplett. Neun Code-
+Commits plus Doku-Commit:
 - `9b4d5c5` 3.3.A Schema + Repos
 - `9fc1ebb` 3.3.B Summary-Engine im Send-Path
 - `0eb941e` 3.3.C History-Loader liest Summaries
@@ -388,16 +133,137 @@ github.com/markusbaier/twin-lab — `origin/main` lokal aktuell auf
 - `bf7b6d5` 3.3.G1 Inbox-Render für semantic-fact-write
 - `fc3f6b3` 3.3.G2 Facts-Settings-View
 - `a3c868b` 3.3.G3 Manual-Extract-Button + Reset-Confirm-Dialog
+- `189acbc` Doku Tag 12
+
+## Phase 3 Status
+
+- 3.1 ✅ **Skill-System Engine + Pilot** (Tag 7)
+- 3.2 ✅ **MCP-Client als Skill-Provider plus UI-Tool-Picker**
+  (Tag 10/11)
+- 3.3 ✅ **Memory: Conversation + Semantic** (Tag 12 lokal,
+  Tag 13 in Production)
+- 3.4 ⏳ **Memory: Episodic — Strategie abgeschlossen,
+  Bau-Phase startet**
+- 3.5 offen — Hyperbrowser als MCP-Skill
+- 3.6 offen — Procedural Memory (ggf. Phase 4)
+
+**Phase 3 Definition of Done — 3 von 5 Häkchen gesetzt**
+(3.1, 3.2, 3.3). Phase 3.4 ist nicht nur eine weitere Memory-
+Schicht, sondern das technische Fundament für fünf der acht
+menschlichen Patterns aus TWIN-VISION (Zeit-Erleben, Schlaf/
+Träume, Aufmerksamkeit/Fokus, Lebens-Narrativ, Selbst-Reflexion).
+
+## Was als nächstes ansteht
+
+1. **Bau-Phase 3.4 starten** — Sub-Schritt 3.4.A (Schema + Repos)
+   nach Doku-Commit. Acht Sub-Schritte insgesamt geplant
+   (siehe `docs/3.4-STRATEGY.md`)
+2. **Phase 3.4 in Production deployen** — nach Abschluss aller
+   Sub-Schritte und Smoke-Tests
+3. **Strategie-Session vor 3.5 (Hyperbrowser)** — kleinere Session,
+   weil 3.5 auf etablierter MCP-Foundation aufbaut
+4. **Pattern-Phasen nach 3.4** — die fünf abhängigen Patterns
+   können relativ schnell folgen, weil Datenschicht aus 3.4
+   bereits vorbereitet ist. Reihenfolge offen, abhängig von
+   Roadmap-Priorisierung
+
+Optional weiterhin im Backlog:
+- **#90 Resume-Prompt-Tuning** (M, should)
+- **#91 Reject-Reason-UI** (S, nice) — ModalWrapper aus 3.3.G3
+  verfügbar
+- **Toast-Framework statt alert()** (M, nice)
+- **#79 Persona-Tabelle droppen** (XS, nice)
+
+## Production-Stack — Tag-12-Stand auf VPS
+
+**Phase 3.3 in Production aktiv** (deployed Tag 13 Vormittag).
+Production-VPS auf Commit `189acbc`.
+
+- **`https://app.twin.harwayexperience.com`** — Web
+- **`https://runtime.twin.harwayexperience.com`** — Runtime
+- **`https://bridge.twin.harwayexperience.com`** — Bridge (vom
+  3. Mai, unverändert)
+
+Alle drei mit `restart: unless-stopped`, HTTPS via Let's Encrypt,
+Traefik-Routing.
+
+**Persona-Stand auf Production:**
+- @markus: 6991 chars
+- @florian: 575 chars
+- @heiko: 344 chars (Stub)
+
+**Production-Twin @markus hat:**
+- Drei initial approved Facts (city=Roding, company=Harway
+  Experience, wife_name=Anna)
+- Sieben Pending-Facts aus Tag-13-Smoke-Test (zu approven
+  oder pflegen)
+- 26 MCP-Tools aktiv (zwei everything-Server)
+- Pilot-Skill `harway-workshops`
+
+**VPS-Override-File** `/docker/twin-lab-web/docker-compose.override.yml`
+hat zwei bind-mounts (lebt nur auf VPS, nicht im Repo):
+- `/docker/twin-lab-web/repo/docs:/app/docs:ro` (#81 vom Tag 8)
+- `/docker/twin-lab-web/repo/mcp-servers:/app/mcp-servers:ro` (#92
+  vom Tag 11)
+
+## Lokal
+`/Users/mjb/Visual Studio/twin-lab` — drei Twins (@markus,
+@florian, @heiko), lokale Bridge auf 5100. Markus-Twin hat:
+- Pilot-Skill `harway-workshops` aktiv
+- 26 MCP-Tools
+- Acht Facts (4 user + 4 approved twin-extracted)
+- Plus zwei Pending-Facts aus Tag-12 (company_headquarters
+  Hamburg, contact_bayreuth Marc — können nächste Session
+  approved werden)
+
+**Konversations-System aktiv (seit Tag 9):** `conversations`-
+Tabelle, `audit.conversation_id` gefüllt seit Migration 009.
+
+**MCP-System aktiv (seit Tag 10):** `mcp_servers`-Tabelle,
+`skills`-Tabelle erweitert um `mcp_server_id`/`mcp_tool_name`.
+
+**Tool-Picker-UI aktiv (seit Tag 11 Mittag):** ToolPicker-
+Komponente im Chat, GET `/twins/:handle/tools`-Endpoint, Multi-
+Step-Followup im Twin-Service.
+
+**Memory-System aktiv (seit Tag 12):**
+- `conversation_summaries`-Tabelle, ConversationSummariesRepo,
+  Auto-Summary bei >50 zählenden Messages
+- `facts`-Tabelle, FactsRepo, Facts im System-Prompt als 2. Schicht
+- Twin-Extraction via POST /facts/extract plus CLI twin:facts-extract
+- Facts-UI unter /facts mit CRUD + Approval-Workflow
+- Manual-Extract-Button + Reset-Confirm-Modal im Chat (3.3.G3)
+
+## Drei User auf Production
+- Owner: @markus (markus.baier@harway.de)
+- Owner: @florian (florian.ristig@harway.de)
+- Owner: @heiko (heiko.gregor@harway.de)
+
+Alle drei mit anthropic/claude-opus-4-7, Production-Bridge.
+
+## Repo
+github.com/markusbaier/twin-lab — `origin/main` lokal auf
+`6bc9a05` (Tag 13 Mittag — Vision-Doc-Commit). Production-VPS
+auf `189acbc` (Tag 12 Doku-Commit). Vision-Doc und 3.4-Strategy
+sind Backend-irrelevant, brauchen daher keine Production-Image-
+Rebuild — aber für Doku-Konsistenz wäre ein Repo-Pull auf VPS
+sinnvoll mit dem nächsten Code-Deploy.
+
+**Tag-13-Commits (bisher):**
+- `6bc9a05` docs: TWIN-VISION.md — Vision-Session vom 11.-12. Mai
+- (kommt: docs: 3.4-STRATEGY.md plus STAND.md + ROADMAP.md
+  Update)
+
+**Tag-12-Commits:**
+- `9b4d5c5` 3.3.A bis `a3c868b` 3.3.G3 (9 Code-Commits)
+- `189acbc` Doku Tag 12
 
 **Tag-11-Commits:**
 - `f3532e8` Doku Tag 11 Vormittag (#92 ✅)
-- `b97ae80` 3.2.H Tool-Picker-UI plus Multi-Step-Patch plus UX-Polish
+- `b97ae80` 3.2.H Tool-Picker-UI plus Multi-Step-Patch plus
+  UX-Polish
 - `2e7c1d0` TOOL_USE_DIRECTIVE härter (Polish für #89)
 - `5aef14b` Doku Tag 11 Mittag
 
-Production-VPS auf `20aaa36` (Tag-10-Stand, deployed Tag 11 Vormittag).
-Tag-11-Mittag (3.2.H + Direktive) und Tag-12 (Phase 3.3) Deploy-Status
-vor nächstem Production-Deploy klären.
-
-VPS-Override-File hat zwei bind-mounts (#81 docs/ + #92 mcp-servers/),
-lebt nur auf VPS, nicht im Repo.
+VPS-Override-File hat zwei bind-mounts (#81 docs/ + #92
+mcp-servers/), lebt nur auf VPS, nicht im Repo.
