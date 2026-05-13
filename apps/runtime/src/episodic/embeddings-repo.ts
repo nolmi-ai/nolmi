@@ -150,6 +150,7 @@ export class EmbeddingsRepo {
   private selectByTargetStmt: Database.Statement;
   private selectByIdStmt: Database.Statement;
   private selectRowidStmt: Database.Statement;
+  private selectFtsStmt: Database.Statement;
   private incrementAccessStmt: Database.Statement;
 
   constructor(private db: Database.Database) {
@@ -178,6 +179,11 @@ export class EmbeddingsRepo {
     this.selectByIdStmt = db.prepare(`SELECT * FROM embeddings WHERE id = ?`);
     this.selectRowidStmt = db.prepare(
       `SELECT rowid FROM embeddings WHERE id = ?`,
+    );
+    this.selectFtsStmt = db.prepare(
+      `SELECT content FROM memory_fts
+         WHERE twin_id = ? AND target_type = ? AND target_id = ?
+         LIMIT 1`,
     );
     this.incrementAccessStmt = db.prepare(
       `UPDATE embeddings
@@ -332,6 +338,27 @@ export class EmbeddingsRepo {
    */
   incrementAccess(id: string): void {
     this.incrementAccessStmt.run(new Date().toISOString(), id);
+  }
+
+  /**
+   * 3.4.E: Holt den originalen Klartext aus `memory_fts` für ein
+   * Embedding-Target. Wird vom MemoryRetrievalService nach Vector-Search
+   * genutzt, um den eigentlichen Content (Summary, Konversations-Aggregat,
+   * Diary-Text) für den System-Prompt zu rendern.
+   *
+   * Returnt null, wenn kein FTS-Eintrag existiert — z.B. bei Bestands-
+   * Embeddings aus 3.4.A-Tests oder wenn 3.4.D-Insert ohne `ftsContent`
+   * gerufen wurde. Caller muss damit umgehen.
+   */
+  getFtsContent(
+    twinId: string,
+    targetType: EmbeddingTargetType,
+    targetId: string,
+  ): string | null {
+    const row = this.selectFtsStmt.get(twinId, targetType, targetId) as
+      | { content: string }
+      | undefined;
+    return row?.content ?? null;
   }
 
   /**

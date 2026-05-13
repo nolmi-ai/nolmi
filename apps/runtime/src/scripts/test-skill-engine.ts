@@ -18,6 +18,7 @@ import { loadMasterKey } from "../crypto-utils.js";
 import { EmbeddingsRepo } from "../episodic/embeddings-repo.js";
 import { TwinDiaryRepo } from "../episodic/twin-diary-repo.js";
 import { MemoryEmbeddingService } from "../episodic/memory-embedding-service.js";
+import { MemoryRetrievalService } from "../episodic/memory-retrieval-service.js";
 import { TwinDiaryService } from "../episodic/twin-diary-service.js";
 
 // ─── TEST: SKILL-ENGINE (Phase 3.1.B) ───────────────────────────────────────
@@ -146,6 +147,19 @@ async function main() {
       throw new Error("Skill-Test sollte keinen Embedding-Provider triggern");
     },
   });
+  // runOwnerDirect ruft retrieve() bei jedem Send. Mit leerer
+  // embeddings-Tabelle (Skill-Test setzt keine Memories) ist die Suche
+  // ohnehin leer; ein Stub-Provider mit Null-Vektor reicht und vermeidet
+  // Error-Logs durch einen werfenden getProvider-Callback.
+  const memoryRetrievalService = new MemoryRetrievalService({
+    embeddingsRepo,
+    getProvider: () => ({
+      modelName: "skill-test-stub",
+      dimensions: 1024,
+      embed: async () => [new Float32Array(1024)],
+      isReady: async () => true,
+    }),
+  });
   const twinDiaryService = new TwinDiaryService(
     twinDiaryRepo,
     memoryEmbeddingService,
@@ -175,6 +189,7 @@ async function main() {
     conversationSummaries: conversationSummariesRepo,
     facts: factsRepo,
     memoryEmbeddingService,
+    memoryRetrievalService,
     twinDiaryService,
   });
 

@@ -42,6 +42,8 @@ import {
   aggregateConversationForEmbedding,
   type MemoryEmbeddingService,
 } from "./episodic/memory-embedding-service.js";
+import type { MemoryRetrievalService } from "./episodic/memory-retrieval-service.js";
+import { buildEpisodicBlock } from "./episodic/prompt-builder.js";
 import type { TwinDiaryService } from "./episodic/twin-diary-service.js";
 import { buildFactsBlock } from "./facts/prompt-builder.js";
 import {
@@ -141,6 +143,12 @@ export interface TwinServiceDeps {
    */
   memoryEmbeddingService: MemoryEmbeddingService;
   /**
+   * 3.4.E: Vector-Search im Send-Path. Wird vor runModel aufgerufen, liefert
+   * Top-K ähnliche Memories aus vergangenen Konversationen / Diary-Einträgen.
+   * Failures sind eskaliert auf "leere Memories-Liste" — Send läuft normal.
+   */
+  memoryRetrievalService: MemoryRetrievalService;
+  /**
    * 3.4.D: Diary-Service-Wrapper (Insert + Auto-Embedding). Wird in 3.4.F
    * vom CLI twin:diary-add genutzt; der Pattern-Phase Self-Reflection für
    * Auto-Generierung steht er ebenfalls bereit.
@@ -218,6 +226,12 @@ export class TwinService {
   public readonly memoryEmbeddingService: MemoryEmbeddingService;
 
   /**
+   * 3.4.E: Memory-Retrieval-Service. Public für CLI-Smoke-Pfade; im Send-
+   * Path wird er intern vor runModel konsumiert.
+   */
+  public readonly memoryRetrievalService: MemoryRetrievalService;
+
+  /**
    * 3.4.D: Diary-Service. Public für CLI-Pfade (3.4.F) und künftige
    * Pattern-Phase Self-Reflection. Insert + Auto-Embedding atomar.
    */
@@ -270,6 +284,7 @@ export class TwinService {
       },
     });
     this.memoryEmbeddingService = deps.memoryEmbeddingService;
+    this.memoryRetrievalService = deps.memoryRetrievalService;
     this.twinDiaryService = deps.twinDiaryService;
   }
 
@@ -543,6 +558,19 @@ export class TwinService {
     }
     const factsBlock = buildFactsBlock(approvedFacts);
 
+    // 3.4.E: Episodic-Retrieval — User-Message gegen vergangene Memories
+    // suchen. Failure-Pfad gibt `[]` zurück, also kein Throw an dieser Stelle.
+    // Filter auf laufende Konv (Konversation + Summary-Segments), damit
+    // Twin nicht seine eigene aktuelle History als "Erinnerung" gespiegelt
+    // bekommt.
+    const episodicMemories = await this.memoryRetrievalService.retrieve({
+      twinId: this.deps.twinId,
+      userMessage: lastUser,
+      currentConversationId: conversationId,
+      excludeSummarySegmentIds: summaries.map((s) => s.id),
+    });
+    const episodicBlock = buildEpisodicBlock(episodicMemories);
+
     try {
       const reply = await this.runModel(
         this.deps.persona,
@@ -553,6 +581,7 @@ export class TwinService {
           forcedToolChoice: options.forcedToolChoice,
           summaryBlock: buildSummaryBlock(summaries),
           factsBlock,
+          episodicBlock,
         },
       );
       const audit = await this.deps.audit.start({
@@ -1392,6 +1421,14 @@ export class TwinService {
        * der reine Persona-Prompt.
        */
       factsBlock?: string | null;
+      /**
+       * 3.4.E: Episodic-Memory-Block. Top-K Hits aus dem Vector-Search über
+       * vergangene Summaries/Konversationen/Diary-Einträge. Wird hinter
+       * dem summaryBlock gerendert — semantisch "passend, aber nicht in der
+       * aktuellen Konv". Bei `null` oder leeren Memories nimmt der
+       * filter(Boolean)-Schritt es raus, kein leerer Header im Prompt.
+       */
+      episodicBlock?: string | null;
     } = {},
   ): Promise<{ content: string; metadata: Record<string, unknown> }> {
     // Skills landen zwischen Persona und LANGUAGE_DIRECTIVE: sie ergänzen die
@@ -1453,7 +1490,7 @@ REGEL 5: Behaupte nicht, dass ein Tool nicht funktioniert, ohne es tatsächlich 
 REGEL 6: Wenn der User dich explizit bittet, ein Tool zu nutzen ("rufe das X-Tool auf", "nutze Y"), MUSST du es rufen. Verweigere nicht und ersetze nicht durch eigene Antworten.`
       : null;
 
-    // Sechs Schichten, Reihenfolge bewusst:
+    // Sieben Schichten, Reihenfolge bewusst:
     //   1. extraSystem (situativer Bridge-Kontext, optional)
     //   2. persona.systemPrompt + factsBlock (combined) — Facts sind Persona-
     //      konstitutiv und profitieren von der Attention-Position am
@@ -1461,8 +1498,10 @@ REGEL 6: Wenn der User dich explizit bittet, ein Tool zu nutzen ("rufe das X-Too
     //   3. skillsBlock (Skill-Erweiterungen, ergänzen Persona — nur Manual-Skills)
     //   4. TOOL_USE_DIRECTIVE (nur wenn Tools übergeben werden)
     //   5. LANGUAGE_DIRECTIVE (Anti-"weiss"-statt-"weiß", gilt für alle Twins)
-    //   6. summaryBlock (3.3.C — verdichtete Vorgeschichte langer Konversationen,
+    //   6. summaryBlock (3.3.C — verdichtete Vorgeschichte der LAUFENDEN Konv,
     //      nur wenn Summaries existieren; sonst null und via filter rausgenommen)
+    //   7. episodicBlock (3.4.E — Top-K Erinnerungen aus VERGANGENEN Konv +
+    //      Diary, semantisch nah an der aktuellen User-Message)
     const personaWithFacts = options.factsBlock
       ? `${persona.systemPrompt}\n\n${options.factsBlock}`
       : persona.systemPrompt;
@@ -1473,6 +1512,7 @@ REGEL 6: Wenn der User dich explizit bittet, ein Tool zu nutzen ("rufe das X-Too
       TOOL_USE_DIRECTIVE,
       LANGUAGE_DIRECTIVE,
       options.summaryBlock ?? null,
+      options.episodicBlock ?? null,
     ]
       .filter(Boolean)
       .join("\n\n");

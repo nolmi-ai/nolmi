@@ -33,6 +33,7 @@ import {
 import { EmbeddingsRepo } from "./episodic/embeddings-repo.js";
 import { TwinDiaryRepo } from "./episodic/twin-diary-repo.js";
 import { MemoryEmbeddingService } from "./episodic/memory-embedding-service.js";
+import { MemoryRetrievalService } from "./episodic/memory-retrieval-service.js";
 import { TwinDiaryService } from "./episodic/twin-diary-service.js";
 import { getEmbeddingProvider } from "./episodic/providers/index.js";
 
@@ -384,6 +385,12 @@ export class TwinServiceRegistry {
       twinDiaryRepo,
       getProvider: () => getEmbeddingProvider(),
     });
+    // 3.4.E: Liest-Seite — Vector-Search im Send-Path. Eigene Service-
+    // Instanz pro Twin (zustandslos, derselbe Provider-Singleton).
+    const memoryRetrievalService = new MemoryRetrievalService({
+      embeddingsRepo,
+      getProvider: () => getEmbeddingProvider(),
+    });
     const twinDiaryService = new TwinDiaryService(
       twinDiaryRepo,
       memoryEmbeddingService,
@@ -408,6 +415,7 @@ export class TwinServiceRegistry {
       conversationSummaries,
       facts,
       memoryEmbeddingService,
+      memoryRetrievalService,
       twinDiaryService,
     });
 

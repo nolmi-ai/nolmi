@@ -110,6 +110,47 @@ export const CONVERSATION_LIVE_WINDOW = parseIntEnv(
   "CONVERSATION_LIVE_WINDOW",
 );
 
+// ─── EPISODIC-MEMORY TUNABLES (Phase 3.4) ────────────────────────────────────
+//
+// Drei Schwellwerte für den Vector-Search-Layer im Send-Path. Defaults aus
+// 3.4-STRATEGY.md "Entscheidung 3 — Retrieval-Strategie": Top-3 Hits über
+// Similarity 0.7. Min-Query-Length filtert Trivial-Sends ("hi") bevor wir
+// den Provider bemühen.
+
+/**
+ * Anzahl der Top-Hits, die als "Erinnerungen"-Schicht in den System-Prompt
+ * fließen. Default 3 — schmal genug, dass die Aufmerksamkeit beim aktuellen
+ * Gespräch bleibt.
+ */
+export const EPISODIC_TOP_K = parseIntEnv(
+  process.env.EPISODIC_TOP_K,
+  3,
+  "EPISODIC_TOP_K",
+);
+
+/**
+ * Cosine-Similarity-Schwelle (0..1). Treffer darunter werden gefiltert. Bei
+ * L2-Distanz auf normalisierten Vektoren: similarity = 1 - distance/2.
+ * 0.7 ist ein konservativer Default — bei zu geringer Trefferquote in der
+ * Realität herunterschrauben.
+ */
+export const EPISODIC_SIMILARITY_THRESHOLD = parseFloatEnv(
+  process.env.EPISODIC_SIMILARITY_THRESHOLD,
+  0.7,
+  "EPISODIC_SIMILARITY_THRESHOLD",
+);
+
+/**
+ * Minimale User-Message-Länge (Zeichen, getrimmt), damit Retrieval ausgelöst
+ * wird. "hi", "ok", "ja" landen unter dem Schwellwert und sparen einen
+ * Embedding-Call. Default 10.
+ */
+export const EPISODIC_MIN_QUERY_LENGTH = parseIntEnv(
+  process.env.EPISODIC_MIN_QUERY_LENGTH,
+  10,
+  "EPISODIC_MIN_QUERY_LENGTH",
+);
+
 /**
  * Parser für nicht-negative Integer-ENVs. Gleiche Fehlerstrenge wie
  * parsePort: ungültige Werte wirfen, keine stille Default-Verwendung — sonst
@@ -122,6 +163,26 @@ function parseIntEnv(raw: string | undefined, fallback: number, name: string): n
   if (!Number.isInteger(parsed) || parsed < 1) {
     throw new Error(
       `${name} muss eine positive Integer-Zahl sein (got: "${raw}")`,
+    );
+  }
+  return parsed;
+}
+
+/**
+ * Analog parseIntEnv für Float-ENVs (z.B. Similarity-Threshold). Wirft bei
+ * NaN oder negativen Werten.
+ */
+function parseFloatEnv(
+  raw: string | undefined,
+  fallback: number,
+  name: string,
+): number {
+  const trimmed = raw?.trim();
+  if (!trimmed) return fallback;
+  const parsed = Number(trimmed);
+  if (!Number.isFinite(parsed) || parsed < 0) {
+    throw new Error(
+      `${name} muss eine nicht-negative Zahl sein (got: "${raw}")`,
     );
   }
   return parsed;
