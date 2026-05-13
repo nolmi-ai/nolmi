@@ -1561,6 +1561,63 @@ Vorbedingung: 3.3 komplett ✅, plus Pilot-Phase mit ~50+ Fakten pro Twin gelauf
 
 ---
 
+## Tag-14-Items (Recherche-getrieben, MemPalace-Inspirationen)
+
+### #95 MemPalace-Patterns als Inspirationsquelle dokumentiert (S, nice)
+
+MemPalace (github.com/mempalace/mempalace, 48.2k Stars, MIT) — open-source AI-Memory-System, Python-basiert mit ChromaDB-Backend. Vier Patterns, die für twin-lab als Inspirationsquelle relevant sind:
+
+1. **Wings/Rooms/Drawers-Hierarchie** (siehe #96)
+2. **Temporal-Knowledge-Graph mit Validity-Windows** (siehe #97)
+3. **Verbatim-Storage statt Summary-Compression** — sie speichern Konversationen 1:1, suchen über Original-Text. Wir summarizen bei >50 Messages. Trade-off: ihre Detail-Tiefe vs. unsere Speicher-Effizienz. Bei Pattern-Phase „Reverse-Memory-Query" (TWIN-VISION Punkt 8) evaluieren, ob Summary-Compression zu viel Detail verliert.
+4. **Auto-Save-Hooks für Claude Code** — periodische Hooks plus Pre-Compression-Hook. Verwandt zu unserem Pattern „Auto-Diary-Generation" (Self-Reflection-Pattern), aber MemPalace ist Claude-Code-spezifisch, wir sind Twin-Plattform.
+
+Architektur-Entscheidung vom 11. Mai (Eigen-Bau statt Cognee/Dreams) bleibt — MemPalace adressiert nur die Memory-Schicht, twin-lab ist Twin-Plattform mit A2A, Persona, Mandates, Trust. Plus: MemPalace ist Python, wir sind TypeScript — Integration via MCP-Server möglich, aber zwei Runtimes parallel ist Compose-Komplexität nicht wert für isoliertes Memory-Layer.
+
+Benchmarks (zur Orientierung, keine direkte Vergleichbarkeit): LongMemEval R@5 96.6% raw / 98.4% hybrid v4, LoCoMo R@10 88.9% hybrid, ConvoMem 92.9% avg recall, MemBench 80.3% R@5.
+
+Aus Tag-14-Recherche.
+
+### #96 Hierarchical Memory-Scoping als Mitigation für Name-Overlap (M, should)
+
+Direktes Mitigation für Name-Overlap-Problem aus 3.4-Pre-Check (Query „Wo geht Markus in Urlaub?" → Toskana-Passage auf Rank 5/5, weil 4 andere Passages „Markus" als Token enthielten). MemPalace löst das via Wings/Rooms/Drawers-Hierarchie: Memory ist nicht flach, sondern strukturiert. „Wings" = große Cluster (Personen, Projekte), „Rooms" = Topics innerhalb eines Wings, „Drawers" = einzelne Memory-Einträge. Suchen kann auf Wing-Level oder Room-Level gescopet werden — Vector-Search läuft nur innerhalb des relevanten Wings, nicht über alles.
+
+Übertragung auf twin-lab: Datenschicht aus 3.4 hat bereits Felder, die in Richtung gehen — `topic_tags` (JSON-Array, NULL initially) und `narrative_thread_id` (TEXT, NULL initially) auf der `embeddings`-Tabelle. Diese könnten als „Light-Hierarchy" interpretiert werden:
+
+- Auto-Tagging beim Embedden via LLM-Call („Welche Topics/Subjekte beschreibt dieser Text?")
+- `narrative_thread_id` als Verkettung verwandter Memories
+- Search-API erweitert: `EmbeddingsRepo.search(twinId, query, { topicTagFilter?, narrativeThreadId? })`
+
+Alternative: Hybrid Search via FTS5 (Datenschicht in 3.4 vorbereitet via `memory_fts`-Tabelle) — kombiniert Vector + BM25-Keyword-Search. Eine der beiden Mitigationen reicht vermutlich, je nach welche zuerst nötig wird im Real-Data-Test.
+
+Andockpunkt: Pattern-Phase „Aufmerksamkeit/Fokus" (TWIN-VISION) oder dedicated Mini-Phase falls Name-Overlap in Production-3.4-Tests spürbar wird.
+
+Aus Tag-14-Recherche + Pre-Check-Befund.
+
+### #97 Facts mit Validity-Windows + History-Tracking (L, should)
+
+Erweiterung des Facts-Systems (`facts`-Tabelle aus 3.3) um temporale Dimension. Heute überschreibt ein neuer Fact den alten — keine History, kein Audit, kein Drift-Tracking möglich.
+
+MemPalace hat das gelöst via Temporal-Knowledge-Graph mit Validity-Windows: Entity-Relationship-Graph mit Zeit-Stempeln pro Fact, alte Einträge werden invalidated (nicht überschrieben), Timeline-Queries möglich (z.B. „Wie war Markus' Beziehungsstatus 2015?").
+
+Übertragung auf twin-lab:
+
+- `facts`-Tabelle bekommt `valid_from`, `valid_until`, `invalidated_by_fact_id` Spalten
+- Plus neue `facts_history`-Tabelle für vollständigen Audit-Trail bei Updates
+- Repo-Methoden: `factsRepo.invalidate(factId, by)`, `factsRepo.getAsOf(date)`, `factsRepo.getTimeline(key)`
+- UI: Facts-Page bekommt Toggle „aktuell" vs „historisch", Timeline-Ansicht pro Fact-Key
+
+Direktes Substrate für Vision-Patterns:
+- **Werte-Drift** (TWIN-VISION Pattern 5): Twin kann beobachten wie sich Markus' Werte über Zeit verschieben
+- **Zeit-Erleben** (Pattern 2): „Was war 2025 wichtig, was ist heute wichtig?"
+- **Lebens-Narrativ** (Pattern 7): Kohärente Story-Linie aus zeitlich verorteten Facts
+
+Substantiell — eigene Phase, vermutlich nach 3.4 oder mit Pattern-Phase „Zeit-Erleben" gebündelt. MemPalace's Implementation als Referenz nutzen, keine direkte Code-Übernahme (Python → TypeScript).
+
+Aus Tag-14-Recherche.
+
+---
+
 ### Lesson (Tag 12 / 3.3.B+C): nanoid-IDs sind NICHT lexikografisch sortierbar
 
 Bei 3.3.B (Summary-Engine) wurde der Cursor zwischen Summary-Runs zunächst via `segment_end_audit_id` (nanoid) gesetzt, in der Annahme dass nanoid-Strings lexikografisch sortierbar wären. Falsch — nanoid generiert random URL-safe-Strings, die NICHT zeitlich monoton wachsen. Cursor-Logik via String-Vergleich liefert falsche „neueste" ID.
