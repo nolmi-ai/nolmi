@@ -110,12 +110,12 @@ export const CONVERSATION_LIVE_WINDOW = parseIntEnv(
   "CONVERSATION_LIVE_WINDOW",
 );
 
-// ─── EPISODIC-MEMORY TUNABLES (Phase 3.4) ────────────────────────────────────
+// ─── EPISODIC-MEMORY TUNABLES (Phase 3.4 + 3.4.I) ───────────────────────────
 //
-// Drei Schwellwerte für den Vector-Search-Layer im Send-Path. Defaults aus
-// 3.4-STRATEGY.md "Entscheidung 3 — Retrieval-Strategie": Top-3 Hits über
-// Similarity 0.7. Min-Query-Length filtert Trivial-Sends ("hi") bevor wir
-// den Provider bemühen.
+// 3.4.I-Refactor: das bisherige einstufige `EPISODIC_SIMILARITY_THRESHOLD`
+// ist weggefallen. Stattdessen Hybrid-Search (Vector + FTS5) mit RRF-Merge
+// und zweistufiger Threshold-Sicherung. Siehe `docs/3.4.I-STRATEGY.md`
+// "Pool, Merge, Threshold".
 
 /**
  * Anzahl der Top-Hits, die als "Erinnerungen"-Schicht in den System-Prompt
@@ -129,18 +129,6 @@ export const EPISODIC_TOP_K = parseIntEnv(
 );
 
 /**
- * Cosine-Similarity-Schwelle (0..1). Treffer darunter werden gefiltert. Bei
- * L2-Distanz auf normalisierten Vektoren: similarity = 1 - distance/2.
- * 0.7 ist ein konservativer Default — bei zu geringer Trefferquote in der
- * Realität herunterschrauben.
- */
-export const EPISODIC_SIMILARITY_THRESHOLD = parseFloatEnv(
-  process.env.EPISODIC_SIMILARITY_THRESHOLD,
-  0.7,
-  "EPISODIC_SIMILARITY_THRESHOLD",
-);
-
-/**
  * Minimale User-Message-Länge (Zeichen, getrimmt), damit Retrieval ausgelöst
  * wird. "hi", "ok", "ja" landen unter dem Schwellwert und sparen einen
  * Embedding-Call. Default 10.
@@ -149,6 +137,48 @@ export const EPISODIC_MIN_QUERY_LENGTH = parseIntEnv(
   process.env.EPISODIC_MIN_QUERY_LENGTH,
   10,
   "EPISODIC_MIN_QUERY_LENGTH",
+);
+
+/**
+ * RRF-Konstante: `1 / (k + rank)` ist der Score-Beitrag pro Source. k=60
+ * ist Industrie-Standard (Elastic, Vespa, Pinecone), kaum tunen.
+ */
+export const EPISODIC_HYBRID_RRF_K = parseIntEnv(
+  process.env.EPISODIC_HYBRID_RRF_K,
+  60,
+  "EPISODIC_HYBRID_RRF_K",
+);
+
+/**
+ * Top-K pro Source vor dem RRF-Merge. Bei kleinem Datenstand (heute ~24 Conv)
+ * deckt das ein Drittel ab; bei Production-Scale skaliert das gleichmäßig.
+ */
+export const EPISODIC_HYBRID_POOL_SIZE = parseIntEnv(
+  process.env.EPISODIC_HYBRID_POOL_SIZE,
+  10,
+  "EPISODIC_HYBRID_POOL_SIZE",
+);
+
+/**
+ * Pre-RRF Vector-Filter — Vector-Hits mit cosine-sim < 0.5 kommen gar nicht
+ * erst in den RRF-Pool. Untergrenze, verhindert dass völlig irrelevante
+ * Vector-Hits via FTS5-Boost reingehoben werden.
+ */
+export const EPISODIC_HYBRID_MIN_VECTOR_SIM = parseFloatEnv(
+  process.env.EPISODIC_HYBRID_MIN_VECTOR_SIM,
+  0.5,
+  "EPISODIC_HYBRID_MIN_VECTOR_SIM",
+);
+
+/**
+ * Post-RRF Score-Cutoff. Items mit Final-RRF-Score < dieser Schwelle werden
+ * nicht in den System-Prompt geladen. Default 0.015 pragmatisch ≈ Niveau
+ * eines Single-Source-Rang-5-Items. Phase-5-Validierung wird das tunen.
+ */
+export const EPISODIC_RRF_THRESHOLD = parseFloatEnv(
+  process.env.EPISODIC_RRF_THRESHOLD,
+  0.015,
+  "EPISODIC_RRF_THRESHOLD",
 );
 
 /**

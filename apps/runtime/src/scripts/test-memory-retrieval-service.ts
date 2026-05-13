@@ -191,7 +191,7 @@ async function runHappyPathTest(
   const results = await service.retrieve({
     twinId,
     userMessage: "Frage zum WORKSHOP_QUERY — was war nochmal mit dem Termin?",
-    similarityThreshold: 0.5,
+    minVectorSimilarity: 0.5,
     topK: 3,
   });
 
@@ -210,14 +210,14 @@ async function runHappyPathTest(
   }
   results.forEach((r, i) =>
     log(
-      `   ${i + 1}. target=${r.targetId} sim=${r.similarity.toFixed(4)} dist=${r.distance.toFixed(4)}`,
+      `   ${i + 1}. target=${r.targetId} rrf=${r.rrfScore.toFixed(4)} vec-sim=${(r.vectorSimilarity ?? 0).toFixed(4)}`,
     ),
   );
   if (results[0]?.targetId !== "close") {
     issues += 1;
     log(`  ⚠ Top-1 sollte "close" sein, war "${results[0]?.targetId}"`);
   } else {
-    log(`  Top-1 = close, sim=${results[0].similarity.toFixed(4)} ✓`);
+    log(`  Top-1 = close, rrf=${results[0].rrfScore.toFixed(4)} vec-sim=${(results[0].vectorSimilarity ?? 0).toFixed(4)} ✓`);
   }
   if (!results[0]?.content.includes("Workshop")) {
     issues += 1;
@@ -234,7 +234,7 @@ async function runThresholdTest(
   provider: DeterministicMockProvider,
   twinId: string,
 ): Promise<number> {
-  banner("TEST 2 — similarityThreshold filtert unähnliche raus");
+  banner("TEST 2 — minVectorSimilarity Pre-RRF-Filter cuttet weg");
   let issues = 0;
   // Anker für Query — kein Item passt dazu (alle bestehenden Items sind orthogonal).
   const farAnchor = makeNormalizedVector(EMBEDDING_DIM);
@@ -243,14 +243,14 @@ async function runThresholdTest(
   const results = await service.retrieve({
     twinId,
     userMessage: "Tiefer DEEP_QUERY_NICHTS_PASST kontextlos",
-    similarityThreshold: 0.99,
+    minVectorSimilarity: 0.99,
     topK: 3,
   });
   if (results.length !== 0) {
     issues += 1;
     log(`  ⚠ Erwartet 0 Hits über sehr hohem Threshold, got ${results.length}`);
     results.forEach((r) =>
-      log(`     target=${r.targetId} sim=${r.similarity.toFixed(4)}`),
+      log(`     target=${r.targetId} rrf=${r.rrfScore.toFixed(4)} vec-sim=${(r.vectorSimilarity ?? 0).toFixed(4)}`),
     );
   } else {
     log("  Threshold 0.99 → 0 Hits ✓");
@@ -287,7 +287,7 @@ async function runMultiTenantTest(
   const results = await service.retrieve({
     twinId: twinA,
     userMessage: "Suche mit CROSS_TENANT_QUERY",
-    similarityThreshold: 0.0,
+    rrfThreshold: 0, minVectorSimilarity: 0,
     topK: 5,
   });
 
@@ -316,7 +316,7 @@ async function runFailureTest(
     results = await service.retrieve({
       twinId,
       userMessage: "Egal welche Query — Provider wirft jetzt",
-      similarityThreshold: 0.0,
+      rrfThreshold: 0, minVectorSimilarity: 0,
     });
   } catch {
     threw = true;
@@ -369,7 +369,7 @@ async function runAccessTrackingTest(
   await service.retrieve({
     twinId,
     userMessage: "Frage mit ACCESS_TRACKING_QUERY drin",
-    similarityThreshold: 0.0,
+    rrfThreshold: 0, minVectorSimilarity: 0,
     topK: 1,
   });
   const after = repo.getById(before.id);
@@ -403,7 +403,7 @@ async function runMinTokenTest(
   const results = await service.retrieve({
     twinId,
     userMessage: "hi",
-    similarityThreshold: 0.0,
+    rrfThreshold: 0, minVectorSimilarity: 0,
   });
   if (provider.callCount !== callsBefore) {
     issues += 1;
@@ -445,7 +445,7 @@ async function runModelFilterTest(
   const results = await service.retrieve({
     twinId,
     userMessage: "Mit MODEL_FILTER_QUERY",
-    similarityThreshold: 0.0,
+    rrfThreshold: 0, minVectorSimilarity: 0,
     topK: 10,
   });
   if (results.some((r) => r.targetId === "wrong-model-leak")) {
@@ -518,7 +518,7 @@ async function runSameConvFilterTest(
   const results = await service.retrieve({
     twinId,
     userMessage: "Etwas mit SAME_CONV_QUERY",
-    similarityThreshold: 0.0,
+    rrfThreshold: 0, minVectorSimilarity: 0,
     topK: 10,
     currentConversationId: currentConvId,
     excludeSummarySegmentIds: [summarySegId],
@@ -562,16 +562,19 @@ function runEpisodicBlockTest(): number {
       targetType: "conversation",
       targetId: "c1",
       content: "Markus erzählte von Maria's Workshop in Bayreuth.",
-      distance: 0.2,
-      similarity: 0.9,
+      rrfScore: 0.032,
+      vectorSimilarity: 0.9,
+      vectorRank: 1,
+      bm25Rank: 1,
     },
     {
       embeddingId: "e2",
       targetType: "diary_entry",
       targetId: "d1",
       content: "Notiz über den Workshop-Vertrag.",
-      distance: 0.3,
-      similarity: 0.85,
+      rrfScore: 0.025,
+      vectorSimilarity: 0.85,
+      vectorRank: 2,
     },
   ]);
   if (!block) {
@@ -579,7 +582,7 @@ function runEpisodicBlockTest(): number {
     log("  ⚠ Block fehlt bei nicht-leerem Input.");
     return issues;
   }
-  if (!block.startsWith("## Erinnerungen an vergangene Gespräche")) {
+  if (!block.startsWith("## Mögliche Erinnerungen")) {
     issues += 1;
     log("  ⚠ Header fehlt/falsch.");
   }
@@ -642,11 +645,11 @@ async function runLocalProviderTest(
   const results = await liveService.retrieve({
     twinId,
     userMessage: "Wer ist Markus' Frau?",
-    similarityThreshold: 0.5,
+    minVectorSimilarity: 0.5,
     topK: 3,
   });
   results.forEach((r) =>
-    log(`   sim=${r.similarity.toFixed(4)} | ${r.content}`),
+    log(`   rrf=${r.rrfScore.toFixed(4)} vec-sim=${(r.vectorSimilarity ?? 0).toFixed(4)} | ${r.content}`),
   );
   if (!results[0]?.content.includes("Anna")) {
     issues += 1;

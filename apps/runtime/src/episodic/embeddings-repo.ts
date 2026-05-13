@@ -129,6 +129,21 @@ export interface SearchHit {
   similarity: number;
 }
 
+/**
+ * 3.4.I: Result-Shape für `searchFts5`. Schlanker als `SearchHit`, weil
+ * der RRF-Merge im Service nur Embedding-ID + Rang braucht — Content
+ * wird erst nach dem Merge per `getFtsContent` für die Final-Top-K geholt.
+ */
+export interface Fts5SearchResult {
+  embeddingId: string;
+  targetType: EmbeddingTargetType;
+  targetId: string;
+  /** BM25-Score aus SQLite — negativ, kleiner = relevanter. */
+  bm25Score: number;
+  /** 1-indexed Position in der nach BM25 sortierten Liste. */
+  rank: number;
+}
+
 /** Float32Array → Node-Buffer (Vector-Binding-Pattern aus Pre-Check). */
 export function f32ToBuffer(f32: Float32Array): Buffer {
   return Buffer.from(f32.buffer, f32.byteOffset, f32.byteLength);
@@ -338,6 +353,85 @@ export class EmbeddingsRepo {
    */
   incrementAccess(id: string): void {
     this.incrementAccessStmt.run(new Date().toISOString(), id);
+  }
+
+  /**
+   * 3.4.I: BM25-basierte Keyword-Search in `memory_fts`. Zweite Source der
+   * Hybrid-Search-Pipeline (siehe MemoryRetrievalService.retrieve, RRF-
+   * Merge mit Vector-Search). Caller liefert die bereits sanitierte Query —
+   * Sanitization passiert im Service, weil dieselbe Query parallel an
+   * Vector-Search geht (unsanitized) und FTS5 (sanitized).
+   *
+   * JOIN auf `embeddings` ist notwendig, weil:
+   *   - `memory_fts.target_type/target_id` matchen zwar 1:1 mit
+   *     `embeddings`, aber wir brauchen die `embeddings.id` als
+   *     Result-Key (für `getFtsContent`, `incrementAccess`, RRF-Merge
+   *     mit Vector-Hits).
+   *   - Multi-Tenant- und Provider-Filter (`embedding_model`) leben auf
+   *     der Stamm-Tabelle, memory_fts hat sie nur als UNINDEXED-Schatten
+   *     für die Twin-Filterung.
+   *
+   * BM25-Score-Semantik in SQLite: negativ, kleiner = relevanter. `ORDER
+   * BY bm25(memory_fts) ASC` liefert die besten zuerst. Caller arbeitet
+   * mit dem Rang (1..N) statt mit dem Score selbst — der RRF-Merge ist
+   * rang-basiert.
+   *
+   * Defensiv: wenn FTS5 doch auf einen Operator-Edge-Case trifft (z.B.
+   * Sanitization-Lücke), gibt `try/catch` ein leeres Array zurück statt
+   * den Send-Path zu killen.
+   */
+  searchFts5(
+    twinId: string,
+    sanitizedQuery: string,
+    options: { topK: number; embeddingModel: string },
+  ): Fts5SearchResult[] {
+    if (sanitizedQuery.length === 0) return [];
+    try {
+      const rows = this.db
+        .prepare(
+          `SELECT
+             e.id           AS embedding_id,
+             e.target_type  AS target_type,
+             e.target_id    AS target_id,
+             bm25(memory_fts) AS bm25_score
+           FROM memory_fts
+           JOIN embeddings e
+             ON e.twin_id = memory_fts.twin_id
+            AND e.target_type = memory_fts.target_type
+            AND e.target_id = memory_fts.target_id
+           WHERE memory_fts MATCH ?
+             AND memory_fts.twin_id = ?
+             AND e.embedding_model = ?
+           ORDER BY bm25_score ASC
+           LIMIT ?`,
+        )
+        .all(
+          sanitizedQuery,
+          twinId,
+          options.embeddingModel,
+          options.topK,
+        ) as Array<{
+          embedding_id: string;
+          target_type: EmbeddingTargetType;
+          target_id: string;
+          bm25_score: number;
+        }>;
+      return rows.map((row, idx) => ({
+        embeddingId: row.embedding_id,
+        targetType: row.target_type,
+        targetId: row.target_id,
+        bm25Score: row.bm25_score,
+        rank: idx + 1,
+      }));
+    } catch (err) {
+      // Sanitization sollte alle Operator-Edge-Cases abdecken. Wenn
+      // hier doch was wirft, ist's Defense-in-Depth — Caller darf
+      // weiterlaufen ohne Hybrid-Hits.
+      console.warn(
+        `[embeddings-repo] searchFts5 failed for query="${sanitizedQuery.slice(0, 80)}": ${err instanceof Error ? err.message : String(err)}`,
+      );
+      return [];
+    }
   }
 
   /**

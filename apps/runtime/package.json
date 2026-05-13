@@ -34,6 +34,7 @@
     "test-embedding-providers": "tsx src/scripts/test-embedding-providers.ts",
     "test-memory-embedding-service": "tsx src/scripts/test-memory-embedding-service.ts",
     "test-memory-retrieval-service": "tsx src/scripts/test-memory-retrieval-service.ts",
+    "test-memory-retrieval-hybrid": "tsx src/scripts/test-memory-retrieval-hybrid.ts",
     "test-twin-diary-cli": "tsx src/scripts/test-twin-diary-cli.ts",
     "test-memory-maintenance": "tsx src/scripts/test-memory-maintenance.ts",
     "test-summary-engine": "tsx src/scripts/test-summary-engine.ts",

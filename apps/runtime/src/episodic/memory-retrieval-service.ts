@@ -1,49 +1,59 @@
 import type {
   EmbeddingsRepo,
   EmbeddingTargetType,
+  Fts5SearchResult,
+  SearchHit,
 } from "./embeddings-repo.js";
 import type { EmbeddingProvider } from "./providers/index.js";
+import { sanitizeForFts5, sanitizedTokenCount } from "./sanitize.js";
 import {
+  EPISODIC_HYBRID_MIN_VECTOR_SIM,
+  EPISODIC_HYBRID_POOL_SIZE,
+  EPISODIC_HYBRID_RRF_K,
   EPISODIC_MIN_QUERY_LENGTH,
-  EPISODIC_SIMILARITY_THRESHOLD,
+  EPISODIC_RRF_THRESHOLD,
   EPISODIC_TOP_K,
 } from "../config.js";
 
-// ─── MEMORY RETRIEVAL SERVICE (3.4.E) ───────────────────────────────────────
+// ─── MEMORY RETRIEVAL SERVICE (3.4.E + 3.4.I Hybrid) ────────────────────────
 //
-// Liest-Seite des Episodic-Memory. Wird im Send-Path vor `runModel`
-// aufgerufen: User-Message wird mit E5-Prefix `query: ` embedded, dann KNN
-// gegen `embeddings_vec`, dann Threshold-Filter, dann Content aus
-// `memory_fts` geholt. Bei Failure → leeres Array (geloggt, kein Throw),
-// damit der Send-Path normal weiterläuft.
+// Liest-Seite des Episodic-Memory. Im Send-Path vor `runModel` aufgerufen:
 //
-// Filter-Logik (Briefing 3.4.E "Same-Conversation-Filter"):
-//   - Embeddings der aktuell laufenden Konversation werden ausgefiltert.
-//     Die Live-Window-Audits + Summary-Block decken sie bereits ab; ein
-//     erneutes Anbieten als "Erinnerung" wäre Redundanz und würde Twin
-//     verwirren.
-//   - Konkret: target_type='conversation' mit target_id === currentConvId
-//     plus target_type='summary_segment' mit target_id ∈ aktuelle
-//     Summary-Segment-IDs.
+//   1. User-Message mit E5-Prefix `query: ` embedden
+//   2. Parallel: Sanitization → BM25-Search auf `memory_fts`
+//   3. Pre-RRF Filter: Vector-Hits unter `EPISODIC_HYBRID_MIN_VECTOR_SIM`
+//      kommen gar nicht in den Pool
+//   4. Reciprocal Rank Fusion: Score = sum(1/(k+rank)) pro Source
+//   5. Post-RRF Filter: Items unter `EPISODIC_RRF_THRESHOLD` weg
+//   6. Same-Conv-Filter (laufende Konv + ihre Summary-Segments)
+//   7. Top-K, Content aus `memory_fts` hydratisieren, Access tracken
 //
-// Pool-Vergrößerung: wir holen `topK + 3` Hits aus dem Repo, weil der
-// Same-Conv-Filter im worst case mehrere Items wegfiltern könnte. Dann auf
-// `topK` slicen. Konsistent mit dem `topK * 3`-Pool im EmbeddingsRepo
-// selbst (der filtert auf twin_id + embedding_model).
+// Failure-Pfad: `[]` (geloggt, kein Throw). Send-Path läuft weiter.
 //
-// Min-Query-Length: sehr kurze Messages ("hi", "ok") sind semantisch
-// unterspezifiziert — ein Embedding davon trifft beliebige Themen. Wir
-// skippen Retrieval für Inputs unter `EPISODIC_MIN_QUERY_LENGTH` Zeichen
-// (Default 10). Spart einen Provider-Call pro Trivial-Send und vermeidet
-// irrelevante "Erinnerungen".
+// Min-Query-Length: sehr kurze Messages ("hi", "ok") triggern keinen
+// Retrieval-Call überhaupt (Performance + Relevanz).
+// Min-FTS5-Token: bei <2 Tokens nach Sanitization wird FTS5-Pfad
+// übersprungen, nur Vector — eine 1-Wort-Query trifft FTS5 zu breit.
+//
+// Vector-Score-Mapping: bei L2-Distanz auf normalisierten E5-Vektoren gilt
+// `cosine_sim = 1 - distance/2`. Im Repo.search-Call lassen wir den
+// internen Threshold aus (übergeben 0), weil unser Pre-RRF-Filter den
+// Job präziser macht — `EPISODIC_HYBRID_MIN_VECTOR_SIM` ist die echte
+// Untergrenze.
 
 export interface RetrievalResult {
   embeddingId: string;
   targetType: EmbeddingTargetType;
   targetId: string;
   content: string;
-  distance: number;
-  similarity: number;
+  /** RRF-Score nach Merge — sortier-relevant für den Caller. */
+  rrfScore: number;
+  /** Cosine-Sim aus dem Vector-Hit, falls vorhanden (nur Vector-Source). */
+  vectorSimilarity?: number;
+  /** 1-indexed Vector-Rang im Pre-RRF-Pool, falls vorhanden. */
+  vectorRank?: number;
+  /** 1-indexed BM25-Rang im Pre-RRF-Pool, falls vorhanden. */
+  bm25Rank?: number;
 }
 
 export interface RetrieveArgs {
@@ -57,24 +67,37 @@ export interface RetrieveArgs {
   currentConversationId?: string | null;
   /**
    * Summary-Segment-IDs der aktuellen Konversation. Schließt die zugehörigen
-   * `summary_segment`-Embeddings aus dem Result raus. Leer/undefined wenn
-   * die Konversation noch keine Segments hat.
+   * `summary_segment`-Embeddings aus dem Result raus.
    */
   excludeSummarySegmentIds?: string[];
-  /** Optional Override; sonst aus ENV / Default 3. */
+  /** Optional Override; sonst `EPISODIC_TOP_K` aus ENV / Default 3. */
   topK?: number;
-  /** Optional Override; sonst aus ENV / Default 0.7. */
-  similarityThreshold?: number;
+  /** Optional Override; sonst `EPISODIC_RRF_THRESHOLD` aus ENV / 0.015. */
+  rrfThreshold?: number;
+  /**
+   * Optional Override; sonst `EPISODIC_HYBRID_MIN_VECTOR_SIM` aus ENV / 0.5.
+   * Vector-Hits unter dieser Cosine-Sim kommen nicht in den RRF-Pool.
+   */
+  minVectorSimilarity?: number;
 }
 
 export interface MemoryRetrievalServiceDeps {
   embeddingsRepo: EmbeddingsRepo;
   /**
    * Lazy-Provider-Resolve. Production: `() => getEmbeddingProvider()`.
-   * Tests: Closure auf einen MockEmbeddingProvider. Spiegelbild des
-   * Patterns aus MemoryEmbeddingService.
+   * Tests: Closure auf einen MockEmbeddingProvider.
    */
   getProvider: () => EmbeddingProvider;
+}
+
+interface MergedHit {
+  embeddingId: string;
+  targetType: EmbeddingTargetType;
+  targetId: string;
+  rrfScore: number;
+  vectorRank?: number;
+  vectorSimilarity?: number;
+  bm25Rank?: number;
 }
 
 export class MemoryRetrievalService {
@@ -82,17 +105,17 @@ export class MemoryRetrievalService {
 
   async retrieve(args: RetrieveArgs): Promise<RetrievalResult[]> {
     const topK = args.topK ?? EPISODIC_TOP_K;
-    const threshold = args.similarityThreshold ?? EPISODIC_SIMILARITY_THRESHOLD;
-    const trimmed = args.userMessage.trim();
+    const rrfThreshold = args.rrfThreshold ?? EPISODIC_RRF_THRESHOLD;
+    const minVectorSim =
+      args.minVectorSimilarity ?? EPISODIC_HYBRID_MIN_VECTOR_SIM;
+    const poolSize = EPISODIC_HYBRID_POOL_SIZE;
+    const rrfK = EPISODIC_HYBRID_RRF_K;
 
+    const trimmed = args.userMessage.trim();
     if (trimmed.length < EPISODIC_MIN_QUERY_LENGTH) {
-      // Kein Throw, kein Log-Spam — der frühe Return ist ein Erfolgs-Pfad
-      // (Trivial-Inputs sollen explizit kein Retrieval triggern).
+      // Trivial-Input: kein Retrieval, kein Log-Spam.
       return [];
     }
-
-    const excludeSegmentIds = new Set(args.excludeSummarySegmentIds ?? []);
-    const excludeConvId = args.currentConversationId ?? null;
 
     try {
       const provider = this.deps.getProvider();
@@ -106,67 +129,92 @@ export class MemoryRetrievalService {
         return [];
       }
 
-      // Pool-Vergrößerung um die Same-Conv-Filter-Verluste auszugleichen.
-      const poolSize = topK + 3;
-      const searchResults = this.deps.embeddingsRepo.search(
-        args.twinId,
-        queryVector,
-        {
-          topK: poolSize,
-          similarityThreshold: threshold,
-          embeddingModel: provider.modelName,
-        },
-      );
+      // Parallel-Searches. Beide sind synchron-SQL, der Provider-Call ist
+      // schon erledigt — Promise.all spart konzeptionell, kein I/O-Gewinn.
+      const sanitized = sanitizeForFts5(trimmed);
+      const tokenCount = sanitizedTokenCount(trimmed);
+      const fts5Enabled = tokenCount >= 2;
+
+      const [vectorHitsRaw, fts5Hits] = await Promise.all([
+        Promise.resolve(
+          this.deps.embeddingsRepo.search(args.twinId, queryVector, {
+            topK: poolSize,
+            // Pre-RRF-Filter erledigt das Threshold-Geschäft präziser.
+            similarityThreshold: 0,
+            embeddingModel: provider.modelName,
+          }),
+        ),
+        Promise.resolve(
+          fts5Enabled
+            ? this.deps.embeddingsRepo.searchFts5(args.twinId, sanitized, {
+                topK: poolSize,
+                embeddingModel: provider.modelName,
+              })
+            : ([] as Fts5SearchResult[]),
+        ),
+      ]);
+
+      // Pre-RRF: Vector-Hits unter Min-Sim raus, Rang im gefilterten
+      // Pool vergeben (1-indexed).
+      const vectorRanked = filterVectorHits(vectorHitsRaw, minVectorSim);
+
+      const merged = rrfMerge(vectorRanked, fts5Hits, rrfK);
+
+      // Post-RRF Threshold + Same-Conv-Filter
+      const excludeSegmentIds = new Set(args.excludeSummarySegmentIds ?? []);
+      const excludeConvId = args.currentConversationId ?? null;
+      const candidates = merged.filter((m) => {
+        if (m.rrfScore < rrfThreshold) return false;
+        if (
+          m.targetType === "conversation" &&
+          excludeConvId &&
+          m.targetId === excludeConvId
+        ) {
+          return false;
+        }
+        if (
+          m.targetType === "summary_segment" &&
+          excludeSegmentIds.has(m.targetId)
+        ) {
+          return false;
+        }
+        return true;
+      });
 
       const results: RetrievalResult[] = [];
-      for (const hit of searchResults) {
+      for (const item of candidates) {
         if (results.length >= topK) break;
-
-        // Same-Conv-Filter
-        if (
-          hit.record.targetType === "conversation" &&
-          excludeConvId &&
-          hit.record.targetId === excludeConvId
-        ) {
-          continue;
-        }
-        if (
-          hit.record.targetType === "summary_segment" &&
-          excludeSegmentIds.has(hit.record.targetId)
-        ) {
-          continue;
-        }
-
         const content = this.deps.embeddingsRepo.getFtsContent(
           args.twinId,
-          hit.record.targetType,
-          hit.record.targetId,
+          item.targetType,
+          item.targetId,
         );
         if (!content || !content.trim()) {
-          // Embedding ohne FTS-Eintrag (z.B. 3.4.A-Test-Daten oder ein
-          // alter Bestand vor FTS5-Pflicht). Wir können keinen Prompt-Block
-          // bauen ohne den Klartext, also überspringen.
+          // Embedding ohne FTS-Eintrag (Test-Daten, alter Bestand vor
+          // 3.4.D-FTS-Pflicht). Ohne Klartext kein Prompt-Block.
           continue;
         }
-
         results.push({
-          embeddingId: hit.record.id,
-          targetType: hit.record.targetType,
-          targetId: hit.record.targetId,
+          embeddingId: item.embeddingId,
+          targetType: item.targetType,
+          targetId: item.targetId,
           content,
-          distance: hit.distance,
-          similarity: hit.similarity,
+          rrfScore: item.rrfScore,
+          vectorSimilarity: item.vectorSimilarity,
+          vectorRank: item.vectorRank,
+          bm25Rank: item.bm25Rank,
         });
-
-        // Access-Tracking erst NACH Filter — wenn wir ein Item ausgefiltert
-        // haben (Same-Conv), wäre ein Inkrement irreführend.
-        this.deps.embeddingsRepo.incrementAccess(hit.record.id);
+        this.deps.embeddingsRepo.incrementAccess(item.embeddingId);
       }
 
       if (results.length > 0) {
+        const top = results[0]!;
         console.log(
           `[memory-retrieval] twin=${args.twinId} returned ${results.length} hit(s), ` +
-            `top-sim=${results[0]?.similarity.toFixed(3)}`,
+            `top-rrf=${top.rrfScore.toFixed(4)} ` +
+            `(vec-rank=${top.vectorRank ?? "—"} vec-sim=${top.vectorSimilarity?.toFixed(3) ?? "—"} ` +
+            `bm25-rank=${top.bm25Rank ?? "—"}) ` +
+            `fts5=${fts5Enabled ? "on" : "skip"}`,
         );
       }
       return results;
@@ -178,4 +226,87 @@ export class MemoryRetrievalService {
       return [];
     }
   }
+}
+
+// ─── intern: Pre-RRF Vector-Filter ────────────────────────────────────────
+
+function filterVectorHits(
+  hits: SearchHit[],
+  minSim: number,
+): Array<{
+  embeddingId: string;
+  targetType: EmbeddingTargetType;
+  targetId: string;
+  similarity: number;
+  rank: number;
+}> {
+  const ranked: Array<{
+    embeddingId: string;
+    targetType: EmbeddingTargetType;
+    targetId: string;
+    similarity: number;
+    rank: number;
+  }> = [];
+  let rank = 1;
+  for (const hit of hits) {
+    if (hit.similarity < minSim) continue;
+    ranked.push({
+      embeddingId: hit.record.id,
+      targetType: hit.record.targetType,
+      targetId: hit.record.targetId,
+      similarity: hit.similarity,
+      rank: rank++,
+    });
+  }
+  return ranked;
+}
+
+// ─── intern: Reciprocal Rank Fusion ──────────────────────────────────────
+//
+// Items, die in beiden Sources auftauchen, bekommen den Score aus beiden
+// addiert — implicit-Boost gegen Halluzinations-Risiko (Token-Overlap-Hits
+// ohne semantischen Match bleiben Single-Source und werden niedriger
+// gerankt). Items in nur einer Source kriegen für die fehlende Source
+// Score-Beitrag 0 — Verworfen wurde "strict mode" (nur beide), weil das
+// semantische Fall-A-Hits kosten würde.
+
+export function rrfMerge(
+  vector: Array<{
+    embeddingId: string;
+    targetType: EmbeddingTargetType;
+    targetId: string;
+    similarity: number;
+    rank: number;
+  }>,
+  fts5: Fts5SearchResult[],
+  k: number,
+): MergedHit[] {
+  const merged = new Map<string, MergedHit>();
+  for (const v of vector) {
+    merged.set(v.embeddingId, {
+      embeddingId: v.embeddingId,
+      targetType: v.targetType,
+      targetId: v.targetId,
+      rrfScore: 1 / (k + v.rank),
+      vectorRank: v.rank,
+      vectorSimilarity: v.similarity,
+    });
+  }
+  for (const f of fts5) {
+    const contrib = 1 / (k + f.rank);
+    const existing = merged.get(f.embeddingId);
+    if (existing) {
+      existing.rrfScore += contrib;
+      existing.bm25Rank = f.rank;
+    } else {
+      merged.set(f.embeddingId, {
+        embeddingId: f.embeddingId,
+        targetType: f.targetType,
+        targetId: f.targetId,
+        rrfScore: contrib,
+        bm25Rank: f.rank,
+      });
+    }
+  }
+  return Array.from(merged.values()).sort((a, b) => b.rrfScore - a.rrfScore);
 }
