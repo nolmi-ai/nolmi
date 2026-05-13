@@ -200,6 +200,40 @@ export class ConversationsRepo {
   }
 
   /**
+   * 3.4.G: Listet alle beendeten Konversationen eines Twins (älteste zuerst).
+   * Aktive Konversationen werden ausgelassen — die sind noch in Bearbeitung
+   * und das Reset wird sie selbst embedden. Wird vom Maintenance-CLI mit
+   * --force genutzt.
+   */
+  listEndedByTwin(twinId: string): Conversation[] {
+    const rows = this.db
+      .prepare(
+        `SELECT * FROM conversations
+           WHERE twin_id = ? AND status = 'ended'
+           ORDER BY ended_at ASC NULLS LAST, started_at ASC`,
+      )
+      .all(twinId) as ConversationRow[];
+    return rows.map(rowToConversation);
+  }
+
+  /**
+   * 3.4.G: Wie listEndedByTwin, aber nur Konversationen, deren
+   * embedding_status nicht 'done' ist. Default-Pfad des Maintenance-CLI.
+   */
+  listPendingByTwin(twinId: string): Conversation[] {
+    const rows = this.db
+      .prepare(
+        `SELECT * FROM conversations
+           WHERE twin_id = ?
+             AND status = 'ended'
+             AND embedding_status != 'done'
+           ORDER BY ended_at ASC NULLS LAST, started_at ASC`,
+      )
+      .all(twinId) as ConversationRow[];
+    return rows.map(rowToConversation);
+  }
+
+  /**
    * 3.4.D: Setzt das embedding_status-Flag nach Reset-Embedding-Versuch.
    * 'done' nach erfolgreichem Insert in `embeddings`, 'failed' bei Provider-
    * oder DB-Failure. Wirft nicht — Caller (Memory-Embedding-Service) macht

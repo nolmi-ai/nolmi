@@ -398,6 +398,57 @@ export class EmbeddingsRepo {
       .get(twinId) as { c: number };
     return row.c;
   }
+
+  /**
+   * 3.4.G: Löscht ALLE Embeddings (über alle Modelle) eines Target-Tripels
+   * plus den zugehörigen vec0-Eintrag und den FTS5-Eintrag. Wird vom
+   * Maintenance-CLI vor dem Re-Embedding mit --force aufgerufen — sonst
+   * kollidiert der nachfolgende Insert mit UNIQUE(twin_id, target_type,
+   * target_id, embedding_model).
+   *
+   * Bewusst über alle embedding_model-Werte: ein Provider-Wechsel hinterlässt
+   * Bestände mit altem Modell, die nicht mehr zu Search-Pfad passen — die
+   * dürfen weg.
+   *
+   * Atomar in einer Transaction: drei Tabellen, alle oder keine. FTS5-Insert
+   * ist in 3.4.A optional ('ftsContent' beim insert), daher kann der DELETE
+   * dort einfach 0 Rows treffen — kein Fehler.
+   */
+  deleteByTarget(
+    twinId: string,
+    targetType: EmbeddingTargetType,
+    targetId: string,
+  ): number {
+    let removed = 0;
+    const tx = this.db.transaction(() => {
+      const rowidRows = this.db
+        .prepare(
+          `SELECT rowid FROM embeddings
+             WHERE twin_id = ? AND target_type = ? AND target_id = ?`,
+        )
+        .all(twinId, targetType, targetId) as Array<{ rowid: number }>;
+      for (const r of rowidRows) {
+        this.db
+          .prepare(`DELETE FROM embeddings_vec WHERE rowid = ?`)
+          .run(BigInt(r.rowid));
+      }
+      const result = this.db
+        .prepare(
+          `DELETE FROM embeddings
+             WHERE twin_id = ? AND target_type = ? AND target_id = ?`,
+        )
+        .run(twinId, targetType, targetId);
+      removed = result.changes;
+      this.db
+        .prepare(
+          `DELETE FROM memory_fts
+             WHERE twin_id = ? AND target_type = ? AND target_id = ?`,
+        )
+        .run(twinId, targetType, targetId);
+    });
+    tx();
+    return removed;
+  }
 }
 
 function rowToRecord(row: EmbeddingRow): EmbeddingRecord {

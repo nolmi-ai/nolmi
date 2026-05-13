@@ -117,6 +117,44 @@ export class ConversationSummariesRepo {
   }
 
   /**
+   * 3.4.G: Listet alle Segments eines Twins, älteste zuerst. Wird vom
+   * Maintenance-CLI `twin:memory-embed-all --force` genutzt, um eine
+   * komplette Re-Embedding-Iteration anzustoßen (z.B. nach Provider-
+   * Wechsel). JOIN über `conversations`, weil `conversation_summaries`
+   * selbst kein twin_id-Feld hat.
+   */
+  listByTwin(twinId: string): ConversationSummary[] {
+    const rows = this.db
+      .prepare(
+        `SELECT s.* FROM conversation_summaries s
+           JOIN conversations c ON c.id = s.conversation_id
+           WHERE c.twin_id = ?
+           ORDER BY s.created_at ASC`,
+      )
+      .all(twinId) as ConversationSummaryRow[];
+    return rows.map(rowToSummary);
+  }
+
+  /**
+   * 3.4.G: Listet alle Segments, deren embedding_status nicht 'done' ist
+   * (also pending oder failed). Default-Pfad des Maintenance-CLI ohne
+   * --force. Sortiert ASC nach created_at, damit der Caller das chronologisch
+   * abarbeitet (älteste Bestandsdaten zuerst).
+   */
+  listPendingByTwin(twinId: string): ConversationSummary[] {
+    const rows = this.db
+      .prepare(
+        `SELECT s.* FROM conversation_summaries s
+           JOIN conversations c ON c.id = s.conversation_id
+           WHERE c.twin_id = ?
+             AND s.embedding_status != 'done'
+           ORDER BY s.created_at ASC`,
+      )
+      .all(twinId) as ConversationSummaryRow[];
+    return rows.map(rowToSummary);
+  }
+
+  /**
    * 3.4.D: Setzt das Embedding-Status-Flag nach Embed-Versuch.
    * 'done' nach erfolgreichem Insert in `embeddings`, 'failed' bei Provider-
    * oder DB-Failure. Wirft nicht — Caller (Memory-Embedding-Service) macht
