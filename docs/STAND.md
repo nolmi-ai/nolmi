@@ -1,23 +1,70 @@
 # twin-lab — Stand
 
-**Letztes Update:** 12. Mai 2026, Abend (Tag 13)
+**Letztes Update:** 13. Mai 2026 (Tag 14)
 
 ## Aktuell in Arbeit
-**Phase 3.4 Memory: Episodic — Bau-Phase läuft.**
-Drei von sieben Sub-Schritten durch und in lokaler Runtime
-smoke-verifiziert: 3.4.A (Schema + Repos), 3.4.B (Embedding-
-Provider-Interface), 3.4.D (Synchrone Embedding-Generation).
-Plan-Anpassung: 3.4.C wurde in 3.4.B integriert (isolierter
-Modell-Setup nicht sinnvoll testbar), daher 7 statt 8
-Sub-Schritte.
+**Phase 3.4 Memory: Episodic — Code komplett, End-to-End-Smoke läuft.**
+Sechs von sieben Sub-Schritten lokal verifiziert (3.4.A, B, D, E, F, G).
+3.4.H Smoke-Protokoll: Phasen 1+2 (Bestandsdaten-Embedding) durch,
+Phasen 3-5 (Browser-Chat, Failure-Path, Cross-Type-Retrieval) als
+Owner-TODO in `docs/3.4-SMOKE.md`. Sobald die Browser-Phasen
+absolviert sind, ist Phase 3.4 abschluss-reif.
 
 **Phase 3 Definition of Done — 3 von 5 Häkchen.** Plus Phase 3.3
-in Production deployed. Plus 3.4 zur Hälfte gebaut und lokal
-verifiziert.
+in Production deployed. Phase 3.4 lokal komplett gebaut.
 
-## Heute (Tag 13) abgeschlossen
+## Heute (Tag 14) abgeschlossen
 
-### Vormittag — Production-Deploy Phase 3.3 (~60 Min)
+### Vormittag — Bau-Sprint 3.4.E + 3.4.F + 3.4.G (~3-4h)
+
+**3.4.E — Vector-Search im Send-Path** (Commit `44ab971`)
+- MemoryRetrievalService mit E5-Query-Prefix, Threshold/Min-Query-
+  Length-Filter, Same-Conv-Filter, Access-Tracking
+- EmbeddingsRepo.getFtsContent für die Prompt-Rendering-Schicht
+- buildEpisodicBlock — neue siebte System-Prompt-Schicht
+  ("Erinnerungen an vergangene Gespräche") nach dem summaryBlock
+- runOwnerDirect ruft retrieve() vor LLM-Call, filtert auf
+  currentConversation + summaries[].id
+- Config-Tunables EPISODIC_TOP_K (3), EPISODIC_SIMILARITY_THRESHOLD
+  (0.7), EPISODIC_MIN_QUERY_LENGTH (10) + parseFloatEnv
+- 10 Test-Cases grün, inkl. Live-LocalProvider-Pattern-Verifikation
+  ("Wer ist Markus' Frau?" → "Anna" mit sim=0.7395)
+
+**3.4.F — Twin-Diary-CLI** (Commit `745d660`)
+- `twin:diary-add` + `twin:diary-list` mit Auto-Embedding via
+  TwinDiaryService aus 3.4.D
+- Foundation-CLI für die Selbst-Reflexions-Pattern-Phase, heute
+  manuell, Auto-Generierung kommt mit Pattern
+- 6 Service-Level-Tests grün (Trigger-Werte, FTS5-Round-Trip, Limit,
+  Multi-Tenant)
+
+**3.4.G — Maintenance-CLI** (Commit `e912130`)
+- `twin:memory-embed-all <handle> [--force] [--type ...] [--dry-run]`
+- MemoryMaintenanceService deckt drei Use-Cases ab: Initial-
+  Migration für 3.3-Bestandsdaten, Failure-Retry, Provider-Wechsel
+  mit deleteByTarget-vor-Re-Embed
+- Skip-Logic für Konversationen mit Summary-Segments
+- 7 Test-Cases grün, inkl. provider-A→provider-B-Swap
+
+### Mittag — Initial-Embedding Bestandsdaten + Smoke-Doc
+
+`pnpm twin:memory-embed-all @markus` auf den 26 pending Konversationen
+aus Phase 3.3 ausgeführt:
+- 23 Konversationen embedded (2.9s, q8-Modell schon warm aus
+  Test-Lauf)
+- 3 Konversationen mit Summary-Segments übersprungen (Skip-Logic
+  zieht sie auf `embedding_status='done'`)
+- Embeddings-Tabelle: 1 → 24 conversation-Rows
+- FTS5-Tabelle synchron befüllt
+
+**3.4.H Smoke-Protokoll** in `docs/3.4-SMOKE.md` angelegt:
+- Phasen 1+2 (DB-Snapshot + Maintenance-CLI) erfolgreich abgeschlossen
+- Phasen 3-5 (Browser-Chat, Failure-Path, Cross-Type-Retrieval) als
+  Owner-TODO mit Pass/Fail-Erwartungen pro Schritt vorgegeben
+
+### Tag-13-Sequenz (zur Erinnerung, unverändert)
+
+#### Tag-13-Vormittag — Production-Deploy Phase 3.3 (~60 Min)
 
 Tag-12-Stand auf VPS deployed. Saubere Single-Phase-Deploy-Sequenz,
 keine Komplikationen.
@@ -172,8 +219,8 @@ Commits plus Doku-Commit (`189acbc`).
   (Tag 10/11)
 - 3.3 ✅ **Memory: Conversation + Semantic** (Tag 12 lokal,
   Tag 13 Vormittag in Production)
-- 3.4 ⏳ **Memory: Episodic — 3 von 7 Sub-Schritten durch**
-  (A, B, D), 3.4.E (Vector-Search im Send-Path) ist Nächster.
+- 3.4 ⏳ **Memory: Episodic — Code komplett, Smoke läuft**
+  (6 von 7 Sub-Schritten durch, 3.4.H Browser-Phasen TODO)
 - 3.5 offen — Hyperbrowser als MCP-Skill
 - 3.6 offen — Procedural Memory (ggf. Phase 4)
 
@@ -185,18 +232,15 @@ Selbst-Reflexion).
 
 ## Was als nächstes ansteht
 
-1. **Sub-Schritt 3.4.E — Vector-Search im Send-Path** (substantiell)
-   - User-Message embedden mit E5-Prefix `query:`
-   - Top-K-Suche mit Threshold-Filter via CTE-Pattern
-   - Integration in `loadConversationHistory` als sechste Schicht
-   - Increment `access_count` und `last_accessed_at` bei Hit
-2. **3.4.F — Twin-Diary Foundation** (Schema, Repo, CLI)
-3. **3.4.G — Maintenance-CLI** `twin:memory-embed-all`
-4. **3.4.H — End-to-End-Smoke-Test**
-5. **Phase 3.4 in Production deployen** — nach Abschluss aller
-   Sub-Schritte. Docker-Volume-Setup für Model-Cache als Pre-
-   Deploy-Vorbereitung (war Bestandteil des entfallenen 3.4.C)
-6. **Strategie-Session vor 3.5 (Hyperbrowser)** — kleinere Session,
+1. **3.4.H Smoke-Phasen 3-5 durchführen** (Owner, ~1h)
+   - Phase 3: Bayreuth-Retrieval, Diary-Retrieval, Reset-Path
+   - Phase 4: Failure-Path mit `TWIN_LAB_EMBEDDING_PROVIDER=invalid`
+   - Phase 5: Cross-Type-Stress mit drei Diary-Einträgen
+   - Befunde direkt in `docs/3.4-SMOKE.md` einsortieren
+2. **Phase 3.4 in Production deployen** — nach erfolgreichem Smoke.
+   Docker-Volume-Setup für Model-Cache als Pre-Deploy-Vorbereitung
+   (war Bestandteil des entfallenen 3.4.C)
+3. **Strategie-Session vor 3.5 (Hyperbrowser)** — kleinere Session,
    weil 3.5 auf etablierter MCP-Foundation aufbaut
 
 Optional weiterhin im Backlog:

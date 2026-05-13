@@ -126,22 +126,21 @@ Initiiert durch Markus' Morgenfrage über autonome träumende Agents. Vier Blöc
 **Strategische Konsequenzen für die Roadmap:** Phase 3.4 ist nicht nur "noch eine Memory-Schicht", sondern das technische Fundament für fünf der acht Patterns. Episodic-Memory als Träger für Zeit-Erleben, Schlaf/Träume, Aufmerksamkeit, Lebens-Narrativ, Selbst-Reflexion.
 
 ### 3.4 — Memory: Episodic
-**Größe:** L · **Zeitfenster:** 1.5-2 Sessions · **Status:** Strategie abgeschlossen, Bau-Start unmittelbar.
+**Größe:** L · **Zeitfenster:** 1.5-2 Sessions · **Status:** Code komplett (6/7 Sub-Schritte lokal verifiziert), End-to-End-Smoke 3.4.H Phasen 1+2 durch, Phasen 3-5 als Owner-TODO.
 
 Vector-Embeddings für "Twin erinnert sich an spezifische Events". Plus Datenschicht-Vorbereitung für die fünf abhängigen Patterns aus der Vision (Extended Foundation).
 
-Acht Sub-Schritte geplant:
+Sieben Sub-Schritte (3.4.C entfiel, in 3.4.B integriert):
 
-- **3.4.A** Schema + Repos (Migrations 017-019: embeddings, twin_diary, embedding-Spalten)
-- **3.4.B** Embedding-Provider-Interface (Local, OpenAI, Voyage)
-- **3.4.C** Lokales Modell-Setup (multilingual-e5-large)
-- **3.4.D** Synchrone Embedding-Generation (Integration in 3.3.B + 3.3.G3)
-- **3.4.E** Vector-Search im Send-Path (sixth-layer in System-Prompt)
-- **3.4.F** Twin-Diary Foundation (Schema, Repo, CLI)
-- **3.4.G** Maintenance-CLI `twin:memory-embed-all`
-- **3.4.H** End-to-End-Smoke-Test
+- **3.4.A** ✅ Schema + Repos (Migrations 017-019: embeddings + vec0 + FTS5, embedding_status-Spalten, twin_diary)
+- **3.4.B** ✅ Embedding-Provider-Interface (Local q8, OpenAI, Voyage; inkl. Modell-Setup)
+- **3.4.D** ✅ Synchrone Embedding-Generation (Send-Path nach SummaryEngine + Reset-Pfad)
+- **3.4.E** ✅ Vector-Search im Send-Path (siebte System-Prompt-Schicht hinter summaryBlock)
+- **3.4.F** ✅ Twin-Diary-CLI (`twin:diary-add`, `twin:diary-list`)
+- **3.4.G** ✅ Maintenance-CLI `twin:memory-embed-all` (force/type/dry-run, Provider-Wechsel)
+- **3.4.H** ⏳ End-to-End-Smoke-Test (`docs/3.4-SMOKE.md`, Phasen 1+2 durch)
 
-Vollständige Spec: `docs/3.4-STRATEGY.md`.
+Vollständige Spec: `docs/3.4-STRATEGY.md`. Smoke-Protokoll: `docs/3.4-SMOKE.md`.
 
 ### 3.5 — Hyperbrowser als MCP-Skill
 **Größe:** M · **Zeitfenster:** 1 Woche
@@ -177,7 +176,7 @@ Schätzung pro Pattern-Phase: 1-2 Tage. Sechs Häkchen nach Phase 3.4 würden de
 - [x] Skill-System läuft mit Pilot-Skill (3.1.A-F) ✅
 - [x] MCP-Client als Skill-Provider integriert (3.2.A-H) ✅
 - [x] Conversation-Memory + Semantic-Memory live (3.3.A-G3) ✅
-- [ ] Episodic-Memory mit sqlite-vec (3.4.A-H, Bau-Start unmittelbar)
+- [ ] Episodic-Memory mit sqlite-vec (3.4.A-H: Code komplett, Smoke 3.4.H Phasen 3-5 offen)
 - [ ] Hyperbrowser als MCP-Skill (3.5)
 - [ ] Twin merkt sich Konversationen, kennt Fakten, nutzt externe Tools, navigiert das Web mit Approval-Gates
 
