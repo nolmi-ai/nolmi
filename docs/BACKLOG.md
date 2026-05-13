@@ -1616,6 +1616,26 @@ Substantiell — eigene Phase, vermutlich nach 3.4 oder mit Pattern-Phase „Zei
 
 Aus Tag-14-Recherche.
 
+### #101 FTS5-AND-Semantik verhindert Hybrid-Boost bei Pronominal-Queries (M, should)
+
+Befund aus 3.4.I Live-E5-Test: FTS5 macht implizit AND-Konjunktion über alle Query-Tokens. Bei deutschen Pronominal-Fragen ("Wer ist Markus' Frau?", "Was hatten wir über X besprochen?") killen die Stopword/Pronomen-Tokens den FTS5-Hit, weil sie im Content nicht vorkommen.
+
+Konkret: Query "Wer ist Markus' Frau?" sanitisiert zu `wer ist markus frau` → AND über 4 Tokens. Content "Anna ist Markus' Frau." enthält "wer" nicht → 0 FTS5-Treffer → kein Hybrid-Boost auf Anna → RRF-Gap top→second nur 0.0003 (Anna 0.7395 via Vector, Florian 0.6901 via Vector — bei Pure-Vector identisch zu 3.4.E-Befund).
+
+Mechanik-Test (Bayreuth-Analogon mit Mock-Daten) funktioniert wie strategisch vorgesehen — Vector-only-Hits ohne Token-Overlap ranken RRF-mäßig knapp über Default-Threshold (0.0164 vs. 0.015). Bayreuth-Halluzinations-Mitigation ist also funktional. **Aber:** Hybrid-Boost-Wirkung bei legitimen Queries ist eingeschränkt.
+
+Drei Mitigations-Pfade:
+
+a) **Stopword-Filter vor FTS5** — `wer`, `ist`, `was`, `wie`, `wo`, `der`/`die`/`das`, `und`/`oder` etc. raus, nur Content-Tokens behalten. Kleine Code-Änderung (~20 Zeilen in `sanitize.ts`), sprach-abhängig (deutsch first). Adressiert auch Bayreuth-Fall (weniger False-Positive-Tokens schwächen Vector-only-Hits).
+
+b) **FTS5 mit OR-Konstruktion** — Tokens via `wer OR ist OR markus OR frau` verbinden statt AND. Sprach-unabhängig, aber Stopwords ranken trotzdem mit (BM25-IDF filtert nur teilweise). Plus Performance-Risiko bei sehr langen Queries.
+
+c) **LLM-Re-Rank (3.4.J)** — umgeht das ganze AND-Problem, weil LLM die Query-Bedeutung versteht. Aber: zusätzlicher LLM-Call pro Send, +1-3s Latenz, eigene Halluzinations-Risiken.
+
+Reihenfolge-Empfehlung: erst Phase-5-Validierung abwarten — wie groß ist das Problem in echten User-Konversationen? Falls signifikant: Pfad a) als 3.4.I.1-Patch (klein, schnell), 3.4.J behält LLM-Re-Rank-Scope. Falls marginal (Vector findet Top-1 zuverlässig auch ohne FTS5-Boost): Backlog.
+
+Aus Tag-14 / 3.4.I Live-E5-Test.
+
 ---
 
 ### Lesson (Tag 12 / 3.3.B+C): nanoid-IDs sind NICHT lexikografisch sortierbar
