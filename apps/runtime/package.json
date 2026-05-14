@@ -32,6 +32,7 @@
     "test-memory-repos": "tsx src/scripts/test-memory-repos.ts",
     "test-episodic-repos": "tsx src/scripts/test-episodic-repos.ts",
     "test-embedding-providers": "tsx src/scripts/test-embedding-providers.ts",
+    "test-model-cache-dir": "tsx src/scripts/test-model-cache-dir.ts",
     "test-memory-embedding-service": "tsx src/scripts/test-memory-embedding-service.ts",
     "test-memory-retrieval-service": "tsx src/scripts/test-memory-retrieval-service.ts",
     "test-memory-retrieval-hybrid": "tsx src/scripts/test-memory-retrieval-hybrid.ts",

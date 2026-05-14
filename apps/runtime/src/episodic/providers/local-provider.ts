@@ -40,6 +40,33 @@ interface PipelineExtractor {
   }>;
 }
 
+/**
+ * Setzt den Modell-Cache-Pfad von `@huggingface/transformers` aus der ENV-
+ * Variable `TWIN_LAB_MODEL_CACHE_DIR`.
+ *
+ * Warum eine *eigene* ENV-Variable statt der „üblichen" `HF_HOME` /
+ * `TRANSFORMERS_CACHE`: transformers.js 4.2.0 liest **keine** von beiden
+ * (anders als die Python-`huggingface_hub`-Lib — `env.js` enthält null
+ * `process.env`-Zugriffe). Sein Default ist ein `.cache/`-Ordner *innerhalb
+ * des npm-Pakets* in `node_modules` — der bei jedem Docker-Container-Recreate
+ * verloren geht und das q8-Modell (~552 MB) neu lädt. Mit gesetztem
+ * `TWIN_LAB_MODEL_CACHE_DIR` landet der Cache an einem mountbaren Pfad und
+ * überlebt Recreates.
+ *
+ * Ist die Variable nicht (oder leer) gesetzt, bleibt `env.cacheDir`
+ * unangetastet → lokales Default-Verhalten unverändert (Cache in
+ * `node_modules`).
+ *
+ * Ausgelagert aus `getExtractor()` als reine Funktion, damit ohne teuren
+ * Modell-Load testbar (`test-model-cache-dir.ts`).
+ */
+export function applyModelCacheDir(env: { cacheDir: string | null }): void {
+  const custom = process.env.TWIN_LAB_MODEL_CACHE_DIR?.trim();
+  if (custom) {
+    env.cacheDir = custom;
+  }
+}
+
 export class LocalEmbeddingProvider implements EmbeddingProvider {
   readonly modelName: string;
   readonly dimensions: number;
@@ -68,7 +95,10 @@ export class LocalEmbeddingProvider implements EmbeddingProvider {
   private getExtractor(): Promise<PipelineExtractor> {
     if (!this.extractorPromise) {
       this.extractorPromise = (async () => {
-        const { pipeline } = await import("@huggingface/transformers");
+        const { pipeline, env } = await import("@huggingface/transformers");
+        // Cache-Pfad VOR dem ersten Modell-Zugriff setzen — siehe
+        // applyModelCacheDir (transformers.js ignoriert HF_HOME).
+        applyModelCacheDir(env);
         const extractor = (await pipeline("feature-extraction", this.modelId, {
           dtype: this.dtype,
         })) as unknown as PipelineExtractor;
