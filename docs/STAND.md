@@ -1,199 +1,185 @@
 # twin-lab — Stand
 
-**Letztes Update:** 13. Mai 2026, Abend (Tag 14)
+**Letztes Update:** 14. Mai 2026, Mittag (Tag 15)
 
 ## Aktuell in Arbeit
-**Phase 3.4 Memory: Episodic — COMPLETE.** Acht von acht Sub-Schritten
-(7 ursprünglich geplant + 1 reaktiv aus Smoke-Befund) lokal verifiziert.
-End-to-End-Smoke durch (Phasen 1+2 + 3.1 + 3.3 + 5), substantieller
-Real-Data-Befund (Bayreuth-Halluzination) hat 3.4.I Hybrid-Search
-ausgelöst — Phase 5 validiert die Resolution.
+**Phase 3.4 Memory: Episodic — IN PRODUCTION LIVE.** Production-Deploy
+abgeschlossen nach substantiellem Diagnose-Marathon (musl/glibc-
+Inkompatibilität bei sqlite-vec). 7 Production-Konversationen embedded,
+Hybrid-Search via Bayreuth-Re-Test verifiziert — Twin antwortet ehrlich
+ohne Halluzination, exakt wie Phase 5 lokal validiert.
 
-**Nächster Schritt:** Phase 3.4 Production-Deploy. Pre-Deploy: Docker-
-Volume-Setup für Model-Cache (war Bestandteil des entfallenen 3.4.C).
-
-**Phase 3 Definition of Done — 4 von 5 Häkchen** (3.1, 3.2, 3.3, 3.4
-lokal komplett). Phase 3.4 in Production deployen ist der nächste
-Schritt für DoD-Häkchen 4 vollständig. 3.5 (Hyperbrowser) bleibt offen
+**Phase 3 Definition of Done — 4 von 5 Häkchen WIRKLICH vollständig**
+(3.1, 3.2, 3.3, 3.4 in Production). 3.5 (Hyperbrowser) bleibt offen
 für Häkchen 5.
 
-## Heute (Tag 14) abgeschlossen
+## Heute (Tag 15) abgeschlossen
 
-### Vormittag — Bau-Sprint 3.4.E + 3.4.F + 3.4.G (~3-4h)
+### Vormittag — Pre-Deploy-Patch 3.4.J.1 (~30 Min)
 
-**3.4.E — Vector-Search im Send-Path** (Commit `44ab971`)
-- MemoryRetrievalService mit E5-Query-Prefix, Threshold/Min-Query-
-  Length-Filter, Same-Conv-Filter, Access-Tracking
-- EmbeddingsRepo.getFtsContent für die Prompt-Rendering-Schicht
-- buildEpisodicBlock — neue sechste System-Prompt-Schicht
-  ("Erinnerungen an vergangene Gespräche") nach dem summaryBlock
-- runOwnerDirect ruft retrieve() vor LLM-Call, filtert auf
-  currentConversation + summaries[].id
-- Config-Tunables EPISODIC_TOP_K (3), EPISODIC_SIMILARITY_THRESHOLD
-  (0.7), EPISODIC_MIN_QUERY_LENGTH (10) + parseFloatEnv
-- 10 Test-Cases grün, inkl. Live-LocalProvider-Pattern-Verifikation
-  ("Wer ist Markus' Frau?" → "Anna" mit sim=0.7395)
+**Recherche Modell-Cache-Pfad:** `@huggingface/transformers` 4.2.0
+ignoriert `HF_HOME` und `TRANSFORMERS_CACHE` komplett (null process.env-
+Refs in env.js). Default-Cache landet in `node_modules/.../@huggingface/
+transformers/.cache/` — bei jedem Container-Recreate weggeworfen.
 
-**3.4.F — Twin-Diary-CLI** (Commit `745d660`)
-- `twin:diary-add` + `twin:diary-list` mit Auto-Embedding via
-  TwinDiaryService aus 3.4.D
-- Foundation-CLI für die Selbst-Reflexions-Pattern-Phase
-- 6 Service-Level-Tests grün
+**3.4.J.1 — Modell-Cache-Pfad via ENV konfigurierbar** (Commit `4ade195`)
+- Helper `applyModelCacheDir(env)` in `local-provider.ts` — liest
+  `TWIN_LAB_MODEL_CACHE_DIR` und setzt `env.cacheDir`. Default-
+  Verhalten unverändert (Cache landet wie bisher in node_modules
+  für lokales Dev).
+- `.env.example`-Eintrag mit Erklärung
+- 2 Unit-Tests grün (ENV ungesetzt → cacheDir unverändert; ENV
+  gesetzt → cacheDir übernommen)
 
-**3.4.G — Maintenance-CLI** (Commit `e912130`)
-- `twin:memory-embed-all <handle> [--force] [--type ...] [--dry-run]`
-- MemoryMaintenanceService deckt drei Use-Cases ab: Initial-
-  Migration für 3.3-Bestandsdaten, Failure-Retry, Provider-Wechsel
-  mit deleteByTarget-vor-Re-Embed
-- Skip-Logic für Konversationen mit Summary-Segments
-- 7 Test-Cases grün, inkl. provider-A→provider-B-Swap
+### Vormittag — VPS-Vorbereitung + Deploy-Versuch (~45 Min, scheiterte)
 
-### Mittag — Bestandsdaten-Embedding + Smoke-Phase 1+2 (~30 Min)
+**VPS-Vorbereitung:**
+- `/docker/twin-lab-web/model-cache` Verzeichnis angelegt
+- `docker-compose.override.yml` erweitert um:
+  - `environment: TWIN_LAB_MODEL_CACHE_DIR=/app/data/model-cache`
+  - `volumes: /docker/twin-lab-web/model-cache:/app/data/model-cache`
+- Volume-Pfad-Entscheidung: bind-mount auf VPS-Filesystem (statt
+  Sub-Pfad des `twin-lab-web-data`-Volumes), wegen clean separation
+  of concerns DB vs Cache
 
-`pnpm twin:memory-embed-all @markus` auf den 26 pending Konversationen
-aus Phase 3.3 ausgeführt:
-- 23 Konversationen embedded (2.9s, q8-Modell schon warm)
-- 3 Konversationen mit Summary-Segments übersprungen (Skip-Logic
-  zieht sie auf `embedding_status='done'`)
-- Embeddings-Tabelle: 1 → 24 conversation-Rows
-- FTS5-Tabelle synchron befüllt
+**Builds erfolgreich** (Runtime 68.5s, Web 52.3s).
 
-Smoke-Doc `docs/3.4-SMOKE.md` mit Phase 1+2 ausgeführt, Phasen 3-5
-als Owner-TODO mit klaren Erwartungen.
+**Recreate scheiterte:** Runtime-Container in Restart-Loop mit
+```
+Error loading shared library .../vec0.so.so: No such file or directory
+```
 
-### Nachmittag — Phase 3.1 Browser-Smoke (~20 Min, substantieller Befund)
+### Vormittag/Mittag — Diagnose-Marathon (~1.5h)
 
-**Bayreuth-Retrieval-Test in echter Runtime.** Query "Hey, was hatten
-wir gestern eigentlich nochmal über Bayreuth-Karten und Marc
-besprochen? Mir entfällt da ein Detail."
+**Hypothesen-Iteration:** Versions-Drift (verworfen, lokal und VPS
+hatten identisch `better-sqlite3@11.10.0`). Symlink-Workaround (als
+Quick-Fix erwogen, aber nicht Wurzel-Fix). Library-Update (nicht
+garantiert wirksam).
 
-**Befund:**
-- Retrieval-Pipeline funktional: 3 Hits mit Top-Sim 0.704
-- **Aber Retrieval-Ranking semantisch falsch** — keine der 3 Hits ist
-  thematisch Bayreuth-relevant (Pending-Fact `contact_bayreuth` ist
-  nicht im Memory-FTS-Index, Bayreuth-Konv existiert nicht als
-  conversation-Row)
-- **Twin halluziniert detaillierte Konversation** aus thematisch
-  falschen Memories + Pending-Fact-Wissen: vier strukturierte Punkte
-  (Preis/Termin/Acht-Karten/Compliance) plus Fazit
-- **Twin korrigiert sich aus eigenem Antrieb** beim Folge-Turn:
-  "Stopp — meine vorige Antwort war Bullshit. Ich hab das erfunden."
-  Vision-Pattern "Ehrlichkeit über Tatsachen" greift sauber.
+**Endgültige Diagnose via Container-Inspect:**
 
-**Implikation:** Pure Vector-Search mit Threshold 0.7 produziert bei
-deutschen Eigennamen-Queries Token-Overlap-Treffer, die der LLM als
-legitimes Memory interpretiert. Pre-Check-Antizipation in realer
-Datenlage *deutlich schärfer* als erwartet.
+```bash
+docker run --rm -it --entrypoint sh twin-lab-runtime:latest
+ldd /app/apps/runtime/node_modules/.pnpm/sqlite-vec-linux-x64@0.1.9/
+  node_modules/sqlite-vec-linux-x64/vec0.so
+```
 
-**Konsequenz:** vier neue Backlog-Items erzeugt (#96 Hierarchical
-Scoping als must, #98 Hybrid-Search, #99 Prompt-Wording, #100 Anti-
-Halluzinations-Pattern). Strategie-Session für 3.4.I als Reaktion
-geplant.
+Output:
+```
+libc.so.6 => /lib/ld-musl-x86_64.so.1
+Error relocating .../vec0.so: __memcpy_chk: symbol not found
+Error relocating .../vec0.so: __fread_chk: symbol not found
+```
 
-### Nachmittag — Strategie-Session + 3.4.I-Bau (~3h)
+**Wurzel:** `sqlite-vec-linux-x64@0.1.9` liefert nur glibc-Builds.
+`__memcpy_chk` und `__fread_chk` sind FORTIFY_SOURCE-Hardening-
+Wrappers, die musl explizit nicht implementiert. Alpine nutzt musl,
+also: Plattform-Inkompatibilität.
 
-**Strategie-Session Hybrid-Search.** Vier Architektur-Fragen geklärt
-in kompaktem Format (Frage 1 Ranking, Frage 2 Query-Preprocessing,
-Frage 3 Pool/Threshold, Frage 4 Scope). Ergebnis:
+**Die irreführende `vec0.so.so`-Fehlermeldung** entsteht durch SQLite's
+Auto-Fallback (siehe `sqlite3_load_extension`-Doku): wenn direkter
+Pfad-Load fehlschlägt, hängt SQLite `.so` nochmal an als zweiten
+Versuch. Wir hatten die ganze Zeit Pfad-Auflösung verdächtigt — war
+aber Symbol-Loading-Problem.
 
-1. **RRF** (Reciprocal Rank Fusion, k=60) als Ranking. LLM-Re-Rank
-   als 3.4.J nach Phase-5-Validierung.
-2. **Aggressive Sanitization** vor FTS5 (alle Nicht-Buchstaben/Zahlen
-   → Space). Vector-Pfad unverändert.
-3. **Top-10 Pool pro Source**, Missing-Rank-Penalty. Zweistufige
-   Threshold-Sicherung: Pre-RRF Min-Vector-Sim 0.5, Post-RRF Score-
-   Threshold 0.015.
-4. **Scope:** RRF + Sanitization + #99 Prompt-Update in 3.4.I. #100
-   + LLM-Re-Rank als 3.4.J. #96 Hierarchical Scoping bleibt offen.
+**Lesson:** Pre-Check vom 12. Mai war lokal auf macOS arm64, nicht im
+Production-Container. Diese Plattform-Inkompatibilität (glibc vs musl)
+ließ sich lokal nicht aufdecken. Backlog #103 für künftige Pre-Checks.
 
-Strategy-Doc `docs/3.4.I-STRATEGY.md` (Commit `f2865d7`, 368 Zeilen).
+### Mittag — Base-Image-Wechsel + Re-Deploy (~1h)
 
-**3.4.I — Hybrid-Search via RRF + Sanitization + #99** (Commit
-`e3a8ea1`)
-- `sanitize.ts` (neu) — `sanitizeForFts5` + `sanitizedTokenCount` als
-  Pure Helpers
-- `EmbeddingsRepo.searchFts5` — BM25-Search mit JOIN auf embeddings
-  für Tenant + Modell-Filter, defensiv mit try/catch
-- `MemoryRetrievalService.retrieve` Refactor auf Hybrid: Vector +
-  FTS5 parallel → Pre-RRF Vector-Filter → RRF (k=60) → Post-RRF
-  Threshold → Same-Conv-Filter → Top-K + Content
-- `rrfMerge` als exportierte Pure-Function für Unit-Tests
-- Config-Refactor: alter `EPISODIC_SIMILARITY_THRESHOLD` raus, vier
-  neue ENVs (`EPISODIC_HYBRID_RRF_K`, `EPISODIC_HYBRID_POOL_SIZE`,
-  `EPISODIC_HYBRID_MIN_VECTOR_SIM`, `EPISODIC_RRF_THRESHOLD`)
-- `buildEpisodicBlock` (#99): Header "Mögliche Erinnerungen", explizite
-  Anti-Halluzinations-Anweisung
-- 8 neue Mock-Tests + Live-E5-Vergleich, alle grün
-- Real-Data-Befund (#101 als Backlog): FTS5 macht implizit AND-
-  Konjunktion über Tokens — bei Pronominal-Queries killen Stopwords
-  den FTS5-Hit. Hybrid-Boost greift dann nicht, Pure-Vector-Ranking
-  bleibt. Drei Mitigations-Pfade dokumentiert.
+**3.4.J.2 — Runtime-Image von Alpine auf Debian-Slim** (Commit `706977b`)
+- `apps/runtime/Dockerfile`: beide Stages auf `node:20-slim`,
+  `apk add` → `apt-get install`
+- `apps/web/Dockerfile`: auch auf slim für Konsistenz (kein glibc-
+  Zwang, aber sauber)
+- Image-Größe Runtime: +166 MB (688 MB → 854 MB, reiner Base-Image-
+  Anteil. onnxruntime-App-Layer byte-identisch)
+- Verifikation lokal: `ldd vec0.so` keine "symbol not found"-Errors
+  mehr, glibc 2.36 sauber aufgelöst
+- Plus init-db-Smoke auf amd64: 19 Migrationen durch inkl.
+  017_embeddings_and_fts.sql
 
-### Nachmittag — Phase-5-Validierung in echter Runtime (~20 Min)
+**VPS-Deploy nach Push:**
+- Repo-Pull `13c9056 → 706977b` (zwei Commits)
+- Image-Rebuild (Runtime 114.8s, Web 47.8s — länger weil neue Debian-
+  Base + native Module gegen glibc kompiliert)
+- Container-Recreate: **beide Up nach 3 Sekunden**, keine Restart-Loop
+- Migrationen 017-019 sauber angewendet, log-bestätigt
+- ENV-Var und Volume verifiziert: `TWIN_LAB_MODEL_CACHE_DIR=
+  /app/data/model-cache` aktiv, Verzeichnis gemountet
 
-Drei Tests gegen 3.4.I in echter Runtime:
+### Mittag — Initial-Embedding + Real-Data-Smoke (~15 Min)
 
-**5.1 Bayreuth-Re-Test (identische Query wie 3.1):**
-- Runtime-Log: `returned 3 hit(s), top-rrf=0.0328 (vec-rank=1
-  vec-sim=0.765 bm25-rank=1) fts5=on`
-- Twin-Antwort: **"Dazu hab ich nichts. Weder Bayreuth noch Marc noch
-  Parsifal-Karten tauchen in meinen Erinnerungen auf."** Ehrlich,
-  sauber, Vision-konform.
-- Self-referential Memory: gestrige Halluzinations-Konv wurde durch
-  3.4.D embedded, ist jetzt selbst Top-Hit. Twin sieht seinen Fehler
-  und reagiert sauber. **Halluzinations-Bug behoben.**
+**Initial-Embedding auf Production:**
+- `node dist/scripts/memory-embed-all.js @markus`
+- 7 Konversationen embedded in **10.9s** (Modell schnell gepulled,
+  vermutlich aus CDN-Cache nahe an VPS)
+- 1 Konversation skipped (Skip-Logic für Summary-Segments)
+- Modell-Cache: 553 MB in `/docker/twin-lab-web/model-cache/Xenova/`
+- @florian + @heiko: 0 Konversationen (sind kaum genutzt)
 
-**5.2 Anna-Test (pronominal):**
-- `bm25-rank=—` — FTS5 fand 0 Hits wegen AND-Stopwords. Bestätigt #101.
-- Twin antwortet trotzdem "Anna" via Facts-Layer (3.3). Saubere
-  Verantwortungstrennung: strukturelle Truth via Facts, Konversations-
-  Verläufe via Episodic.
+**DB-Verifikation:** 7 embeddings, 8 conversations_done (+1 wegen
+Skip-Logic), 7 FTS-Einträge — konsistent.
 
-**5.3 Maria-Topic-Query:**
-- `bm25-rank=—` — wieder Stopwords-Problem
-- Vector findet Maria-Konv mit Sim 0.749 (Top-1)
-- Twin nutzt Memory konsistent ("Mail und CRM nicht angebunden")
+**Bayreuth-Re-Test gegen Production:** identische Query wie Tag-14
+Phase 3.1 und 5.1, jetzt gegen Production-Twin:
 
-**Befund:** Hybrid-Search + #99 löst Halluzinations-Problem. FTS5-AND-
-Befund (#101) ist real, aber nicht kritisch — Facts-Layer fängt
-strukturelle Fragen ab, Vector zuverlässig bei Topic-Queries.
+> "Hey, was hatten wir gestern eigentlich nochmal über Bayreuth-Karten
+> und Marc besprochen? Mir entfällt da ein Detail."
 
-**Phase 3.4 production-ready.**
+**Runtime-Log:**
+```
+[memory-retrieval] twin=twin_jgqzOIkzdTsTx6vv returned 3 hit(s),
+  top-rrf=0.0164 (vec-rank=1 vec-sim=0.697 bm25-rank=—) fts5=on
+```
 
-### Plus: MemPalace-Inspirationen + Backlog-Items (~30 Min)
+**Twin-Antwort:**
 
-Recherche zu MemPalace (github.com/mempalace/mempalace, 48.2k Stars,
-MIT, Python). Vier Patterns als Inspirationsquelle dokumentiert ohne
-Architektur-Switch:
-- Wings/Rooms/Drawers-Hierarchie
-- Temporal-Knowledge-Graph mit Validity-Windows
-- Verbatim-Storage statt Summary-Compression
-- Auto-Save-Hooks für Claude Code
+> "Dazu habe ich keine Erinnerung. Weder Bayreuth-Karten noch ein Marc
+> tauchen in dem auf, was ich aus früheren Gesprächen mit dir habe.
+> Was ich finde: ein kurzer Test nach einem Deploy, eine Frage zu
+> Frau/Wohnort/Arbeit, und eine Hauptstadt-Frage. Mehr nicht.
+>
+> Falls du das mit Markus direkt besprochen hast (nicht mit mir als
+> Twin), müsstest du ihn selbst fragen — info@harwayexperience.com
+> oder LinkedIn."
 
-Drei Backlog-Items angelegt (#95, #96, #97). Commit `ad308b6`.
+**Pass.** Drei Sachen sind hier richtig: keine Halluzination,
+Transparenz über echte Memory (nennt konkret die 7 embedded
+Konversationen), saubere Self-vs-Original-Markus-Trennung.
 
-Plus aus Phase 3.1 vier weitere Items: #98 (Hybrid-Search via FTS5,
-durch 3.4.I umgesetzt), #99 (Prompt-Wording, in 3.4.I integriert),
-#100 (Anti-Halluzinations-Persona, bleibt für 3.4.J), #101 (FTS5-AND-
-Befund aus 3.4.I).
+Plus: `bm25-rank=—` bestätigt #101 FTS5-AND-Befund in Production —
+gleiche Pattern wie Phase 5.2/5.3 lokal. Nicht kritisch, weil Vector-
+Layer den Hit liefert und Facts-Layer strukturelle Truth abdeckt.
+
+**Phase 3.4 in Production LIVE und Halluzinations-Bug behoben.**
+
+## Tag-14-Sequenz (zur Erinnerung, unverändert)
+
+**Vormittag:** Bau-Sprint 3.4.E (`44ab971`) + 3.4.F (`745d660`) +
+3.4.G (`e912130`). Plus 3.4.H Smoke-Doc.
+
+**Mittag:** 23 Bestandsdaten-Konvs lokal embedded via Maintenance-CLI.
+
+**Nachmittag:** Phase 3.1 Browser-Smoke → Bayreuth-Halluzinations-
+Befund. Reaktive Strategie-Session + 3.4.I-Bau (`e3a8ea1`). Phase 5
+validiert Resolution. Plus #101 als FTS5-AND-Befund.
+
+**Abend:** STAND-Update Tag 14 Abend (`13c9056`).
 
 ## Tag-13-Sequenz (zur Erinnerung, unverändert)
 
-**Vormittag:** Production-Deploy Phase 3.3 — Tag-12-Stand auf VPS,
-keine Komplikationen. Initial-Facts via Container-CLI.
+**Vormittag:** Production-Deploy Phase 3.3 — Tag-12-Stand auf VPS.
 
 **Mittag/Nachmittag:** Vision-Session (~3h). `docs/TWIN-VISION.md`
-(275 Zeilen, Commit `6bc9a05`). Plus Pitch-Deck.
+(`6bc9a05`). Plus Pitch-Deck.
 
-**Nachmittag:** Strategie-Session vor Phase 3.4 (~45 Min). Fünf
-Architektur-Entscheidungen. `docs/3.4-STRATEGY.md` (Commit `897aa34`).
-
-**Nachmittag/Abend:** Pre-Check + 3.4-STRATEGY-Patch (~45 Min).
-Stack-Validation für sqlite-vec + better-sqlite3 + transformers auf
-M1 Max. q8 + E5-Prefix + FTS5-Vorbereitung. Commit `88a98b7`.
+**Nachmittag:** Strategie-Session vor 3.4. `docs/3.4-STRATEGY.md`
+(`897aa34`). Plus Pre-Check + Patch (`88a98b7`).
 
 **Abend:** Bau 3.4.A (`168986c`), 3.4.B (`7fb5551`), 3.4.D (`260186b`).
-Plus 3.4.C entfallen (`ca1f2ff`). Plus STAND-Update (`4411fb4`).
+Plus 3.4.C entfallen (`ca1f2ff`).
 
 ## Phase 3 Status
 
@@ -202,55 +188,57 @@ Plus 3.4.C entfallen (`ca1f2ff`). Plus STAND-Update (`4411fb4`).
   (Tag 10/11)
 - 3.3 ✅ **Memory: Conversation + Semantic** (Tag 12 lokal,
   Tag 13 Vormittag in Production)
-- 3.4 ✅ **Memory: Episodic** (Tag 13/14 lokal komplett, inkl. 3.4.I
-  Hybrid-Search-Resolution aus Smoke-Befund) — Production-Deploy
-  pending
+- 3.4 ✅ **Memory: Episodic** (Tag 13/14 lokal komplett, Tag 15
+  in Production)
 - 3.5 offen — Hyperbrowser als MCP-Skill
 - 3.6 offen — Procedural Memory (ggf. Phase 4)
 
-**Phase 3 Definition of Done — 4 von 5 Häkchen.** Phase 3.4 lokal
-komplett. Production-Deploy steht aus. Phase 3.4 ist das technische
-Fundament für fünf der acht menschlichen Patterns aus TWIN-VISION
-(Zeit-Erleben, Schlaf/Träume, Aufmerksamkeit/Fokus, Lebens-Narrativ,
-Selbst-Reflexion).
+**Phase 3 Definition of Done — 4 von 5 Häkchen wirklich vollständig.**
+
+Phase 3.4 ist das technische Fundament für fünf der acht menschlichen
+Patterns aus TWIN-VISION (Zeit-Erleben, Schlaf/Träume, Aufmerksamkeit/
+Fokus, Lebens-Narrativ, Selbst-Reflexion).
 
 ## Was als nächstes ansteht
 
-1. **Phase 3.4 in Production deployen** (M, primär)
-   - Pre-Deploy: Docker-Volume für Model-Cache vorbereiten
-   - Normaler Deploy-Pfad: Repo-Pull, Image-Rebuild, Container-Recreate
-   - Migrationen 017-019 werden auto-angewendet
-   - Maintenance-CLI auf Production-Bestandsdaten ausführen (alle
-     Production-Konversationen sind aktuell pending)
-   - Real-Data-Smoke: Bayreuth-Re-Test gegen Production
-2. **Strategie-Session vor 3.5 (Hyperbrowser)** (S, danach)
+1. **Strategie-Session vor 3.5 (Hyperbrowser)** (S, primär)
+   - 3.5 baut auf etablierter MCP-Foundation aus 3.2 auf
+   - Kleinere Strategie-Session — vermutlich drei Architektur-Fragen
+     (Server-Pattern, Skill-Exposure, Use-Cases)
+2. **DEPLOYMENT.md + docker-compose.override.yml.example** (#102, M,
+   should). Self-Hosting-Doku, die heute-gelernte Sachen wie Base-
+   Image-Anforderung und Modell-Cache-Volume sauber dokumentiert.
+   Nicht zeitkritisch, aber Vision-relevant.
 3. **Optional**: #101 FTS5-AND-Befund evaluieren wenn Real-Data zeigt
-   dass Pronominal-Queries Pain Point werden (Stopword-Filter wäre
-   kleiner Patch)
+   dass Pronominal-Queries Pain Point werden
 4. **Optional**: 3.4.J (LLM-Re-Rank + #100 Persona-Anti-Halluzinations)
-   — nicht mehr akut, weil Hybrid + #99 reichen. Bei Datenmengen-
-   Wachstum als Premium-Schicht verfügbar
+   — nicht akut, weil Hybrid + #99 reichen
 
 Weiterhin im Backlog:
 - **#90 Resume-Prompt-Tuning** (M, should)
 - **#91 Reject-Reason-UI** (S, nice)
+- **#103 Pre-Check im production-äquivalenten Container** (S, should)
+- **#104 sqlite3-CLI im Runtime-Image** (XS, nice)
 - **Toast-Framework statt alert()** (M, nice)
 - **#79 Persona-Tabelle droppen** (XS, nice)
 
-## Production-Stack — Tag-12-Stand auf VPS
+## Production-Stack — Tag-15-Stand auf VPS
 
-**Phase 3.3 in Production aktiv** (deployed Tag 13 Vormittag).
-Production-VPS auf Commit `189acbc`. Phase 3.4 lokal komplett, noch
-nicht deployed.
+**Phase 3.4 in Production LIVE** (deployed Tag 15 Mittag).
+Production-VPS auf Commit `706977b`.
 
 - **`https://app.twin.harwayexperience.com`** — Web
 - **`https://runtime.twin.harwayexperience.com`** — Runtime
 - **`https://bridge.twin.harwayexperience.com`** — Bridge
 
-**Persona-Stand auf Production:**
-- @markus: 6991 chars
-- @florian: 575 chars
-- @heiko: 344 chars (Stub)
+**Stack-Änderungen seit Tag 13:**
+- Base-Image: `node:20-alpine` → `node:20-slim` (Debian, glibc) —
+  wegen sqlite-vec musl-Inkompatibilität
+- Image-Größen: Runtime ~854 MB, Web ~427 MB (Debian-Base-Anteil)
+- Neue Volumes: `/docker/twin-lab-web/model-cache` (553 MB Modell-
+  Cache, persistiert über Container-Recreates)
+- Neue ENV: `TWIN_LAB_MODEL_CACHE_DIR=/app/data/model-cache` in
+  override.yml
 
 **Production-Twin @markus hat:**
 - Drei initial approved Facts (city=Roding, company=Harway
@@ -258,10 +246,14 @@ nicht deployed.
 - Sieben Pending-Facts aus Tag-13-Smoke-Test
 - 26 MCP-Tools aktiv
 - Pilot-Skill `harway-workshops`
+- **7 embedded Konversationen** in Episodic-Memory (Tag-15-Mittag)
+- Plus Bayreuth-Test-Konv von Tag 15 (self-referential Memory aktiv)
 
-**VPS-Override-File** hat zwei bind-mounts:
+**VPS-Override-File** hat jetzt drei bind-mounts und eine ENV-Var:
 - `/docker/twin-lab-web/repo/docs:/app/docs:ro` (#81)
 - `/docker/twin-lab-web/repo/mcp-servers:/app/mcp-servers:ro` (#92)
+- `/docker/twin-lab-web/model-cache:/app/data/model-cache` (Tag 15)
+- `TWIN_LAB_MODEL_CACHE_DIR=/app/data/model-cache`
 
 ## Lokal
 `/Users/mjb/Visual Studio/twin-lab` — drei Twins, lokale Bridge
@@ -272,32 +264,16 @@ Tag 14):**
 - `embeddings`-Tabelle mit vec0-Virtual-Tabelle (1024 dim)
 - `memory_fts`-Virtual-Tabelle mit unicode61-Tokenizer
 - `twin_diary`-Tabelle
-- `embedding_status`-Spalten auf conversation_summaries und
-  conversations
-- EmbeddingsRepo + TwinDiaryRepo
-- LocalEmbeddingProvider mit multilingual-e5-large q8
-- MemoryEmbeddingService + TwinDiaryService
-- **3.4.I Hybrid-Search aktiv:** MemoryRetrievalService kombiniert
-  Vector + FTS5 via RRF, zweistufige Threshold-Sicherung, #99 Anti-
-  Halluzinations-Prompt-Wording
+- `embedding_status`-Spalten
+- 3.4.I Hybrid-Search aktiv (Vector + FTS5 via RRF, zweistufige
+  Threshold-Sicherung, #99 Anti-Halluzinations-Prompt-Wording)
 
-**24+ Memory-Einträge in der DB:**
-- Maria-Konv (Tag 13 Abend)
-- 23 Bestandsdaten-Konvs (Tag 14 Vormittag via Maintenance-CLI)
-- Drei Tag-14-Nachmittag-Konvs (Bayreuth-Halluzination, Anna-Test,
-  Maria-Test) plus deren Reflektieren-Konvs
-
-**Memory-System aktiv (seit Tag 12):**
-- `conversation_summaries`-Tabelle, Auto-Summary bei >50 Messages
-- `facts`-Tabelle, Facts im System-Prompt als 2. Schicht
-- Twin-Extraction via POST /facts/extract
-- Facts-UI unter /facts
-- Manual-Extract-Button + Reset-Confirm-Modal im Chat (3.3.G3)
+**24+ Memory-Einträge in der DB** aus Tag 13/14.
 
 **Markus-Twin lokal:**
 - Pilot-Skill `harway-workshops`, 26 MCP-Tools
 - 8 Facts (4 user + 4 approved twin-extracted)
-- Plus Pending-Facts aus Tag-12 + Tag-13-Smoke
+- Plus Pending-Facts
 
 ## Drei User auf Production
 - Owner: @markus (markus.baier@harway.de)
@@ -307,32 +283,31 @@ Tag 14):**
 Alle drei mit anthropic/claude-opus-4-7.
 
 ## Repo
-github.com/markusbaier/twin-lab — `origin/main` auf `e3a8ea1`
-(Tag 14 Nachmittag, 3.4.I). Production-VPS auf `189acbc` (Tag 12
-Doku-Commit). Tag-13/14-Code-Commits sind noch nicht in Production
-— das kommt mit dem 3.4-Production-Deploy.
+github.com/markusbaier/twin-lab — `origin/main` auf `706977b`
+(Tag 15 Mittag, Base-Image-Wechsel). Production-VPS auf `706977b`.
+Repo und VPS sind synchron.
 
-**Tag-14-Commits (alle gepushed):**
-- `4411fb4` docs: STAND Tag 13 Abend — 3.4.A/B/D durch und
-  smoke-verifiziert
-- `ad308b6` docs: MemPalace-Inspirationen als Backlog-Items #95/96/97
-- `44ab971` feat(runtime): 3.4.E Vector-Search im Send-Path als
-  sechste Memory-Schicht
+**Tag-15-Commits (alle gepushed):**
+- `4ade195` feat(runtime): Modell-Cache-Pfad via
+  TWIN_LAB_MODEL_CACHE_DIR konfigurierbar
+- `706977b` fix(deploy): Runtime-Image von Alpine auf Debian-Slim
+  wegen sqlite-vec musl-Inkompatibilität
+- (kommt: docs Tag 15 — STAND + Backlog #102/103/104)
+
+**Tag-14-Commits:**
+- `4411fb4` docs: STAND Tag 13 Abend
+- `ad308b6` docs: MemPalace-Inspirationen
+- `44ab971` feat(runtime): 3.4.E Vector-Search im Send-Path
 - `745d660` feat(runtime): 3.4.F Twin-Diary-CLI
-- `e912130` feat(runtime): 3.4.G Maintenance-CLI twin:memory-embed-all
-- `6e9771f` docs(3.4): 3.4.H End-to-End-Smoke-Protokoll + Phase-3.4-
-  Status-Updates
-- `f2865d7` docs(3.4.I): Strategy-Doc für Hybrid-Search nach Smoke-
-  Befund
-- `e3a8ea1` feat(runtime): 3.4.I Hybrid-Search via RRF + Sanitization
-  + #99 Prompt-Update
-- (kommt: docs Tag 14 Abend — Smoke-Phase-5 + STAND + Backlog #101)
+- `e912130` feat(runtime): 3.4.G Maintenance-CLI
+- `6e9771f` docs(3.4): 3.4.H End-to-End-Smoke-Protokoll
+- `f2865d7` docs(3.4.I): Strategy-Doc für Hybrid-Search
+- `e3a8ea1` feat(runtime): 3.4.I Hybrid-Search via RRF + #99
+- `00ded89` docs: #101 FTS5-AND-Befund
+- `13c9056` docs(3.4): Phase 3.4 abgeschlossen — Tag 14 Abend
 
-**Tag-13-Commits:** siehe vorigen Stand-Eintrag
+**Tag-13-Commits:** siehe vorige Stand-Einträge
 
 **Tag-12-Commits:**
 - `9b4d5c5` 3.3.A bis `a3c868b` 3.3.G3 (9 Code-Commits)
 - `189acbc` Doku Tag 12
-
-VPS-Override-File hat zwei bind-mounts (#81 docs/ + #92
-mcp-servers/), lebt nur auf VPS.

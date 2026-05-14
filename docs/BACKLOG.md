@@ -1616,6 +1616,78 @@ Substantiell — eigene Phase, vermutlich nach 3.4 oder mit Pattern-Phase „Zei
 
 Aus Tag-14-Recherche.
 
+### #102 Self-Hosting-Doku: DEPLOYMENT.md + docker-compose.override.yml.example (M, should)
+
+**Kontext:** Tag-15-Production-Deploy hat drei Doku-Lücken offengelegt:
+
+1. **`docker-compose.override.yml` lebt nur auf VPS.** Self-Hoster sehen das Pattern gar nicht. Heute hatten wir auf VPS drei Bind-Mounts (docs, mcp-servers, model-cache) plus eine ENV-Variable (TWIN_LAB_MODEL_CACHE_DIR) — alles undokumentiert für externe Nutzer.
+2. **`.env.example` ist Self-Hosting-unvollständig.** Phase-3.4-ENVs (EPISODIC_*, TWIN_LAB_EMBEDDING_*) sind nicht drin, weil sie Defaults haben — aber ein Self-Hoster der's konfigurieren möchte hat keinen Anhaltspunkt.
+3. **musl/glibc-Inkompatibilität bei sqlite-vec.** Wir haben heute 1h+ Diagnose-Marathon gebraucht um das zu verstehen. Self-Hoster, die ein anderes Base-Image probieren, würden in dieselbe Falle laufen. „Use node:20-slim or any glibc-based Linux distro" sollte explizit dokumentiert sein.
+
+**Lösung:** Zwei Dateien anlegen:
+
+- **`docker-compose.override.yml.example`** im Repo committen — Vorlage mit Platzhaltern für deployment-spezifische Werte (Domains, Volume-Pfade). Header-Kommentar erklärt: „Kopiere zu `docker-compose.override.yml`, passe an, niemals committen."
+- **`docs/DEPLOYMENT.md`** mit:
+  - Pre-Deploy-Checks (Disk-Speicher, DNS, Bridge-Network)
+  - Volume-Konfiguration (model-cache, data-volume, docs/mcp-servers bind-mounts)
+  - ENV-Variable-Reference (was muss/kann/sollte gesetzt sein)
+  - Base-Image-Anforderung: **glibc, nicht musl** (sqlite-vec liefert nur glibc-Builds)
+  - Deploy-Sequenz (Pull, Build, Recreate, Embedding-Initialization)
+  - Smoke-Tests post-Deploy
+  - Troubleshooting (vec0.so.so-Pattern erklären als Auto-Fallback bei dlopen-Fail)
+
+**Größe:** M — ca. 2-3h, weil Substanz heute schon klar. Tag-15-Lessons direkt verarbeiten.
+
+**Wann:** vor erstem externen Self-Hosting-Use-Case, oder als Polish-Item wenn Roadmap Pause hat. Nicht zeitkritisch, aber Vision-relevant (siehe TWIN-VISION.md / Pitch-Deck).
+
+---
+
+### #103 Pre-Check in production-äquivalentem Container, nicht lokal (S, should)
+
+**Kontext:** Tag-15-Production-Deploy hat einen substantiellen Pre-Check-Lücke offengelegt. Der Pre-Check für Phase 3.4 vom 12. Mai wurde *lokal auf macOS arm64* gemacht — drei kritische Patterns wurden verifiziert (BigInt-rowid, Buffer-Wrap, CTE-KNN), Stack-Kompatibilität festgestellt. Aber: das `vec0.so`-Binary von sqlite-vec ist glibc-gebaut, Alpine Linux nutzt musl. macOS-Lokal-Verifikation hat das nicht abgedeckt.
+
+**Kosten:** ~1.5h Diagnose-Marathon auf Tag 15 (Inspect-Shell, `ldd`, web search, Hypothesen-Tests). Plus Build-Image-Wechsel von Alpine auf Debian-Slim (+166 MB Image-Size).
+
+**Lösung:** Future Pre-Checks für architektur-sensitive Dependencies (native modules, C-Extensions, OS-spezifische Libraries) sollen im Production-äquivalenten Docker-Container laufen, nicht nur lokal. Pattern:
+
+```bash
+# Pre-Check-Container hochfahren
+docker run --rm -it --entrypoint sh node:20-slim sh -c "
+  apt-get update && apt-get install -y python3 make g++ &&
+  cd /workspace && npm install <dep-to-test> &&
+  ldd node_modules/.../the-binary.so &&
+  node -e 'require(\"<dep>\")'
+"
+```
+
+Plus: bei Phase-Strategy-Sessions explizit fragen „braucht das einen Container-basierten Pre-Check?" als checkbox.
+
+**Größe:** S — 30-60 Min, einmaliges Pattern-Setup. Plus dokumentierter Pattern in DEPLOYMENT.md (#102) oder im 3.5-STRATEGY-Pre-Check.
+
+**Wann:** Vor nächstem Stack-Validation (z.B. 3.5 Hyperbrowser falls native Deps dabei sind, oder beim ersten Performance-Engpass mit neuen native Deps).
+
+---
+
+### #104 sqlite3-CLI nicht im Container-Image (XS, nice)
+
+**Kontext:** Bei Tag-15-Production-Verifikation wollten wir `sqlite3 /data/twin.db ".tables"` ausführen, um Tabellen-Existenz zu prüfen. `sqlite3`-Binary ist nicht im node:20-slim Image installiert.
+
+**Workaround verwendet:** Verifikation via `node -e "..."` mit `better-sqlite3`. Funktioniert, aber umständlicher als direkter SQL-Call. Plus Migrations-Logs aus init-db zeigten die Tabellen ohnehin.
+
+**Lösung:** In `apps/runtime/Dockerfile` runner-Stage ergänzen:
+
+```dockerfile
+RUN apt-get update && apt-get install -y --no-install-recommends sqlite3 && rm -rf /var/lib/apt/lists/*
+```
+
+Kosten: ~6 MB Image-Größe. Nutzen: direkter SQL-Zugriff für Smoke-Tests und Debugging im Container.
+
+**Größe:** XS — 5 Min Dockerfile-Edit + Test.
+
+**Wann:** beim nächsten Routine-Dockerfile-Touch.
+
+---
+
 ### #101 FTS5-AND-Semantik verhindert Hybrid-Boost bei Pronominal-Queries (M, should)
 
 Befund aus 3.4.I Live-E5-Test: FTS5 macht implizit AND-Konjunktion über alle Query-Tokens. Bei deutschen Pronominal-Fragen ("Wer ist Markus' Frau?", "Was hatten wir über X besprochen?") killen die Stopword/Pronomen-Tokens den FTS5-Hit, weil sie im Content nicht vorkommen.
