@@ -11,7 +11,10 @@
 # Root — die COPY-Layouts unten respektieren das.
 
 # ─── Stage 1: Builder ───────────────────────────────────────────────────────
-FROM node:20-alpine AS builder
+# node:20-slim (Debian) statt -alpine — gleiche Base wie das Runtime-Image
+# (apps/runtime/Dockerfile). Web selbst hat keine glibc-Abhängigkeit, aber
+# zwei verschiedene Base-Images im selben Compose-Stack sind unnötige Drift.
+FROM node:20-slim AS builder
 
 RUN corepack enable
 
@@ -48,7 +51,7 @@ RUN pnpm --filter @twin-lab/web build
 
 
 # ─── Stage 2: Runner ────────────────────────────────────────────────────────
-FROM node:20-alpine AS runner
+FROM node:20-slim AS runner
 
 ENV NODE_ENV=production
 

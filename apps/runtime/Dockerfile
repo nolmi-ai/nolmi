@@ -6,14 +6,22 @@
 #
 # Pattern 1:1 von apps/bridge/Dockerfile übernommen, nur Filter-Targets
 # wechseln und @twin-lab/shared mitkopieren (Runtime nutzt es als
-# Workspace-Dep — Bridge nicht).
+# Workspace-Dep — Bridge nicht). Abweichung: Base-Image ist hier
+# node:20-slim statt -alpine (sqlite-vec braucht glibc, siehe Stage 1).
 
 # ─── Stage 1: Builder ───────────────────────────────────────────────────────
-FROM node:20-alpine AS builder
+# Debian-Slim statt Alpine: sqlite-vec-linux-x64 liefert vec0.so nur als
+# glibc-Build (FORTIFY_SOURCE-Symbole __memcpy_chk / __fread_chk). Alpines
+# musl libc implementiert die nicht → "symbol not found" beim Extension-Load,
+# der Container-Init scheitert. glibc-Base ist daher Pflicht für die Runtime.
+FROM node:20-slim AS builder
 
-# better-sqlite3 hat ein natives Modul. Auf Alpine (musl) ist meist kein
-# Prebuild verfügbar → python3/make/g++ werden gebraucht.
-RUN apk add --no-cache python3 make g++
+# better-sqlite3 hat ein natives Modul. Build-Toolchain als Sicherheits-Net,
+# falls kein passender Prebuild gezogen wird (auf Debian/glibc-x64 meist
+# vorhanden — wir verlassen uns aber nicht drauf).
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends python3 make g++ \
+  && rm -rf /var/lib/apt/lists/*
 
 # pnpm-Version stammt aus dem packageManager-Feld der Root-package.json
 RUN corepack enable
@@ -50,7 +58,7 @@ RUN pnpm deploy --filter @twin-lab/runtime --prod /out
 
 
 # ─── Stage 2: Runner ────────────────────────────────────────────────────────
-FROM node:20-alpine AS runner
+FROM node:20-slim AS runner
 
 ENV NODE_ENV=production
 
