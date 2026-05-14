@@ -1,0 +1,52 @@
+# Production-Override für docker-compose.yml.
+#
+# Dieses File ist eine Vorlage. Kopiere es zu `docker-compose.override.yml`
+# in deinem Deployment-Verzeichnis (typischerweise neben der docker-compose.yml,
+# z.B. /docker/twin-lab-web/), passe es an deine Deployment-spezifischen Werte
+# an, und committe es NICHT zurück ins Repo.
+#
+# Compose lädt `docker-compose.override.yml` automatisch zusätzlich zur
+# `docker-compose.yml`. Settings hier überschreiben oder ergänzen die Basis-
+# Konfiguration aus dem Repo.
+#
+# Drei Use-Cases werden hier abgedeckt:
+# 1. Live-Mounts für docs/ und mcp-servers/ — damit twin:reload-CLI auf
+#    aktuellen Repo-Stand zugreift, ohne Image-Rebuild
+# 2. Modell-Cache-Volume für Phase 3.4 Episodic-Memory — damit das
+#    ~550 MB multilingual-e5-large q8 Modell Container-Recreates überlebt
+# 3. Pfad-Konvention bind-mount mit absoluten Pfaden — relative Pfade
+#    klappen nicht, wenn `docker-compose.yml` ein Symlink ist (was im
+#    empfohlenen Setup der Fall ist)
+#
+# Pfade unten gehen vom Setup-Pattern aus:
+#   /docker/twin-lab-web/
+#     ├── docker-compose.yml          → Symlink auf repo/docker/twin-lab-web/...
+#     ├── docker-compose.override.yml ← diese Datei, angepasst kopiert
+#     ├── .env                        → Production-Secrets
+#     ├── repo/                       → git clone des Repos
+#     ├── model-cache/                → Bind-Mount für Modell-Cache
+#     └── data/ oder Docker-Volume    → SQLite-DB
+
+services:
+  runtime:
+    environment:
+      # Phase 3.4 Episodic-Memory: Pfad für lokalen Embedding-Modell-Cache.
+      # @huggingface/transformers 4.2.0 ignoriert HF_HOME und TRANSFORMERS_CACHE
+      # — diese eigene Variable ist nötig damit der Cache nicht in
+      # node_modules landet (würde bei Container-Recreate weggeworfen).
+      - TWIN_LAB_MODEL_CACHE_DIR=/app/data/model-cache
+
+    volumes:
+      # Live-Mount der docs/ aus dem geklonten Repo, read-only.
+      # Erlaubt twin:reload-CLI im Container ohne Image-Rebuild.
+      - /docker/twin-lab-web/repo/docs:/app/docs:ro
+
+      # Live-Mount der mcp-servers/-Definitionen, read-only.
+      # Analog zu docs/ — neue MCP-Server ohne Rebuild verfügbar.
+      - /docker/twin-lab-web/repo/mcp-servers:/app/mcp-servers:ro
+
+      # Modell-Cache-Volume für Phase 3.4 Episodic-Memory.
+      # Bind-Mount auf VPS-Filesystem (statt Docker-Volume), damit der
+      # Cache per SSH inspizierbar ist und unabhängig vom DB-Volume
+      # gebackupt werden kann (Cache ist regenerierbar, DB nicht).
+      - /docker/twin-lab-web/model-cache:/app/data/model-cache
