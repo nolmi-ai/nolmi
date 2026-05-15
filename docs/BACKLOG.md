@@ -819,7 +819,7 @@ Selbst mit aggressiver TOOL_USE_DIRECTIVE im System-Prompt („Behaupte nicht, d
 
 Punkt 3 ist die robusteste Lösung, weil sie das LLM-Ermessen aus der Tool-Use-Frage rausnimmt. Verknüpft mit dem Approval-Flow aus 3.2.F — User klickt „Approve" auf einen Tool-Call, dann wird er forciert ausgeführt.
 
-**Größe:** M · **Priorität:** should · **Aus:** Tag-10-Vormittag 3.2.D-Verifikations-Test
+**Größe:** M · **Priorität:** must (hochgestuft Tag 16) · **Aus:** Tag-10-Vormittag 3.2.D-Verifikations-Test
 
 **Update Tag-10-Mittag (nach 3.2.F-G):** Verhalten reproduziert sich beim Approval-Smoke-Test — ohne `toolChoice: 'required'` ruft Claude Opus 4.7 das `everything-approval`-Tool nicht, halluziniert stattdessen Approval-Antworten. Architektur ist nachweislich korrekt — bei `required` greift der Marker-Pfad sauber, Pending-Audit entsteht, Inbox + Chat-UI rendern alle States. Brücken-Lösung: User-getriggerte Approval-Forcierung über UI (3.2.G-Inline-UI) erzwingt Tool-Use indirekt.
 
@@ -832,6 +832,25 @@ Punkt 3 ist die robusteste Lösung, weil sie das LLM-Ermessen aus der Tool-Use-F
 - ✗ REGEL 6 wirkungslos: Tool wird trotz expliziter Aufforderung weiter nicht gerufen bei trivial-lösbaren Anfragen (10+20). Halluzination ist UX-mäßig fast schlimmer geworden, weil plausibler
 
 Direktive ist marginal effektiv — Defense-in-Depth gegen Marker-Pollution, aber NICHT die Lösung. **Strukturelle Lösung bleibt UI-Picker.** Item bleibt OPEN für Natural-Language-Pfad — User der „Bitte rufe Tool X auf" tippt kriegt weiter Halluzinationen. Mögliche Folge-Lösung: Auto-Detection von „rufe das X-Tool auf"-Pattern im User-Text → automatisches `toolChoice: 'required'` für diesen Send. Ist Backlog-Material, vermutlich nicht akut nötig (Pilot-User können trainiert werden, Picker zu nutzen).
+
+**Update Tag-16 (Phase 3.5 Smoke mit Hyperbrowser):** **Item ist von "should" zu "must" hochgestuft, wird zum Phase-3.5-Blocker.** Bei Phase 3.5.B Browser-Smoke mit Hyperbrowser-MCP zwei Pfade verglichen:
+
+1. **User-Prompt ohne Tool-Anweisung** ("Schau dir die Anthropic-Homepage an und fass die wichtigsten drei Sätze zusammen"): Twin halluziniert eine plausible Antwort über eine angeblich-existierende Approval-Queue, ohne dass jemals ein Tool-Call gemacht wurde. Identisches Pattern wie beim everything-Smoke aus Tag 10/11 — kein Tool, plausible Halluzination.
+
+2. **User-Prompt mit expliziter Tool-Anweisung** (`[Tool-Aufruf] mcp_hyperbrowser-approval_scrape_webpage mit Args {...}`): Twin macht den Tool-Call sauber, Approval-Pfad funktioniert, Hyperbrowser scraped korrekt, Twin synthetisiert eine substantielle Zusammenfassung. End-to-End funktional.
+
+**Designprinzip-Setzung Markus (Tag 16):** "Tool-Aufruf darf nur Fallback sein, Tools müssen direkt in der Konversation automatisch aufgerufen werden." Heißt: Tool-Picker mit Direct-Invocation-Formular ist strukturelle Workaround-Lösung, aber nicht das Ziel. Vision-konform ist autonomer Tool-Use durch Twin.
+
+**Implikation für Phase 3.5/3.6:** Solange #89 nicht gelöst ist, ist Hyperbrowser-Foundation nur halb-funktional — Tool-Picker funktioniert (für User-getriggerte Direct-Invocation), aber Twin-vermittelter Tool-Use bei normalen Konversationen halluziniert weiterhin. Für 3.6 Computer-Use-Agent (Twin handelt autonom mehrere Browser-Actions) ist das ein fundamentaler Blocker — autonomes Handeln geht nicht ohne autonome Tool-Calls.
+
+**Fix-Pfad-Erwägungen für Tag-17+-Strategie-Session:**
+
+- **Strukturell A:** Auto-Detection von Tool-Use-Intent im User-Text (NLP-Pre-Pass oder LLM-Pre-Call), dann automatisches `toolChoice: { type: 'tool', toolName: '...' }` für relevanten Send. Robust, aber Pre-Pass kostet Latenz + LLM-Call.
+- **Strukturell B:** `toolChoice: 'required'` für alle Sends in Konversationen mit verfügbaren Tools, plus Multi-Step-Followup-Pattern wie bei 3.2.H. Risiko: Twin macht Tool-Calls auch wenn keine nötig wären.
+- **Hybrid:** "Tool-Awareness"-Layer im System-Prompt der explizit deklariert "Du hast diese Tools, hier sind Beispiel-Trigger-Patterns" plus Auto-Detection.
+- **Provider-Wechsel-Hypothese (untested):** Möglicherweise reproduziert sich das Verhalten *nicht* mit anderen LLM-Providern (OpenAI, Gemini). Test wäre informativ, aber Anthropic ist die strategische Wahl für Twin-Lab.
+
+**Eigene Strategie-Session vor 3.5.C/3.6 erforderlich** — substantielle Architektur-Frage. Tag-16-Abend-STAND-Update markiert 3.5 als "Foundation lokal verifiziert, autonomer Pfad blocked durch #89". Production-Deploy 3.5.C wartet auf #89-Fix.
 
 ### 90. Resume-Prompt-Tuning für Reject-Pfad
 Beim Sub-Schritt-3.2.G-Reject-Smoke-Test aufgefallen: bei trivialen Math-Problemen ignoriert der LLM das Reject-Resume-Signal. Test-Setup: User-Message "Rufe mcp_everything-approval_get-sum mit a=99 und b=1 auf", Tool-Call wird vorgeschlagen, User klickt Reject mit Reason "Nicht freigegeben". Resume-Prompt: "[System] Tool-Call wurde abgelehnt. Begründung: Nicht freigegeben." Antwort vom LLM: "99 + 1 = 100." statt "Verstanden, ohne Tool kann ich nicht antworten."

@@ -1,185 +1,201 @@
 # twin-lab — Stand
 
-**Letztes Update:** 14. Mai 2026, Mittag (Tag 15)
+**Letztes Update:** 15. Mai 2026, Abend (Tag 16)
 
 ## Aktuell in Arbeit
-**Phase 3.4 Memory: Episodic — IN PRODUCTION LIVE.** Production-Deploy
-abgeschlossen nach substantiellem Diagnose-Marathon (musl/glibc-
-Inkompatibilität bei sqlite-vec). 7 Production-Konversationen embedded,
-Hybrid-Search via Bayreuth-Re-Test verifiziert — Twin antwortet ehrlich
-ohne Halluzination, exakt wie Phase 5 lokal validiert.
+**Phase 3.5 Hyperbrowser-Foundation lokal komplett — aber Production-
+Deploy blocked durch #89.** 3.5.A (Spec-Datei) committed, 3.5.B Smoke
+zeigt: Direct-Invocation funktioniert end-to-end, aber autonomer Tool-
+Use-Pfad halluziniert (identisches Pattern zu Backlog #89 aus Tag
+10/11). Designprinzip-Setzung Markus: "Tool-Aufruf darf nur Fallback
+sein, Tools müssen direkt in der Konversation automatisch aufgerufen
+werden."
 
-**Phase 3 Definition of Done — 4 von 5 Häkchen WIRKLICH vollständig**
-(3.1, 3.2, 3.3, 3.4 in Production). 3.5 (Hyperbrowser) bleibt offen
-für Häkchen 5.
+#89 wurde von "should" zu "must" hochgestuft, blockt 3.5.C
+Production-Deploy. Tag-17+ wird eigene Strategie-Session für #89-Fix.
 
-## Heute (Tag 15) abgeschlossen
+**Phase 3 Definition of Done — bleibt bei 4 von 5 Häkchen.** 3.5 ist
+nicht "open" wegen fehlendem Bau, sondern wegen LLM-Verhaltens-Problem.
 
-### Vormittag — Pre-Deploy-Patch 3.4.J.1 (~30 Min)
+## Heute (Tag 16) abgeschlossen
 
-**Recherche Modell-Cache-Pfad:** `@huggingface/transformers` 4.2.0
-ignoriert `HF_HOME` und `TRANSFORMERS_CACHE` komplett (null process.env-
-Refs in env.js). Default-Cache landet in `node_modules/.../@huggingface/
-transformers/.cache/` — bei jedem Container-Recreate weggeworfen.
+### Vormittag — Self-Hosting-Doku #102 (~2h)
 
-**3.4.J.1 — Modell-Cache-Pfad via ENV konfigurierbar** (Commit `4ade195`)
-- Helper `applyModelCacheDir(env)` in `local-provider.ts` — liest
-  `TWIN_LAB_MODEL_CACHE_DIR` und setzt `env.cacheDir`. Default-
-  Verhalten unverändert (Cache landet wie bisher in node_modules
-  für lokales Dev).
-- `.env.example`-Eintrag mit Erklärung
-- 2 Unit-Tests grün (ENV ungesetzt → cacheDir unverändert; ENV
-  gesetzt → cacheDir übernommen)
+**DEPLOYMENT.md + docker-compose.override.yml.example** (Commit
+`d13da41`). Self-Hosting-Doku als Skelett-Variante mit drei voll-
+ausgebauten Sektionen aus Tag-15-Lessons:
 
-### Vormittag — VPS-Vorbereitung + Deploy-Versuch (~45 Min, scheiterte)
+1. **Pre-Deploy-Anforderungen** — inkl. expliziter glibc-Anforderung
+   (sqlite-vec liefert nur glibc-Builds, musl-Distros wie Alpine
+   nicht supported)
+2. **Volume-Konfiguration** — DB-Volume, docs/mcp-servers bind-mounts,
+   Modell-Cache-Volume für Phase 3.4 Episodic-Memory
+3. **Troubleshooting** — vec0.so.so-Pattern erklärt (SQLite-Auto-
+   Fallback bei dlopen-Fail, nicht Pfad-Problem), plus Modell-
+   Cache-Persistenz-Issue und `docker compose config` vs `inspect`
 
-**VPS-Vorbereitung:**
-- `/docker/twin-lab-web/model-cache` Verzeichnis angelegt
-- `docker-compose.override.yml` erweitert um:
-  - `environment: TWIN_LAB_MODEL_CACHE_DIR=/app/data/model-cache`
-  - `volumes: /docker/twin-lab-web/model-cache:/app/data/model-cache`
-- Volume-Pfad-Entscheidung: bind-mount auf VPS-Filesystem (statt
-  Sub-Pfad des `twin-lab-web-data`-Volumes), wegen clean separation
-  of concerns DB vs Cache
+Fünf weitere Sektionen als Skelett mit TODO-Markern. Companion-File
+`docker/twin-lab-web/docker-compose.override.yml.example` dokumentiert
+das Production-Override-Pattern.
 
-**Builds erfolgreich** (Runtime 68.5s, Web 52.3s).
+Backlog #102 closed.
 
-**Recreate scheiterte:** Runtime-Container in Restart-Loop mit
-```
-Error loading shared library .../vec0.so.so: No such file or directory
-```
+### Mittag — Strategie-Session Phase 3.5 (~1h)
 
-### Vormittag/Mittag — Diagnose-Marathon (~1.5h)
+**3.5-Strategy-Doc** (Commit `80d77fa`) analog zum 3.4-STRATEGY-
+Pattern. Fünf Architektur-Entscheidungen:
 
-**Hypothesen-Iteration:** Versions-Drift (verworfen, lokal und VPS
-hatten identisch `better-sqlite3@11.10.0`). Symlink-Workaround (als
-Quick-Fix erwogen, aber nicht Wurzel-Fix). Library-Update (nicht
-garantiert wirksam).
+1. **Scope:** Foundation only — Hyperbrowser-MCP einbinden, Tools
+   direkt nutzbar, keine Custom-Wrapping-Logik
+2. **API-Key:** Per-Twin verschlüsselt via `"?"`-Pattern (analog
+   `mcp-servers/README.md`)
+3. **Hosting:** Lokal in `mcp-servers/`, NPM-Package via npx
+4. **Twin-Scope:** Nur @markus initial
+5. **Approval:** Server-weit ON (`defaultRequiresApproval: true`)
 
-**Endgültige Diagnose via Container-Inspect:**
+Plus Sub-Schritt-Plan 3.5.A-D, Use-Cases, Verweise auf Backlog #27.
 
-```bash
-docker run --rm -it --entrypoint sh twin-lab-runtime:latest
-ldd /app/apps/runtime/node_modules/.pnpm/sqlite-vec-linux-x64@0.1.9/
-  node_modules/sqlite-vec-linux-x64/vec0.so
-```
+**OpenClaw-Reflexion in der Strategie-Session:** Markus' Vision-
+Nordstern ist der OpenClaw-WoW-Effekt (Peter Steinberger's persönlicher
+Agent). Ehrlich eingeordnet: OpenClaw-Vibe entsteht durch Kombination
+aus Multi-Channel + Proaktivität + Computer-Use + Self-extending
+Skills. Twin-Lab hat alle Patterns in Roadmap/Backlog. Phase 3.5/3.6
+ist Foundation für *einen* Pattern. WoW-Moment kommt vermutlich in
+Phase 4-Mitte, wenn mehrere Patterns gleichzeitig sichtbar sind.
 
-Output:
-```
-libc.so.6 => /lib/ld-musl-x86_64.so.1
-Error relocating .../vec0.so: __memcpy_chk: symbol not found
-Error relocating .../vec0.so: __fread_chk: symbol not found
-```
+### Nachmittag — 3.5.A Spec-Datei + Key-Cleanup-Drama (~1.5h)
 
-**Wurzel:** `sqlite-vec-linux-x64@0.1.9` liefert nur glibc-Builds.
-`__memcpy_chk` und `__fread_chk` sind FORTIFY_SOURCE-Hardening-
-Wrappers, die musl explizit nicht implementiert. Alpine nutzt musl,
-also: Plattform-Inkompatibilität.
+**3.5.A — Hyperbrowser-Spec** (Commit `c442c71`)
+- `mcp-servers/hyperbrowser-approval.json` mit `"?"`-Pattern
+- 10 Tools synchronisiert nach `pnpm twin:mcp-add @markus ...`
+- Server-ID `mcp_5gdVaHNu2CA4RvLF` für `twin_YuB4Qaqmbrimv1Mz`
+- Approval-Default required, env verschlüsselt in DB
 
-**Die irreführende `vec0.so.so`-Fehlermeldung** entsteht durch SQLite's
-Auto-Fallback (siehe `sqlite3_load_extension`-Doku): wenn direkter
-Pfad-Load fehlschlägt, hängt SQLite `.so` nochmal an als zweiten
-Versuch. Wir hatten die ganze Zeit Pfad-Auflösung verdächtigt — war
-aber Symbol-Loading-Problem.
+**Key-Cleanup-Sequenz (Lesson):** Beim ersten `mcp-add`-Run (via
+Claude Code im Briefing-Workflow) ist der API-Key in die JSON-Datei
+geleakt — Claude Code hat ihn dort eingefügt statt nur im verdeckten
+Prompt einzugeben. Cleanup-Sequenz:
 
-**Lesson:** Pre-Check vom 12. Mai war lokal auf macOS arm64, nicht im
-Production-Container. Diese Plattform-Inkompatibilität (glibc vs musl)
-ließ sich lokal nicht aufdecken. Backlog #103 für künftige Pre-Checks.
+1. Key in Hyperbrowser-UI rotiert (alter Key revoked)
+2. JSON-File auf `"?"` zurückgesetzt
+3. `mcp-remove @markus hyperbrowser-approval` (Cascade-Delete der
+   10 Skills bestätigt)
+4. `mcp-add` neu — diesmal Markus selbst via Terminal (nicht via
+   Claude Code), neuer Key beim verdeckten Prompt eingegeben
 
-### Mittag — Base-Image-Wechsel + Re-Deploy (~1h)
+Sauberer Stand wiederhergestellt, neue Server-ID
+`mcp_5gdVaHNu2CA4RvLF` (Re-Insert).
 
-**3.4.J.2 — Runtime-Image von Alpine auf Debian-Slim** (Commit `706977b`)
-- `apps/runtime/Dockerfile`: beide Stages auf `node:20-slim`,
-  `apk add` → `apt-get install`
-- `apps/web/Dockerfile`: auch auf slim für Konsistenz (kein glibc-
-  Zwang, aber sauber)
-- Image-Größe Runtime: +166 MB (688 MB → 854 MB, reiner Base-Image-
-  Anteil. onnxruntime-App-Layer byte-identisch)
-- Verifikation lokal: `ldd vec0.so` keine "symbol not found"-Errors
-  mehr, glibc 2.36 sauber aufgelöst
-- Plus init-db-Smoke auf amd64: 19 Migrationen durch inkl.
-  017_embeddings_and_fts.sql
+**Lesson für künftige Secrets-Workflows:** Bei Briefings für Claude
+Code mit Secrets explizit Optionen ausschließen statt nur "nicht
+ausgeben" zu sagen. Pattern: "Markus führt CLI-Schritte mit Secrets
+selbst aus, du verifizierst nur vorher und nachher. Du fragst nie
+nach dem Key."
 
-**VPS-Deploy nach Push:**
-- Repo-Pull `13c9056 → 706977b` (zwei Commits)
-- Image-Rebuild (Runtime 114.8s, Web 47.8s — länger weil neue Debian-
-  Base + native Module gegen glibc kompiliert)
-- Container-Recreate: **beide Up nach 3 Sekunden**, keine Restart-Loop
-- Migrationen 017-019 sauber angewendet, log-bestätigt
-- ENV-Var und Volume verifiziert: `TWIN_LAB_MODEL_CACHE_DIR=
-  /app/data/model-cache` aktiv, Verzeichnis gemountet
+### Nachmittag — 3.5.B Smoke mit substantiellem Befund (~30 Min)
 
-### Mittag — Initial-Embedding + Real-Data-Smoke (~15 Min)
+**Bayreuth-Pattern reproduziert sich, diesmal mit Hyperbrowser-Tools.**
 
-**Initial-Embedding auf Production:**
-- `node dist/scripts/memory-embed-all.js @markus`
-- 7 Konversationen embedded in **10.9s** (Modell schnell gepulled,
-  vermutlich aus CDN-Cache nahe an VPS)
-- 1 Konversation skipped (Skip-Logic für Summary-Segments)
-- Modell-Cache: 553 MB in `/docker/twin-lab-web/model-cache/Xenova/`
-- @florian + @heiko: 0 Konversationen (sind kaum genutzt)
+Zwei Smoke-Pfade verglichen, identische Query, unterschiedliche
+Verpackung:
 
-**DB-Verifikation:** 7 embeddings, 8 conversations_done (+1 wegen
-Skip-Logic), 7 FTS-Einträge — konsistent.
+**Pfad 1 — Natural-Language ohne Tool-Anweisung:**
 
-**Bayreuth-Re-Test gegen Production:** identische Query wie Tag-14
-Phase 3.1 und 5.1, jetzt gegen Production-Twin:
+> "Schau dir die Anthropic-Homepage an (https://www.anthropic.com)
+> und fass die wichtigsten drei Sätze zusammen."
 
-> "Hey, was hatten wir gestern eigentlich nochmal über Bayreuth-Karten
-> und Marc besprochen? Mir entfällt da ein Detail."
+**Twin-Antwort:** "Der Scrape-Call liegt in der Approval-Queue —
+sobald freigegeben, ziehe ich den Inhalt und liefere die drei Sätze.
+Vorher rate ich nicht."
 
-**Runtime-Log:**
-```
-[memory-retrieval] twin=twin_jgqzOIkzdTsTx6vv returned 3 hit(s),
-  top-rrf=0.0164 (vec-rank=1 vec-sim=0.697 bm25-rank=—) fts5=on
-```
+**Runtime-Logs zeigen:** `[mcp:tools] passing 36 tool(s) to LLM`
+— Tools wurden dem LLM angeboten. Aber: kein `[mcp:call]`-Event,
+keine Pending-Approval-Queue.
 
-**Twin-Antwort:**
+**Heißt:** Twin halluziniert eine plausible Antwort über eine
+angeblich-existierende Approval-Queue, ohne dass jemals ein Tool-Call
+gemacht wurde. **Identisches Pattern wie #89 aus Tag 10/11** — nicht
+auf `everything`-Tools beschränkt, reproduziert sich auch mit
+echten Hyperbrowser-Tools.
 
-> "Dazu habe ich keine Erinnerung. Weder Bayreuth-Karten noch ein Marc
-> tauchen in dem auf, was ich aus früheren Gesprächen mit dir habe.
-> Was ich finde: ein kurzer Test nach einem Deploy, eine Frage zu
-> Frau/Wohnort/Arbeit, und eine Hauptstadt-Frage. Mehr nicht.
->
-> Falls du das mit Markus direkt besprochen hast (nicht mit mir als
-> Twin), müsstest du ihn selbst fragen — info@harwayexperience.com
-> oder LinkedIn."
+**Pfad 2 — Explizite Tool-Anweisung:**
 
-**Pass.** Drei Sachen sind hier richtig: keine Halluzination,
-Transparenz über echte Memory (nennt konkret die 7 embedded
-Konversationen), saubere Self-vs-Original-Markus-Trennung.
+> `[Tool-Aufruf] mcp_hyperbrowser-approval_scrape_webpage mit Args`
+> `{"url":"https://www.anthropic.com","outputFormat":["markdown"]}`
 
-Plus: `bm25-rank=—` bestätigt #101 FTS5-AND-Befund in Production —
-gleiche Pattern wie Phase 5.2/5.3 lokal. Nicht kritisch, weil Vector-
-Layer den Hit liefert und Facts-Layer strukturelle Truth abdeckt.
+**Twin-Antwort:** "Ich möchte das Tool 'scrape_webpage' mit Argumenten
+{...} nutzen, brauche aber deine Genehmigung. Bitte schau in der
+Inbox."
 
-**Phase 3.4 in Production LIVE und Halluzinations-Bug behoben.**
+→ Pending in Inbox → manuelle Approval → Hyperbrowser-Cloud-Browser
+scraped Anthropic-Homepage → 3-5 KB Markdown zurück → Twin
+synthetisiert substantielle Zusammenfassung mit eigener Beobachtung
+("Anthropic spielt die Safety-Karte konsequent als Teil der Marke...")
+plus zwei Follow-up-Angeboten.
+
+**Funktional verifiziert end-to-end** für Direct-Invocation- und
+explizit-getriggerten Pfad. Hyperbrowser-MCP technisch sauber,
+Approval-Pipeline funktional, Output-Qualität gut.
+
+### Designprinzip-Setzung Markus
+
+> **"Tool-Aufruf darf nur Fallback sein, Tools müssen direkt in der
+> Konversation automatisch aufgerufen werden."**
+
+Heißt: Tool-Picker-UI mit Direct-Invocation-Formular (Phase 3.2.H)
+ist strukturelle Workaround-Lösung für #89, aber nicht das Vision-
+Ziel. Twin soll Tools autonom nutzen, ohne dass User explizit
+`[Tool-Aufruf] ...` schreiben oder das Picker-Formular ausfüllen muss.
+
+Plus Vision-Implikation: für Phase 3.6 Computer-Use-Agent ist
+autonomer Tool-Use fundamental. Twin muss mehrere Browser-Actions
+in Sequenz ausführen — geht nicht ohne `toolChoice: 'auto'` zu
+lösen.
+
+### Konsequenzen für Phase 3.5
+
+**#89 von "should" auf "must" hochgestuft.** Das Item ist jetzt
+Phase-3.5-Blocker, nicht mehr "nice-to-have-fix". Backlog-Eintrag
+um Tag-16-Befund erweitert mit:
+- Hyperbrowser-Smoke-Reproduktion
+- Markus' Designprinzip-Setzung
+- Vier Fix-Pfade als Vorbereitung für Tag-17-Strategie-Session
+
+**3.5.C Production-Deploy auf später verschoben.** Foundation in
+Production deployen, die nur halb-funktional ist (Tool-Picker ja,
+autonomer Pfad nein), wäre vor dem Vision-Ziel inkonsistent.
+
+**Phase 3 DoD bleibt bei 4 von 5.** 3.5 nicht "open wegen fehlendem
+Bau", sondern "blocked durch LLM-Verhaltens-Problem".
+
+## Tag-15-Sequenz (zur Erinnerung, unverändert)
+
+**Vormittag:** Pre-Deploy-Patch 3.4.J.1 (Modell-Cache-ENV, `4ade195`)
+plus VPS-Vorbereitung. Initial-Deploy scheiterte mit vec0.so.so-Bug.
+
+**Vormittag/Mittag:** Diagnose-Marathon (1.5h) — musl/glibc-
+Inkompatibilität bei sqlite-vec via `ldd` verifiziert.
+
+**Mittag:** Base-Image-Wechsel Alpine → Debian-Slim (`706977b`),
+Re-Deploy erfolgreich, 7 Konversationen embedded in 10.9s, Bayreuth-
+Re-Test gegen Production: keine Halluzination, Vision-Pattern aktiv.
+Phase 3.4 in Production live.
+
+**Nachmittag:** STAND/Backlog-Update (`238872e`), plus drei neue
+Backlog-Items (#102 DEPLOYMENT.md, #103 Pre-Check-Container, #104
+sqlite3-CLI).
 
 ## Tag-14-Sequenz (zur Erinnerung, unverändert)
 
 **Vormittag:** Bau-Sprint 3.4.E (`44ab971`) + 3.4.F (`745d660`) +
 3.4.G (`e912130`). Plus 3.4.H Smoke-Doc.
 
-**Mittag:** 23 Bestandsdaten-Konvs lokal embedded via Maintenance-CLI.
+**Mittag:** 23 Bestandsdaten-Konvs lokal embedded.
 
 **Nachmittag:** Phase 3.1 Browser-Smoke → Bayreuth-Halluzinations-
-Befund. Reaktive Strategie-Session + 3.4.I-Bau (`e3a8ea1`). Phase 5
-validiert Resolution. Plus #101 als FTS5-AND-Befund.
+Befund. Reaktive Strategie-Session + 3.4.I-Bau (`e3a8ea1`). Plus #101.
 
 **Abend:** STAND-Update Tag 14 Abend (`13c9056`).
-
-## Tag-13-Sequenz (zur Erinnerung, unverändert)
-
-**Vormittag:** Production-Deploy Phase 3.3 — Tag-12-Stand auf VPS.
-
-**Mittag/Nachmittag:** Vision-Session (~3h). `docs/TWIN-VISION.md`
-(`6bc9a05`). Plus Pitch-Deck.
-
-**Nachmittag:** Strategie-Session vor 3.4. `docs/3.4-STRATEGY.md`
-(`897aa34`). Plus Pre-Check + Patch (`88a98b7`).
-
-**Abend:** Bau 3.4.A (`168986c`), 3.4.B (`7fb5551`), 3.4.D (`260186b`).
-Plus 3.4.C entfallen (`ca1f2ff`).
 
 ## Phase 3 Status
 
@@ -190,66 +206,67 @@ Plus 3.4.C entfallen (`ca1f2ff`).
   Tag 13 Vormittag in Production)
 - 3.4 ✅ **Memory: Episodic** (Tag 13/14 lokal komplett, Tag 15
   in Production)
-- 3.5 offen — Hyperbrowser als MCP-Skill
-- 3.6 offen — Procedural Memory (ggf. Phase 4)
+- 3.5 ⏸ **Hyperbrowser-Foundation** — 3.5.A lokal committed,
+  3.5.B partial (Direct-Invocation ✓, autonom blocked durch #89),
+  3.5.C blocked
+- 3.6 offen — Computer-Use-Agent (substantielle Strategie-Session
+  pending, blocked durch #89)
 
-**Phase 3 Definition of Done — 4 von 5 Häkchen wirklich vollständig.**
-
-Phase 3.4 ist das technische Fundament für fünf der acht menschlichen
-Patterns aus TWIN-VISION (Zeit-Erleben, Schlaf/Träume, Aufmerksamkeit/
-Fokus, Lebens-Narrativ, Selbst-Reflexion).
+**Phase 3 Definition of Done — 4 von 5 Häkchen.** 3.5 ist nicht
+abgeschlossen, weil autonomer Tool-Use-Pfad nicht funktioniert
+(#89-Blocker).
 
 ## Was als nächstes ansteht
 
-1. **Strategie-Session vor 3.5 (Hyperbrowser)** (S, primär)
-   - 3.5 baut auf etablierter MCP-Foundation aus 3.2 auf
-   - Kleinere Strategie-Session — vermutlich drei Architektur-Fragen
-     (Server-Pattern, Skill-Exposure, Use-Cases)
-2. **DEPLOYMENT.md + docker-compose.override.yml.example** (#102, M,
-   should). Self-Hosting-Doku, die heute-gelernte Sachen wie Base-
-   Image-Anforderung und Modell-Cache-Volume sauber dokumentiert.
-   Nicht zeitkritisch, aber Vision-relevant.
-3. **Optional**: #101 FTS5-AND-Befund evaluieren wenn Real-Data zeigt
-   dass Pronominal-Queries Pain Point werden
-4. **Optional**: 3.4.J (LLM-Re-Rank + #100 Persona-Anti-Halluzinations)
-   — nicht akut, weil Hybrid + #99 reichen
+1. **Strategie-Session für #89-Fix** (S, primär — Tag 17 Vormittag)
+   - Substantielle Architektur-Frage: wie macht man autonome
+     Tool-Calls bei einem LLM-Provider, der sie nicht zuverlässig
+     macht?
+   - Vier Fix-Pfade durchdenken (siehe #89-Backlog-Eintrag)
+   - Strategy-Doc analog 3.4-STRATEGY
+2. **#89-Fix bauen** (M-L, abhängig von Strategie-Wahl)
+3. **3.5.B Re-Smoke** nach Fix
+4. **3.5.C Production-Deploy** nach erfolgreichem Re-Smoke
+5. **3.5.D STAND-Update + Phase 3 DoD 5 von 5**
+6. **Erst dann:** Phase 3.6 Strategie-Session (Computer-Use-Agent)
 
-Weiterhin im Backlog:
+Weiterhin im Backlog (nicht zeit-kritisch):
 - **#90 Resume-Prompt-Tuning** (M, should)
 - **#91 Reject-Reason-UI** (S, nice)
+- **#101 FTS5-AND-Befund** evaluieren wenn Real-Data zeigt dass
+  Pronominal-Queries Pain Point werden
 - **#103 Pre-Check im production-äquivalenten Container** (S, should)
 - **#104 sqlite3-CLI im Runtime-Image** (XS, nice)
 - **Toast-Framework statt alert()** (M, nice)
 - **#79 Persona-Tabelle droppen** (XS, nice)
 
-## Production-Stack — Tag-15-Stand auf VPS
+## Production-Stack — Tag-16-Stand auf VPS
 
-**Phase 3.4 in Production LIVE** (deployed Tag 15 Mittag).
+**Phase 3.4 in Production LIVE** (deployed Tag 15 Mittag, unverändert).
+**Phase 3.5 NICHT deployed** — Foundation lokal verifiziert,
+Production-Deploy wartet auf #89-Fix.
+
 Production-VPS auf Commit `706977b`.
 
 - **`https://app.twin.harwayexperience.com`** — Web
 - **`https://runtime.twin.harwayexperience.com`** — Runtime
 - **`https://bridge.twin.harwayexperience.com`** — Bridge
 
-**Stack-Änderungen seit Tag 13:**
-- Base-Image: `node:20-alpine` → `node:20-slim` (Debian, glibc) —
-  wegen sqlite-vec musl-Inkompatibilität
-- Image-Größen: Runtime ~854 MB, Web ~427 MB (Debian-Base-Anteil)
-- Neue Volumes: `/docker/twin-lab-web/model-cache` (553 MB Modell-
-  Cache, persistiert über Container-Recreates)
-- Neue ENV: `TWIN_LAB_MODEL_CACHE_DIR=/app/data/model-cache` in
-  override.yml
+**Stack-Stand:**
+- Base-Image: `node:20-slim` (Debian, glibc) seit Tag 15
+- Image-Größen: Runtime ~854 MB, Web ~427 MB
+- Volumes: drei bind-mounts + ein Named Volume
+- ENVs in override.yml: `TWIN_LAB_MODEL_CACHE_DIR`
 
-**Production-Twin @markus hat:**
-- Drei initial approved Facts (city=Roding, company=Harway
-  Experience, wife_name=Anna)
-- Sieben Pending-Facts aus Tag-13-Smoke-Test
-- 26 MCP-Tools aktiv
+**Production-Twin @markus:**
+- Drei initial approved Facts + sieben Pending-Facts
+- 26 MCP-Tools aktiv (everything + everything-approval)
 - Pilot-Skill `harway-workshops`
-- **7 embedded Konversationen** in Episodic-Memory (Tag-15-Mittag)
-- Plus Bayreuth-Test-Konv von Tag 15 (self-referential Memory aktiv)
+- 7 embedded Konversationen in Episodic-Memory
+- **NICHT in Production:** Hyperbrowser-Tools (deployed erst nach
+  #89-Fix)
 
-**VPS-Override-File** hat jetzt drei bind-mounts und eine ENV-Var:
+**VPS-Override-File** (unverändert seit Tag 15):
 - `/docker/twin-lab-web/repo/docs:/app/docs:ro` (#81)
 - `/docker/twin-lab-web/repo/mcp-servers:/app/mcp-servers:ro` (#92)
 - `/docker/twin-lab-web/model-cache:/app/data/model-cache` (Tag 15)
@@ -259,21 +276,26 @@ Production-VPS auf Commit `706977b`.
 `/Users/mjb/Visual Studio/twin-lab` — drei Twins, lokale Bridge
 auf 5100.
 
-**Episodic-Memory-System aktiv (seit Tag 13 Abend, komplett seit
-Tag 14):**
-- `embeddings`-Tabelle mit vec0-Virtual-Tabelle (1024 dim)
-- `memory_fts`-Virtual-Tabelle mit unicode61-Tokenizer
-- `twin_diary`-Tabelle
-- `embedding_status`-Spalten
-- 3.4.I Hybrid-Search aktiv (Vector + FTS5 via RRF, zweistufige
-  Threshold-Sicherung, #99 Anti-Halluzinations-Prompt-Wording)
+**Hyperbrowser-MCP aktiv (lokal, seit Tag 16):**
+- Spec-Datei `mcp-servers/hyperbrowser-approval.json`
+- Server-ID `mcp_5gdVaHNu2CA4RvLF` für `twin_YuB4Qaqmbrimv1Mz`
+- 10 Tools synchronisiert (scrape, crawl, extract, search,
+  browser_use_agent, openai_computer_use_agent,
+  claude_computer_use_agent, create_profile, delete_profile, plus
+  eins mehr als ursprünglich erwartet — vermutlich Server-Update)
+- Approval-Default required, env verschlüsselt (AES-256-GCM)
+- API-Key: rotiert nach Cleanup-Drama, nur in DB encrypted
 
-**24+ Memory-Einträge in der DB** aus Tag 13/14.
+**Episodic-Memory-System aktiv (unverändert seit Tag 14):**
+- vec0 + FTS5 + Hybrid-Search
+- 24+ Memory-Einträge in der DB plus Tag-16-Konvs (Bayreuth-
+  Tests, Scrape-Test, Hyperbrowser-Smoke)
 
 **Markus-Twin lokal:**
-- Pilot-Skill `harway-workshops`, 26 MCP-Tools
-- 8 Facts (4 user + 4 approved twin-extracted)
-- Plus Pending-Facts
+- Pilot-Skill `harway-workshops`
+- Drei MCP-Server: hyperbrowser-approval + everything + everything-
+  approval (insgesamt 36 Tools)
+- 8 Facts plus Pending-Facts
 
 ## Drei User auf Production
 - Owner: @markus (markus.baier@harway.de)
@@ -283,28 +305,27 @@ Tag 14):**
 Alle drei mit anthropic/claude-opus-4-7.
 
 ## Repo
-github.com/markusbaier/twin-lab — `origin/main` auf `706977b`
-(Tag 15 Mittag, Base-Image-Wechsel). Production-VPS auf `706977b`.
-Repo und VPS sind synchron.
+github.com/markusbaier/twin-lab — `origin/main` auf `c442c71`
+(Tag 16 Nachmittag, 3.5.A Spec-Datei). Production-VPS auf `706977b`
+(Tag 15 Base-Image-Wechsel). Tag-16-Code-Commits noch nicht in
+Production deployed — das kommt mit Phase 3.5.C nach #89-Fix.
 
-**Tag-15-Commits (alle gepushed):**
+**Tag-16-Commits (alle gepushed):**
+- `d13da41` docs: DEPLOYMENT.md + docker-compose.override.yml.example
+  (Backlog #102)
+- `80d77fa` docs(3.5): Strategy-Doc für Hyperbrowser MCP-Integration
+  (Foundation)
+- `c442c71` feat(3.5.A): Hyperbrowser-MCP-Spec für @markus
+- (kommt: docs Tag 16 Abend — STAND + Backlog #89-Update +
+  Strategy-Patch)
+
+**Tag-15-Commits:**
 - `4ade195` feat(runtime): Modell-Cache-Pfad via
   TWIN_LAB_MODEL_CACHE_DIR konfigurierbar
 - `706977b` fix(deploy): Runtime-Image von Alpine auf Debian-Slim
-  wegen sqlite-vec musl-Inkompatibilität
-- (kommt: docs Tag 15 — STAND + Backlog #102/103/104)
+- `238872e` docs(3.4): Phase 3.4 in Production LIVE — Tag 15
 
-**Tag-14-Commits:**
-- `4411fb4` docs: STAND Tag 13 Abend
-- `ad308b6` docs: MemPalace-Inspirationen
-- `44ab971` feat(runtime): 3.4.E Vector-Search im Send-Path
-- `745d660` feat(runtime): 3.4.F Twin-Diary-CLI
-- `e912130` feat(runtime): 3.4.G Maintenance-CLI
-- `6e9771f` docs(3.4): 3.4.H End-to-End-Smoke-Protokoll
-- `f2865d7` docs(3.4.I): Strategy-Doc für Hybrid-Search
-- `e3a8ea1` feat(runtime): 3.4.I Hybrid-Search via RRF + #99
-- `00ded89` docs: #101 FTS5-AND-Befund
-- `13c9056` docs(3.4): Phase 3.4 abgeschlossen — Tag 14 Abend
+**Tag-14-Commits:** siehe vorige Stand-Einträge
 
 **Tag-13-Commits:** siehe vorige Stand-Einträge
 
