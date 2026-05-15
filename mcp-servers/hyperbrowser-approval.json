@@ -1,0 +1,8 @@
+{
+  "name": "hyperbrowser-approval",
+  "transport": "stdio",
+  "command": "npx",
+  "args": ["--yes", "hyperbrowser-mcp"],
+  "env": { "HYPERBROWSER_API_KEY": "?" },
+  "defaultRequiresApproval": true
+}
