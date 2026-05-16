@@ -42,24 +42,36 @@ html, body {
   color: #0a0a0a;
 }
 
-/* ─── Sonner-Toaster auf Twin-Lab-Look (UX.1.A.2.B) ─────────────────────
+/* ─── Sonner-Toaster auf Twin-Lab-Look (UX.1.A.2.B + .C.1 Tuning) ──────
  * Sonner v2 exponiert eigene CSS-Variables pro Toast-Typ. Wir überschreiben
  * sie für Backgrounds/Border/Text auf die semantischen Aliases oben. Damit
  * brauchen wir kein toastOptions.classNames-Override (kein !important-
  * Wettstreit mit Sonner-Defaults) und Twin-Lab-Stack bleibt konsistent.
  *
- * Bewusst:
- *  - Background bleibt durchgängig `surface` (Card-Look), nur Border-Farbe
- *    signalisiert den Typ — passt zum App-Pattern „Border-First statt Fill".
- *  - shadow: none + font-family: inherit überschreiben Sonner-Defaults
- *    (white shadow + System-Font) auf Twin-Lab-Stack. */
+ * Designprinzipien:
+ *  - Background = `surface` (= var(--color-bg-elevated)) → wie Modal-Body,
+ *    Card-Look statt schwebende Notification.
+ *  - Border-Farbe SOFT (color-mix mit Transparenz) — Voll-Saturation würde
+ *    den Toast lauter machen als die ruhigen Modal-Borders. 40 % Mischung
+ *    gegen transparent ergibt eine dezente Mint/Brick-Tönung, die zur
+ *    Modal-Border-Sprache passt.
+ *  - Title in `text-default` + semibold, Description in `text-muted` —
+ *    spiegelt Modal-Body-Hierarchie (h2 = text-text font-semibold,
+ *    Body-Text in text-muted).
+ *  - Padding 16 px (~ p-4) — Modal-Body hat p-6 (24 px), Toasts sind
+ *    aber kleiner; 16 px ist die kompakte Modal-äquivalente Anmutung.
+ *  - Border-Radius 4 px (= `rounded`), nicht rounded-lg — der ModalWrapper
+ *    nutzt `rounded` (4 px), also matchen wir das exakt. (Briefing nahm
+ *    rounded-lg an; tatsächlicher Modal-Pattern ist `rounded`.)
+ *  - shadow: none — App-weite Border-First-Disziplin (Modal hat shadow-xl,
+ *    ist Ausnahme; Toast bleibt borderonly). */
 [data-sonner-toaster] {
   --normal-bg: var(--color-bg-elevated);
   --normal-border: var(--color-border-default);
   --normal-text: var(--color-text-default);
 
   --success-bg: var(--color-bg-elevated);
-  --success-border: var(--color-success);
+  --success-border: color-mix(in srgb, var(--color-success) 40%, transparent);
   --success-text: var(--color-text-default);
 
   --info-bg: var(--color-bg-elevated);
@@ -67,7 +79,7 @@ html, body {
   --info-text: var(--color-text-default);
 
   --error-bg: var(--color-bg-elevated);
-  --error-border: var(--color-danger);
+  --error-border: color-mix(in srgb, var(--color-danger) 40%, transparent);
   --error-text: var(--color-text-default);
 }
 
@@ -76,4 +88,30 @@ html, body {
   box-shadow: none;
   border-radius: 4px;
   border-width: 1px;
+  padding: 16px;
+}
+
+/* Title-/Description-Hierarchie an Modal-Body anlehnen.
+ * Sonner setzt `[data-title]` und `[data-description]` als interne
+ * Attribute innerhalb der Toast-Card — wir greifen darauf zu, ohne dass
+ * der Toaster-Component-Code geändert werden muss. */
+[data-sonner-toast] [data-title] {
+  font-weight: 600;
+  color: var(--color-text-default);
+}
+
+[data-sonner-toast] [data-description] {
+  color: var(--color-text-muted);
+}
+
+/* Icon-Farbe explizit auf die jeweilige Twin-Lab-Akzent-Farbe — Sonner
+ * würde sonst Default-Greens/Reds (~hellere Töne) reinmischen, die als
+ * „fremd" wahrgenommen werden (UX.1.A.2.C.1 Smoke-Befund: „Toast wirkte
+ * türkis statt mint"). */
+[data-sonner-toast][data-type="success"] [data-icon] {
+  color: var(--color-success);
+}
+
+[data-sonner-toast][data-type="error"] [data-icon] {
+  color: var(--color-danger);
 }
