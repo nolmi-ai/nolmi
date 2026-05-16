@@ -790,6 +790,7 @@ Heute werden Skills via CLI angelegt und über die UI nur als Read-Only-Liste mi
 Was fehlt: Skill-Detail-View mit Markdown-Editor für SKILL.md, Form-Fields für Manifest, PATCH-Endpoint analog zu Persona-Reload-CLI (#78). Vorbedingung: Skill-Sync-Endpoint aus #75. Verknüpft mit #76 (Skill-Edit/Delete via UI), könnte gemeinsam adressiert werden.
 
 **Größe:** L · **Priorität:** should · **Aus:** 3.2-Strategie-Session, langfristige UI-Editierbarkeit
+**Stufe:** 0 → 2 · **Tranche:** C · **Spur:** UX-Reifung Stufe 1 (Bau-Plan in `docs/UX-STRATEGY.md`)
 
 ### 87. UI-Konfigurator für MCP-Server pro Twin
 Heute werden MCP-Server via CLI/SQL hinzugefügt (Sub-Schritt 3.2.E baut die CLI). Langfristig brauchen non-tech-User eine UI: Server-Add-Form mit Transport-Wahl (stdio/http), Command + Args, optionalen ENV-Vars (verschlüsselt analog zu API-Key), Default-Approval-Setting. Plus Server-Liste mit Aktiv-Toggle, Refresh-Tool-Discovery-Button, Server-Remove mit Cascade-Confirm.
@@ -797,6 +798,7 @@ Heute werden MCP-Server via CLI/SQL hinzugefügt (Sub-Schritt 3.2.E baut die CLI
 Konzeptionell parallel zu #86 — beide sind Backend-getriebene Configs, die heute via CLI laufen, langfristig UI brauchen. Schema und Repo (3.2.A) sind so designed, dass UI später ohne Refactor möglich ist (`hasEnv`-Marker statt Plain-ENV im Output, Encrypted-Storage, Validation im Repo).
 
 **Größe:** L · **Priorität:** should · **Aus:** 3.2-Strategie-Session
+**Stufe:** 0 → 2 · **Tranche:** C · **Spur:** UX-Reifung Stufe 1 (Bau-Plan in `docs/UX-STRATEGY.md`)
 
 ### 88. Multi-Provider Tool-Use-Adapter
 Aktuelle Tool-Bridge (3.2.D) nutzt das AI-SDK direkt — `generateText({tools})` abstrahiert die Provider-API-Schemata für Anthropic/OpenAI/Google/Groq/Ollama. Funktioniert für die bestehenden Provider Out-of-the-Box ohne eigenen Adapter.
@@ -882,6 +884,7 @@ Saubere Lösung: Modal-Komponente oder Inline-Eingabefeld mit Textarea (analog z
 Vorbedingung: keine. Diff-Scope: Frontend only, ein Edit in `apps/web/app/chat/[handle]/page.tsx` plus eventuell Helper-Komponente.
 
 **Größe:** S · **Priorität:** nice · **Aus:** Tag-10-Mittag 3.2.G-Implementation (window.prompt analog Inbox)
+**Stufe:** 0 → 1 · **Tranche:** A · **Spur:** UX-Reifung Stufe 1 (Bau-Plan in `docs/UX-STRATEGY.md`)
 
 ### 92. Production-Deploy von Phase 3.2 (Migrations + MCP-Setup) ✅ Tag 11
 **Erledigt 10. Mai 2026 vormittag (Tag 11), kein Repo-Commit für VPS-Override-Update.**
@@ -1028,6 +1031,132 @@ In Phase 4: Owner-Mode (Markus chattet via Telegram mit eigenem Twin) deutlich e
 
 ### A2A vs. eigene Bridge-Strategie
 A2A wird zusätzlich gebaut, nicht statt. Eigene Bridge bleibt für Twin-Lab-spezifische Features (Mandate-Layer, Approval-Gates, eigene Persona-Modellierung). A2A ist Adapter-Schicht obendrauf für Ökosystem-Anbindung. Entscheidung in Phase 4.
+
+---
+
+## UX-Reifung — Stufe 1 (Less Technical)
+
+Parallel zu Phase 3.6. Vollständige Spec: `docs/UX-STRATEGY.md`.
+
+Stufen-Konzept: 0 = Engineer-Stand, 1 = Tech-Affine ohne Doku-Lookup, 2 = Casual-User-fähig, 3 = ohne tech. Vorkenntnis. Backlog-Items ohne Stufen-Marker = implizit Stufe 0 (UX-irrelevant für diese Spur).
+
+### Tranche A — Quick-Wins
+
+Bestehende Items, jetzt re-klassifiziert:
+- **#91 Reject-Reason-UI** (window.prompt → Modal) — siehe Item oben, jetzt `Stufe: 0 → 1`, `Tranche: A`
+
+Neu für Tranche A:
+
+### 94. Toast-Framework statt `alert()` / `confirm()` in der Web-UI
+Aktuell nutzt `apps/web` an mehreren Stellen Browser-`alert()` / `confirm()` für Erfolgs-, Fehler- und Status-Meldungen. Das blockt die UI, ist nicht theme-bar, und sieht in Production wie ein Bug aus. Plus: für Mobile/Tablet ist das katastrophal.
+
+Was zu tun ist: leichtgewichtiges Toast-Framework (z.B. `sonner` oder `react-hot-toast`, beide Tailwind-kompatibel und klein) plus konsistenten Wrapper `toast.success/error/info(...)`. Inkrementelle Migration der `alert()`-Stellen — Settings-Save, MCP-Add-Fehler, Skill-Toggle, etc.
+
+Plus zentraler Stand: `toast.promise(...)` für API-Calls mit pending/success/error in einem Aufruf. Spart Redundanz pro Try-Catch-Stelle.
+
+**Größe:** M · **Priorität:** should · **Aus:** UX-Strategie-Session Tag 17 Abend
+**Stufe:** 0 → 1 · **Tranche:** A · **Spur:** UX-Reifung Stufe 1 (Bau-Plan in `docs/UX-STRATEGY.md`)
+
+### 95. Tool-Names human-readable im Approve-Dialog
+Aktuell zeigt der Approve-Dialog technische Identifier wie `mcp_hyperbrowser-approval_scrape_webpage`. Für Casual-User unverständlich, für Tech-Affine zumindest reibungsfähig.
+
+Was zu tun ist: Mapping-Layer Tool-Identifier → human-readable Label plus Args-Kurzbeschreibung. Quellen für das Label, in dieser Reihenfolge:
+1. `manifestJson.displayName` falls vom Skill explizit gesetzt (neue Optional-Property, Owner kann override)
+2. Aus dem `description`-Feld des Tool-Manifests den ersten Satz extrahieren
+3. Heuristik aus Tool-Identifier (kebab-/snake-Case → Title Case, MCP-Server-Prefix entfernen)
+
+Plus Args-Preview: für `scrape_webpage({url: 'https://anthropic.com', outputFormat: ['markdown']})` → „Webseite lesen: anthropic.com". Heuristik pro bekanntem Tool-Pattern, generischer Fallback ist die Args-JSON.
+
+**Größe:** S · **Priorität:** should · **Aus:** UX-Strategie-Session Tag 17 Abend (Tool-Picker UX-Audit)
+**Stufe:** 0 → 1 · **Tranche:** A · **Spur:** UX-Reifung Stufe 1 (Bau-Plan in `docs/UX-STRATEGY.md`)
+
+### 96. Empty-State-Onboarding für Chat
+Erstuser landet im Chat-Tab mit nur einem leeren Input-Feld. Keine Erklärung, was der Twin kann, welche Tools verfügbar sind, wie Memory funktioniert. Aktuelle User wissen es, neue User scheitern.
+
+Was zu tun ist: bei leerer Konversation (`messages.length === 0`) statt nur leeres Feld ein Onboarding-Block:
+- 1-2 Sätze „Das ist dein Twin von X" mit Persona-Display-Name
+- Liste der wichtigsten Capabilities („Web lesen, Memory abfragen, Skills X/Y")
+- 2-3 Beispiel-Prompts als anklickbare Chips, die ins Input-Feld einsetzen
+
+Pattern: bekannt aus ChatGPT/Claude-Web. Verschwindet sobald die erste User-Message gesendet wurde.
+
+**Größe:** S · **Priorität:** should · **Aus:** UX-Strategie-Session Tag 17 Abend
+**Stufe:** 0 → 1 · **Tranche:** A · **Spur:** UX-Reifung Stufe 1 (Bau-Plan in `docs/UX-STRATEGY.md`)
+
+### 97. Inbox-Tab Tutorial / Empty-State
+Aktuell ist die leere Inbox einfach leer. Das Konzept „Approvals" / „Pending-Actions" ist twin-lab-spezifisch und wird nicht erklärt.
+
+Was zu tun ist: Empty-Inbox zeigt einen 2-3-Zeilen-Erklärtext: „Wenn dein Twin eine Aktion vorschlägt, die Genehmigung braucht (z.B. eine Webseite lesen, eine Mail senden), landet sie hier. Du genehmigst per Klick — oder lehnst ab." Plus einen Mini-Screenshot oder eine vereinfachte Demo eines Pending-Eintrags.
+
+Aktiviert sich nur wenn Inbox leer ist; verschwindet sobald irgendein Pending existiert hat.
+
+**Größe:** XS · **Priorität:** nice · **Aus:** UX-Strategie-Session Tag 17 Abend
+**Stufe:** 0 → 1 · **Tranche:** A · **Spur:** UX-Reifung Stufe 1 (Bau-Plan in `docs/UX-STRATEGY.md`)
+
+### Tranche B — Mittlere Investments
+
+### 98. Cost/Time-Preview vor Approve
+Aktuell ist Approve ein blinder Klick — User weiß nicht, ob die nachfolgende Aktion 2 Sekunden oder 2 Minuten dauert, 0 Cent oder 50 Cent kostet. Pflicht für Hyperbrowser-Calls (Cloud-Browser-Session kostet), kritisch für Phase 3.6 Computer-Use-Agent (Multi-Step-Sessions mit substantieller Inferenz-Last).
+
+Was zu tun ist: Approve-Dialog zeigt vor Bestätigung:
+- Geschätzte Latenz („~30 s")
+- Geschätzte Kosten („~0,12 €", optional)
+- Heuristik pro Tool-Type-Pattern (scrape: niedrig, computer_use_agent: hoch)
+- Fallback: „Unbekannt" wenn keine Heuristik matched
+
+Cost-Heuristik braucht eine Kosten-Tabelle pro Tool-Pattern; für Phase 3.6 als Pflicht-Block separat angesetzt. Für jetzt: Latenz-Schätzung reicht erstmal als MVP.
+
+**Größe:** M · **Priorität:** should · **Aus:** UX-Strategie-Session Tag 17 Abend (Phase-3.6-Vorbereitung)
+**Stufe:** 0 → 1 · **Tranche:** B · **Spur:** UX-Reifung Stufe 1 (Bau-Plan in `docs/UX-STRATEGY.md`)
+
+### 99. Audit-Trail-View menschlich lesbar formatieren
+Aktuell ist die Audit-Detail-View Roh-JSON: Tool-Calls als `{toolName, input, output}`-Objekte, Token-Usage als nested Object, Timestamps als epoch ms. Funktional fürs Debugging, aber unzumutbar für Casual-User. Plus: Vision Block 4 (Vererbung — Anna soll später auf Markus' Audit-Trail Zugriff haben können) braucht das in menschlicher Form.
+
+Was zu tun ist: Audit-Entry-Renderer mit Tool-Call-Sätzen statt JSON:
+- „Twin hat die Webseite *anthropic.com* gelesen" statt `{toolName:'scrape_webpage', input:{url:'...'}}`
+- Args als Plain-Text-Liste (Label + Wert)
+- Result als gekürzter Preview mit Expand-Toggle für den vollen Output
+- Timestamps human-readable („vor 3 Minuten", „heute 14:23")
+- Token-Usage als „~1500 Tokens, ~0,08 €" statt nested JSON
+
+Pro Tool-Type ein eigenes Render-Template (mit generischem Fallback). Wartbar, weil pro Skill anpassbar.
+
+**Größe:** M · **Priorität:** should · **Aus:** UX-Strategie-Session Tag 17 Abend (Vererbungs-Argument)
+**Stufe:** 0 → 1 · **Tranche:** B · **Spur:** UX-Reifung Stufe 1 (Bau-Plan in `docs/UX-STRATEGY.md`)
+
+### 100. Memory-Hit-Indikator im Chat
+Wenn Twin Memory-Hits (Episodic, Semantic) in seine Antwort einbezogen hat, gibt es heute keinen UI-Hinweis. Das ist Vision Block 2 Pattern 2 (Zeit-Erleben) — Memory soll *spürbar* sein, nicht nur funktional vorhanden.
+
+Was zu tun ist: pro Twin-Antwort, die Memory-Retrieval-Hits hatte, ein kleines Icon/Badge in der Antwort-Bubble. Hover/Klick zeigt:
+- Anzahl Hits („Twin hat sich an 3 frühere Konversationen erinnert")
+- Optional die genauen Memory-Snippets (gekürzt, mit Datum)
+
+Backend liefert die Hits ohnehin schon (3.4 Hybrid-Search Logging), muss in der API-Response surfaced werden (heute vermutlich nur intern geloggt).
+
+**Größe:** S · **Priorität:** nice · **Aus:** UX-Strategie-Session Tag 17 Abend (Vision Block 2 Pattern 2)
+**Stufe:** 0 → 1 · **Tranche:** B · **Spur:** UX-Reifung Stufe 1 (Bau-Plan in `docs/UX-STRATEGY.md`)
+
+### Tranche C — Strategische Investments
+
+Bestehende Items, jetzt re-klassifiziert:
+- **#86 UI-Editor für Skills (Manifest + Markdown)** — siehe Item oben, jetzt `Stufe: 0 → 2`, `Tranche: C`
+- **#87 UI-Konfigurator für MCP-Server pro Twin** — siehe Item oben, jetzt `Stufe: 0 → 2`, `Tranche: C`
+
+Neu für Tranche C:
+
+### 101. Twin-Reife-Stufen-Anzeige
+Vision Block 2.5 zentral: Twin-Reife ist gestuft (Onboarding-Twin → tiefer Twin nach Monaten/Jahren Pflege), und Stufen sollen für User sichtbar sein. Engagement-Hook für SaaS-Launch (User sieht eigenen Fortschritt) und Differenzierung gegen flache Twins-as-Chatbots.
+
+Was zu tun ist: Reife-Berechnungs-Engine plus UI-Anzeige.
+- Stufen-Definition (z.B. 0 = Onboarding, 1 = Bewohnt, 2 = Vertraut, 3 = Tief) mit objektiven Schwellen aus Memory-Tiefe (Konv-Count, Facts-Count, Embedding-Density, Pattern-Aktivität)
+- Engine berechnet aktuelle Stufe + Distanz zur nächsten
+- UI-Component: Stufen-Badge in der Persona-Sidebar, plus Detail-View „Was fehlt zur nächsten Stufe?"
+- Optional Notifications bei Stufen-Aufstieg
+
+Strategische Entscheidung vor Bau: Stufen-Definition braucht eine eigene Strategie-Session (Markus + Vision-Doc abgleichen, ob Stufen-Granularität passt).
+
+**Größe:** L · **Priorität:** should · **Aus:** UX-Strategie-Session Tag 17 Abend (Vision Block 2.5)
+**Stufe:** 0 → 2 · **Tranche:** C · **Spur:** UX-Reifung Stufe 1 (Bau-Plan in `docs/UX-STRATEGY.md`)
 
 ---
 
