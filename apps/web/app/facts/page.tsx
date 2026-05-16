@@ -11,6 +11,7 @@ import {
 import { useRouter, useSearchParams } from "next/navigation";
 import type { AuditEntry, FactItem, TwinEvent } from "@twin-lab/shared";
 import { ModalWrapper } from "../../components/ModalWrapper";
+import { RejectReasonModal } from "../../components/RejectReasonModal";
 
 const RUNTIME_URL = process.env.NEXT_PUBLIC_RUNTIME_URL ?? "http://localhost:4000";
 
@@ -56,6 +57,13 @@ function FactsInner() {
   const [error, setError] = useState<string | null>(null);
   const [addOpen, setAddOpen] = useState(false);
   const [editing, setEditing] = useState<FactWithAudit | null>(null);
+  // UX.1.A.1 (#91): Reject-Reason-Modal-State statt window.prompt().
+  const [rejectModal, setRejectModal] = useState<{
+    open: boolean;
+    auditId?: string;
+    factId?: string;
+    subject?: string;
+  }>({ open: false });
 
   const selectedHandle = useMemo(
     () => requestedHandle ?? twins[0]?.handle ?? null,
@@ -204,19 +212,31 @@ function FactsInner() {
     }
   };
 
-  const handleReject = async (fact: FactWithAudit) => {
+  const handleReject = (fact: FactWithAudit) => {
     if (!selectedHandle || !fact.pendingAuditId) return;
-    const reason = window.prompt("Grund für Ablehnung (optional):", "");
-    if (reason === null) return;
-    setBusy((b) => ({ ...b, [fact.id]: true }));
+    // UX.1.A.1 (#91): Modal öffnen statt window.prompt(). subject = factKey
+    // gibt dem User Kontext, welches Fact er ablehnt.
+    setRejectModal({
+      open: true,
+      auditId: fact.pendingAuditId,
+      factId: fact.id,
+      subject: fact.factKey,
+    });
+  };
+
+  const confirmRejectFromModal = async (reason: string) => {
+    if (!selectedHandle || !rejectModal.auditId || !rejectModal.factId) return;
+    const { auditId, factId } = rejectModal;
+    const reasonOrDefault = reason.trim() || "Nicht freigegeben";
+    setBusy((b) => ({ ...b, [factId]: true }));
     try {
       const res = await fetch(
-        `${RUNTIME_URL}/twins/${selectedHandle}/audit/${fact.pendingAuditId}/reject`,
+        `${RUNTIME_URL}/twins/${selectedHandle}/audit/${auditId}/reject`,
         {
           method: "POST",
           credentials: "include",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ reason: reason.trim() || "Nicht freigegeben" }),
+          body: JSON.stringify({ reason: reasonOrDefault }),
         },
       );
       if (!res.ok) {
@@ -226,8 +246,9 @@ function FactsInner() {
       await loadFacts(selectedHandle);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Reject fehlgeschlagen");
+      throw err; // Re-throw → Modal zeigt error-Toast.
     } finally {
-      setBusy((b) => ({ ...b, [fact.id]: false }));
+      setBusy((b) => ({ ...b, [factId]: false }));
     }
   };
 
@@ -360,6 +381,12 @@ function FactsInner() {
           }}
         />
       )}
+      <RejectReasonModal
+        open={rejectModal.open}
+        subject={rejectModal.subject}
+        onConfirm={confirmRejectFromModal}
+        onCancel={() => setRejectModal({ open: false })}
+      />
     </div>
   );
 }

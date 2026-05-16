@@ -13,6 +13,7 @@ import Link from "next/link";
 import type { AuditEntry, ChatMessage, TwinEvent } from "@twin-lab/shared";
 import { ToolPicker } from "./ToolPicker";
 import { ModalWrapper } from "../../../components/ModalWrapper";
+import { RejectReasonModal } from "../../../components/RejectReasonModal";
 import { toast } from "../../../lib/toast";
 
 const RUNTIME_URL = process.env.NEXT_PUBLIC_RUNTIME_URL ?? "http://localhost:4000";
@@ -885,6 +886,12 @@ function DirectChat({
   // 3.2.G: Loading-State pro Audit für Approve/Reject — Tool-Call braucht
   // 5-10s (Spawn + LLM-Resume), Buttons werden in der Zeit disabled.
   const [loadingAuditId, setLoadingAuditId] = useState<string | null>(null);
+  // UX.1.A.1 (#91): Reject-Reason-Modal-State statt window.prompt().
+  const [rejectModal, setRejectModal] = useState<{
+    open: boolean;
+    auditId?: string;
+    subject?: string;
+  }>({ open: false });
   // #85: Conv-ID, mit der neue Live-Messages getagged werden. Initial null;
   // nach Audit-Load auf die newest convId gesetzt — so erweitern Live-Sends
   // die laufende Konversation, ohne falschen Trenner. Nach Reset bumped der
@@ -1049,9 +1056,16 @@ function DirectChat({
     }
   }
 
-  async function handleReject(auditId: string) {
-    const reason = window.prompt("Grund für Ablehnung?", "Nicht freigegeben");
-    if (reason === null) return;
+  function handleReject(auditId: string, subject?: string) {
+    // UX.1.A.1 (#91): Modal-State setzen statt blocking prompt(). Daten-
+    // Fetch passiert in confirmRejectFromModal nach Submit.
+    setRejectModal({ open: true, auditId, subject });
+  }
+
+  async function confirmRejectFromModal(reason: string) {
+    if (!rejectModal.auditId) return;
+    const auditId = rejectModal.auditId;
+    const reasonOrDefault = reason.trim() || "Nicht freigegeben";
     setLoadingAuditId(auditId);
     setError(null);
     try {
@@ -1061,7 +1075,7 @@ function DirectChat({
           method: "POST",
           credentials: "include",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ reason }),
+          body: JSON.stringify({ reason: reasonOrDefault }),
         },
       );
       if (!res.ok) {
@@ -1071,6 +1085,7 @@ function DirectChat({
       await loadAudits();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Reject fehlgeschlagen");
+      throw err; // Re-throw für Modal-Error-Toast.
     } finally {
       setLoadingAuditId(null);
     }
@@ -1113,7 +1128,7 @@ function DirectChat({
                       rejectReason={block.rejectReason}
                       busy={loadingAuditId === block.auditId}
                       onApprove={() => handleApprove(block.auditId)}
-                      onReject={() => handleReject(block.auditId)}
+                      onReject={() => handleReject(block.auditId, block.toolName)}
                     />
                   ) : (
                     <Bubble role={block.kind} content={block.content} />
@@ -1156,6 +1171,12 @@ function DirectChat({
           send
         </button>
       </div>
+      <RejectReasonModal
+        open={rejectModal.open}
+        subject={rejectModal.subject}
+        onConfirm={confirmRejectFromModal}
+        onCancel={() => setRejectModal({ open: false })}
+      />
     </>
   );
 }

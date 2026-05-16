@@ -3,6 +3,7 @@
 import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import type { AuditEntry, ChatMessage, TwinEvent } from "@twin-lab/shared";
+import { RejectReasonModal } from "../../components/RejectReasonModal";
 
 const RUNTIME_URL = process.env.NEXT_PUBLIC_RUNTIME_URL ?? "http://localhost:4000";
 
@@ -39,6 +40,12 @@ function InboxInner() {
   const [pending, setPending] = useState<AuditEntry[]>([]);
   const [busy, setBusy] = useState<Record<string, boolean>>({});
   const [error, setError] = useState<string | null>(null);
+  // UX.1.A.1 (#91): Reject-Reason-Modal-State statt window.prompt().
+  const [rejectModal, setRejectModal] = useState<{
+    open: boolean;
+    auditId?: string;
+    subject?: string;
+  }>({ open: false });
 
   const selectedHandle = useMemo(
     () => requestedHandle ?? twins[0]?.handle ?? null,
@@ -154,10 +161,18 @@ function InboxInner() {
     }
   }
 
-  async function reject(id: string) {
+  function reject(id: string, subject?: string) {
     if (!selectedHandle) return;
-    const reason = window.prompt("Grund für Ablehnung?", "Nicht freigegeben");
-    if (reason === null) return;
+    // UX.1.A.1 (#91): Modal öffnen statt window.prompt() blocken — async
+    // Submit + Loading-State + a11y. Daten-Fetch passiert in confirmReject.
+    setRejectModal({ open: true, auditId: id, subject });
+  }
+
+  async function confirmReject(reason: string) {
+    if (!selectedHandle || !rejectModal.auditId) return;
+    const id = rejectModal.auditId;
+    // Fallback auf alten Default-Reason, damit Audit-Trail nie leer ist.
+    const reasonOrDefault = reason.trim() || "Nicht freigegeben";
     setBusy((b) => ({ ...b, [id]: true }));
     setError(null);
     try {
@@ -167,7 +182,7 @@ function InboxInner() {
           method: "POST",
           credentials: "include",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ reason }),
+          body: JSON.stringify({ reason: reasonOrDefault }),
         },
       );
       if (!res.ok) {
@@ -177,7 +192,9 @@ function InboxInner() {
       await loadPending(selectedHandle);
       await loadAudit(selectedHandle);
     } catch (err) {
+      // Re-throw, damit das Modal den error-Toast zeigen kann.
       setError(err instanceof Error ? err.message : "Reject fehlgeschlagen");
+      throw err;
     } finally {
       setBusy((b) => ({ ...b, [id]: false }));
     }
@@ -244,7 +261,7 @@ function InboxInner() {
                         {isBusy ? "..." : "approve"}
                       </button>
                       <button
-                        onClick={() => reject(entry.id)}
+                        onClick={() => reject(entry.id, entry.capability)}
                         disabled={isBusy}
                         className="px-3 py-1.5 text-xs border border-warn text-warn rounded hover:bg-warn hover:text-bg disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
                       >
@@ -358,6 +375,12 @@ function InboxInner() {
           </table>
         )}
       </Section>
+      <RejectReasonModal
+        open={rejectModal.open}
+        subject={rejectModal.subject}
+        onConfirm={confirmReject}
+        onCancel={() => setRejectModal({ open: false })}
+      />
     </div>
   );
 }
