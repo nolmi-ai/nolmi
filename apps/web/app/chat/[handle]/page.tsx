@@ -13,6 +13,7 @@ import Link from "next/link";
 import type { AuditEntry, ChatMessage, TwinEvent } from "@twin-lab/shared";
 import { ToolPicker } from "./ToolPicker";
 import { ModalWrapper } from "../../../components/ModalWrapper";
+import { toast } from "../../../lib/toast";
 
 const RUNTIME_URL = process.env.NEXT_PUBLIC_RUNTIME_URL ?? "http://localhost:4000";
 
@@ -370,8 +371,8 @@ function ConversationDivider() {
 //        - Reflektieren + Beenden (Extract, dann Reset; bei Extract-Failure
 //          trotzdem Reset, weil User-Intention "beenden" war)
 //
-// Toast-Fallback: das Projekt hat (noch) keine Toast-Library — wir nutzen
-// `alert()` als pragmatischen Ersatz. Modal-Komponente kommt aus
+// Toast-Feedback: zentrale Toast-API in `apps/web/lib/toast.ts` (sonner-
+// basiert, UX.1.A.1 / Item #94). Modal-Komponente kommt aus
 // `apps/web/components/ModalWrapper`.
 //
 // 3.3.G3 ersetzt den vorherigen #84-Inline-Confirm-Button durch das Modal-
@@ -399,11 +400,9 @@ function DirectChatActions({
 
   const hasConversation = conversationId !== null;
 
-  function showToast(msg: string) {
-    // Pragmatischer Fallback: alert(). Wenn das Projekt später ein Toast-
-    // System bekommt (z.B. sonner), an dieser Stelle umstellen.
-    alert(msg);
-  }
+  // UX.1.A.1 (#94): showToast → toast.success/.error/.info pro Call-Site.
+  // Der lokale Wrapper wurde mit der Toast-Migration entfernt; siehe
+  // `apps/web/lib/toast.ts` für die zentrale API.
 
   async function performExtract(): Promise<{
     extracted: number;
@@ -460,11 +459,11 @@ function DirectChatActions({
     try {
       const result = await performExtract();
       if (result.error) {
-        showToast(`Reflexion fehlgeschlagen: ${result.error}`);
+        toast.error(`Reflexion fehlgeschlagen: ${result.error}`);
       } else if (result.extracted === 0) {
-        showToast("Keine neuen Facts extrahiert.");
+        toast.info("Keine neuen Facts extrahiert.");
       } else {
-        showToast(
+        toast.success(
           `${result.extracted} neue Fact${result.extracted === 1 ? "" : "s"} extrahiert. Review in /facts.`,
         );
       }
@@ -494,11 +493,11 @@ function DirectChatActions({
       // Briefing-Entscheidung: bei Extract-Failure trotzdem Reset — User
       // wollte beenden, Extract war Nebenziel. Toast informiert über Lücke.
       if (result.error) {
-        showToast(
+        toast.error(
           `Reflexion fehlgeschlagen: ${result.error}\nKonversation wird trotzdem beendet.`,
         );
       } else if (result.extracted > 0) {
-        showToast(
+        toast.success(
           `${result.extracted} neue Fact${result.extracted === 1 ? "" : "s"} extrahiert. Review in /facts.`,
         );
       }

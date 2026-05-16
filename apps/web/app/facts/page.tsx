@@ -163,6 +163,8 @@ function FactsInner() {
 
   const handleDelete = async (fact: FactWithAudit) => {
     if (!selectedHandle) return;
+    // FIXME (UX.1.A.1 / nach #94): window.confirm() — destruktiv, braucht
+    // eigenen AlertDialog statt Toast. Eigenes Backlog-Item für später.
     if (!window.confirm(`Fact "${fact.factKey}" wirklich löschen?`)) return;
     setBusy((b) => ({ ...b, [fact.id]: true }));
     try {

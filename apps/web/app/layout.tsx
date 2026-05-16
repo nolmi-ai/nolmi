@@ -1,5 +1,6 @@
 import "./globals.css";
 import { Suspense, type ReactNode } from "react";
+import { Toaster } from "sonner";
 import { AppHeader } from "../components/AppHeader";
 import { AppFooter } from "../components/AppFooter";
 
@@ -27,6 +28,10 @@ export default function RootLayout({ children }: { children: ReactNode }) {
         <Suspense fallback={null}>
           <AppFooter />
         </Suspense>
+        {/* Toaster (UX.1.A.1 / Item #94): zentrale Toast-Anzeige.
+         * richColors für semantische Success/Error/Info-Defaults,
+         * closeButton damit User Toasts manuell wegklicken kann. */}
+        <Toaster position="top-right" richColors closeButton />
       </body>
     </html>
   );

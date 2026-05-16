@@ -224,6 +224,9 @@ function SettingsInner() {
 
   async function removeTrust(trust: TrustRelationship) {
     if (!selectedHandle) return;
+    // FIXME (UX.1.A.1 / nach #94): window.confirm() — destruktiv,
+    // braucht eigenen AlertDialog statt Toast (kein generischer Dialog-
+    // Component in der Codebase). Eigenes Backlog-Item für später.
     if (!window.confirm(`Wirklich ${trust.trustedHandle} aus Vertrauten entfernen?`)) {
       return;
     }
