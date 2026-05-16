@@ -210,6 +210,26 @@ Matrix-Modell. Twin auf Bridge-A spricht mit Twin auf Bridge-B. Plus: Cross-Twin
 
 ---
 
+## Orthogonaler Strang: UX-Reifung
+
+UX-Reifung läuft parallel zu allen Engineering-Phasen, nicht als
+eigene Phase. Vier Reife-Stufen: 0 (Engineer-Stand), 1 (Less
+Technical), 2 (Casual-User-fähig), 3 (ohne tech. Vorkenntnis).
+
+**Stufe 1 läuft parallel zu Phase 3.6** mit 11 priorisierten Items.
+Tranche A (Quick-Wins, S-Items), Tranche B (Mittlere Investments,
+M-Items), Tranche C (Strategisch, L-Items).
+
+Vollständiger Bau-Plan: `docs/UX-STRATEGY.md`. Backlog-Items mit
+Stufen-Marker stehen im `BACKLOG.md` (neue Section „UX-Reifung —
+Stufe 1" plus inline-Marker an bestehenden Items).
+
+Stufe 2 (SaaS-Hosting, Persona-Builder-Chat, MCP-Marketplace,
+Onboarding-Wizard) ist eigene Strategie-Session, Voraussetzung
+für Public-Launch.
+
+---
+
 ## Phase 5+ — Vision
 
 P2P mit DIDs, optional Blockchain. Plus Open-Core-Modus aus Vision-Doc.
