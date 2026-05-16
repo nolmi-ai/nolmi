@@ -13,6 +13,8 @@ import {
   stepCountIs,
   type LanguageModel,
   type ModelMessage,
+  type StopCondition,
+  type ToolSet,
 } from "ai";
 import type Database from "better-sqlite3";
 import { checkMandate } from "./mandates/service.js";
@@ -1546,7 +1548,14 @@ REGEL 6: Wenn der User dich explizit bittet, ein Tool zu nutzen ("rufe das X-Too
       ...(hasTools
         ? {
             tools: mcpTools,
-            stopWhen: stepCountIs(5),
+            // 3.5.E.B: stopWhen-Array hat OR-Semantik — Multi-Step bricht ab,
+            // sobald entweder das Step-Limit (5) erreicht oder ein Marker-
+            // Tool-Result im letzten Step auftaucht. Der Marker-Stop ist
+            // Defense-in-Depth zum Step-Walk-Fix in detectPendingToolCall:
+            // verhindert dass AI SDK aus dem Marker eine Synthese-Antwort
+            // baut. detectPendingToolCall findet den Marker-Call dann sauber
+            // in steps[*] und wirft McpToolApprovalRequiredError.
+            stopWhen: [stepCountIs(5), stopOnPendingApprovalMarker],
             ...(forcedTool ? { toolChoice: forcedTool } : {}),
           }
         : {}),
@@ -1605,7 +1614,11 @@ REGEL 6: Wenn der User dich explizit bittet, ein Tool zu nutzen ("rufe das X-Too
           ...result.response.messages,
         ],
         tools: mcpTools,
-        stopWhen: stepCountIs(2),
+        // 3.5.E.B: gleicher Marker-Stop wie im ersten Call. Hier
+        // theoretisch redundant (Marker-Pfad geht durch den Catch oben und
+        // erreicht den Followup nie), aber kostenlos und schützt vor
+        // zukünftigen Forced-Followup-Pfaden mit Approval-Tools.
+        stopWhen: [stepCountIs(2), stopOnPendingApprovalMarker],
         // Kein toolChoice → Default 'auto'. LLM darf jetzt frei antworten.
       });
     }
@@ -1615,10 +1628,16 @@ REGEL 6: Wenn der User dich explizit bittet, ein Tool zu nutzen ("rufe das X-Too
     // damit landen Tool-Calls automatisch im Audit-Trail, ohne weitere
     // Anpassung. AI-SDK 6 nutzt input/output (nicht args/result).
     //
-    // Tool-Calls/-Results kommen aus dem ERSTEN Call (das ist das
-    // erzwungene Tool); Final-Text aus dem Followup, falls vorhanden.
-    const toolCallsForAudit: AuditToolCall[] = result.toolCalls.map((tc) => {
-      const matchingResult = result.toolResults.find(
+    // 3.5.E.B: collectAllTool* statt result.toolCalls/.toolResults direkt
+    // — Multi-Step legt frühere Tool-Calls in result.steps[i].toolCalls,
+    // top-level zeigt nur den letzten Step. Vorher hat der Audit-Trail bei
+    // Multi-Step-Tool-Use leere toolCalls gezeigt, obwohl Tools sehr wohl
+    // gerufen wurden. Final-Text kommt weiter aus dem Followup, falls
+    // vorhanden; der erste Call liefert die Tool-Calls aller Steps.
+    const allToolCalls = collectAllToolCalls(result);
+    const allToolResults = collectAllToolResults(result);
+    const toolCallsForAudit: AuditToolCall[] = allToolCalls.map((tc) => {
+      const matchingResult = allToolResults.find(
         (tr) => tr.toolCallId === tc.toolCallId,
       );
       return {
@@ -1794,6 +1813,57 @@ interface AuditMcpToolUseInputShape {
  */
 type GenerateTextOutcome = Awaited<ReturnType<typeof generateText>>;
 
+// ─── 3.5.E.B: STEP-WALK FÜR TOOL-CALLS / TOOL-RESULTS ──────────────────────
+//
+// AI SDK 6 propagiert bei Multi-Step-`generateText`-Calls die Tool-Calls
+// aus früheren Steps NICHT ins top-level `result.toolCalls` — das zeigt
+// nur den letzten Step. Wir flachen daher über `result.steps` und fallen
+// nur dann auf top-level zurück, wenn `steps` fehlt (defensive: ältere
+// SDK-Version oder Single-Step-Cache-Hit). Spike 3.5.E.0 hat das Verhalten
+// verifiziert (siehe Findings-Doc auf Branch `spike/89-tool-autonomy`).
+function collectAllToolCalls(
+  result: GenerateTextOutcome,
+): GenerateTextOutcome["toolCalls"] {
+  const fromSteps = result.steps?.flatMap((s) => s.toolCalls ?? []);
+  return fromSteps && fromSteps.length > 0
+    ? fromSteps
+    : (result.toolCalls ?? []);
+}
+
+function collectAllToolResults(
+  result: GenerateTextOutcome,
+): GenerateTextOutcome["toolResults"] {
+  const fromSteps = result.steps?.flatMap((s) => s.toolResults ?? []);
+  return fromSteps && fromSteps.length > 0
+    ? fromSteps
+    : (result.toolResults ?? []);
+}
+
+// 3.5.E.B Defense-in-Depth: bricht den Multi-Step-Loop ab, sobald ein Tool-
+// Result im *gerade fertiggestellten* Step den Pending-Approval-Marker
+// enthält. Ohne diesen Stop würde das AI SDK aus dem Marker-Result einen
+// Synthese-Text generieren (sieht wie User-freundliche Halluzination aus,
+// kostet außerdem ein zusätzlicher LLM-Roundtrip an Tokens und Latenz).
+// Der Marker-Tool-Call bleibt in `steps[*]` stehen — `detectPendingToolCall`
+// findet ihn weiter, der Pending-Audit kann sauber gebaut werden.
+const stopOnPendingApprovalMarker: StopCondition<ToolSet> = ({ steps }) => {
+  const lastStep = steps[steps.length - 1];
+  if (!lastStep) return false;
+  for (const tr of lastStep.toolResults ?? []) {
+    const output = tr.output as
+      | { content?: Array<{ type?: string; text?: string }> }
+      | undefined;
+    if (
+      output?.content?.some(
+        (c) => c?.type === "text" && c?.text === MCP_PENDING_APPROVAL_MARKER,
+      )
+    ) {
+      return true;
+    }
+  }
+  return false;
+};
+
 function detectPendingToolCall(
   result: GenerateTextOutcome,
   skillByToolKey: Map<string, Skill>,
@@ -1802,8 +1872,14 @@ function detectPendingToolCall(
   mcpToolName: string;
   input: Record<string, unknown>;
 } | null {
-  for (const toolCall of result.toolCalls ?? []) {
-    const matching = result.toolResults?.find(
+  // 3.5.E.B: Step-Walk statt top-level — siehe collectAllTool*. Vorher hat
+  // diese Funktion nur den letzten Step gesehen; bei Multi-Step lag der
+  // Marker-Call aber in step[0] und wurde übersehen → kein Pending-Audit
+  // → AI SDK synthetisierte einen Antwort-Text aus dem Marker-Result.
+  const toolCalls = collectAllToolCalls(result);
+  const toolResults = collectAllToolResults(result);
+  for (const toolCall of toolCalls) {
+    const matching = toolResults.find(
       (r) => r.toolCallId === toolCall.toolCallId,
     );
     if (!matching) continue;
