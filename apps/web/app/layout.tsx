@@ -28,10 +28,12 @@ export default function RootLayout({ children }: { children: ReactNode }) {
         <Suspense fallback={null}>
           <AppFooter />
         </Suspense>
-        {/* Toaster (UX.1.A.1 / Item #94): zentrale Toast-Anzeige.
-         * richColors für semantische Success/Error/Info-Defaults,
-         * closeButton damit User Toasts manuell wegklicken kann. */}
-        <Toaster position="top-right" richColors closeButton />
+        {/* Toaster (UX.1.A.1 / #94 + UX.1.A.2.B Theming). richColors
+         * bewusst ENTFERNT — wir setzen Backgrounds/Border/Text-Farben
+         * via CSS-Vars-Overrides (siehe `globals.css`, `[data-sonner-
+         * toaster]`-Block). Damit greift der Twin-Lab-Look (surface-BG,
+         * accent/warn-Border, IBM-Plex-Mono) statt der Sonner-Defaults. */}
+        <Toaster position="top-right" closeButton />
       </body>
     </html>
   );

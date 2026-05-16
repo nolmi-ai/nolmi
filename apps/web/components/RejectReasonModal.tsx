@@ -115,19 +115,27 @@ export function RejectReasonModal({
           />
         </label>
         <div className="flex justify-end gap-2">
+          {/* UX.1.A.2.B Audit-Fix: Ghost-Variant mit jetzt valider
+           * `bg-surface-hover` (Token in dieser Sprint-Runde ergänzt) +
+           * `text-muted → text-text`-Hover-Übergang, konsistent mit
+           * den existierenden Tab-Link-Patterns aus TopNav. */}
           <button
             type="button"
             onClick={handleCancel}
             disabled={busy}
-            className="px-3 py-1 rounded border border-border hover:bg-surface-hover disabled:opacity-50"
+            className="px-4 py-2 text-sm rounded border border-border text-muted hover:bg-surface-hover hover:text-text disabled:opacity-50 transition-colors"
           >
             Abbrechen
           </button>
+          {/* UX.1.A.2.B Audit-Fix: Warn-Variant statt Tailwind-Default-Rot.
+           * Pattern 1:1 von Inbox/Chat-Reject-Buttons (border-warn outlined
+           * → hover invertiert auf bg-warn/text-bg) — Twin-Lab-Destructive-
+           * Convention. */}
           <button
             type="button"
             onClick={() => void handleSubmit()}
             disabled={busy}
-            className="px-3 py-1 rounded bg-red-600 text-white hover:bg-red-700 disabled:opacity-50"
+            className="px-4 py-2 text-sm border border-warn text-warn rounded hover:bg-warn hover:text-bg disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
           >
             {busy ? "Lehne ab…" : "Ablehnen"}
           </button>

@@ -6,6 +6,25 @@
 
 :root {
   color-scheme: dark;
+
+  /* ─── Semantische CSS-Variable-Aliases (UX.1.A.2.B) ─────────────────────
+   * Spiegel der Twin-Lab-Foundation-Tokens aus tailwind.config.js.
+   * Zweck: 3rd-Party-Libraries, die KEINE Tailwind-Klassen konsumieren
+   * können (sonner-Toaster, später ggf. Radix-Komponenten, …), bekommen
+   * den Twin-Lab-Look über Standard-CSS-Vars statt eigener Theme-APIs.
+   *
+   * Single Source of Truth bleibt tailwind.config.js — diese Vars sind
+   * reine Aliases. Bei Änderung dort hier mit-aktualisieren (kurzfristig
+   * akzeptable Duplikation, langfristig via Tailwind-v4-@theme-inline
+   * oder PostCSS-Plugin auflösbar). */
+  --color-bg-base: #0a0a0a;
+  --color-bg-elevated: #141414;
+  --color-bg-hover: #1f1f1f;
+  --color-border-default: #2a2a2a;
+  --color-text-default: #e8e8e8;
+  --color-text-muted: #666666;
+  --color-success: #4a9e6a;
+  --color-danger: #cc4444;
 }
 
 html, body {
@@ -21,4 +40,40 @@ html, body {
 ::selection {
   background: #4a9e6a;
   color: #0a0a0a;
+}
+
+/* ─── Sonner-Toaster auf Twin-Lab-Look (UX.1.A.2.B) ─────────────────────
+ * Sonner v2 exponiert eigene CSS-Variables pro Toast-Typ. Wir überschreiben
+ * sie für Backgrounds/Border/Text auf die semantischen Aliases oben. Damit
+ * brauchen wir kein toastOptions.classNames-Override (kein !important-
+ * Wettstreit mit Sonner-Defaults) und Twin-Lab-Stack bleibt konsistent.
+ *
+ * Bewusst:
+ *  - Background bleibt durchgängig `surface` (Card-Look), nur Border-Farbe
+ *    signalisiert den Typ — passt zum App-Pattern „Border-First statt Fill".
+ *  - shadow: none + font-family: inherit überschreiben Sonner-Defaults
+ *    (white shadow + System-Font) auf Twin-Lab-Stack. */
+[data-sonner-toaster] {
+  --normal-bg: var(--color-bg-elevated);
+  --normal-border: var(--color-border-default);
+  --normal-text: var(--color-text-default);
+
+  --success-bg: var(--color-bg-elevated);
+  --success-border: var(--color-success);
+  --success-text: var(--color-text-default);
+
+  --info-bg: var(--color-bg-elevated);
+  --info-border: var(--color-border-default);
+  --info-text: var(--color-text-default);
+
+  --error-bg: var(--color-bg-elevated);
+  --error-border: var(--color-danger);
+  --error-text: var(--color-text-default);
+}
+
+[data-sonner-toast] {
+  font-family: inherit;
+  box-shadow: none;
+  border-radius: 4px;
+  border-width: 1px;
 }
