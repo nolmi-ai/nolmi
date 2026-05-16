@@ -852,6 +852,12 @@ Direktive ist marginal effektiv — Defense-in-Depth gegen Marker-Pollution, abe
 
 **Eigene Strategie-Session vor 3.5.C/3.6 erforderlich** — substantielle Architektur-Frage. Tag-16-Abend-STAND-Update markiert 3.5 als "Foundation lokal verifiziert, autonomer Pfad blocked durch #89". Production-Deploy 3.5.C wartet auf #89-Fix.
 
+**Update Tag-17 (Diagnose-Wende):** Spike `3.5.E.0` hat alle drei LLM-Hypothesen widerlegt. Wurzel ist Step-Walk-Bug in `twin-service.ts` — `detectPendingToolCall` und Audit-Builder lesen `result.toolCalls` top-level, sehen Multi-Step-Tool-Calls in `result.steps[i].toolCalls` nicht. Marker-Pattern wird dadurch unerkannt durchgereicht, AI SDK synthetisiert plausiblen Antwort-Text aus Marker-Result, User sieht "Halluzination".
+
+Fix: 1-Tages-Patch (3.5.E.B), keiner der vier strukturellen Fix-Pfade wird gebaut. Re-Klassifizierung: **must → must (Patch)**, nicht mehr "Strategie-Frage".
+
+Plus Defense-in-Depth: Custom `stopWhen`-Predicate, das Multi-Step bei Marker-Detection abbricht.
+
 ### 90. Resume-Prompt-Tuning für Reject-Pfad
 Beim Sub-Schritt-3.2.G-Reject-Smoke-Test aufgefallen: bei trivialen Math-Problemen ignoriert der LLM das Reject-Resume-Signal. Test-Setup: User-Message "Rufe mcp_everything-approval_get-sum mit a=99 und b=1 auf", Tool-Call wird vorgeschlagen, User klickt Reject mit Reason "Nicht freigegeben". Resume-Prompt: "[System] Tool-Call wurde abgelehnt. Begründung: Nicht freigegeben." Antwort vom LLM: "99 + 1 = 100." statt "Verstanden, ohne Tool kann ich nicht antworten."
 
@@ -897,6 +903,13 @@ VPS-Override-File `/docker/twin-lab-web/docker-compose.override.yml` hat jetzt z
 Plus eine kleine Lesson zur Compose-Diagnose: `docker compose config` zeigt Override-Volume-Mounts NICHT an, obwohl sie aktiv sind. `docker inspect <container>` ist die zuverlässige Wahrheit. Beim Diagnostizieren in #92 erst irritierend.
 
 **Größe:** M · **Priorität:** must · **Aus:** Tag-10-Mittag, Production-Drift 7 Commits
+
+### 93. Thinking-Aktivierung-Form für Opus 4.7
+Spike-Befund (Tag 17): Claude Opus 4.7 lehnt `providerOptions.anthropic.thinking={type:'enabled', budgetTokens:N}` mit API-Error ab — Hinweis aus der API: `Use 'thinking.type.adaptive' and 'output_config.effort' to control thinking behavior.` `{type:'adaptive', display:'summarized'}` funktioniert hingegen.
+
+Aktuell nicht relevant, weil Thinking im Send-Path nicht aktiviert ist. Wenn künftig Thinking-Aktivierung gebraucht wird (z.B. für komplexe Tool-Use-Reasoning-Chains, oder als Fallback-Lever bei #89-Rest-Bug), die `adaptive`-Form nutzen, nicht `enabled`. Plus: Modell-Version-Check einbauen, falls neuere Opus-Versionen die `enabled`-Form wieder unterstützen sollten.
+
+**Größe:** XS · **Priorität:** nice · **Aus:** Spike 3.5.E.0 (Tag 17)
 
 ---
 
@@ -1803,6 +1816,18 @@ Beim Commit von 3.3.G3 wollte `git add apps/web/app/chat/[handle]/page.tsx` nich
 Lösung: Single-Quotes um Pfade mit eckigen Klammern: `git add 'apps/web/app/chat/[handle]/page.tsx'`. Oder Escapen: `apps/web/app/chat/\[handle\]/page.tsx`.
 
 Lesson: **bei Next.js dynamic routes (`[param]`-Verzeichnisnamen) im git-Workflow auf zsh-Quoting achten.** Doku-Hinweis für künftige Sessions.
+
+### Lesson (Tag 17 / #89): „Halluzination" hat zwei mögliche Wurzeln — LLM-Verhalten oder Detection-Bug
+
+Drei Tage stand #89 im Backlog als „LLM-Verhaltens-Problem". Tag 16 Designprinzip-Setzung darauf aufgebaut, Phase-3.5-Deploy geblockt, Vier-Pfade-Strategie-Vorbereitung. Tag 17 Spike: alle drei Hypothesen widerlegt — Wurzel war Step-Walk-Bug, der das Marker-Pattern unerkannt durchließ und die AI-SDK-Synthese plausiblen Tool-Output-Text aus dem Marker-Result generieren ließ.
+
+Pattern: bei Marker-basierten Audit-Pfaden in Multi-Step-LLM-Calls muss man vor jedem „LLM-Verhaltens-Problem"-Verdacht verifizieren, dass der Detection-Code den richtigen Step liest. Top-level `result.toolCalls` in AI SDK 6 zeigt nur den letzten Step. Bei Marker-Pattern (`execute()` returnt Marker, LLM synthetisiert weiter) ist das *nie* der relevante Step.
+
+Verstärkt die existierende Lesson aus Tag 10: „`finishReason` plus `toolCalls`-Array sind Ground-Truth" — gilt nur, wenn man die richtige Array-Quelle liest. Bei Single-Step ist top-level richtig, bei Multi-Step nicht.
+
+Generelles Prinzip: **wenn ein „LLM-Verhaltens-Problem" mehrere Tage Strategie-Aufwand braucht, ist die Diagnose-Verifikation der erste Schritt, nicht der letzte.** Konkret: jeder Marker-basierte Audit-Pfad braucht einen Smoke-Test, der `audit.output.toolCalls` non-empty nach Multi-Step-Tool-Use verifiziert (siehe 3.5.E.D).
+
+Plus Meta-Lesson: das Designprinzip von Tag 16 („Tool-Aufruf nur als Fallback") bleibt richtig, aber wurde aus falscher Diagnose abgeleitet. Wenn die Diagnose falsch ist, kann die abgeleitete Strategie zufällig richtig sein — verlässlich ist sie aber nicht. Sanity-Check für künftige Designprinzip-Setzungen: „Habe ich die Wurzel des Problems verifiziert, bevor ich strukturelle Konsequenzen ziehe?"
 
 ---
 
