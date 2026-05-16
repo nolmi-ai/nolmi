@@ -12,6 +12,7 @@ import {
 import Link from "next/link";
 import type { AuditEntry, ChatMessage, TwinEvent } from "@twin-lab/shared";
 import { ToolPicker } from "./ToolPicker";
+import { EmptyState } from "../../../components/EmptyState";
 import { ModalWrapper } from "../../../components/ModalWrapper";
 import { RejectReasonModal } from "../../../components/RejectReasonModal";
 import { toast } from "../../../lib/toast";
@@ -1109,9 +1110,20 @@ function DirectChat({
       >
         <div className="max-w-3xl mx-auto space-y-4">
           {chatBlocks.length === 0 ? (
-            <div className="text-muted text-sm">
-              Noch keine Nachrichten. Schreib unten eine Frage.
-            </div>
+            // UX.1.A.3 (#96): EmptyState statt einfacher Hint-Text. Twin-
+            // factsCount/toolsCount sind im Chat-Scope nicht ohne Extra-
+            // Query verfügbar (Briefing-Stop-Bedingung greift) — Variante
+            // ohne Zahlen, dafür mit Inbox-Pattern-Hinweis als Bridge zu #97.
+            <EmptyState
+              title={`Chat mit ${handle}`}
+              description={
+                <>
+                  Stell deinem Twin eine Frage oder erzähl, was dich
+                  gerade beschäftigt. Aktionen, die Genehmigung brauchen,
+                  landen in der Inbox.
+                </>
+              }
+            />
           ) : (
             // #85: Trenner zwischen aufeinanderfolgenden Blöcken mit
             // unterschiedlicher conversationId. Erster Block (i===0) bekommt
@@ -1343,9 +1355,13 @@ function A2AChat({
       >
         <div className="max-w-3xl mx-auto space-y-3">
           {messages.length === 0 ? (
-            <div className="text-muted text-sm">
-              Noch keine Nachrichten in dieser Konversation.
-            </div>
+            // UX.1.A.3 (#96): EmptyState auch im A2A-Pfad. Knapper Text
+            // als bei DirectChat — A2A-Owner kennen das Konzept i.d.R.,
+            // brauchen keine Tutorial-Anleitung; nur Kontext „mit wem".
+            <EmptyState
+              title={`Konversation mit ${partnerLabel}`}
+              description="Schreib unten, was du fragen oder mitteilen willst."
+            />
           ) : (
             messages.map((m) => (
               <ConversationBubble

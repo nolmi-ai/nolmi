@@ -3,6 +3,7 @@
 import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import type { AuditEntry, ChatMessage, TwinEvent } from "@twin-lab/shared";
+import { EmptyState } from "../../components/EmptyState";
 import { PageContainer } from "../../components/PageContainer";
 import { RejectReasonModal } from "../../components/RejectReasonModal";
 
@@ -222,9 +223,17 @@ function InboxInner() {
 
       <Section title={`Pending (${pending.length})`}>
         {pending.length === 0 ? (
-          <div className="text-sm text-muted">
-            Keine wartenden Aktionen.
-          </div>
+          <EmptyState
+            title="Keine wartenden Aktionen"
+            description={
+              <>
+                Wenn dein Twin eine Aktion vorschlägt, die Genehmigung
+                braucht — eine Webseite lesen, eine Mail senden, ein Tool
+                nutzen — landet sie hier. Du genehmigst per Klick oder
+                lehnst ab.
+              </>
+            }
+          />
         ) : (
           <ul className="space-y-3">
             {pending.map((entry) => {
