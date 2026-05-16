@@ -1355,13 +1355,14 @@ function A2AChat({
       >
         <div className="max-w-3xl mx-auto space-y-3">
           {messages.length === 0 ? (
-            // UX.1.A.3 (#96): EmptyState auch im A2A-Pfad. Knapper Text
-            // als bei DirectChat — A2A-Owner kennen das Konzept i.d.R.,
-            // brauchen keine Tutorial-Anleitung; nur Kontext „mit wem".
-            <EmptyState
-              title={`Konversation mit ${partnerLabel}`}
-              description="Schreib unten, was du fragen oder mitteilen willst."
-            />
+            // EmptyState bewusst NICHT gerendert (UX.1.A.3 Verifikation
+            // Tag 17 Abend): `NewConversationModal` erzwingt eine erste
+            // Nachricht beim Anlegen (chat/[handle]/page.tsx:1431-1434),
+            // A2AChat mountet damit nie mit `messages.length === 0`. Der
+            // EmptyState wäre toter Code. Architektur-Fix als Backlog #105
+            // dokumentiert — bis dahin bleibt der Pfad leer (kann strukturell
+            // sowieso nicht getroffen werden).
+            null
           ) : (
             messages.map((m) => (
               <ConversationBubble

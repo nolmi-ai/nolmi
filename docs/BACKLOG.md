@@ -1091,7 +1091,7 @@ Plus Args-Preview: für `scrape_webpage({url: 'https://anthropic.com', outputFor
 **Größe:** S · **Priorität:** should · **Aus:** UX-Strategie-Session Tag 17 Abend (Tool-Picker UX-Audit)
 **Stufe:** 0 → 1 · **Tranche:** A · **Spur:** UX-Reifung Welle 1 (Bau-Plan in `docs/UX-STRATEGY.md`)
 
-### 96. Empty-State-Onboarding für Chat
+### 96. Empty-State-Onboarding für Chat (partially functional)
 Erstuser landet im Chat-Tab mit nur einem leeren Input-Feld. Keine Erklärung, was der Twin kann, welche Tools verfügbar sind, wie Memory funktioniert. Aktuelle User wissen es, neue User scheitern.
 
 Was zu tun ist: bei leerer Konversation (`messages.length === 0`) statt nur leeres Feld ein Onboarding-Block:
@@ -1104,7 +1104,9 @@ Pattern: bekannt aus ChatGPT/Claude-Web. Verschwindet sobald die erste User-Mess
 **Größe:** S · **Priorität:** should · **Aus:** UX-Strategie-Session Tag 17 Abend
 **Stufe:** 0 → 1 · **Tranche:** A · **Spur:** UX-Reifung Welle 1 (Bau-Plan in `docs/UX-STRATEGY.md`)
 
-### 97. Inbox-Tab Tutorial / Empty-State
+**Update Tag 17 Abend (partially functional):** Implementiert in Commit `9121405` (EmptyState-Component + Inbox + Chat). Verifikation zeigt: DirectChat-EmptyState ist nur bei brand-new Twin (Tag-1-Onboarding) sichtbar — nach erstem Send sieht User immer Audit-Historie, weil DirectChat strukturell ein Audit-Log-Viewer ist (Reset löscht die Historie nicht). A2AChat-EmptyState ist strukturell unerreichbar, weil `NewConversationModal` Erst-Nachricht erzwingt — A2A-EmptyState im Folge-Commit `UX.1.A.3.X` aus dem Code entfernt (toter Pfad). Architektur-Fixes als Items #105 (A2A-Modal) und #106 (DirectChat-View-Architektur) angelegt, beide Welle-2-Material.
+
+### 97. ✅ Inbox-Tab Tutorial / Empty-State (CLOSED Tag 17)
 Aktuell ist die leere Inbox einfach leer. Das Konzept „Approvals" / „Pending-Actions" ist twin-lab-spezifisch und wird nicht erklärt.
 
 Was zu tun ist: Empty-Inbox zeigt einen 2-3-Zeilen-Erklärtext: „Wenn dein Twin eine Aktion vorschlägt, die Genehmigung braucht (z.B. eine Webseite lesen, eine Mail senden), landet sie hier. Du genehmigst per Klick — oder lehnst ab." Plus einen Mini-Screenshot oder eine vereinfachte Demo eines Pending-Eintrags.
@@ -1113,6 +1115,8 @@ Aktiviert sich nur wenn Inbox leer ist; verschwindet sobald irgendein Pending ex
 
 **Größe:** XS · **Priorität:** nice · **Aus:** UX-Strategie-Session Tag 17 Abend
 **Stufe:** 0 → 1 · **Tranche:** A · **Spur:** UX-Reifung Welle 1 (Bau-Plan in `docs/UX-STRATEGY.md`)
+
+**Update Tag 17 Abend (CLOSED):** Implementiert in Commit `9121405` (EmptyState-Component + Inbox-Pending-Block). Funktional verifiziert per Screenshot. Anders als #96 ist die Inbox-Architektur kompatibel mit dem Empty-State-Pattern — bei leerem Pending-Block wird der Tutorial-Text sauber angezeigt, verschwindet sobald irgendein Pending da ist.
 
 ### Tranche B — Mittlere Investments
 
@@ -1178,6 +1182,37 @@ Strategische Entscheidung vor Bau: Stufen-Definition braucht eine eigene Strateg
 
 **Größe:** L · **Priorität:** should · **Aus:** UX-Strategie-Session Tag 17 Abend (Vision Block 2.5)
 **Stufe:** 0 → 2 · **Tranche:** C · **Spur:** UX-Reifung Welle 1 (Bau-Plan in `docs/UX-STRATEGY.md`)
+
+### Architektur-Follow-ups aus UX.1.A.3 (kein Welle-1-Scope, Welle-2-Material)
+
+Aus der Empty-State-Verifikation Tag 17 Abend emergiert: Die Inbox- und Chat-Empty-States sind als Component sauber gebaut (#96/#97 Commit `9121405`), aber die strukturelle Chat-Flow-Architektur macht sie praktisch fast unsichtbar. Zwei Items dokumentieren die Fixes für Welle 2.
+
+### 105. A2A-Konversations-Flow: erste Nachricht optional
+Aktuell zwingt `NewConversationModal` (`apps/web/app/chat/[handle]/page.tsx:1431-1434`) beim Anlegen einer A2A-Konversation zur Erst-Nachricht. User landet sofort im Message-Mode, sieht keinen Empty-State.
+
+**Befund aus UX.1.A.3-Verifikation Tag 17 Abend:** Diese Architektur macht das EmptyState-Pattern für A2A strukturell unerreichbar. Konzeptionell wäre „Konv anlegen ohne Pflicht-Nachricht, dann tippen" natürlicher — User sieht erst, dass die Konv existiert, und schreibt dann. In Folge dieses Befunds wurde der A2A-EmptyState im Code wieder entfernt (er war toter Pfad).
+
+Was zu tun ist: `NewConversationModal` umbauen — Erst-Nachricht optional. Wenn das Content-Feld beim Submit leer ist: nur die Konversation anlegen (POST gegen neuen Endpoint, ohne `/send`), dann zum A2AChat-View springen. EmptyState wird sichtbar, User tippt erste Nachricht regulär.
+
+Backend-Frage: existiert ein Endpoint „Konversation anlegen ohne Send"? Falls nicht, muss er gebaut werden (kleiner Bridge-/Runtime-Touch).
+
+**Größe:** M · **Priorität:** should · **Aus:** UX.1.A.3-Verifikation Tag 17 Abend
+**Stufe:** 0 → 1 · **Spur:** UX-Reifung
+
+### 106. DirectChat: aktive Konversation als View, Audit als Historie
+Aktuell rendert DirectChat alle Audits aus dem Audit-Stream zeitlich gestapelt. Der Reset-Button setzt einen synthetischen Conversation-Divider (`directChatResetSeq`-Mechanismus, `chat/[handle]/page.tsx:984-986`), aber die alten Audits bleiben sichtbar. Heißt: nach erstem Twin-Use ist der EmptyState für immer weg, weil immer Audit-Historie da ist.
+
+**Befund aus UX.1.A.3-Verifikation Tag 17 Abend:** Strukturell ist DirectChat ein „Audit-Log-Viewer", nicht „Konversations-View". Trade-off:
+- Pro Status-Quo: Vollständiger Verlauf sichtbar, nichts geht verloren.
+- Contra: Keine „frische Konversation"-Erfahrung möglich, EmptyState-Pattern für Wieder-Onboarding/Reset wertlos, und auch konzeptionell hat User keine Trennung zwischen „aktuellem Thread" und „alter Verlauf".
+
+Was zu entscheiden ist (eigene Strategie-Session vor Bau):
+
+- **Variante A — Conversation-View-Filter:** UI-Filter „nur aktuelle Konversation anzeigen" / „Vollhistorie anzeigen". Standard bei neuer Konv: nur aktuelle, EmptyState sichtbar. Power-User schaltet bei Bedarf auf Vollhistorie um.
+- **Variante B — Soft-Hide-Reset:** Reset markiert alle bisherigen Audits als „vor-Reset", DirectChat blendet sie standardmäßig aus. Toggle „Vor-Reset-Verlauf einblenden" für Power-User.
+
+**Größe:** L (Strategie-Session + M-Bau) · **Priorität:** should · **Aus:** UX.1.A.3-Verifikation Tag 17 Abend
+**Stufe:** 0 → 1 · **Spur:** UX-Reifung
 
 ---
 
