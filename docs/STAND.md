@@ -1,23 +1,111 @@
 # twin-lab — Stand
 
-**Letztes Update:** 15. Mai 2026, Abend (Tag 16)
+**Letztes Update:** 16. Mai 2026, Nachmittag (Tag 17)
 
 ## Aktuell in Arbeit
-**Phase 3.5 Hyperbrowser-Foundation lokal komplett — aber Production-
-Deploy blocked durch #89.** 3.5.A (Spec-Datei) committed, 3.5.B Smoke
-zeigt: Direct-Invocation funktioniert end-to-end, aber autonomer Tool-
-Use-Pfad halluziniert (identisches Pattern zu Backlog #89 aus Tag
-10/11). Designprinzip-Setzung Markus: "Tool-Aufruf darf nur Fallback
-sein, Tools müssen direkt in der Konversation automatisch aufgerufen
-werden."
 
-#89 wurde von "should" zu "must" hochgestuft, blockt 3.5.C
-Production-Deploy. Tag-17+ wird eigene Strategie-Session für #89-Fix.
+**Phase 3.5 Hyperbrowser-Foundation komplett — Production live.**
+Phase 3 Definition of Done: 5 von 5 Häkchen. #89 (autonomer
+Tool-Use bei Claude Opus 4.7) gelöst durch Step-Walk-Patch in
+`twin-service.ts` — war kein LLM-Verhaltens-Problem, sondern ein
+Detection-Bug, der drei Tage als solches misdiagnostiziert war.
+Spike 3.5.E.0 hat alle drei LLM-Hypothesen widerlegt; Patch +
+Regression-Guard sind drin, Production heute Nachmittag live.
 
-**Phase 3 Definition of Done — bleibt bei 4 von 5 Häkchen.** 3.5 ist
-nicht "open" wegen fehlendem Bau, sondern wegen LLM-Verhaltens-Problem.
+Nächster Block: Phase 3.6 Computer-Use-Agent — Strategie-Session
+zuerst (substantielle Architektur-Fragen, siehe 3.5-STRATEGY
+"Was nach 3.5 Foundation kommt").
 
-## Heute (Tag 16) abgeschlossen
+## Heute (Tag 17) abgeschlossen
+
+### Vormittag — Diagnose-Wende #89 (~3h)
+
+**Spike `3.5.E.0`** (Branch `spike/89-tool-autonomy`, Commit
+`0d6cfd7`): drei LLM-Hypothesen via Standalone-Skripten getestet
+(identisches Tool-Schema, identische TOOL_USE_DIRECTIVE, nur die
+LLM-Send-Config variiert, kein MCP-Roundtrip):
+
+- **H1** (Anthropic tool-shy): widerlegt — gpt-4o zeigt identisches
+  Symptom in step[0]
+- **H2** (AI SDK v6 Tool-Schema): widerlegt — Raw Anthropic API
+  zeigt identisches Symptom
+- **H3** (Extended Thinking fehlt): widerlegt — adaptive Thinking
+  ändert nichts; nebenbei Befund #93: Opus 4.7 hat `enabled` deprecated
+
+**Echte Wurzel: Step-Walk-Bug in `twin-service.ts`.**
+`detectPendingToolCall` und Audit-Builder lasen `result.toolCalls`
+top-level. In AI SDK 6 ist top-level der LETZTE Step — Tool-Calls
+aus früheren Steps liegen in `result.steps[i].toolCalls`.
+Marker-Pattern aus 3.2.F wurde dadurch unerkannt durchgereicht,
+AI SDK synthetisierte plausiblen Antwort-Text aus dem Marker-Result,
+User sah „Halluzination".
+
+Tag-16-Designprinzip („Tool-Aufruf nur als Fallback") bleibt
+gültig — wurde aber aus falscher Diagnose abgeleitet (neue Lesson
+in BACKLOG.md).
+
+Sub-Schritte:
+- **3.5.E.A** (`4be99b3`) — Diagnose-Wende dokumentiert:
+  3.5-STRATEGY-Patch, BACKLOG #89 Tag-17-Update, neue Lesson über
+  zwei Wurzeln von „Halluzination", neues Item #93 (Thinking-
+  Aktivierung-Form).
+- **3.5.E.B** (`d0954a6`) — Step-Walk-Patch in `twin-service.ts`:
+  `collectAllToolCalls` / `collectAllToolResults`-Helper (mit
+  defensiv-Fallback auf top-level), step-walking
+  `detectPendingToolCall` + Audit-Builder, plus
+  `stopOnPendingApprovalMarker` als StopCondition<ToolSet>
+  (OR-Kombi mit `stepCountIs` — Defense-in-Depth, bricht Multi-Step
+  bei Marker im Last-Step ab).
+
+### Mittag — Lokal-Re-Smoke + Regression-Guard (~1h)
+
+**3.5.E.C** Re-Smoke lokal, alle drei Tests grün:
+- Test 1 (autonom): Twin macht `scrape_webpage`-Call ohne Tool-
+  Trigger im Prompt, Pending-Box im Chat, nach Approve substantielle
+  Zusammenfassung.
+- Test 2 (forced): Direct-Invocation-Pfad unangetastet.
+- Test 3 (smalltalk): kein Tool-Call, normale Antwort.
+
+**3.5.E.D** (`1e57aec`) Regression-Guard:
+`apps/runtime/src/scripts/test-regression-89-step-walk.ts` mit vier
+Test-Cases (Multi-Step + Marker, Negativ, Single-Step-Fallback,
+Non-Marker False-Positive). Mutation-Test beim Patch-Bau ausgeführt:
+Helper temporär auf top-level zurückbauen → TEST 1 + TEST 4 rot
+mit 4 Issues (Exit 2), TEST 3 grün (top-level ist dort gewünscht).
+Helper restored, alle grün. Registriert als
+`pnpm --filter @twin-lab/runtime test-regression-89-step-walk`.
+
+### Nachmittag — Production-Deploy (~1.5h)
+
+**3.5.E.E** Production-Deploy auf VPS `srv1046432`:
+- Repo-Pull → HEAD `1e57aec`.
+- Image-Rebuild Runtime + Web (~110s mit Layer-Cache).
+- Container-Recreate, Boot sauber: 19 Migrations skipped, 3 Twins
+  boot, Bridge-Connections live.
+- Image-Patch-Verifikation: `grep collectAllToolCalls` +
+  `stopOnPendingApprovalMarker` im gebauten `dist/twin-service.js`
+  je 3 Treffer.
+- Mount-Verifikation via `docker inspect` (nicht `compose config` —
+  Tag-11/#92-Lesson): alle 4 Mounts bestätigt.
+- Hyperbrowser-MCP für Production-@markus registriert via verdecktem
+  Prompt (Lesson 3.5.A — Markus selbst, kein Agent-Touch). Server-ID
+  `mcp_QjIi2cpQktSo8mBj`, 10 Tools, env encrypted.
+- Production-Smoke alle drei Tests grün, identisches Verhalten
+  zu lokal.
+
+Plus kleiner Stolperstein dokumentiert in neuer Lesson: das Deploy-
+Briefing nahm `docker compose build` an, Twin-Lab-Compose ist aber
+image-tag-only — Build muss direkt via `docker build`. Quick-Win:
+DEPLOYMENT.md Section 3 (First-Time-Setup) hat jetzt den Build-Block
+explizit, nicht nur als README-Verweis.
+
+### Abend — Closure (3.5.E.F)
+
+Diese STAND-Aktualisierung, BACKLOG #89 closed mit Closure-Notiz,
+Spike-Findings-Doc auf main cherry-picked, Spike-Branch lokal
+gelöscht.
+
+## Tag-16-Sequenz (zur Erinnerung, unverändert)
 
 ### Vormittag — Self-Hosting-Doku #102 (~2h)
 
@@ -206,33 +294,28 @@ Befund. Reaktive Strategie-Session + 3.4.I-Bau (`e3a8ea1`). Plus #101.
   Tag 13 Vormittag in Production)
 - 3.4 ✅ **Memory: Episodic** (Tag 13/14 lokal komplett, Tag 15
   in Production)
-- 3.5 ⏸ **Hyperbrowser-Foundation** — 3.5.A lokal committed,
-  3.5.B partial (Direct-Invocation ✓, autonom blocked durch #89),
-  3.5.C blocked
-- 3.6 offen — Computer-Use-Agent (substantielle Strategie-Session
-  pending, blocked durch #89)
+- 3.5 ✅ **Hyperbrowser-Foundation** (Tag 16 lokal, Tag 17
+  Production — inkl. #89-Step-Walk-Patch als Wurzel-Fix)
+- 3.6 offen — Computer-Use-Agent (Strategie-Session steht an,
+  jetzt unblocked)
 
-**Phase 3 Definition of Done — 4 von 5 Häkchen.** 3.5 ist nicht
-abgeschlossen, weil autonomer Tool-Use-Pfad nicht funktioniert
-(#89-Blocker).
+**Phase 3 Definition of Done — 5 von 5 Häkchen.** ✅
 
 ## Was als nächstes ansteht
 
-1. **Strategie-Session für #89-Fix** (S, primär — Tag 17 Vormittag)
-   - Substantielle Architektur-Frage: wie macht man autonome
-     Tool-Calls bei einem LLM-Provider, der sie nicht zuverlässig
-     macht?
-   - Vier Fix-Pfade durchdenken (siehe #89-Backlog-Eintrag)
-   - Strategy-Doc analog 3.4-STRATEGY
-2. **#89-Fix bauen** (M-L, abhängig von Strategie-Wahl)
-3. **3.5.B Re-Smoke** nach Fix
-4. **3.5.C Production-Deploy** nach erfolgreichem Re-Smoke
-5. **3.5.D STAND-Update + Phase 3 DoD 5 von 5**
-6. **Erst dann:** Phase 3.6 Strategie-Session (Computer-Use-Agent)
+1. **Phase 3.6 (Computer-Use-Agent) — Strategie-Session** (S, primär)
+   - Substantielle Architektur-Fragen (siehe 3.5-STRATEGY
+     „Was nach 3.5 Foundation kommt"): Latenz-UX, Cost-Limits,
+     Failure-Modes, Memory-Implications, Persona-Pattern
+   - Strategy-Doc analog 3.4-STRATEGY / 3.5-STRATEGY
+2. **Phase 3.6 Bau** (M-L, abhängig von Strategie-Wahl)
 
 Weiterhin im Backlog (nicht zeit-kritisch):
-- **#90 Resume-Prompt-Tuning** (M, should)
+- **#90 Resume-Prompt-Tuning** (M, should) — vermutlich nicht
+  mehr akut, weil #89 strukturell gelöst ist
 - **#91 Reject-Reason-UI** (S, nice)
+- **#93 Thinking-Aktivierung-Form für Opus 4.7** (XS, nice) —
+  aus Spike 3.5.E.0 mitgebracht
 - **#101 FTS5-AND-Befund** evaluieren wenn Real-Data zeigt dass
   Pronominal-Queries Pain Point werden
 - **#103 Pre-Check im production-äquivalenten Container** (S, should)
@@ -240,13 +323,12 @@ Weiterhin im Backlog (nicht zeit-kritisch):
 - **Toast-Framework statt alert()** (M, nice)
 - **#79 Persona-Tabelle droppen** (XS, nice)
 
-## Production-Stack — Tag-16-Stand auf VPS
+## Production-Stack — Tag-17-Stand auf VPS
 
-**Phase 3.4 in Production LIVE** (deployed Tag 15 Mittag, unverändert).
-**Phase 3.5 NICHT deployed** — Foundation lokal verifiziert,
-Production-Deploy wartet auf #89-Fix.
+**Phase 3.5 in Production LIVE** (deployed Tag 17 Nachmittag).
+Vorher: Phase 3.4 seit Tag 15 live, unverändert übernommen.
 
-Production-VPS auf Commit `706977b`.
+Production-VPS auf Commit `1e57aec`.
 
 - **`https://app.twin.harwayexperience.com`** — Web
 - **`https://runtime.twin.harwayexperience.com`** — Runtime
@@ -254,17 +336,21 @@ Production-VPS auf Commit `706977b`.
 
 **Stack-Stand:**
 - Base-Image: `node:20-slim` (Debian, glibc) seit Tag 15
-- Image-Größen: Runtime ~854 MB, Web ~427 MB
-- Volumes: drei bind-mounts + ein Named Volume
-- ENVs in override.yml: `TWIN_LAB_MODEL_CACHE_DIR`
+- Images: Runtime `d5dd62255959`, Web `a385778ff370` (Tag-17-Rebuild)
+- Image-Größen unverändert: Runtime ~854 MB, Web ~427 MB
+- Volumes: drei bind-mounts + ein Named Volume (unverändert)
+- ENVs in override.yml: `TWIN_LAB_MODEL_CACHE_DIR` (unverändert)
 
-**Production-Twin @markus:**
-- Drei initial approved Facts + sieben Pending-Facts
-- 26 MCP-Tools aktiv (everything + everything-approval)
-- Pilot-Skill `harway-workshops`
-- 7 embedded Konversationen in Episodic-Memory
-- **NICHT in Production:** Hyperbrowser-Tools (deployed erst nach
-  #89-Fix)
+**Production-Twin @markus** (`twin_jgqzOIkzdTsTx6vv`):
+- Drei initial approved Facts + sieben Pending-Facts (unverändert)
+- Pilot-Skill `harway-workshops` (unverändert)
+- 7 embedded Konversationen in Episodic-Memory (unverändert)
+- **MCP-Server jetzt drei** (Tag 17 Nachmittag dazu):
+  - `everything` (13 Tools)
+  - `everything-approval` (13 Tools)
+  - `hyperbrowser-approval` (`mcp_QjIi2cpQktSo8mBj`, 10 Tools,
+    env encrypted, approval required)
+  - **insgesamt 36 MCP-Tools**
 
 **VPS-Override-File** (unverändert seit Tag 15):
 - `/docker/twin-lab-web/repo/docs:/app/docs:ro` (#81)
@@ -276,15 +362,17 @@ Production-VPS auf Commit `706977b`.
 `/Users/mjb/Visual Studio/twin-lab` — drei Twins, lokale Bridge
 auf 5100.
 
-**Hyperbrowser-MCP aktiv (lokal, seit Tag 16):**
+**Hyperbrowser-MCP aktiv (lokal seit Tag 16, in Production seit Tag 17):**
 - Spec-Datei `mcp-servers/hyperbrowser-approval.json`
-- Server-ID `mcp_5gdVaHNu2CA4RvLF` für `twin_YuB4Qaqmbrimv1Mz`
+- Lokal: Server-ID `mcp_5gdVaHNu2CA4RvLF` für `twin_YuB4Qaqmbrimv1Mz`
+- Production: Server-ID `mcp_QjIi2cpQktSo8mBj` für `twin_jgqzOIkzdTsTx6vv`
 - 10 Tools synchronisiert (scrape, crawl, extract, search,
   browser_use_agent, openai_computer_use_agent,
   claude_computer_use_agent, create_profile, delete_profile, plus
   eins mehr als ursprünglich erwartet — vermutlich Server-Update)
 - Approval-Default required, env verschlüsselt (AES-256-GCM)
-- API-Key: rotiert nach Cleanup-Drama, nur in DB encrypted
+- API-Key: rotiert nach Cleanup-Drama (Tag 16), nur in DB encrypted
+- **Autonomer Pfad jetzt funktional** dank Step-Walk-Patch (`d0954a6`)
 
 **Episodic-Memory-System aktiv (unverändert seit Tag 14):**
 - vec0 + FTS5 + Hybrid-Search
@@ -305,27 +393,27 @@ auf 5100.
 Alle drei mit anthropic/claude-opus-4-7.
 
 ## Repo
-github.com/markusbaier/twin-lab — `origin/main` auf `c442c71`
-(Tag 16 Nachmittag, 3.5.A Spec-Datei). Production-VPS auf `706977b`
-(Tag 15 Base-Image-Wechsel). Tag-16-Code-Commits noch nicht in
-Production deployed — das kommt mit Phase 3.5.C nach #89-Fix.
+github.com/markusbaier/twin-lab — `origin/main` auf `1e57aec`
+(Tag 17 Nachmittag, 3.5.E.D Regression-Guard). Production-VPS auf
+`1e57aec` (synchron seit 3.5.E.E-Deploy heute Nachmittag).
 
-**Tag-17-Commits (laufend, vollständiger STAND-Block in 3.5.E.F):**
-- `0d6cfd7` (Branch `spike/89-tool-autonomy`) spike: 3.5.E.0 Diagnose
+**Tag-17-Commits (alle gepushed, alle in Production):**
+- `0d6cfd7` (Branch `spike/89-tool-autonomy`) spike(89): Diagnose
+  3.5.E.0 — alle 3 LLM-Hypothesen widerlegt
 - `4be99b3` docs(3.5.E.A): Diagnose-Wende #89 — Step-Walk-Bug
-- `d0954a6` fix(3.5.E.B): Step-Walk-Patch (Wurzel-Fix #89)
-- 3.5.E.D Regression-Guard `test-regression-89-step-walk.ts` —
-  Multi-Step + Single-Step-Fallback + Marker/Non-Marker-Cases,
-  Mutation-Verifikation beim Patch-Bau bestätigt dass Guard greift.
+- `d0954a6` fix(3.5.E.B): Step-Walk-Patch für Marker-Detection +
+  Audit-Builder (Wurzel-Fix #89)
+- `1e57aec` test(3.5.E.D): Regression-Guard mit Mutation-Test-
+  verifiziertem Step-Walk-Schutz
+- (kommt: 3.5.E.F Closure — diese STAND-Updates + BACKLOG #89
+  closure + Findings-Cherry-Pick + Spike-Branch-Cleanup)
 
-**Tag-16-Commits (alle gepushed):**
+**Tag-16-Commits (alle gepushed, alle in Production seit Tag 17):**
 - `d13da41` docs: DEPLOYMENT.md + docker-compose.override.yml.example
   (Backlog #102)
 - `80d77fa` docs(3.5): Strategy-Doc für Hyperbrowser MCP-Integration
   (Foundation)
 - `c442c71` feat(3.5.A): Hyperbrowser-MCP-Spec für @markus
-- (kommt: docs Tag 16 Abend — STAND + Backlog #89-Update +
-  Strategy-Patch)
 
 **Tag-15-Commits:**
 - `4ade195` feat(runtime): Modell-Cache-Pfad via

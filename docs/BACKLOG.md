@@ -805,7 +805,7 @@ Sollte ein Provider in Zukunft Tool-Use-Spezifika haben, die das AI SDK noch nic
 
 **Größe:** M · **Priorität:** nice · **Aus:** 3.2-Strategie-Session, Tag-10-Vormittag
 
-### 89. LLM-Tool-Use-Verhalten tunen — Tools werden ignoriert
+### 89. ✅ LLM-Tool-Use-Verhalten tunen — Tools werden ignoriert (CLOSED Tag 17)
 Beim Sub-Schritt-3.2.D-Verifikations-Test mit Claude Opus 4.7 ist aufgefallen: der LLM ruft Tools selbst dann nicht auf, wenn sie explizit angefordert werden. Bei „Bitte rufe das simulate-research-query Tool auf" antwortet er stattdessen mit einer halluzinierten Erklärung warum das Tool angeblich nicht funktioniert (technisch klingender Bullshit über `client.experimental.tasks.callToolStream()`).
 
 Selbst mit aggressiver TOOL_USE_DIRECTIVE im System-Prompt („Behaupte nicht, dass ein Tool nicht funktioniert ohne es tatsächlich aufgerufen zu haben") ignoriert er die Anweisung. Mit `toolChoice: 'required'` ruft er Tools (Beweistest hat funktioniert), aber dann gibt er nach Tool-Result keinen finalen User-Text mehr aus — `finishReason: tool-calls`, leere Reply-Bubble.
@@ -857,6 +857,8 @@ Direktive ist marginal effektiv — Defense-in-Depth gegen Marker-Pollution, abe
 Fix: 1-Tages-Patch (3.5.E.B), keiner der vier strukturellen Fix-Pfade wird gebaut. Re-Klassifizierung: **must → must (Patch)**, nicht mehr "Strategie-Frage".
 
 Plus Defense-in-Depth: Custom `stopWhen`-Predicate, das Multi-Step bei Marker-Detection abbricht.
+
+**Update Tag-17 (CLOSED):** Step-Walk-Patch in `d0954a6` (3.5.E.B) plus Regression-Guard in `1e57aec` (3.5.E.D, `test-regression-89-step-walk.ts` mit Mutation-Verifikation). Re-Smoke lokal + Production alle drei Tests grün (autonom, forced, smalltalk). Production-Deploy Tag 17 Nachmittag (`mcp_QjIi2cpQktSo8mBj` für Production-@markus). Phase 3 DoD: 5/5.
 
 ### 90. Resume-Prompt-Tuning für Reject-Pfad
 Beim Sub-Schritt-3.2.G-Reject-Smoke-Test aufgefallen: bei trivialen Math-Problemen ignoriert der LLM das Reject-Resume-Signal. Test-Setup: User-Message "Rufe mcp_everything-approval_get-sum mit a=99 und b=1 auf", Tool-Call wird vorgeschlagen, User klickt Reject mit Reason "Nicht freigegeben". Resume-Prompt: "[System] Tool-Call wurde abgelehnt. Begründung: Nicht freigegeben." Antwort vom LLM: "99 + 1 = 100." statt "Verstanden, ohne Tool kann ich nicht antworten."
@@ -1828,6 +1830,14 @@ Verstärkt die existierende Lesson aus Tag 10: „`finishReason` plus `toolCalls
 Generelles Prinzip: **wenn ein „LLM-Verhaltens-Problem" mehrere Tage Strategie-Aufwand braucht, ist die Diagnose-Verifikation der erste Schritt, nicht der letzte.** Konkret: jeder Marker-basierte Audit-Pfad braucht einen Smoke-Test, der `audit.output.toolCalls` non-empty nach Multi-Step-Tool-Use verifiziert (siehe 3.5.E.D).
 
 Plus Meta-Lesson: das Designprinzip von Tag 16 („Tool-Aufruf nur als Fallback") bleibt richtig, aber wurde aus falscher Diagnose abgeleitet. Wenn die Diagnose falsch ist, kann die abgeleitete Strategie zufällig richtig sein — verlässlich ist sie aber nicht. Sanity-Check für künftige Designprinzip-Setzungen: „Habe ich die Wurzel des Problems verifiziert, bevor ich strukturelle Konsequenzen ziehe?"
+
+### Lesson (Tag 17 / #89-Closure): Production-Deploy braucht Image-Build-Doku in der ersten Iteration, nicht der zweiten
+
+Beim Tag-17-Production-Deploy fiel auf: das Deploy-Briefing nahm `docker compose build` an, aber Twin-Lab-Compose ist image-tag-only — Build muss direkt via `docker build` aus Repo-Root. Diese Info war in `docker/twin-lab-web/README.md` korrekt dokumentiert, plus in DEPLOYMENT.md §6 (Standard-Update) als expliziter Build-Block — aber §3 (First-Time-Setup) verwies nur auf die README statt es zu duplizieren.
+
+Generelles Prinzip: bei Deploy-Doku ist eine kleine Doppelung (Build-Command auch in DEPLOYMENT.md §3, nicht nur Verweis) sinnvoller als ein Verweis — Deploy-Briefings laufen gegen DEPLOYMENT.md, nicht gegen die README. Quick-Win nach dem Stolperstein gemacht: §3 hat jetzt einen kompakten Build-Block plus den Hinweis auf §6 für den vollen Re-Deploy-Flow.
+
+Plus: das war 10 Min Stolperstein, kein Major. Aber für Self-Hosting durch Dritte (DEPLOYMENT.md ist genau dafür) wäre es ärgerlich. Pattern für künftige Skelett-Dokus: bei kritischen Setup-Schritten lieber redundant als „siehe da".
 
 ---
 

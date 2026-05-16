@@ -132,21 +132,43 @@ Beispiel-Pattern in `docker/twin-lab-web/README.md`.
 
 ## 3. First-Time-Setup
 
-> **Status:** TODO — Skelett-Sektion. Voller Inhalt folgt.
+> **Status:** TODO — Skelett-Sektion mit Initial-Build-Block. Voller
+> Self-Hosting-Walkthrough folgt.
 >
-> Das initiale Production-Setup ist bereits in `docker/twin-lab-web/README.md`
-> dokumentiert. Diese Sektion soll daraus eine self-hosting-freundliche
-> Version werden, mit:
+> Das initiale Production-Setup ist in `docker/twin-lab-web/README.md`
+> komplett dokumentiert. Diese Sektion soll daraus eine self-hosting-
+> freundliche Version werden, mit:
 >
 > - Verzeichnis-Struktur-Empfehlung
 > - Repo-Klonen mit Deploy-Key
 > - `.env` aus `.env.example` ableiten (welche Variables Pflicht?)
 > - Compose-Symlink-Setup
-> - Initial-Build-Sequenz (siehe `docker/twin-lab-web/README.md`)
 > - DB-Init und erste Twin-Anlage
 >
 > Bis dahin: siehe `docker/twin-lab-web/README.md` für die rohe
 > Setup-Sequenz.
+
+### Initial-Build der beiden Images
+
+Twin-Lab-Compose ist image-tag-only — `docker compose build`
+funktioniert NICHT (kein `build:`-Block im Compose-File, wir
+bauen die Images extern und Compose pullt sie per Tag). Build
+direkt via `docker build` aus dem Repo-Root:
+
+```bash
+cd /docker/twin-lab-web/repo
+docker build -t twin-lab-runtime:latest -f apps/runtime/Dockerfile .
+docker build \
+  -t twin-lab-web:latest \
+  -f apps/web/Dockerfile \
+  --build-arg NEXT_PUBLIC_RUNTIME_URL=https://runtime.<deine-domain> \
+  --build-arg NEXT_PUBLIC_DEPLOYMENT_LABEL=production \
+  .
+```
+
+Re-Deploys nach Code-Updates folgen demselben Build-Block plus
+`docker compose up -d --force-recreate runtime web` — vollständig
+in §6 (Updates und Re-Deploys).
 
 ---
 
