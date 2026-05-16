@@ -3,6 +3,7 @@
 import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import type { AuditEntry, ChatMessage, TwinEvent } from "@twin-lab/shared";
+import { PageContainer } from "../../components/PageContainer";
 import { RejectReasonModal } from "../../components/RejectReasonModal";
 
 const RUNTIME_URL = process.env.NEXT_PUBLIC_RUNTIME_URL ?? "http://localhost:4000";
@@ -205,7 +206,7 @@ function InboxInner() {
     .slice(0, 5);
 
   return (
-    <div className="max-w-[1200px] mx-auto w-full px-6 py-8 space-y-8">
+    <PageContainer className="space-y-8">
       <div className="flex items-baseline gap-3">
         <h1 className="text-xl font-semibold text-text">Inbox</h1>
         {selectedHandle && (
@@ -381,7 +382,7 @@ function InboxInner() {
         onConfirm={confirmReject}
         onCancel={() => setRejectModal({ open: false })}
       />
-    </div>
+    </PageContainer>
   );
 }
 

@@ -131,6 +131,11 @@ interface ConversationMessage {
 
 type Selection = { kind: "direct" } | { kind: "a2a"; partner: string };
 
+// Chat-Page nutzt KEIN PageContainer (UX.1.A.2.C.1, 16. Mai 2026):
+// zwei-spaltiges Layout mit eigener Breitenlogik (Konversations-Sidebar +
+// Chat-Content, Full-Viewport-Höhe). Innere Lese-Breite begrenzt der
+// `max-w-3xl`-Wrapper im Verlauf-Bereich (siehe ChatLayout / DirectChat /
+// A2AChat). PageContainer würde diese Doppel-Constraint-Logik nur stören.
 export default function ChatPage({
   params,
 }: {

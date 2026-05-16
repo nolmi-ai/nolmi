@@ -2,6 +2,7 @@
 
 import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
+import { PageContainer } from "../../components/PageContainer";
 
 const RUNTIME_URL = process.env.NEXT_PUBLIC_RUNTIME_URL ?? "http://localhost:4000";
 
@@ -300,7 +301,7 @@ function SettingsInner() {
   }
 
   return (
-    <div className="max-w-[1200px] mx-auto w-full px-6 py-8 space-y-8">
+    <PageContainer className="space-y-8">
       <div className="flex items-baseline gap-3">
         <h1 className="text-xl font-semibold text-text">Settings</h1>
         {selectedHandle && (
@@ -506,7 +507,7 @@ function SettingsInner() {
           <li>- Bootstrap: <code className="text-accent">pnpm --filter @twin-lab/runtime twin:bootstrap &lt;name&gt;</code></li>
         </ul>
       </Section>
-    </div>
+    </PageContainer>
   );
 }
 

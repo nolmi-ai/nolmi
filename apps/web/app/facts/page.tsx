@@ -11,6 +11,7 @@ import {
 import { useRouter, useSearchParams } from "next/navigation";
 import type { AuditEntry, FactItem, TwinEvent } from "@twin-lab/shared";
 import { ModalWrapper } from "../../components/ModalWrapper";
+import { PageContainer } from "../../components/PageContainer";
 import { RejectReasonModal } from "../../components/RejectReasonModal";
 
 const RUNTIME_URL = process.env.NEXT_PUBLIC_RUNTIME_URL ?? "http://localhost:4000";
@@ -290,7 +291,7 @@ function FactsInner() {
   const autoFacts = facts.filter((f) => f.confidence === "auto");
 
   return (
-    <div className="max-w-3xl mx-auto px-6 py-6 space-y-6">
+    <PageContainer className="space-y-6">
       <div className="flex items-center justify-between gap-3">
         <div>
           <h1 className="text-lg text-text">Facts</h1>
@@ -387,7 +388,7 @@ function FactsInner() {
         onConfirm={confirmRejectFromModal}
         onCancel={() => setRejectModal({ open: false })}
       />
-    </div>
+    </PageContainer>
   );
 }
 

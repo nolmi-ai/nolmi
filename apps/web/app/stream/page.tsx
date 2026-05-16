@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import type { TwinEvent } from "@twin-lab/shared";
+import { PageContainer } from "../../components/PageContainer";
 
 const RUNTIME_URL = process.env.NEXT_PUBLIC_RUNTIME_URL ?? "http://localhost:4000";
 
@@ -37,7 +38,7 @@ export default function StreamPage() {
   }, []);
 
   return (
-    <div className="max-w-[1200px] mx-auto w-full px-6 py-8 space-y-6">
+    <PageContainer className="space-y-6">
       <div className="flex items-center justify-between">
         <h1 className="text-xl font-semibold text-text">Stream</h1>
         <div
@@ -88,7 +89,7 @@ export default function StreamPage() {
           </ul>
         )}
       </div>
-    </div>
+    </PageContainer>
   );
 }
 
