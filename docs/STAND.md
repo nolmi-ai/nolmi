@@ -17,13 +17,13 @@ zuerst (substantielle Architektur-Fragen, siehe 3.5-STRATEGY
 „Was nach 3.5 Foundation kommt").
 
 **Plus neue UX-Spur (Tag 17 Abend identifiziert):** UX-Reifung als
-orthogonaler Strang. Vier Stufen (0 Engineer / 1 Less Technical /
-2 Casual-User / 3 ohne Vorkenntnis), Stufe 1 mit 11 priorisierten
-Items parallel zu Phase 3.6. Begründung: aktuelle UX ist Engineer-
-Niveau, blockt Open-Core-Ziel. Bau-Plan in `docs/UX-STRATEGY.md`,
-BACKLOG-Section „UX-Reifung — Stufe 1" mit 8 neuen Items (#94–#101)
-plus 3 re-klassifizierten (#86/#87/#91). Plus 18 weitere bestehende
-Items retro-klassifiziert für spätere Stufen.
+orthogonaler Strang. Vier Reife-Stufen (0 Engineer / 1 Less Technical /
+2 Casual-User / 3 ohne Vorkenntnis); gebaut wird in Wellen — Welle 1
+mit 11 priorisierten Items parallel zu Phase 3.6. Begründung: aktuelle
+UX ist Engineer-Niveau, blockt Open-Core-Ziel. Bau-Plan in
+`docs/UX-STRATEGY.md`, BACKLOG-Section „UX-Reifung — Welle 1" mit
+8 neuen Items (#94–#101) plus 3 re-klassifizierten (#86/#87/#91).
+Plus 18 weitere bestehende Items retro-klassifiziert für spätere Wellen.
 
 ## Heute (Tag 17) abgeschlossen
 
@@ -319,7 +319,7 @@ Befund. Reaktive Strategie-Session + 3.4.I-Bau (`e3a8ea1`). Plus #101.
    - Strategy-Doc analog 3.4-STRATEGY / 3.5-STRATEGY
 2. **Phase 3.6 Bau** (M-L, abhängig von Strategie-Wahl)
 
-**Plus parallel:** UX-Reifung Stufe 1 (Bau-Plan
+**Plus parallel:** UX-Reifung Welle 1 (Bau-Plan
 `docs/UX-STRATEGY.md`). Tranche A Quick-Wins (Toast-Framework
 #94, Reject-Modal #91, Tool-Names human-readable #95, Empty-State
 #96, Inbox-Tutorial #97) können vor Phase-3.6-Strategie-Session

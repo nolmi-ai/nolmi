@@ -809,7 +809,7 @@ Heute werden Skills via CLI angelegt und über die UI nur als Read-Only-Liste mi
 Was fehlt: Skill-Detail-View mit Markdown-Editor für SKILL.md, Form-Fields für Manifest, PATCH-Endpoint analog zu Persona-Reload-CLI (#78). Vorbedingung: Skill-Sync-Endpoint aus #75. Verknüpft mit #76 (Skill-Edit/Delete via UI), könnte gemeinsam adressiert werden.
 
 **Größe:** L · **Priorität:** should · **Aus:** 3.2-Strategie-Session, langfristige UI-Editierbarkeit
-**Stufe:** 0 → 2 · **Tranche:** C · **Spur:** UX-Reifung Stufe 1 (Bau-Plan in `docs/UX-STRATEGY.md`)
+**Stufe:** 0 → 2 · **Tranche:** C · **Spur:** UX-Reifung Welle 1 (Bau-Plan in `docs/UX-STRATEGY.md`)
 
 ### 87. UI-Konfigurator für MCP-Server pro Twin
 Heute werden MCP-Server via CLI/SQL hinzugefügt (Sub-Schritt 3.2.E baut die CLI). Langfristig brauchen non-tech-User eine UI: Server-Add-Form mit Transport-Wahl (stdio/http), Command + Args, optionalen ENV-Vars (verschlüsselt analog zu API-Key), Default-Approval-Setting. Plus Server-Liste mit Aktiv-Toggle, Refresh-Tool-Discovery-Button, Server-Remove mit Cascade-Confirm.
@@ -817,7 +817,7 @@ Heute werden MCP-Server via CLI/SQL hinzugefügt (Sub-Schritt 3.2.E baut die CLI
 Konzeptionell parallel zu #86 — beide sind Backend-getriebene Configs, die heute via CLI laufen, langfristig UI brauchen. Schema und Repo (3.2.A) sind so designed, dass UI später ohne Refactor möglich ist (`hasEnv`-Marker statt Plain-ENV im Output, Encrypted-Storage, Validation im Repo).
 
 **Größe:** L · **Priorität:** should · **Aus:** 3.2-Strategie-Session
-**Stufe:** 0 → 2 · **Tranche:** C · **Spur:** UX-Reifung Stufe 1 (Bau-Plan in `docs/UX-STRATEGY.md`)
+**Stufe:** 0 → 2 · **Tranche:** C · **Spur:** UX-Reifung Welle 1 (Bau-Plan in `docs/UX-STRATEGY.md`)
 
 ### 88. Multi-Provider Tool-Use-Adapter
 Aktuelle Tool-Bridge (3.2.D) nutzt das AI-SDK direkt — `generateText({tools})` abstrahiert die Provider-API-Schemata für Anthropic/OpenAI/Google/Groq/Ollama. Funktioniert für die bestehenden Provider Out-of-the-Box ohne eigenen Adapter.
@@ -903,7 +903,7 @@ Saubere Lösung: Modal-Komponente oder Inline-Eingabefeld mit Textarea (analog z
 Vorbedingung: keine. Diff-Scope: Frontend only, ein Edit in `apps/web/app/chat/[handle]/page.tsx` plus eventuell Helper-Komponente.
 
 **Größe:** S · **Priorität:** nice · **Aus:** Tag-10-Mittag 3.2.G-Implementation (window.prompt analog Inbox)
-**Stufe:** 0 → 1 · **Tranche:** A · **Spur:** UX-Reifung Stufe 1 (Bau-Plan in `docs/UX-STRATEGY.md`)
+**Stufe:** 0 → 1 · **Tranche:** A · **Spur:** UX-Reifung Welle 1 (Bau-Plan in `docs/UX-STRATEGY.md`)
 
 ### 92. Production-Deploy von Phase 3.2 (Migrations + MCP-Setup) ✅ Tag 11
 **Erledigt 10. Mai 2026 vormittag (Tag 11), kein Repo-Commit für VPS-Override-Update.**
@@ -1053,9 +1053,11 @@ A2A wird zusätzlich gebaut, nicht statt. Eigene Bridge bleibt für Twin-Lab-spe
 
 ---
 
-## UX-Reifung — Stufe 1 (Less Technical)
+## UX-Reifung — Welle 1 (Less Technical)
 
 Parallel zu Phase 3.6. Vollständige Spec: `docs/UX-STRATEGY.md`.
+
+Welle vs. Stufe: **„Welle 1"** ist die aktuelle Bau-Runde (Sub-Schritte UX.1.A–D), **„Stufe N"** ist die Reife-Ziel-Marke einzelner Items. Welle 1 bringt die meisten Items auf Stufe 1, plus drei Tranche-C-Vorbereitungs-Items, die schon auf Stufe 2 zielen.
 
 Stufen-Konzept: 0 = Engineer-Stand, 1 = Tech-Affine ohne Doku-Lookup, 2 = Casual-User-fähig, 3 = ohne tech. Vorkenntnis. Backlog-Items ohne Stufen-Marker = implizit Stufe 0 (UX-irrelevant für diese Spur).
 
@@ -1074,7 +1076,7 @@ Was zu tun ist: leichtgewichtiges Toast-Framework (z.B. `sonner` oder `react-hot
 Plus zentraler Stand: `toast.promise(...)` für API-Calls mit pending/success/error in einem Aufruf. Spart Redundanz pro Try-Catch-Stelle.
 
 **Größe:** M · **Priorität:** should · **Aus:** UX-Strategie-Session Tag 17 Abend
-**Stufe:** 0 → 1 · **Tranche:** A · **Spur:** UX-Reifung Stufe 1 (Bau-Plan in `docs/UX-STRATEGY.md`)
+**Stufe:** 0 → 1 · **Tranche:** A · **Spur:** UX-Reifung Welle 1 (Bau-Plan in `docs/UX-STRATEGY.md`)
 
 ### 95. Tool-Names human-readable im Approve-Dialog
 Aktuell zeigt der Approve-Dialog technische Identifier wie `mcp_hyperbrowser-approval_scrape_webpage`. Für Casual-User unverständlich, für Tech-Affine zumindest reibungsfähig.
@@ -1087,7 +1089,7 @@ Was zu tun ist: Mapping-Layer Tool-Identifier → human-readable Label plus Args
 Plus Args-Preview: für `scrape_webpage({url: 'https://anthropic.com', outputFormat: ['markdown']})` → „Webseite lesen: anthropic.com". Heuristik pro bekanntem Tool-Pattern, generischer Fallback ist die Args-JSON.
 
 **Größe:** S · **Priorität:** should · **Aus:** UX-Strategie-Session Tag 17 Abend (Tool-Picker UX-Audit)
-**Stufe:** 0 → 1 · **Tranche:** A · **Spur:** UX-Reifung Stufe 1 (Bau-Plan in `docs/UX-STRATEGY.md`)
+**Stufe:** 0 → 1 · **Tranche:** A · **Spur:** UX-Reifung Welle 1 (Bau-Plan in `docs/UX-STRATEGY.md`)
 
 ### 96. Empty-State-Onboarding für Chat
 Erstuser landet im Chat-Tab mit nur einem leeren Input-Feld. Keine Erklärung, was der Twin kann, welche Tools verfügbar sind, wie Memory funktioniert. Aktuelle User wissen es, neue User scheitern.
@@ -1100,7 +1102,7 @@ Was zu tun ist: bei leerer Konversation (`messages.length === 0`) statt nur leer
 Pattern: bekannt aus ChatGPT/Claude-Web. Verschwindet sobald die erste User-Message gesendet wurde.
 
 **Größe:** S · **Priorität:** should · **Aus:** UX-Strategie-Session Tag 17 Abend
-**Stufe:** 0 → 1 · **Tranche:** A · **Spur:** UX-Reifung Stufe 1 (Bau-Plan in `docs/UX-STRATEGY.md`)
+**Stufe:** 0 → 1 · **Tranche:** A · **Spur:** UX-Reifung Welle 1 (Bau-Plan in `docs/UX-STRATEGY.md`)
 
 ### 97. Inbox-Tab Tutorial / Empty-State
 Aktuell ist die leere Inbox einfach leer. Das Konzept „Approvals" / „Pending-Actions" ist twin-lab-spezifisch und wird nicht erklärt.
@@ -1110,7 +1112,7 @@ Was zu tun ist: Empty-Inbox zeigt einen 2-3-Zeilen-Erklärtext: „Wenn dein Twi
 Aktiviert sich nur wenn Inbox leer ist; verschwindet sobald irgendein Pending existiert hat.
 
 **Größe:** XS · **Priorität:** nice · **Aus:** UX-Strategie-Session Tag 17 Abend
-**Stufe:** 0 → 1 · **Tranche:** A · **Spur:** UX-Reifung Stufe 1 (Bau-Plan in `docs/UX-STRATEGY.md`)
+**Stufe:** 0 → 1 · **Tranche:** A · **Spur:** UX-Reifung Welle 1 (Bau-Plan in `docs/UX-STRATEGY.md`)
 
 ### Tranche B — Mittlere Investments
 
@@ -1126,7 +1128,7 @@ Was zu tun ist: Approve-Dialog zeigt vor Bestätigung:
 Cost-Heuristik braucht eine Kosten-Tabelle pro Tool-Pattern; für Phase 3.6 als Pflicht-Block separat angesetzt. Für jetzt: Latenz-Schätzung reicht erstmal als MVP.
 
 **Größe:** M · **Priorität:** should · **Aus:** UX-Strategie-Session Tag 17 Abend (Phase-3.6-Vorbereitung)
-**Stufe:** 0 → 1 · **Tranche:** B · **Spur:** UX-Reifung Stufe 1 (Bau-Plan in `docs/UX-STRATEGY.md`)
+**Stufe:** 0 → 1 · **Tranche:** B · **Spur:** UX-Reifung Welle 1 (Bau-Plan in `docs/UX-STRATEGY.md`)
 
 ### 99. Audit-Trail-View menschlich lesbar formatieren
 Aktuell ist die Audit-Detail-View Roh-JSON: Tool-Calls als `{toolName, input, output}`-Objekte, Token-Usage als nested Object, Timestamps als epoch ms. Funktional fürs Debugging, aber unzumutbar für Casual-User. Plus: Vision Block 4 (Vererbung — Anna soll später auf Markus' Audit-Trail Zugriff haben können) braucht das in menschlicher Form.
@@ -1141,7 +1143,7 @@ Was zu tun ist: Audit-Entry-Renderer mit Tool-Call-Sätzen statt JSON:
 Pro Tool-Type ein eigenes Render-Template (mit generischem Fallback). Wartbar, weil pro Skill anpassbar.
 
 **Größe:** M · **Priorität:** should · **Aus:** UX-Strategie-Session Tag 17 Abend (Vererbungs-Argument)
-**Stufe:** 0 → 1 · **Tranche:** B · **Spur:** UX-Reifung Stufe 1 (Bau-Plan in `docs/UX-STRATEGY.md`)
+**Stufe:** 0 → 1 · **Tranche:** B · **Spur:** UX-Reifung Welle 1 (Bau-Plan in `docs/UX-STRATEGY.md`)
 
 ### 100. Memory-Hit-Indikator im Chat
 Wenn Twin Memory-Hits (Episodic, Semantic) in seine Antwort einbezogen hat, gibt es heute keinen UI-Hinweis. Das ist Vision Block 2 Pattern 2 (Zeit-Erleben) — Memory soll *spürbar* sein, nicht nur funktional vorhanden.
@@ -1153,7 +1155,7 @@ Was zu tun ist: pro Twin-Antwort, die Memory-Retrieval-Hits hatte, ein kleines I
 Backend liefert die Hits ohnehin schon (3.4 Hybrid-Search Logging), muss in der API-Response surfaced werden (heute vermutlich nur intern geloggt).
 
 **Größe:** S · **Priorität:** nice · **Aus:** UX-Strategie-Session Tag 17 Abend (Vision Block 2 Pattern 2)
-**Stufe:** 0 → 1 · **Tranche:** B · **Spur:** UX-Reifung Stufe 1 (Bau-Plan in `docs/UX-STRATEGY.md`)
+**Stufe:** 0 → 1 · **Tranche:** B · **Spur:** UX-Reifung Welle 1 (Bau-Plan in `docs/UX-STRATEGY.md`)
 
 ### Tranche C — Strategische Investments
 
@@ -1175,7 +1177,7 @@ Was zu tun ist: Reife-Berechnungs-Engine plus UI-Anzeige.
 Strategische Entscheidung vor Bau: Stufen-Definition braucht eine eigene Strategie-Session (Markus + Vision-Doc abgleichen, ob Stufen-Granularität passt).
 
 **Größe:** L · **Priorität:** should · **Aus:** UX-Strategie-Session Tag 17 Abend (Vision Block 2.5)
-**Stufe:** 0 → 2 · **Tranche:** C · **Spur:** UX-Reifung Stufe 1 (Bau-Plan in `docs/UX-STRATEGY.md`)
+**Stufe:** 0 → 2 · **Tranche:** C · **Spur:** UX-Reifung Welle 1 (Bau-Plan in `docs/UX-STRATEGY.md`)
 
 ---
 

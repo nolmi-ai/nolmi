@@ -1,8 +1,15 @@
 # UX-Reifung Strategy: Less Technical First
 
 **Datum:** 16. Mai 2026, Abend (Tag 17)
-**Scope:** Stufe 1 (Less Technical), parallel zu Phase 3.6.
-Stufe 2/3 als zukünftige Strategie-Sessions.
+**Scope:** Welle 1 — erste Bau-Runde der UX-Reifung-Spur. Bringt
+die UI auf Stufe 1 (Less Technical) und legt mit drei Tranche-C-
+Vorbereitungs-Items schon Fundamente für Stufe 2. Parallel zu
+Phase 3.6. Stufe 2 / Welle 2 als eigene Strategie-Session,
+Stufe 3 langfristig.
+
+**Vokabular:** „Welle" ist eine Bau-Runde (zeitlich, mehrere Items),
+„Stufe" ist die Reife-Ziel-Marke eines einzelnen Items. Welle 1
+adressiert primär Items mit Ziel Stufe 1, plus drei mit Ziel Stufe 2.
 
 ## Kontext
 
@@ -47,16 +54,16 @@ hat Phasen (1, 2, 2.5, 3, 4, 5+), UX-Reifung hat Stufen (0, 1,
 2, 3). Beide Dimensionen gleichzeitig.
 
 In jeder Engineering-Phase kann an UX-Stufen parallel gebaut
-werden. Stufe 1 läuft konkret parallel zu Phase 3.6.
+werden. Welle 1 läuft konkret parallel zu Phase 3.6.
 
 **Phase-Druck nicht mischen.** Bei Konflikt „soll ich heute 3.6
 oder UX-Item bauen" gewinnt die klarere Bau-Aufgabe — nicht
 ein Schema.
 
-## Stufe-1-Scope
+## Welle-1-Scope
 
 11 priorisierte Items, in drei Tranchen. Backlog-Nummern siehe
-`BACKLOG.md` Section „UX-Reifung — Stufe 1 (Less Technical)".
+`BACKLOG.md` Section „UX-Reifung — Welle 1 (Less Technical)".
 
 ### Tranche A — Quick-Wins (XS-S, ca. 2-3 Tage gesamt)
 
@@ -98,26 +105,27 @@ Tranche festgelegt. Vorab grobe Struktur:
 - **UX.1.B** — Tranche B (Mittlere) durchziehen
 - **UX.1.C** — Tranche C (Strategisch) durchziehen, jedes Item
   als eigene Sub-Phase
-- **UX.1.D** — Stufe-1-Abschluss-Review + Stufe-2-Strategie-Session
+- **UX.1.D** — Welle-1-Abschluss-Review + Welle-2-Strategie-Session (Scope vermutlich Ziel Stufe 2)
 
 Tranche A und B können parallel zu Phase 3.6 laufen. Tranche C
 ist je nach Item priorisierbar — MCP-Configurator-UI und
 Skill-Editor-UI sind Voraussetzung für Stufe 2, Twin-Reife-Anzeige
 ist Vision-Engagement-Pattern.
 
-## Stufe-1-Abschluss-Kriterien
+## Welle-1-Abschluss-Kriterien
 
 - [ ] Alle 11 Items in Tranche A/B/C gebaut, lokal verifiziert
 - [ ] Production-Deploy für alle Items
 - [ ] Smoke-Test mit echtem Casual-User (Markus' Frau, Kollege,
   jemand außerhalb der Bubble) — User schafft Chat, Tool-Approve,
   Fact-Pflege ohne Doku-Lookup
-- [ ] BACKLOG-Items für Stufe 1 als closed markiert
-- [ ] Stufe-2-Strategie-Session geplant
+- [ ] BACKLOG-Items aus Welle 1 als closed markiert
+- [ ] Welle-2-Strategie-Session geplant (Scope vermutlich Stufe 2)
 
-## Was kommt nach Stufe 1
+## Was kommt nach Welle 1
 
-**Stufe 2 (Casual-User-fähig)** ist eigene Strategie-Session.
+**Welle 2 mit Ziel Stufe 2 (Casual-User-fähig)** ist eigene
+Strategie-Session.
 Hauptthemen:
 
 - **SaaS-Hosting** statt Self-Hosting-Pflicht (eigener
@@ -137,7 +145,7 @@ Plus Mobile-App, Vererbungs-Modus First-Class, etc.
 
 - `docs/TWIN-VISION.md` Block 2.5 (Twin-Reife sichtbar machen)
 - `docs/TWIN-VISION.md` Block 1.3 (SaaS-Onboarding niedrigschwellig)
-- `docs/BACKLOG.md` neue Section „UX-Reifung — Stufe 1 (Less Technical)"
+- `docs/BACKLOG.md` neue Section „UX-Reifung — Welle 1 (Less Technical)"
 - `docs/ROADMAP.md` Section „Orthogonaler Strang: UX-Reifung"
 - Bestehende Backlog-Items #86 (Skill-Editor-UI), #87 (MCP-
   Configurator-UI), #91 (Reject-Reason-Modal) — jetzt re-klassifiziert
