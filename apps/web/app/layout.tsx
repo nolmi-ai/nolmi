@@ -28,12 +28,27 @@ export default function RootLayout({ children }: { children: ReactNode }) {
         <Suspense fallback={null}>
           <AppFooter />
         </Suspense>
-        {/* Toaster (UX.1.A.1 / #94 + UX.1.A.2.B Theming). richColors
-         * bewusst ENTFERNT — wir setzen Backgrounds/Border/Text-Farben
-         * via CSS-Vars-Overrides (siehe `globals.css`, `[data-sonner-
-         * toaster]`-Block). Damit greift der Twin-Lab-Look (surface-BG,
-         * accent/warn-Border, IBM-Plex-Mono) statt der Sonner-Defaults. */}
-        <Toaster position="top-right" closeButton />
+        {/* Toaster (UX.1.A.2.C.2): Sonner als reine Stack-/Auto-Dismiss-
+         * Engine. `unstyled: true` schaltet Sonners eigenes Visual-Layer ab;
+         * Markup-Klassen kommen via `classNames` von uns (siehe
+         * `globals.css`, `.twin-toast*`-Block). Damit wirkt der Toast wie
+         * eine Mini-Modal-Card, nicht wie eine schwebende Sonner-Notification.
+         * Vorherige CSS-Var-Overrides aus UX.1.A.2.B/C.1 wurden in
+         * `globals.css` entfernt — sie waren auf Sonners default-styled
+         * Markup gebaut und sind im unstyled-Modus wirkungslos. */}
+        <Toaster
+          position="top-right"
+          closeButton
+          toastOptions={{
+            unstyled: true,
+            classNames: {
+              toast: "twin-toast",
+              title: "twin-toast-title",
+              description: "twin-toast-description",
+              closeButton: "twin-toast-close",
+            },
+          }}
+        />
       </body>
     </html>
   );
