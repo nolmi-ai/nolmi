@@ -1821,7 +1821,7 @@ type GenerateTextOutcome = Awaited<ReturnType<typeof generateText>>;
 // nur dann auf top-level zurück, wenn `steps` fehlt (defensive: ältere
 // SDK-Version oder Single-Step-Cache-Hit). Spike 3.5.E.0 hat das Verhalten
 // verifiziert (siehe Findings-Doc auf Branch `spike/89-tool-autonomy`).
-function collectAllToolCalls(
+export function collectAllToolCalls(
   result: GenerateTextOutcome,
 ): GenerateTextOutcome["toolCalls"] {
   const fromSteps = result.steps?.flatMap((s) => s.toolCalls ?? []);
@@ -1830,7 +1830,7 @@ function collectAllToolCalls(
     : (result.toolCalls ?? []);
 }
 
-function collectAllToolResults(
+export function collectAllToolResults(
   result: GenerateTextOutcome,
 ): GenerateTextOutcome["toolResults"] {
   const fromSteps = result.steps?.flatMap((s) => s.toolResults ?? []);
@@ -1864,7 +1864,7 @@ const stopOnPendingApprovalMarker: StopCondition<ToolSet> = ({ steps }) => {
   return false;
 };
 
-function detectPendingToolCall(
+export function detectPendingToolCall(
   result: GenerateTextOutcome,
   skillByToolKey: Map<string, Skill>,
 ): {

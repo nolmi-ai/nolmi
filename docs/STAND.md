@@ -310,6 +310,14 @@ github.com/markusbaier/twin-lab — `origin/main` auf `c442c71`
 (Tag 15 Base-Image-Wechsel). Tag-16-Code-Commits noch nicht in
 Production deployed — das kommt mit Phase 3.5.C nach #89-Fix.
 
+**Tag-17-Commits (laufend, vollständiger STAND-Block in 3.5.E.F):**
+- `0d6cfd7` (Branch `spike/89-tool-autonomy`) spike: 3.5.E.0 Diagnose
+- `4be99b3` docs(3.5.E.A): Diagnose-Wende #89 — Step-Walk-Bug
+- `d0954a6` fix(3.5.E.B): Step-Walk-Patch (Wurzel-Fix #89)
+- 3.5.E.D Regression-Guard `test-regression-89-step-walk.ts` —
+  Multi-Step + Single-Step-Fallback + Marker/Non-Marker-Cases,
+  Mutation-Verifikation beim Patch-Bau bestätigt dass Guard greift.
+
 **Tag-16-Commits (alle gepushed):**
 - `d13da41` docs: DEPLOYMENT.md + docker-compose.override.yml.example
   (Backlog #102)
