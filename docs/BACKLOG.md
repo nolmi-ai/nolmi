@@ -114,6 +114,8 @@ Heute: Pending nur sichtbar wenn Settings-Page offen.
 - Konfigurierbar pro Twin: welche Events triggern Notifications
 - Vorbedingung: 2.5.4 (User-Auth, weil Notification-Routing pro User)
 
+**Stufe:** 0 → 1 · **Spur:** UX-Reifung
+
 ### 2.5.6 — Production-Deployment Web auf VPS ✅
 **Abgeschlossen 4. Mai 2026 abends.** Web-UI deployed unter `app.twin.harwayexperience.com`, Runtime unter `runtime.twin.harwayexperience.com`, Bridge weiterhin unter `bridge.twin.harwayexperience.com`. Drei User registriert, drei Twins hot-geladen ohne Container-Restart. Multi-Tenant-SaaS funktional — externer User kann sich registrieren, Twin onboarden, chatten.
 
@@ -175,6 +177,7 @@ Mandate-Condition wie "Auto-Reply, wenn Absender = vertrauter Handle UND Inhalt 
 ### 5. Reject-Notification an Absender
 Aktuell: Reject = Stille. Optional könnte der andere Twin eine kurze Notification bekommen ("Markus hat deine Nachricht nicht beantwortet"). Phase-2-Spec hatte das bewusst weggelassen.
 **Größe:** S · **Priorität:** nice · **Aus:** Phase-2-Spec
+**Stufe:** 0 → 1 · **Spur:** UX-Reifung
 
 ### 6. Bridge-Catch-up beim Reconnect
 Aktuell: Reconnect verlässt sich darauf, dass die Bridge alle nicht-gelieferten Nachrichten beim SSE-Connect nachschickt. Falls die Bridge das nicht macht (z.B. nach Bridge-Crash), bleiben Nachrichten ungesehen bis zum nächsten Twin-Boot. Idempotenz fängt das ab, aber sauberer wäre ein eigener `getInbox()`-Call beim Reconnect.
@@ -195,6 +198,7 @@ Aktuell wird die Persona bei jedem Boot überschrieben. Wenn du sie iterierst, v
 ### 10. UI-Bearbeitung von Persona/Mandates
 In Phase 1 und 2 explizit ausgeschlossen — Files in `docs/` sind die Source of Truth. Phase 2.5.3 (Onboarding-Wizard) hat den Initial-Setup gelöst, aber **nicht** die spätere Bearbeitung. Twin-User können heute ihre Persona/Mandates nur durch Re-Bootstrap oder direkte DB-Edits ändern.
 **Größe:** L · **Priorität:** should · **Aus:** Phase-1-Scope-Disziplin
+**Stufe:** 0 → 2 · **Spur:** UX-Reifung
 
 ### 11. Persona-Klarstellung: 1. Person vs. Stellvertreter-Sprech
 Twin spricht aktuell teilweise in dritter Person über Markus ("checke es bei Markus"). Klären, ob das gewünscht ist (zeigt klar: Twin ist nicht Markus selbst) oder ob er als "ich" konsistent für Markus sprechen soll. Verknüpft mit #14 (Owner-Recognition) — Stellvertreter-Sprech ist im A2A-Modus richtig, im Web-UI-Owner-Modus eher nicht.
@@ -231,6 +235,7 @@ Sub-Schritt 2d hat alte Pfade (`/chat`, `/twin-profile`, `/audit`, `/audit/pendi
 ### 17. Stream-Page auf Multi-Twin migrieren
 `/stream` zeigt aktuell @markus via Legacy-Alias. Neue Route `/stream/[handle]/page.tsx` analog zur Chat-Route. Backend-Routes `/twins/:handle/stream` existieren bereits.
 **Größe:** S · **Priorität:** should · **Aus:** Sub-Schritt 2d Caveat #2
+**Stufe:** 0 → 1 · **Spur:** UX-Reifung
 
 ### 18. @-Char in URLs decodieren bei Display-Output
 Chat-Header zeigt `%40florian` statt `@florian` (URL-encodierter `@`). Backend-Routes akzeptieren beides, aber UI-Display sollte decoded sein. Einmal `decodeURIComponent()` an den richtigen Stellen.
@@ -242,6 +247,7 @@ Strategische Option, die geklärt wurde: **Nein.** Hybrid-Strategie — eigenes 
 ### 33. Mandate-basierte Approval-Logik auch im Web-UI
 Heute: Web-UI-Chat überspringt Approval-Flow für Markus, aber blockt für Heiko (cautious). A2A-Eingang nutzt Approval. Konzeptionell unklar: was, wenn Markus im Web-UI eine sensitive Antwort generieren lässt, die er sich nochmal anschauen will? Vorschlag: Mandates differenzieren `requires_approval` per Channel. RESPOND_TO_CHAT könnte für Owner-Chats `false`, für externe `true` sein. Verknüpft mit #14 (Owner-Recognition).
 **Größe:** M · **Priorität:** should · **Aus:** Live-Test 2.5.2e, in 2.5.3 verstärkt sichtbar
+**Stufe:** 0 → 1 · **Spur:** UX-Reifung
 
 ### 34. Master-Key-Rotation CLI
 Heute: bei Verdacht auf Kompromittierung des Master-Keys oder regulärer Rotation muss manuell entschlüsselt und neu verschlüsselt werden. Sauber: CLI-Tool `pnpm key:rotate` das den alten Master-Key liest, alle `apiKeyEncrypted` entschlüsselt, mit neuem Key verschlüsselt, in DB schreibt. Out of scope für 2.5.2e.
@@ -267,6 +273,7 @@ UI-mässig sollte die System-Antwort visuell anders dargestellt werden als eine 
 
 Vorteile: eliminiert Improvisations-Risiko, schneller (kein LLM-Call), spart Kosten, klares Mental-Model für den Chat-Partner.
 **Größe:** S · **Priorität:** must · **Aus:** 2.5.3 Heiko-Live-Test
+**Stufe:** 0 → 1 · **Spur:** UX-Reifung
 
 ### 39. Cautious-Mode mit Klassifikator-Vorlauf — Phase 3 — NEU aus 2.5.3
 Heute: cautious-Template hat `requires_approval=true` für RESPOND_TO_CHAT. Heißt: ALLE Chat-Anfragen gehen durch Approval, auch simple Smalltalk- oder Identitäts-Fragen wie "Wer bist du?". Das ist UX-mässig falsch — Selbstbeschreibung sollte ohne Approval beantwortbar sein.
@@ -290,6 +297,7 @@ Heute schützt nur `SameSite=Lax` auf dem Session-Cookie. Bei breiterem Deployme
 ### 41. Magic-Link Auth (passwordless) — NEU aus 2.5.4
 Alternative zu Email/Passwort: User gibt Email ein, kriegt Login-Link via Email zugeschickt. Vorteil: kein Passwort-Management, sicherer (kein Rainbow-Table-Risiko, kein Password-Reuse). Vorbedingung: Email-Versand aus 2.5.5. Markus' Frage vom 02.05: "Magic Link könnten wir für die Zukunft nochmal überlegen."
 **Größe:** L · **Priorität:** nice · **Aus:** 2.5.4 Architektur-Diskussion, blockt auf 2.5.5
+**Stufe:** 0 → 2 · **Spur:** UX-Reifung
 
 ### 42. Rate-Limiting auf /auth/login — NEU aus 2.5.4
 Heute kein Rate-Limit. Bei breiterem Deployment Brute-Force-anfällig. `@fastify/rate-limit` mit konservativem Default (z.B. 5 Login-Versuche pro IP pro 15 Minuten), bei Treffer 429 mit Retry-After-Header. Plus per-Email-Tracking gegen distributed Brute-Force.
@@ -305,6 +313,7 @@ Footer rendert weiterhin auf Public-Routes — Twin-Count fällt auf "multi-twin
 ### 44. Self-Service-Password-Reset — NEU aus 2.5.4
 Florian und Heiko haben heute Platzhalter-Passworte von Markus per CLI bekommen. Es gibt aber keinen Weg für sie, das Passwort selbst zu ändern. CLI-Tool (`pnpm user:create` mit Update-Flag oder ein neues `user:reset-password`) reicht für heute, aber UI-Flow ("Passwort vergessen?" → Email-Link → Set-New-Password) wäre richtig. Vorbedingung: Email-Versand aus 2.5.5.
 **Größe:** M · **Priorität:** should · **Aus:** 2.5.4 Migration der drei bestehenden User, blockt auf 2.5.5
+**Stufe:** 0 → 2 · **Spur:** UX-Reifung
 
 ---
 
@@ -324,6 +333,7 @@ Während Deployment aufgefallen, neu im Backlog: #59-#62 unten.
 ### 47. Reply-Marker bei Approval-Antworten manchmal fehlend
 Conversation-View zeigt Reply-Marker (`↩ reply`) nicht zuverlässig bei allen Approval-Antworten — z.B. die „Wieder ein Test"-Antwort um 13:45 in Florian's View ohne Marker, obwohl konzeptionell Reply auf vorherige Test-Message. Hypothese: Backend setzt `inReplyTo` korrekt, aber Frontend-Render verschluckt es bei bestimmten Pfaden. Vermutlich Edge-Case in `mergeAuditIntoBridgeMessages` oder in der Render-Conditional, die zwischen `reply-received` und `respond_to_twin_message` unterscheidet.
 **Größe:** S · **Priorität:** nice · **Aus:** 2.5.4.3 Live-Test
+**Stufe:** 0 → 1 · **Spur:** UX-Reifung
 
 ### 48. Conversations-List Bridge-Roundtrip pro Partner
 `fetchAllBridgeConversations` ruft `getConversationMessages` für jeden bekannten Bridge-Twin in Schleife. Bei vielen Twins teuer. Lösung: dedizierter Bridge-Endpoint `/conversations` mit Server-Aggregation, der eine Liste aller Partner mit `lastMessageAt` zurückgibt, statt N Roundtrips.
@@ -344,10 +354,12 @@ Bei jedem GET `/conversations` macht der Server einen Bridge-Roundtrip pro Partn
 ### 52. read_at im Audit-Log-UI sichtbar machen
 Mark-Read setzt `read_at`-Spalte, aber Audit-Log-UI im Inbox zeigt das heute nicht an. Optional: kleiner Indikator in der Audit-Log-Tabelle, z.B. „gelesen 5 Min nach Empfang" als Spalte oder Tooltip. Polish, nicht Architektur.
 **Größe:** S · **Priorität:** nice · **Aus:** 2.5.4.2 Caveat
+**Stufe:** 0 → 1 · **Spur:** UX-Reifung
 
 ### 53. Conversations löschen/archivieren — NEU 3. Mai 2026 nachmittags
 Aktuell: Konversationen in der Sidebar bleiben dauerhaft sichtbar. Bei vielen A2A-Partnern oder nach abgeschlossenen Projekten unübersichtlich. Plus: nach Test-Sessions sammeln sich Test-Konversationen, die man weghaben will. Implementation: `archived_at` und `deleted_at`-Spalten in einem `conversations`-Tabelle ODER pro Audit-Eintrag flaggen. UI: Hover-Action oder Rechtsklick-Menü mit „archivieren" und „löschen". Plus: archivierte Konversationen in separater „Archiv"-Sicht wieder einsehbar (löschen ist endgültig). Konzeptionelle Frage: was passiert mit Bridge-Messages, wenn beide Seiten archivieren? Bridge bleibt unverändert, jeder Twin entscheidet lokal über Sichtbarkeit.
 **Größe:** M · **Priorität:** should · **Aus:** UX-Diskussion 3. Mai
+**Stufe:** 0 → 1 · **Spur:** UX-Reifung
 
 ### 54. Header-Höhe als CSS-Variable statt hartcodiert — NEU 3. Mai 2026 nachmittags
 Heute: `h-[calc(100vh-65px)]` in ChatLayout setzt voraus, dass AppHeader exakt 65px hoch ist. Wenn AppHeader-Style sich ändert (Padding, Button-Höhen), muss die Konstante mitziehen. Sauberer: CSS-Variable `--app-header-height: 65px` im `:root` setzen, sowohl AppHeader als auch ChatLayout nutzen. Plus: bei Mobile-Layout-Anpassungen (Backlog #56) könnte die Höhe variieren — CSS-Variable macht das responsive einfach.
@@ -356,6 +368,7 @@ Heute: `h-[calc(100vh-65px)]` in ChatLayout setzt voraus, dass AppHeader exakt 6
 ### 55. Mobile-Layout für Chat-Page (Sidebar-Toggle/Collapse) — NEU 3. Mai 2026 nachmittags
 Heute: Chat-Layout fest auf Desktop-Breite optimiert. Sidebar w-72 (288px) belegt auf Mobile fast die halbe Bildschirmbreite, Conversation wird sehr eng. Plus: Top-Nav mit Brand + 3 Tabs + Switcher + Avatar nebeneinander bricht bei <768px. Lösung: Sidebar als Off-Canvas-Drawer mit Toggle-Button, Top-Nav mit Hamburger-Menü oder Tabs als Bottom-Nav. Pattern wie WhatsApp-Web oder Slack-Mobile. Vorbedingung: Visual-Design-Iteration (#59).
 **Größe:** L · **Priorität:** should · **Aus:** UX-Iteration 3. Mai (Layout-Fix Caveat)
+**Stufe:** 0 → 1 · **Spur:** UX-Reifung
 
 ### 56. Textarea Auto-Grow mit Cap im Conversation-Input — NEU 3. Mai 2026 nachmittags
 Heute: Textarea im Conversation-Input ist fix h-20 (80px), bei längeren Eingaben scrollt sie intern. Bei mehrzeiligen Antworten umständlich, weil User nicht den ganzen Text sieht. Lösung: Auto-Grow mit Cap — Textarea wächst mit Inhalt bis 3-4 Zeilen, dann scrollt sie intern weiter. Container-Höhe muss flexibel sein, oder Textarea overlay'd den Verlauf-Bereich. Pattern wie Slack/Discord — Input wächst nach oben, Verlauf rutscht entsprechend hoch.
@@ -364,10 +377,12 @@ Heute: Textarea im Conversation-Input ist fix h-20 (80px), bei längeren Eingabe
 ### 57. 100dvh statt 100vh für Mobile-Browser-Kompatibilität — NEU 3. Mai 2026 nachmittags
 Heute: ChatLayout nutzt `h-[calc(100vh-65px)]`. Auf Safari iOS (und älteren Mobile-Browsern) berücksichtigt 100vh die dynamische Toolbar nicht — Conversation-Input könnte unter den Address-Bar gequetscht werden. Lösung: `100dvh` (dynamic viewport height) — wird von modernen Browsern korrekt berechnet. Backwards-Compatibility: `min-h-[100vh] min-h-[100dvh]` als Fallback. Vermutlich gehört zur Mobile-Layout-Iteration (#56).
 **Größe:** S · **Priorität:** nice · **Aus:** UX-Iteration 3. Mai (Layout-Fix Caveat)
+**Stufe:** 0 → 1 · **Spur:** UX-Reifung
 
 ### 58. Visual Design + Brand-Iteration für twin-lab — NEU 3. Mai 2026 nachmittags
 Aktuell: monospace, schwarz-weiß-grün, sehr functional. Konzeptionell stimmig zum „Lab"-Charakter, aber spätestens bei Multi-Tenant-Public-Launch (nach 2.5.6) wird die Frage akut: wie soll twin-lab aussehen für externe User? Eigene Brand-Identity entwickeln (Logo, Farben, Typografie-Hierarchie), Header-Komponente neu konzipieren, Page-Templates strukturieren, Conversation-Bubble-Designs polishen. Vorbereitung: Mood-Boards, Inspiration sammeln. Empfohlen mit Florian zusammen (Designer). Trigger: vor Phase 2.5.6 oder nach.
 **Größe:** XL · **Priorität:** should · **Aus:** UX-Diskussion 3. Mai (Option-3-Reizfrage)
+**Stufe:** 0 → 2 · **Spur:** UX-Reifung
 
 ### 59. Bridge `/messages/:id/sender` mit Auth + Owner-Scope ✅
 **Abgeschlossen 3. Mai 2026 abends.** Drei Schichten Schutz: 
@@ -513,6 +528,7 @@ Pflicht-Items, wenn neue User von außen kommen:
 
 Vorbedingung: Email-Versand-Infrastruktur (resend.com Konto vorhanden, in 2.5.5 für Notifications eh geplant).
 **Größe:** L · **Priorität:** should · **Aus:** 2.5.6 Production-Live
+**Stufe:** 0 → 2 · **Spur:** UX-Reifung
 
 ### 70. Production-Stack-Doku: README für `/docker/twin-lab-web/`
 Heute: README im Repo unter `docker/twin-lab-web/README.md` beschreibt Build-Sequenz und ENV-Variablen. Ergänzen um:
@@ -579,6 +595,7 @@ Approval-Strategie: **Variante C — Trust-basiert.** Vertraute Twins direkt (ex
 Vorbedingung: 3.1 Skill-System ✅ + 3.2 Tool-Use über MCP-Pattern. Implementation als Action-Skill `send_to_twin` mit Manifest, Mandate-gated. Kalenderzeit: 6-10 Wochen ab heute.
 
 **Größe:** L · **Priorität:** should · **Aus:** Markus-Idee 6. Mai während 3.1.B-Implementation
+**Stufe:** 0 → 1 · **Spur:** UX-Reifung
 
 ### 74. Persona-Skill-Layering klären ✅
 **Abgeschlossen 7. Mai 2026 (Tag 8 Vormittag) — Commit `f045dd8` (File) plus DB-Update via Wegwerf-Skript.**
@@ -622,6 +639,7 @@ Was fehlt:
 Verknüpft mit #10 (UI-Bearbeitung von Persona/Mandates). Konsistente UX: alles, was heute in Files lebt, soll später in der UI editierbar sein.
 
 **Größe:** L · **Priorität:** should · **Aus:** 3.1.E expliziter Scope-Ausschluss
+**Stufe:** 0 → 2 · **Spur:** UX-Reifung
 
 ### 77. Production-Container-Bootstrap ruft init-db nicht auf ✅
 **Abgeschlossen 7. Mai 2026 (Tag 8 Vormittag) — Commit `2e96ddb` mit Variante 1 (Dockerfile-CMD-Wrap).**
@@ -777,6 +795,7 @@ Argument dagegen: Reply-Detection wurde explizit eingebaut um Loop-Risiko zu ver
 **Verwandt mit #80:** History-Reset-Pfad. Beide adressieren UX-Lücken in der Konversations-UI. Könnten architektur-seitig gemeinsam gedacht werden — Konversations-Konzept (Threads, Resets, Reply-Verlinkung) als kohärentes UX-Subsystem.
 
 **Größe:** M (Variante 1, mit UI-Refactor) / XS (Variante 2, Frontend-Quickfix) · **Priorität:** should · **Aus:** Tag-8-Production-Smoke-Test, korrigierte Diagnose Tag-9-Vormittag
+**Stufe:** 0 → 1 · **Spur:** UX-Reifung
 
 **Status-Erkenntnis aus der Diagnose:** Der gestern als „echte Production-Regression" eingeordnete Bug ist keine Regression — die `trusted-bypass`-Architektur war seit 2.5.4.1 stabil und hat heute morgen im Test sauber funktioniert. Was geändert wurde: die UI-Verkettungs-Logik im Frontend produziert seit irgendwann (vermutlich Phase 2.5.5 mit Konversations-UI-Refactor) immer ein `in_reply_to`. Das versteckt den Twin-Trigger-Pfad bei allen Folge-Fragen. Ist also ein UX-Bug, nicht Architektur-Bug. Plus eine wichtige Lesson: Reply-Detection greift sowohl bei semantischen Replies („okay, danke!") als auch bei neuen Fragen, weil das Frontend nicht zwischen beiden unterscheidet. Differenzierung braucht UI-Konzept-Arbeit, nicht nur Backend-Fix.
 
