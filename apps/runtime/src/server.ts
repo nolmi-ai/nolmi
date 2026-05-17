@@ -10,9 +10,12 @@ import {
   FactCreateRequestSchema,
   FactExtractRequestSchema,
   FactUpdateRequestSchema,
+  SkillCreateRequestSchema,
+  SkillUpdateRequestSchema,
   type AuditEntry,
   type FactConfidence,
   type FactItem,
+  type SkillDetailPayload,
   type TwinToolListItem,
 } from "@twin-lab/shared";
 import { McpServersRepo } from "./mcp/repo.js";
@@ -37,7 +40,11 @@ import {
   TrustAlreadyExistsError,
   TrustNotFoundError,
 } from "./trust/trust-repo.js";
-import { SkillRepo } from "./skills/repo.js";
+import {
+  SkillAlreadyExistsError,
+  SkillRepo,
+  SkillValidationError,
+} from "./skills/repo.js";
 import type { Skill, SkillUiPayload } from "@twin-lab/shared";
 import type { ConversationsRepo } from "./conversations/repo.js";
 import {
@@ -979,6 +986,20 @@ function toSkillUiPayload(skill: Skill): SkillUiPayload {
   };
 }
 
+/**
+ * #86: Detail-Payload mit Manifest + Instructions + Script — für den
+ * Skill-Editor (Prefill in Edit-Mode, Response auf Create/Update).
+ * Listings nutzen weiter den schlanken UiPayload.
+ */
+function toSkillDetailPayload(skill: Skill): SkillDetailPayload {
+  return {
+    ...toSkillUiPayload(skill),
+    manifestJson: skill.manifestJson,
+    instructionsMd: skill.instructionsMd,
+    scriptTs: skill.scriptTs,
+  };
+}
+
 function registerSkillRoutes(
   app: FastifyInstance,
   deps: ServerDeps,
@@ -1031,6 +1052,156 @@ function registerSkillRoutes(
         return reply.status(500).send({ error: "Skill nach Update nicht gefunden" });
       }
       return toSkillUiPayload(updated);
+    },
+  );
+
+  // ─── #86: Detail-View für Edit-Prefill ──────────────────────────────────
+  app.get<{ Params: { handle: string; skillId: string } }>(
+    "/twins/:handle/skills/:skillId",
+    async (request, reply) => {
+      const ctx = await requireOwner(request, reply, request.params.handle);
+      if (!ctx) return;
+      const { entry } = ctx;
+      const skill = deps.skillRepo.findById(request.params.skillId);
+      if (!skill || skill.twinId !== entry.twinId) {
+        return reply.status(404).send({ error: "Skill nicht für diesen Twin" });
+      }
+      return toSkillDetailPayload(skill);
+    },
+  );
+
+  // ─── #86: Create (manual only) ──────────────────────────────────────────
+  app.post<{ Params: { handle: string } }>(
+    "/twins/:handle/skills",
+    async (request, reply) => {
+      const ctx = await requireOwner(request, reply, request.params.handle);
+      if (!ctx) return;
+      const { entry } = ctx;
+
+      const parsed = SkillCreateRequestSchema.safeParse(request.body);
+      if (!parsed.success) {
+        return reply.status(400).send({ error: parsed.error.message });
+      }
+      const { name, description, manifestJson, instructionsMd, scriptTs } =
+        parsed.data;
+
+      // Manifest hat eigene name/description-Felder — wir spiegeln die
+      // Request-Top-Level-Werte rein, damit Form-Inputs und JSON-Editor
+      // nicht doppelt gepflegt werden müssen.
+      const fullManifest = { ...manifestJson, name, description };
+
+      try {
+        const created = deps.skillRepo.add({
+          twinId: entry.twinId,
+          name,
+          description,
+          manifestJson: fullManifest,
+          instructionsMd,
+          scriptTs: scriptTs ?? null,
+          source: "manual",
+        });
+        return reply.status(201).send(toSkillDetailPayload(created));
+      } catch (err) {
+        if (err instanceof SkillAlreadyExistsError) {
+          return reply.status(409).send({
+            error: "skill_name_taken",
+            name,
+          });
+        }
+        if (err instanceof SkillValidationError) {
+          return reply.status(400).send({ error: err.message });
+        }
+        throw err;
+      }
+    },
+  );
+
+  // ─── #86: Update (manual only — MCP-Skills sind read-only) ──────────────
+  app.patch<{ Params: { handle: string; skillId: string } }>(
+    "/twins/:handle/skills/:skillId",
+    async (request, reply) => {
+      const ctx = await requireOwner(request, reply, request.params.handle);
+      if (!ctx) return;
+      const { entry } = ctx;
+
+      const existing = deps.skillRepo.findById(request.params.skillId);
+      if (!existing || existing.twinId !== entry.twinId) {
+        return reply.status(404).send({ error: "Skill nicht für diesen Twin" });
+      }
+      // MCP-Skills sind synthetisch (via mcp-add/mcp-refresh), Edit würde
+      // beim nächsten Refresh überschrieben — daher 403.
+      if (existing.source === "mcp") {
+        return reply.status(403).send({ error: "mcp_skill_not_editable" });
+      }
+
+      const parsed = SkillUpdateRequestSchema.safeParse(request.body);
+      if (!parsed.success) {
+        return reply.status(400).send({ error: parsed.error.message });
+      }
+
+      // Top-Level description ist Source of Truth — wir spiegeln sie immer
+      // in das Manifest, egal ob der Client `manifestJson` explizit mit-
+      // schickt oder nicht. Sonst sieht die Detail-Response inkonsistente
+      // Werte (Top-Level neu, Manifest alt).
+      const patch: Parameters<typeof deps.skillRepo.update>[1] = {};
+      if (parsed.data.description !== undefined) {
+        patch.description = parsed.data.description;
+      }
+      const nextDescription =
+        parsed.data.description ?? existing.description;
+      if (parsed.data.manifestJson !== undefined) {
+        patch.manifestJson = {
+          ...parsed.data.manifestJson,
+          name: existing.name,
+          description: nextDescription,
+        };
+      } else if (parsed.data.description !== undefined) {
+        // Nur description geändert — Manifest aus existing-Stand re-patchen,
+        // damit die Spiegelung greift.
+        patch.manifestJson = {
+          ...existing.manifestJson,
+          description: nextDescription,
+        };
+      }
+      if (parsed.data.instructionsMd !== undefined) {
+        patch.instructionsMd = parsed.data.instructionsMd;
+      }
+      if (parsed.data.scriptTs !== undefined) {
+        patch.scriptTs = parsed.data.scriptTs;
+      }
+
+      try {
+        const updated = deps.skillRepo.update(existing.skillId, patch);
+        return toSkillDetailPayload(updated);
+      } catch (err) {
+        if (err instanceof SkillValidationError) {
+          return reply.status(400).send({ error: err.message });
+        }
+        throw err;
+      }
+    },
+  );
+
+  // ─── #86: Delete (manual only) ──────────────────────────────────────────
+  app.delete<{ Params: { handle: string; skillId: string } }>(
+    "/twins/:handle/skills/:skillId",
+    async (request, reply) => {
+      const ctx = await requireOwner(request, reply, request.params.handle);
+      if (!ctx) return;
+      const { entry } = ctx;
+
+      const existing = deps.skillRepo.findById(request.params.skillId);
+      if (!existing || existing.twinId !== entry.twinId) {
+        return reply.status(404).send({ error: "Skill nicht für diesen Twin" });
+      }
+      if (existing.source === "mcp") {
+        // MCP-Skills werden via `mcp-remove` (CLI) plus Cascade-Delete
+        // entfernt — direkter DELETE würde den FK reißen.
+        return reply.status(403).send({ error: "mcp_skill_not_editable" });
+      }
+
+      deps.skillRepo.remove(existing.skillId);
+      return reply.status(204).send();
     },
   );
 }

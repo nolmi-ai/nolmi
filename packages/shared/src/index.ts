@@ -368,6 +368,51 @@ export const SkillUiPayloadSchema = z.object({
 });
 export type SkillUiPayload = z.infer<typeof SkillUiPayloadSchema>;
 
+/**
+ * #86: Detail-Payload für den Skill-Editor. Im Gegensatz zu
+ * `SkillUiPayload` enthält dieses Shape `manifestJson`, `instructionsMd`
+ * und `scriptTs` — alles was das Modal zum Prefill und Speichern braucht.
+ * Listings bleiben beim schlanken UiPayload (kein Manifest/Markdown in
+ * jedem Listing über die Leitung).
+ */
+export const SkillDetailPayloadSchema = SkillUiPayloadSchema.extend({
+  manifestJson: SkillManifestSchema,
+  instructionsMd: z.string(),
+  scriptTs: z.string().nullable(),
+});
+export type SkillDetailPayload = z.infer<typeof SkillDetailPayloadSchema>;
+
+/** #86: Request-Schema für POST /twins/:handle/skills. */
+export const SkillCreateRequestSchema = z.object({
+  /** Eindeutig pro Twin, ohne Whitespace. */
+  name: z
+    .string()
+    .min(1)
+    .max(200)
+    .refine((s) => !/\s/.test(s), {
+      message: "Name darf keinen Whitespace enthalten",
+    }),
+  description: z.string().min(1).max(500),
+  manifestJson: SkillManifestSchema,
+  instructionsMd: z.string().min(1),
+  scriptTs: z.string().nullable().optional(),
+});
+export type SkillCreateRequest = z.infer<typeof SkillCreateRequestSchema>;
+
+/**
+ * #86: Request-Schema für PATCH /twins/:handle/skills/:skillId. Name ist
+ * NICHT änderbar (vermeidet Konflikte mit MCP-Sync-Naming und schützt
+ * gegen versehentliches Umbenennen von im System-Prompt referenzierten
+ * Skills). isActive läuft weiter über die existierende Toggle-Route.
+ */
+export const SkillUpdateRequestSchema = z.object({
+  description: z.string().min(1).max(500).optional(),
+  manifestJson: SkillManifestSchema.optional(),
+  instructionsMd: z.string().min(1).optional(),
+  scriptTs: z.string().nullable().optional(),
+});
+export type SkillUpdateRequest = z.infer<typeof SkillUpdateRequestSchema>;
+
 export const SkillSchema = z.object({
   skillId: z.string(),
   twinId: z.string(),
