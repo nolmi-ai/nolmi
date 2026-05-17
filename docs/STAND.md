@@ -1,29 +1,33 @@
 # twin-lab — Stand
 
-**Letztes Update:** 16. Mai 2026, Nachmittag (Tag 17)
+**Letztes Update:** 17. Mai 2026, Vormittag (Tag 18)
 
 ## Aktuell in Arbeit
 
-**Phase 3.5 Hyperbrowser-Foundation komplett — Production live.**
-Phase 3 Definition of Done: 5 von 5 Häkchen. #89 (autonomer
-Tool-Use bei Claude Opus 4.7) gelöst durch Step-Walk-Patch in
-`twin-service.ts` — war kein LLM-Verhaltens-Problem, sondern ein
-Detection-Bug, der drei Tage als solches misdiagnostiziert war.
-Spike 3.5.E.0 hat alle drei LLM-Hypothesen widerlegt; Patch +
-Regression-Guard sind drin, Production heute Nachmittag live.
+**Pre-Launch-Phase A gestartet (Tag 18, 17. Mai 2026).** Ziel:
+Self-Hosting-Launch in 6 Wochen (Ende Juni / Anfang Juli 2026).
+Strategy-Doc: `docs/PRE-LAUNCH-A-STRATEGY.md`.
 
-Nächster Block: Phase 3.6 Computer-Use-Agent — Strategie-Session
-zuerst (substantielle Architektur-Fragen, siehe 3.5-STRATEGY
-„Was nach 3.5 Foundation kommt").
+Build-Pfad (Hybrid-Sequenz aus dem Strategy-Pivot):
+1. UX-Welle 1 Tranche A abschließen (#95 Tool-Names human-readable)
+2. Vision-kritisch vorgezogen: #100 Memory-Hit, #101 Twin-Reife
+3. Restliche Welle-1-Items (#86, #87, #98, #99)
+4. Architektur-Follow-ups (#105, #106)
+5. Schmaler Computer-Use-Recherche-Workflow (Block 3, #107/#108)
+6. Self-Hosting-Polish (Block 4, #109/#110/#111)
+7. Launch-Vorbereitung (Block 5, #112/#113/#114/#115)
 
-**Plus neue UX-Spur (Tag 17 Abend identifiziert):** UX-Reifung als
-orthogonaler Strang. Vier Reife-Stufen (0 Engineer / 1 Less Technical /
-2 Casual-User / 3 ohne Vorkenntnis); gebaut wird in Wellen — Welle 1
-mit 11 priorisierten Items parallel zu Phase 3.6. Begründung: aktuelle
-UX ist Engineer-Niveau, blockt Open-Core-Ziel. Bau-Plan in
-`docs/UX-STRATEGY.md`, BACKLOG-Section „UX-Reifung — Welle 1" mit
-8 neuen Items (#94–#101) plus 3 re-klassifizierten (#86/#87/#91).
-Plus 18 weitere bestehende Items retro-klassifiziert für spätere Wellen.
+**Phase 3.6 (Computer-Use-Agent-Pattern) verschoben auf
+Pre-Launch-Phase B** oder später. Schmaler Recherche-Workflow
+bleibt als Hook-Feature in Phase A (Beta-deklariert).
+
+Differenzierungs-Story für Launch: **Memory-Tiefe + Persona +
+A2A-Bridge**. Nicht Computer-Use.
+
+**UX-Welle 1 ist jetzt Block 1 von Pre-Launch-Phase A.** Welle-1-
+Inhalte (11 Items in drei Tranchen) unverändert, nur Build-Pfad
+leicht angepasst (#100/#101 vorgezogen, weil Vision-kritisch für
+die Differenzierungs-Story).
 
 ## Heute (Tag 17) abgeschlossen
 
@@ -305,37 +309,51 @@ Befund. Reaktive Strategie-Session + 3.4.I-Bau (`e3a8ea1`). Plus #101.
   in Production)
 - 3.5 ✅ **Hyperbrowser-Foundation** (Tag 16 lokal, Tag 17
   Production — inkl. #89-Step-Walk-Patch als Wurzel-Fix)
-- 3.6 offen — Computer-Use-Agent (Strategie-Session steht an,
-  jetzt unblocked)
+- 3.6 **verschoben auf Pre-Launch-Phase B** (Strategy-Pivot
+  Tag 18 Vormittag, siehe `docs/PRE-LAUNCH-A-STRATEGY.md`).
+  Schmaler Recherche-Workflow bleibt als Hook-Feature in
+  Phase A.
 
 **Phase 3 Definition of Done — 5 von 5 Häkchen.** ✅
 
 ## Was als nächstes ansteht
 
-1. **Phase 3.6 (Computer-Use-Agent) — Strategie-Session** (S, primär)
-   - Substantielle Architektur-Fragen (siehe 3.5-STRATEGY
-     „Was nach 3.5 Foundation kommt"): Latenz-UX, Cost-Limits,
-     Failure-Modes, Memory-Implications, Persona-Pattern
-   - Strategy-Doc analog 3.4-STRATEGY / 3.5-STRATEGY
-2. **Phase 3.6 Bau** (M-L, abhängig von Strategie-Wahl)
+**Pre-Launch-Phase A Block 1 — UX-Welle 1 vollständig (~20–25 Tage)**
 
-**Plus parallel:** UX-Reifung Welle 1 (Bau-Plan
-`docs/UX-STRATEGY.md`). Tranche A Quick-Wins (Toast-Framework
-#94, Reject-Modal #91, Tool-Names human-readable #95, Empty-State
-#96, Inbox-Tutorial #97) können vor Phase-3.6-Strategie-Session
-beginnen — keine Vorbedingung.
+Aktive Items in Bau-Reihenfolge:
+1. **#95 Tool-Names human-readable** (S, jetzt) — Tranche A
+   abschließen
+2. **#100 Memory-Hit-Indikator** (S, vorgezogen) — Vision-kritisch
+3. **#101 Twin-Reife-Anzeige** (L, vorgezogen, Strategy-Session
+   vorab) — Vision-kritisch
+4. **#98 Cost-Preview vor Approve** (M)
+5. **#99 Audit-Trail menschlich** (M) — Vision Vererbung
+6. **#86 Skill-Editor-UI** (L)
+7. **#87 MCP-Configurator-UI** (L)
 
-Weiterhin im Backlog (nicht zeit-kritisch):
+Danach (alle aus `docs/PRE-LAUNCH-A-STRATEGY.md`):
+- **Block 2 Architektur-Follow-ups:** #105 A2A-Modal, #106
+  DirectChat-View
+- **Block 3 Computer-Use-Hook:** #107 Recherche-Workflow-Skill,
+  #108 Beta-Deklaration
+- **Block 4 Self-Hosting-Polish:** #109 DEPLOYMENT-Test, #110
+  Onboarding-Wizard, #111 Public-Repo-Hygiene
+- **Block 5 Launch-Vorbereitung:** #112 Landing, #113 Demo, #114
+  Launch-Posts, #115 Timing-Plan
+
+Total 37–50 Tage Pflicht bei 42 Tagen verfügbar — knapp, aber
+machbar bei strikter Scope-Disziplin.
+
+Weiterhin im Backlog (nicht zeit-kritisch, **nicht** Teil von
+Pre-Launch-Phase A):
 - **#90 Resume-Prompt-Tuning** (M, should) — vermutlich nicht
   mehr akut, weil #89 strukturell gelöst ist
-- **#91 Reject-Reason-UI** (S, nice)
 - **#93 Thinking-Aktivierung-Form für Opus 4.7** (XS, nice) —
   aus Spike 3.5.E.0 mitgebracht
-- **#101 FTS5-AND-Befund** evaluieren wenn Real-Data zeigt dass
+- **#101 FTS5-AND-Befund** evaluieren, wenn Real-Data zeigt, dass
   Pronominal-Queries Pain Point werden
 - **#103 Pre-Check im production-äquivalenten Container** (S, should)
 - **#104 sqlite3-CLI im Runtime-Image** (XS, nice)
-- **Toast-Framework statt alert()** (M, nice)
 - **#79 Persona-Tabelle droppen** (XS, nice)
 
 ## Production-Stack — Tag-17-Stand auf VPS

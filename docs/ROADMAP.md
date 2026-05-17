@@ -147,10 +147,14 @@ Vollständige Spec: `docs/3.4-STRATEGY.md`. Smoke-Protokoll: `docs/3.4-SMOKE.md`
 
 Cloud-Browser-Infrastruktur (hyperbrowser.ai) als MCP-Server. Direkter Drop-In auf MCP-Foundation aus 3.2, ENV-Wert für API-Key.
 
-### 3.6 — Procedural Memory (optional, ggf. Phase 4)
-**Größe:** XL · **Zeitfenster:** 2-3 Wochen oder später
+### 3.6 — verschoben auf Pre-Launch-Phase B oder später
+**Status:** Strategy-Pivot Tag 18 Vormittag, siehe `docs/PRE-LAUNCH-A-STRATEGY.md`.
 
-Lerngedächtnis. Twin lernt aus Approves/Rejects/Edits, schreibt Skills selbst. Plus möglicher Andock-Punkt für #94 (Dream-Pattern).
+Phase 3.6 wurde ursprünglich als **Procedural Memory** definiert (siehe unten), in jüngerer Lesart (Strategy-Docs ab Tag 16) auch synonym als **Computer-Use-Agent-Pattern** verwendet. Beide Stränge sind durch den Pre-Launch-Phase-A-Pivot **verschoben**: vollständiges Computer-Use-Agent-Pattern folgt nach dem Self-Hosting-Launch in Pre-Launch-Phase B, Procedural Memory bleibt langfristig optional (ggf. Phase 4 oder später).
+
+**Schmaler Recherche-Workflow** (`search` + `scrape` + Synthese) bleibt als Hook-Feature in Pre-Launch-Phase A, Beta-deklariert — siehe BACKLOG-Items #107/#108.
+
+**Ursprüngliche Definition (Procedural Memory):** Größe XL, Zeitfenster 2-3 Wochen oder später. Lerngedächtnis — Twin lernt aus Approves/Rejects/Edits, schreibt Skills selbst. Plus möglicher Andock-Punkt für #94 (Dream-Pattern).
 
 ### Pattern-Phasen (nach 3.4, vor oder parallel zu 3.5/3.6)
 
@@ -181,6 +185,32 @@ Schätzung pro Pattern-Phase: 1-2 Tage. Sechs Häkchen nach Phase 3.4 würden de
 - [ ] Twin merkt sich Konversationen, kennt Fakten, nutzt externe Tools, navigiert das Web mit Approval-Gates
 
 3.6 (Procedural Memory) und die Pattern-Phasen sind nicht im engen DoD, ergeben sich aber natürlich aus der Vision.
+
+---
+
+## Pre-Launch-Phase A — Self-Hosting-Launch (Tag 18+)
+
+**Ziel:** Public-Self-Hosting-Launch in ~6 Wochen (Ende Juni / Anfang Juli 2026).
+**Status:** Aktiv seit 17. Mai 2026 (Tag 18 Vormittag).
+**Strategy-Doc:** `docs/PRE-LAUNCH-A-STRATEGY.md`.
+
+Pre-Launch-Phase A ist eine **Sondersituation, keine reguläre Engineering-Phase**. Sie überlagert sich mit dem orthogonalen UX-Strang (Welle 1, siehe unten) und führt zusätzlich Polish- und Launch-Vorbereitungs-Items ein. Sie schaltet sich zwischen Phase 3 und Phase 4 als Launch-Vorbereitungs-Sondersituation — Phase 4 und Phase 5+ bleiben in ihrer Reihenfolge unverändert.
+
+**Differenzierungs-Story:** Memory-Tiefe + Persona + A2A-Bridge, plus schmaler Computer-Use-Recherche-Workflow als Beta-Hook.
+
+**Was nicht in Phase A:** vollständiges Computer-Use-Agent-Pattern (verschoben auf Pre-Launch-Phase B oder später, siehe 3.6 oben), SaaS-Hosting-Infrastruktur (Phase B), Persona-Builder-Chat (Phase B). Vollständige Anti-Goal-Liste im Strategy-Doc.
+
+**Build-Blöcke (Pflicht-Items, Total 37–50 Tage bei 42 verfügbar):**
+
+| Block | Inhalt | Backlog-Items |
+|---|---|---|
+| 1 — UX-Welle 1 vollständig | Tranche A abschließen + Vision-kritische vorziehen | #95, #100, #101, #98, #99, #86, #87 |
+| 2 — Architektur-Follow-ups | A2A-Modal + DirectChat-View | #105, #106 |
+| 3 — Schmaler Computer-Use-Hook | Recherche-Workflow + Beta-Deklaration | #107, #108 |
+| 4 — Self-Hosting-Polish | DEPLOYMENT-Test + Onboarding-Wizard + Repo-Hygiene | #109, #110, #111 |
+| 5 — Launch-Vorbereitung | Landing + Demo + Launch-Posts + Timing | #112, #113, #114, #115 |
+
+**Pre-Launch-Phase B (~6–8 Wochen, nach Phase-A-Launch):** SaaS-Hosting, Persona-Builder-Chat, Onboarding-Wizard mit Hand-Holding, Mandate-Wizard, Phase 3.6 Computer-Use-Agent formell.
 
 ---
 

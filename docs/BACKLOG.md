@@ -973,6 +973,10 @@ Skills im Hermes/agentskills.io-Format implementieren, damit wir community-Skill
 Cloud-Browser-Infrastruktur (hyperbrowser.ai, Y Combinator backed) als Skill-Tool. Twins können Web navigieren, scrapen, Forms ausfüllen — autonomes Web-Handling. Use-Cases: Web-Research für Konversationen, Form-Filling mit Approval-Gate, A2A-Erweiterung (Twins navigieren zu URLs, die andere Twins teilen). Vorbedingung: Skill-System (#25). Per-Twin Setup analog zu LLM-Config. Pricing ab $99/mo Basic, skaliert nach Proxy- und CAPTCHA-Volumen. Alternativen evaluieren: Browserbase/Stagehand, Browser Use (Open-Source), Skyvern (Computer-Vision-basiert), Lightpanda. Tool-Abstraktion über Provider — analog zur Vercel AI SDK für LLM.
 **Größe:** L · **Priorität:** should · **Aus:** Backlog-Anregung Markus, 1. Mai 2026 Abend
 
+**Update Tag 18 (verschoben auf Pre-Launch-Phase B oder später):** Strategic-Pivot in `docs/PRE-LAUNCH-A-STRATEGY.md` (Tag 18). Foundation-Teil dieses Items (Hyperbrowser-MCP-Spec, Tool-Sync, Approval-Gate) ist durch Phase 3.5 abgeschlossen und seit Tag 17 in Production live. Das verbleibende Ambitions-Set unter diesem Item — autonomes Computer-Use-Agent-Pattern, Multi-Step-Browser-Workflows mit `claude_computer_use_agent`, Form-Filling mit Approval-Gate, Persistent-Profiles — ist **nicht Teil von Pre-Launch-Phase A**. Schmaler Recherche-Workflow (`search_with_bing` + `scrape_webpage` + Synthese) bleibt als Hook-Feature in Phase A, Beta-deklariert (siehe neue Items #107 + #108 unten). Vollständiges Computer-Use-Agent-Pattern folgt nach Phase-A-Launch in Pre-Launch-Phase B oder als eigenes Item.
+
+Hinweis zur Phase-Nummerierung: Phase 3.6 wurde in der ursprünglichen ROADMAP als „Procedural Memory" definiert (siehe `docs/ROADMAP.md`), in jüngerer Lesart (Strategy-Docs ab Tag 16) wird „Phase 3.6 Computer-Use-Agent-Pattern" synonym verwendet. **Beide Stränge sind durch dieses Update verschoben.**
+
 ### 28. Autonome Skill-Generierung (Lernschleife)
 Twin schreibt nach komplexen Tasks (5+ Tool-Calls oder definierte Trigger) eine Skill-Markdown-Datei selbst. Lernschleife wie bei Hermes. Überschneidet mit Procedural Memory (#23).
 **Größe:** XL · **Priorität:** nice · **Aus:** Skills-Diskussion 1.5.
@@ -1213,6 +1217,120 @@ Was zu entscheiden ist (eigene Strategie-Session vor Bau):
 
 **Größe:** L (Strategie-Session + M-Bau) · **Priorität:** should · **Aus:** UX.1.A.3-Verifikation Tag 17 Abend
 **Stufe:** 0 → 1 · **Spur:** UX-Reifung
+
+## Pre-Launch-Phase A — Block 3: Schmaler Computer-Use-Hook
+
+Items aus dem Strategy-Pivot Tag 18. Block 3 nutzt die seit Phase 3.5 deployed Hyperbrowser-Foundation für einen schmalen Recherche-Workflow als Hook-Feature. Vollständiges Computer-Use-Agent-Pattern bleibt verschoben (siehe #27 Update). Spec: `docs/PRE-LAUNCH-A-STRATEGY.md`.
+
+### 107. Recherche-Workflow als Skill-Pattern
+Schmaler Computer-Use-Hook für den Self-Hosting-Launch. Twin kann auf Nutzer-Anfrage zu einem Thema recherchieren: `search_with_bing` für 2–5 Top-Results, dann `scrape_webpage` auf die relevantesten, dann Synthese mit Quellen-Referenz.
+
+Pattern wird als Skill-Definition realisiert (keine neuen Backend-Routes nötig — beide Tools sind seit 3.5 Hyperbrowser-Foundation verfügbar). Plus Persona-Pattern-Hinweis im System-Prompt, dass Twin proaktiv recherchieren darf, wenn der Nutzer zu einem aktuellen Thema fragt.
+
+**Beta-deklariert für Launch:** README und Landing-Page weisen explizit darauf hin, dass die Recherche-Capability „Frühphase" ist — Latenz 30–60 s, gelegentliche Quellen-Schwäche möglich, kein Multi-Step-Browser-Handling.
+
+**Größe:** S · **Priorität:** must · **Aus:** Pre-Launch-Phase-A-Strategy (Block 3) · **Spur:** Pre-Launch-Phase A
+
+### 108. Launch-Deklaration Recherche-Capability als Beta
+In README, Landing-Page und ggf. UI-Hint klarstellen, dass die Recherche-Capability im Self-Hosting-Launch Beta-Status hat. Erwartungs-Management vermeidet User-Enttäuschung bei Edge-Cases.
+
+Konkrete Stellen:
+- **README:** Hauptpitch-Block mit „Features"-Liste, Recherche-Capability als „(Beta)" gekennzeichnet
+- **Landing-Page:** gleiche Deklaration im Feature-Abschnitt
+- **Optional UI-Hint im Approve-Dialog** bei Recherche-Tool-Calls („Beta-Capability — Feedback willkommen")
+
+**Größe:** XS · **Priorität:** must · **Aus:** Pre-Launch-Phase-A-Strategy (Block 3) · **Spur:** Pre-Launch-Phase A
+
+## Pre-Launch-Phase A — Block 4: Self-Hosting-Polish
+
+Items aus dem Strategy-Pivot Tag 18. Block 4 macht das Repo für externe Tech-Affine deploybar. Spec: `docs/PRE-LAUNCH-A-STRATEGY.md`.
+
+### 109. DEPLOYMENT.md production-fest mit Self-Hoster-Smoke-Test
+`docs/DEPLOYMENT.md` (#102, Tag 16) existiert, ist aber Markus' eigener Setup-Wegweiser. Für Public-Launch braucht es:
+
+1. **Externer Self-Hoster führt die Doku durch** (Florian punktuell oder externer Tech-Affine), Reibungspunkte werden dokumentiert und gefixt
+2. **Klare Voraussetzungen am Anfang** (VPS-Specs, Domain-Bedarf, Reverse-Proxy-Wissen, Docker-Compose-Basics)
+3. **Troubleshooting-Section** für die häufigsten Stolpersteine (TLS-Setup, MCP-Server-Provisioning, Bridge-Token-Generation)
+4. **Optional: Self-Hosting-Cookbook** für Standard-Stacks (Coolify, CapRover, Plain-Docker, …)
+
+**Größe:** M · **Priorität:** must · **Aus:** Pre-Launch-Phase-A-Strategy (Block 4) · **Spur:** Pre-Launch-Phase A
+
+### 110. Onboarding-Wizard für ersten Login + Twin-Anlage
+Aktueller Erst-Login-Flow setzt voraus, dass User direkt zur Settings/Twin-Anlage navigiert und manuell Persona-YAML, MCP-Server etc. provisioniert. Für Self-Hosting-Launch zu hoch.
+
+Onboarding-Wizard nach Erst-Login:
+- **Welcome-Screen** (was ist Twin-Lab, was passiert als Nächstes)
+- **Schritt 1:** Anthropic-API-Key eingeben + verifizieren
+- **Schritt 2:** Erste Persona anlegen (vereinfachte UI, keine YAML-Direktbearbeitung)
+- **Schritt 3:** Mandates-Setup mit Standard-Presets (z.B. „Persönlich" / „Beruflich" / „Custom")
+- **Schritt 4:** Optional ein erster MCP-Server (Standard-Workflows: Hyperbrowser, oder „skip for now")
+- **Schritt 5:** Erste Konversation mit Beispiel-Prompts
+
+Wizard ist überspringbar für Tech-Affine („Skip to dashboard"), aber Default-Pfad für neue User.
+
+**Größe:** M · **Priorität:** must · **Aus:** Pre-Launch-Phase-A-Strategy (Block 4) · **Spur:** Pre-Launch-Phase A
+
+### 111. Public-Repo-Hygiene (README, LICENSE, CONTRIBUTING)
+Repo wird als Open-Source-Self-Hosting-Distro öffentlich. Hygiene-Items:
+
+- **README.md** Hauptpitch: was ist Twin-Lab, Quick-Start, Differenzierungs-Story (Memory + Persona + A2A), Screenshots oder Mini-Demo, Verweis auf DEPLOYMENT.md für Self-Hosting
+- **LICENSE** wählen: MIT (permissiv) oder Apache 2.0 (mit Patent-Schutz) — Open-Core-konsistent
+- **CONTRIBUTING.md** für externe Contributors: Code-Style, Sub-Schritt-Workflow (analog Markus' Pair-Programming-Pattern), PR-Reviewer-Hinweise
+- **GitHub-Issue-Templates** (Bug, Feature-Request, Question)
+- **GitHub-Discussions** evtl. aktivieren für Community
+
+**Größe:** S · **Priorität:** must · **Aus:** Pre-Launch-Phase-A-Strategy (Block 4) · **Spur:** Pre-Launch-Phase A
+
+## Pre-Launch-Phase A — Block 5: Launch-Vorbereitung
+
+Items aus dem Strategy-Pivot Tag 18. Block 5 bringt das Repo öffentlich und koordiniert den Launch-Push. Spec: `docs/PRE-LAUNCH-A-STRATEGY.md`.
+
+### 112. Landing-Page für Self-Hosting-Launch (minimal)
+Minimale Landing-Page als Anlauf-Stelle für Twitter/HN-Traffic. Kein voll-designtes Marketing-Site, eher README-Style mit visuellen Highlights:
+
+- **Hero:** „Twin-Lab — Your Personal AI Twin with Memory Depth and Inter-Twin Communication" (oder besser auf Englisch finalisiert)
+- **Differenzierungs-Story:** 3–4 Punkte (Memory + Persona + A2A + Beta-Recherche)
+- **Screenshots oder Mini-GIFs** der UI
+- **Quick-Start-Button** → GitHub-Repo / DEPLOYMENT.md
+- **Footer** mit Kontakt (Twitter, Email)
+
+Implementierungsoption: einfache Next.js-Page in einem separaten Repo oder Subdomain, oder GitHub-Pages mit Astro/Markdown. Pragmatisch wählen.
+
+**Größe:** M · **Priorität:** must · **Aus:** Pre-Launch-Phase-A-Strategy (Block 5) · **Spur:** Pre-Launch-Phase A
+
+### 113. Demo-Video oder schriftlicher Walkthrough (5–10 Min)
+Tech-Affine entscheiden in den ersten 60 Sekunden, ob ein Tool für sie relevant ist. Demo-Material reduziert „ich-müsste-es-erst-selbst-aufsetzen"-Hürde.
+
+Format-Optionen:
+- **Video (5–10 Min):** Screen-Capture mit Voice-Over. Zeigt Erst-Login, Twin-Anlage, erste Konversation, Memory-Sichtbarkeit, A2A-Demo mit zwei Twins, Recherche-Beta-Hook
+- **Schriftlicher Walkthrough:** Markdown-Doc mit Screenshots, Schritt-für-Schritt-Story. Weniger Aufwand als Video, aber weniger Wirkung
+- **Hybrid:** Schriftlicher Walkthrough plus eine kurze 60-s-GIF oder Embed-Video als Hero
+
+Pragmatisch: schriftlich + 60-s-GIF reicht für Launch.
+
+**Größe:** S · **Priorität:** must · **Aus:** Pre-Launch-Phase-A-Strategy (Block 5) · **Spur:** Pre-Launch-Phase A
+
+### 114. Launch-Post-Drafts (Twitter-Thread + HN-Submission)
+Konkrete Drafts vorbereiten, nicht spontan launchen.
+
+- **Twitter-Thread (5–8 Tweets):** Story-Bogen „Why I built this", Differenzierungs-Story, Screenshots, Quick-Start-Link
+- **Hacker-News-Submission:** „Show HN: Twin-Lab — [tagline]". Title-Optimization, Body mit Context, Quick-Start-Link
+- **Reddit:** evtl. r/LocalLLaMA, r/SelfHosted, r/MachineLearning. Subreddit-Auswahl strategisch
+- **Discord/Slack-Communities:** AI-Engineer-Discord, Anthropic-Discord, etc.
+
+Drafts werden vor Launch reviewed (Florian punktuell). Launch findet als koordiniert kurzer Push statt.
+
+**Größe:** S · **Priorität:** must · **Aus:** Pre-Launch-Phase-A-Strategy (Block 5) · **Spur:** Pre-Launch-Phase A
+
+### 115. Launch-Timing-Plan
+Optimal-Timing für Public-Launch:
+
+- **Wochentag:** Dienstag oder Mittwoch (HN-Algorithm-Optimum, Twitter-Engagement-Optimum für Tech-Audience)
+- **Uhrzeit:** 9–10 Uhr US-East-Coast (15–16 Uhr Berlin) für HN-Erstposition
+- **Vorab-Schritte:** README finalisiert, DEPLOYMENT.md getestet, Demo-Material live, Landing-Page deployed, alle Tweets/Posts draft fertig
+- **Tag selbst:** HN-Post zuerst, dann Twitter-Thread mit HN-Link, dann Communities, dann observieren und auf Kommentare reagieren
+
+**Größe:** XS (Doku-Item) · **Priorität:** must · **Aus:** Pre-Launch-Phase-A-Strategy (Block 5) · **Spur:** Pre-Launch-Phase A
 
 ---
 

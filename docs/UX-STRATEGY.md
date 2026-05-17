@@ -141,8 +141,27 @@ hängt mit SaaS-Reife zusammen. Skill/Mandate/MCP-Konzepte
 verschwinden aus der User-UI, ersetzt durch Capability-Sprache.
 Plus Mobile-App, Vererbungs-Modus First-Class, etc.
 
+## Verhältnis zu Pre-Launch-Phase A
+
+Seit Tag 18 (`docs/PRE-LAUNCH-A-STRATEGY.md`) ist UX-Welle 1
+**Block 1 der Pre-Launch-Phase A**. Die Welle-1-Inhalte (11 Items
+in drei Tranchen) bleiben unverändert — Pre-Launch-Phase A
+ergänzt sie um:
+
+- **Block 2 — Architektur-Follow-ups** (#105, #106)
+- **Block 3 — Computer-Use-Hook** (#107, #108)
+- **Block 4 — Self-Hosting-Polish** (#109, #110, #111)
+- **Block 5 — Launch-Vorbereitung** (#112, #113, #114, #115)
+
+Der Build-Pfad innerhalb von Welle 1 wurde leicht angepasst:
+**#100 (Memory-Hit) und #101 (Twin-Reife) werden direkt nach
+Tranche A vorgezogen**, weil sie Vision-kritisch für die
+Differenzierungs-Story (Memory-Tiefe + Persona + A2A) sind.
+Tranche B/C-Reihenfolge sonst unverändert.
+
 ## Verweise
 
+- `docs/PRE-LAUNCH-A-STRATEGY.md` (Welle 1 = Block 1 von Phase A)
 - `docs/TWIN-VISION.md` Block 2.5 (Twin-Reife sichtbar machen)
 - `docs/TWIN-VISION.md` Block 1.3 (SaaS-Onboarding niedrigschwellig)
 - `docs/BACKLOG.md` neue Section „UX-Reifung — Welle 1 (Less Technical)"
