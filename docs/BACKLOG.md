@@ -1082,7 +1082,7 @@ Plus zentraler Stand: `toast.promise(...)` für API-Calls mit pending/success/er
 **Größe:** M · **Priorität:** should · **Aus:** UX-Strategie-Session Tag 17 Abend
 **Stufe:** 0 → 1 · **Tranche:** A · **Spur:** UX-Reifung Welle 1 (Bau-Plan in `docs/UX-STRATEGY.md`)
 
-### 95. Tool-Names human-readable im Approve-Dialog
+### 95. ✅ Tool-Names human-readable im Approve-Dialog (CLOSED Tag 18)
 Aktuell zeigt der Approve-Dialog technische Identifier wie `mcp_hyperbrowser-approval_scrape_webpage`. Für Casual-User unverständlich, für Tech-Affine zumindest reibungsfähig.
 
 Was zu tun ist: Mapping-Layer Tool-Identifier → human-readable Label plus Args-Kurzbeschreibung. Quellen für das Label, in dieser Reihenfolge:
@@ -1094,6 +1094,8 @@ Plus Args-Preview: für `scrape_webpage({url: 'https://anthropic.com', outputFor
 
 **Größe:** S · **Priorität:** should · **Aus:** UX-Strategie-Session Tag 17 Abend (Tool-Picker UX-Audit)
 **Stufe:** 0 → 1 · **Tranche:** A · **Spur:** UX-Reifung Welle 1 (Bau-Plan in `docs/UX-STRATEGY.md`)
+
+**Update Tag 18 (CLOSED):** Implementiert in Commit `ece8109` (`apps/web/lib/tool-display.ts` mit `resolveToolDisplay()` + `formatArgs()` für 13 Tool-Patterns). Generic Title-Case-Fallback mit Mono-Identifier-Hint für Power-User. Integration in Inbox + Chat + Reject-Modal. Browser-Smoke 3/3 grün. Tranche A damit komplett.
 
 ### 96. Empty-State-Onboarding für Chat (partially functional)
 Erstuser landet im Chat-Tab mit nur einem leeren Input-Feld. Keine Erklärung, was der Twin kann, welche Tools verfügbar sind, wie Memory funktioniert. Aktuelle User wissen es, neue User scheitern.
@@ -1124,7 +1126,7 @@ Aktiviert sich nur wenn Inbox leer ist; verschwindet sobald irgendein Pending ex
 
 ### Tranche B — Mittlere Investments
 
-### 98. Cost/Time-Preview vor Approve
+### 98. ✅ Cost/Time-Preview vor Approve (CLOSED Tag 18)
 Aktuell ist Approve ein blinder Klick — User weiß nicht, ob die nachfolgende Aktion 2 Sekunden oder 2 Minuten dauert, 0 Cent oder 50 Cent kostet. Pflicht für Hyperbrowser-Calls (Cloud-Browser-Session kostet), kritisch für Phase 3.6 Computer-Use-Agent (Multi-Step-Sessions mit substantieller Inferenz-Last).
 
 Was zu tun ist: Approve-Dialog zeigt vor Bestätigung:
@@ -1137,6 +1139,8 @@ Cost-Heuristik braucht eine Kosten-Tabelle pro Tool-Pattern; für Phase 3.6 als 
 
 **Größe:** M · **Priorität:** should · **Aus:** UX-Strategie-Session Tag 17 Abend (Phase-3.6-Vorbereitung)
 **Stufe:** 0 → 1 · **Tranche:** B · **Spur:** UX-Reifung Welle 1 (Bau-Plan in `docs/UX-STRATEGY.md`)
+
+**Update Tag 18 (CLOSED):** Implementiert in Commit `12aad33` (`apps/web/lib/tool-cost.ts` mit `estimateToolCost()` + `formatEstimate()`). Heuristik-Tabelle für 16 Tools (9 Hyperbrowser + 7 Everything). Vier Display-Branches (Fallback / kostenlos / mit-cost / nur-Latenz). Deutsche Komma-Notation via `toLocaleString("de-DE")`. Integration nur in Pending-States (nicht executed/rejected).
 
 ### 99. Audit-Trail-View menschlich lesbar formatieren
 Aktuell ist die Audit-Detail-View Roh-JSON: Tool-Calls als `{toolName, input, output}`-Objekte, Token-Usage als nested Object, Timestamps als epoch ms. Funktional fürs Debugging, aber unzumutbar für Casual-User. Plus: Vision Block 4 (Vererbung — Anna soll später auf Markus' Audit-Trail Zugriff haben können) braucht das in menschlicher Form.
@@ -1153,7 +1157,7 @@ Pro Tool-Type ein eigenes Render-Template (mit generischem Fallback). Wartbar, w
 **Größe:** M · **Priorität:** should · **Aus:** UX-Strategie-Session Tag 17 Abend (Vererbungs-Argument)
 **Stufe:** 0 → 1 · **Tranche:** B · **Spur:** UX-Reifung Welle 1 (Bau-Plan in `docs/UX-STRATEGY.md`)
 
-### 100. Memory-Hit-Indikator im Chat
+### 100. ✅ Memory-Hit-Indikator im Chat (CLOSED Tag 18)
 Wenn Twin Memory-Hits (Episodic, Semantic) in seine Antwort einbezogen hat, gibt es heute keinen UI-Hinweis. Das ist Vision Block 2 Pattern 2 (Zeit-Erleben) — Memory soll *spürbar* sein, nicht nur funktional vorhanden.
 
 Was zu tun ist: pro Twin-Antwort, die Memory-Retrieval-Hits hatte, ein kleines Icon/Badge in der Antwort-Bubble. Hover/Klick zeigt:
@@ -1165,6 +1169,8 @@ Backend liefert die Hits ohnehin schon (3.4 Hybrid-Search Logging), muss in der 
 **Größe:** S · **Priorität:** nice · **Aus:** UX-Strategie-Session Tag 17 Abend (Vision Block 2 Pattern 2)
 **Stufe:** 0 → 1 · **Tranche:** B · **Spur:** UX-Reifung Welle 1 (Bau-Plan in `docs/UX-STRATEGY.md`)
 
+**Update Tag 18 (CLOSED):** Implementiert in Commit `3eb645b`. Backend `RetrievalResult.createdAt` + `audit.output.memoryHits` als SSoT (UI re-lädt nach Reload den Audit-Stream, nicht den Response-Body). `MemoryHitBadge` mit Mono-Stil + Expand-on-Click. Snippets gruppiert nach `targetType` (Vergangenes Gespräch / Auszug / Eigene Notiz). Nur DirectChat-Integration (A2AChat hat kein Memory-Pfad). Browser-Smoke 🟢🟢🟢 mit echten Hits.
+
 ### Tranche C — Strategische Investments
 
 Bestehende Items, jetzt re-klassifiziert:
@@ -1173,7 +1179,7 @@ Bestehende Items, jetzt re-klassifiziert:
 
 Neu für Tranche C:
 
-### 101. Twin-Reife-Stufen-Anzeige
+### 101. ✅ Twin-Reife-Stufen-Anzeige (CLOSED Tag 18)
 Vision Block 2.5 zentral: Twin-Reife ist gestuft (Onboarding-Twin → tiefer Twin nach Monaten/Jahren Pflege), und Stufen sollen für User sichtbar sein. Engagement-Hook für SaaS-Launch (User sieht eigenen Fortschritt) und Differenzierung gegen flache Twins-as-Chatbots.
 
 Was zu tun ist: Reife-Berechnungs-Engine plus UI-Anzeige.
@@ -1186,6 +1192,8 @@ Strategische Entscheidung vor Bau: Stufen-Definition braucht eine eigene Strateg
 
 **Größe:** L · **Priorität:** should · **Aus:** UX-Strategie-Session Tag 17 Abend (Vision Block 2.5)
 **Stufe:** 0 → 2 · **Tranche:** C · **Spur:** UX-Reifung Welle 1 (Bau-Plan in `docs/UX-STRATEGY.md`)
+
+**Update Tag 18 (CLOSED):** Implementiert in Commits `63b423f`, `b6a88ef`, `3a964fb`. Backend `TwinMaturityService` mit 4-Dimensionen-Heuristik (Konvs + Facts + Themen + Zeitspanne, 3-von-4-Regel). Greedy-Cosine-Clustering auf conversation-Embeddings für Themen-Vielfalt (kalibriert: Threshold 0.85, Topic-Schwellen [2,5,12]). `MaturityBadge` im Chat-Header (Dauer-Sichtbarkeit) + `MaturityDetail` in Settings (Stats + Progress + Was-fehlt). Edge-Case verifiziert (@florian "Onboarding · 0%"). @markus jetzt auf "Bewohnt · 66% bis Vertraut".
 
 ### Architektur-Follow-ups aus UX.1.A.3 (kein Welle-1-Scope, Welle-2-Material)
 
