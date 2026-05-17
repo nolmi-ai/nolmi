@@ -6,6 +6,7 @@ import type { AuditEntry, ChatMessage, TwinEvent } from "@twin-lab/shared";
 import { EmptyState } from "../../components/EmptyState";
 import { PageContainer } from "../../components/PageContainer";
 import { RejectReasonModal } from "../../components/RejectReasonModal";
+import { resolveToolDisplay } from "../../lib/tool-display";
 
 const RUNTIME_URL = process.env.NEXT_PUBLIC_RUNTIME_URL ?? "http://localhost:4000";
 
@@ -271,7 +272,7 @@ function InboxInner() {
                         {isBusy ? "..." : "approve"}
                       </button>
                       <button
-                        onClick={() => reject(entry.id, entry.capability)}
+                        onClick={() => reject(entry.id, header)}
                         disabled={isBusy}
                         className="px-3 py-1.5 text-xs border border-warn text-warn rounded hover:bg-warn hover:text-bg disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
                       >
@@ -419,14 +420,14 @@ function extractLastMessage(entry: AuditEntry): string {
   };
   // 3.2.F: mcp-tool-use Pending zeigt Tool-Name + Args statt der LLM-
   // History — der User soll auf einen Blick sehen, was approved werden soll.
+  // UX.1.A / #95: Display via resolveToolDisplay — human-readable Label +
+  // formatierte Args statt rohem Identifier + JSON-Blob.
   if (entry.capability === "mcp-tool-use" && input.toolCall?.mcpToolName) {
-    let argsPreview: string;
-    try {
-      argsPreview = JSON.stringify(input.toolCall.args ?? {});
-    } catch {
-      argsPreview = "(args nicht serialisierbar)";
-    }
-    return `Tool: ${input.toolCall.mcpToolName}\nArgs: ${argsPreview}`;
+    const display = resolveToolDisplay(
+      input.toolCall.mcpToolName,
+      input.toolCall.args,
+    );
+    return `${display.label}\n${display.argsPreview}`;
   }
   if (typeof input.lastMessage === "string") return input.lastMessage;
   if (Array.isArray(input.messages)) {
@@ -441,7 +442,11 @@ function formatPendingHeader(entry: AuditEntry): string {
   const input = entry.input as {
     fromHandle?: string;
     targetHandle?: string;
-    toolCall?: { mcpServerId?: string; mcpToolName?: string };
+    toolCall?: {
+      mcpServerId?: string;
+      mcpToolName?: string;
+      args?: Record<string, unknown>;
+    };
   };
   if (entry.capability === "respond_to_twin_message" && input.fromHandle) {
     return `Eingehend von ${input.fromHandle}`;
@@ -450,7 +455,12 @@ function formatPendingHeader(entry: AuditEntry): string {
     return `An ${input.targetHandle} senden`;
   }
   if (entry.capability === "mcp-tool-use" && input.toolCall?.mcpToolName) {
-    return `MCP-Tool: ${input.toolCall.mcpToolName}`;
+    // UX.1.A / #95: Header bekommt das human-readable Label statt rohem ID.
+    const display = resolveToolDisplay(
+      input.toolCall.mcpToolName,
+      input.toolCall.args,
+    );
+    return display.label;
   }
   return entry.capability;
 }
@@ -492,11 +502,15 @@ function formatCapability(entry: AuditEntry): string {
         ? `Direkt gesendet an ${input.toHandle}`
         : "Direkt gesendet";
     case "mcp-tool-use": {
-      const toolCall = (entry.input as { toolCall?: { mcpToolName?: string } })
-        .toolCall;
-      return toolCall?.mcpToolName
-        ? `MCP-Tool: ${toolCall.mcpToolName}`
-        : "MCP-Tool";
+      // UX.1.A / #95: human-readable Label, kein roher Identifier.
+      const toolCall = (
+        entry.input as {
+          toolCall?: { mcpToolName?: string; args?: Record<string, unknown> };
+        }
+      ).toolCall;
+      if (!toolCall?.mcpToolName) return "MCP-Tool";
+      const display = resolveToolDisplay(toolCall.mcpToolName, toolCall.args);
+      return display.label;
     }
     case "semantic-fact-write": {
       const factInput = entry.input as { factKey?: string };

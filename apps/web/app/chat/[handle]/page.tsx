@@ -16,6 +16,7 @@ import { EmptyState } from "../../../components/EmptyState";
 import { ModalWrapper } from "../../../components/ModalWrapper";
 import { RejectReasonModal } from "../../../components/RejectReasonModal";
 import { toast } from "../../../lib/toast";
+import { resolveToolDisplay } from "../../../lib/tool-display";
 
 const RUNTIME_URL = process.env.NEXT_PUBLIC_RUNTIME_URL ?? "http://localhost:4000";
 
@@ -1145,7 +1146,14 @@ function DirectChat({
                       rejectReason={block.rejectReason}
                       busy={loadingAuditId === block.auditId}
                       onApprove={() => handleApprove(block.auditId)}
-                      onReject={() => handleReject(block.auditId, block.toolName)}
+                      // UX.1.A / #95: human-readable Label im Reject-Modal-
+                      // Subject statt rohem Tool-Identifier.
+                      onReject={() =>
+                        handleReject(
+                          block.auditId,
+                          resolveToolDisplay(block.toolName, block.args).label,
+                        )
+                      }
                     />
                   ) : (
                     <Bubble role={block.kind} content={block.content} />
@@ -1577,12 +1585,10 @@ function McpToolCallBox({
     statusClass = "text-warn";
   }
 
-  let argsPreview: string;
-  try {
-    argsPreview = JSON.stringify(args);
-  } catch {
-    argsPreview = "(args nicht serialisierbar)";
-  }
+  // UX.1.A / #95: human-readable Label + Args-Pretty-Print. Den rohen
+  // Identifier zeigen wir als Mono-Sub-Zeile darunter, damit power user
+  // weiterhin sehen, welches Tool konkret gefeuert wird.
+  const display = resolveToolDisplay(toolName, args);
 
   let resultPreview: string | null = null;
   if (status === "executed" && toolResult !== undefined && toolResult !== null) {
@@ -1622,12 +1628,20 @@ function McpToolCallBox({
       </div>
       <div className="text-xs space-y-1">
         <div>
-          <span className="text-muted">Tool: </span>
-          <span className="font-mono text-text">{toolName}</span>
+          <span className="text-muted">Aktion: </span>
+          <span className="text-text">{display.label}</span>
+          {display.isFallback && (
+            <span
+              className="text-muted ml-2 font-mono"
+              title="Tool nicht im Label-Mapping — generischer Fallback aus Identifier"
+            >
+              ({toolName})
+            </span>
+          )}
         </div>
         <div>
-          <span className="text-muted">Args: </span>
-          <span className="font-mono text-text break-all">{argsPreview}</span>
+          <span className="text-muted">Details: </span>
+          <span className="text-text break-all">{display.argsPreview}</span>
         </div>
         {resultPreview && (
           <div>
