@@ -2,10 +2,11 @@
 
 import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import type { SkillDetailPayload } from "@twin-lab/shared";
+import type { McpServerUiPayload, SkillDetailPayload } from "@twin-lab/shared";
 import { PageContainer } from "../../components/PageContainer";
 import { MaturityDetail } from "../../components/MaturityDetail";
 import { SkillEditorModal } from "../../components/SkillEditorModal";
+import { McpServerAddModal } from "../../components/McpServerAddModal";
 import { toast } from "../../lib/toast";
 
 const RUNTIME_URL = process.env.NEXT_PUBLIC_RUNTIME_URL ?? "http://localhost:4000";
@@ -101,6 +102,13 @@ function SettingsInner() {
   );
   const [createOpen, setCreateOpen] = useState(false);
   const [editLoadingId, setEditLoadingId] = useState<string | null>(null);
+  // #87: MCP-Configurator
+  const [mcpServers, setMcpServers] = useState<McpServerUiPayload[]>([]);
+  const [mcpAddOpen, setMcpAddOpen] = useState(false);
+  const [mcpBusyIds, setMcpBusyIds] = useState<Set<string>>(new Set());
+  const [mcpDeleteConfirmId, setMcpDeleteConfirmId] = useState<string | null>(
+    null,
+  );
 
   const selectedHandle = useMemo(
     () => requestedHandle ?? twins[0]?.handle ?? null,
@@ -158,6 +166,19 @@ function SettingsInner() {
     }
   }, []);
 
+  const loadMcpServers = useCallback(async (handle: string) => {
+    try {
+      const res = await fetch(`${RUNTIME_URL}/twins/${handle}/mcp-servers`, {
+        credentials: "include",
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = (await res.json()) as { servers: McpServerUiPayload[] };
+      setMcpServers(data.servers);
+    } catch (err) {
+      console.error("loadMcpServers failed:", err);
+    }
+  }, []);
+
   const loadProfile = useCallback(async (handle: string) => {
     setProfileLoading(true);
     setProfileError(null);
@@ -187,10 +208,13 @@ function SettingsInner() {
     setTrustInfo(null);
     setSkills([]);
     setSkillError(null);
+    setMcpServers([]);
+    setMcpDeleteConfirmId(null);
     loadProfile(selectedHandle);
     loadTrusts(selectedHandle);
     loadSkills(selectedHandle);
-  }, [selectedHandle, loadProfile, loadTrusts, loadSkills]);
+    loadMcpServers(selectedHandle);
+  }, [selectedHandle, loadProfile, loadTrusts, loadSkills, loadMcpServers]);
 
   async function addTrust() {
     if (!selectedHandle) return;
@@ -307,6 +331,95 @@ function SettingsInner() {
       setSkillBusyIds((curr) => {
         const next = new Set(curr);
         next.delete(skill.skillId);
+        return next;
+      });
+    }
+  }
+
+  // #87: MCP-Server toggle is_active. Optimistic-Update + Revert bei Fehler,
+  // analog zu toggleSkill.
+  async function toggleMcpServer(server: McpServerUiPayload) {
+    if (!selectedHandle) return;
+    const next = !server.isActive;
+    setMcpServers((curr) =>
+      curr.map((s) =>
+        s.serverId === server.serverId ? { ...s, isActive: next } : s,
+      ),
+    );
+    setMcpBusyIds((curr) => new Set(curr).add(server.serverId));
+    try {
+      const res = await fetch(
+        `${RUNTIME_URL}/twins/${selectedHandle}/mcp-servers/${server.serverId}/active`,
+        {
+          method: "PATCH",
+          credentials: "include",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ isActive: next }),
+        },
+      );
+      if (!res.ok) {
+        throw new Error(`HTTP ${res.status}`);
+      }
+      const updated = (await res.json()) as McpServerUiPayload;
+      setMcpServers((curr) =>
+        curr.map((s) => (s.serverId === updated.serverId ? updated : s)),
+      );
+    } catch (err) {
+      // Revert.
+      setMcpServers((curr) =>
+        curr.map((s) =>
+          s.serverId === server.serverId
+            ? { ...s, isActive: server.isActive }
+            : s,
+        ),
+      );
+      toast.error(
+        err instanceof Error ? err.message : "Toggle fehlgeschlagen",
+      );
+    } finally {
+      setMcpBusyIds((curr) => {
+        const next = new Set(curr);
+        next.delete(server.serverId);
+        return next;
+      });
+    }
+  }
+
+  // #87: Delete mit Cascade-Skill-Count im Toast. Confirm-Stage triggert der
+  // Caller (inline in der Row), dieser Handler ist die zweite Klick-Stage.
+  async function deleteMcpServer(server: McpServerUiPayload) {
+    if (!selectedHandle) return;
+    setMcpBusyIds((curr) => new Set(curr).add(server.serverId));
+    try {
+      const res = await fetch(
+        `${RUNTIME_URL}/twins/${selectedHandle}/mcp-servers/${server.serverId}`,
+        { method: "DELETE", credentials: "include" },
+      );
+      if (!res.ok) {
+        const body = (await res.json().catch(() => ({}))) as {
+          error?: string;
+        };
+        throw new Error(body.error ?? `HTTP ${res.status}`);
+      }
+      const data = (await res.json()) as {
+        ok: boolean;
+        deletedSkills: number;
+      };
+      toast.success(
+        `MCP-Server gelöscht — ${data.deletedSkills} Skills entfernt`,
+      );
+      setMcpDeleteConfirmId(null);
+      void loadMcpServers(selectedHandle);
+      // Skills haben sich verändert (Cascade): Liste neu laden.
+      void loadSkills(selectedHandle);
+    } catch (err) {
+      toast.error(
+        err instanceof Error ? err.message : "Löschen fehlgeschlagen",
+      );
+    } finally {
+      setMcpBusyIds((curr) => {
+        const next = new Set(curr);
+        next.delete(server.serverId);
         return next;
       });
     }
@@ -467,6 +580,117 @@ function SettingsInner() {
         </form>
       </Section>
 
+      <Section title={`MCP-Server (${mcpServers.length})`}>
+        <div className="flex items-start justify-between gap-3 mb-4">
+          <p className="text-sm text-muted leading-relaxed flex-1">
+            MCP-Server geben dem Twin externe Werkzeuge (Web-Browsing,
+            Datenbanken, Custom-Integrationen). Jeder Server wird über eine
+            JSON-Spezifikation hinzugefügt und synchronisiert seine Tools
+            automatisch als Skills.
+          </p>
+          <button
+            type="button"
+            onClick={() => setMcpAddOpen(true)}
+            disabled={!selectedHandle}
+            className="px-3 py-2 text-xs border border-accent text-accent rounded hover:bg-accent hover:text-bg disabled:opacity-30 disabled:cursor-not-allowed transition-colors flex-shrink-0 font-mono"
+          >
+            + MCP-Server hinzufügen
+          </button>
+        </div>
+        {mcpServers.length === 0 ? (
+          <div className="text-sm text-muted">
+            Keine MCP-Server für diesen Twin — klick „+ MCP-Server
+            hinzufügen", um den ersten zu verbinden.
+          </div>
+        ) : (
+          <ul className="space-y-2">
+            {mcpServers.map((server) => {
+              const busy = mcpBusyIds.has(server.serverId);
+              const showConfirm = mcpDeleteConfirmId === server.serverId;
+              return (
+                <li
+                  key={server.serverId}
+                  className="border border-border rounded px-3 py-2"
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="flex-1 min-w-0">
+                      <div className="text-sm font-mono text-text">
+                        {server.name}
+                      </div>
+                      <div className="text-[10px] mt-1 flex flex-wrap items-center gap-2">
+                        <span className="font-mono px-2 py-0.5 border border-border rounded text-muted">
+                          {server.transport}
+                        </span>
+                        <span className="font-mono px-2 py-0.5 border border-border rounded text-muted">
+                          {server.skillCount} Skill
+                          {server.skillCount === 1 ? "" : "s"}
+                        </span>
+                        {server.defaultRequiresApproval && (
+                          <span className="font-mono px-2 py-0.5 border border-border rounded text-muted">
+                            approval-required
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                    <label className="flex items-center gap-2 shrink-0 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={server.isActive}
+                        onChange={() => void toggleMcpServer(server)}
+                        disabled={busy}
+                        className="h-4 w-4 cursor-pointer disabled:cursor-not-allowed"
+                      />
+                      <span className="text-xs text-muted">
+                        {server.isActive ? "aktiv" : "inaktiv"}
+                      </span>
+                    </label>
+                  </div>
+                  {showConfirm ? (
+                    <div className="mt-3 border-t border-warn pt-2 space-y-2">
+                      <div className="text-xs text-warn">
+                        <span aria-hidden="true">⚠ </span>
+                        MCP-Server „{server.name}" wirklich löschen? Dies
+                        löscht auch {server.skillCount} zugehörige Skill
+                        {server.skillCount === 1 ? "" : "s"}.
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => void deleteMcpServer(server)}
+                          disabled={busy}
+                          className="px-3 py-1.5 text-xs border border-warn bg-warn text-bg rounded hover:opacity-80 disabled:opacity-30 disabled:cursor-not-allowed transition-opacity font-mono"
+                        >
+                          {busy ? "Lösche…" : "Endgültig löschen"}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setMcpDeleteConfirmId(null)}
+                          disabled={busy}
+                          className="px-3 py-1.5 text-xs text-muted hover:text-text transition-colors"
+                        >
+                          Abbrechen
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="mt-2 flex justify-end">
+                      <button
+                        type="button"
+                        onClick={() => setMcpDeleteConfirmId(server.serverId)}
+                        disabled={busy}
+                        className="text-[10px] font-mono uppercase tracking-wider text-warn hover:underline disabled:opacity-30 disabled:cursor-not-allowed"
+                      >
+                        Löschen
+                      </button>
+                    </div>
+                  )}
+                </li>
+              );
+            })}
+          </ul>
+        )}
+      </Section>
+
       <Section title={`Skills (${skills.length})`}>
         <div className="flex items-start justify-between gap-3 mb-4">
           <p className="text-sm text-muted leading-relaxed flex-1">
@@ -599,6 +823,17 @@ function SettingsInner() {
             }}
             onDelete={() => {
               setEditingSkill(null);
+              void loadSkills(selectedHandle);
+            }}
+          />
+          <McpServerAddModal
+            open={mcpAddOpen}
+            twinHandle={selectedHandle}
+            onClose={() => setMcpAddOpen(false)}
+            onSuccess={() => {
+              setMcpAddOpen(false);
+              // Add hat Skills synct — beide Listen refetchen.
+              void loadMcpServers(selectedHandle);
               void loadSkills(selectedHandle);
             }}
           />
