@@ -25,6 +25,7 @@ import { resolveToolDisplay } from "../../../lib/tool-display";
 import { estimateToolCost, formatEstimate } from "../../../lib/tool-cost";
 import { MemoryHitBadge } from "../../../components/MemoryHitBadge";
 import { MaturityBadge } from "../../../components/MaturityBadge";
+import { formatRelative } from "../../../lib/time-format";
 
 const RUNTIME_URL = process.env.NEXT_PUBLIC_RUNTIME_URL ?? "http://localhost:4000";
 
@@ -1790,21 +1791,6 @@ function safeDecode(raw: string): string {
   } catch {
     return raw;
   }
-}
-
-function formatRelative(iso: string): string {
-  const then = new Date(iso).getTime();
-  if (Number.isNaN(then)) return iso;
-  const diff = Date.now() - then;
-  const sec = Math.floor(diff / 1000);
-  if (sec < 60) return "gerade eben";
-  const min = Math.floor(sec / 60);
-  if (min < 60) return `vor ${min} Min`;
-  const h = Math.floor(min / 60);
-  if (h < 24) return `vor ${h} Std`;
-  const d = Math.floor(h / 24);
-  if (d < 7) return `vor ${d} Tag${d === 1 ? "" : "en"}`;
-  return new Date(iso).toLocaleDateString("de-DE");
 }
 
 function formatTime(iso: string): string {
