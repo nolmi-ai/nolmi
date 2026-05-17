@@ -26,7 +26,12 @@ export function AppHeader() {
   if (isPublic) return null;
 
   return (
-    <header className="border-b border-border px-6 py-4 flex items-center justify-between gap-4">
+    // Sticky-Header: bleibt beim Body-Scroll oben (Inbox/Facts/Stream/
+    // Settings). `/chat` ist davon unbeeinflusst, weil der Chat-Container
+    // einen eigenen overflow-Scroll-Bereich hat und der body dort nicht
+    // scrollt. z-40 lässt Modals + Dropdowns (z-50) sauber darüber.
+    // bg-bg deckt den Content unter dem Header beim Scroll ab.
+    <header className="sticky top-0 z-40 bg-bg border-b border-border px-6 py-4 flex items-center justify-between gap-4">
       {/* Linke Gruppe: Brand + Tabs direkt nebeneinander, kleiner Abstand
        * dazwischen. Vorher waren die Tabs zentriert — bei breitem Viewport
        * weit weg vom Brand und visuell entkoppelt. */}
