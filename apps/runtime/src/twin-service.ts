@@ -4,6 +4,7 @@ import type {
   ChatMessage,
   ForcedToolChoice,
   Mandate,
+  MemoryHit,
   Persona,
   Skill,
 } from "@twin-lab/shared";
@@ -350,7 +351,13 @@ export class TwinService {
   async chat(
     messages: ChatMessage[],
     ctx: ChatRequestContext = {},
-  ): Promise<{ message: ChatMessage | null; auditId: string; pending: boolean }> {
+  ): Promise<{
+    message: ChatMessage | null;
+    auditId: string;
+    pending: boolean;
+    /** #100: Memory-Hits aus dem Owner-Bypass-Pfad. Andere Pfade leer. */
+    memoryHits?: MemoryHit[];
+  }> {
     // 1. Capability detecten
     const lastUser = messages.at(-1)?.content ?? "";
     const detection = detectCapability(lastUser);
@@ -452,7 +459,13 @@ export class TwinService {
     messages: ChatMessage[],
     lastUser: string,
     options: { forcedToolChoice?: ForcedToolChoice } = {},
-  ): Promise<{ message: ChatMessage; auditId: string; pending: boolean }> {
+  ): Promise<{
+    message: ChatMessage;
+    auditId: string;
+    pending: boolean;
+    /** #100: optional, nur im Success-Pfad gesetzt wenn Hits vorlagen. */
+    memoryHits?: MemoryHit[];
+  }> {
     // #71b/#80: Direct-Chat-Audits werden mit der aktiven Konversation
     // verknüpft. ownerUserId muss gesetzt sein, weil Owner-Bypass nur greift
     // wenn requesterUserId === ownerUserId — der `chat()`-Caller stellt das
@@ -586,6 +599,16 @@ export class TwinService {
           episodicBlock,
         },
       );
+      // #100: Slim-Projektion der konsultierten Memory-Hits für die UI. Score-
+      // Felder bleiben backend-intern; das Frontend bekommt nur targetType,
+      // Klartext und Datum. Wird im Audit-Output persistiert, damit
+      // buildChatBlocksFromAudits() im Web den Badge auch nach Page-Reload
+      // rendern kann (Audit-Stream ist SSoT für die Chat-View).
+      const memoryHits: MemoryHit[] = episodicMemories.map((m) => ({
+        targetType: m.targetType,
+        content: m.content,
+        createdAt: m.createdAt,
+      }));
       const audit = await this.deps.audit.start({
         capability: "owner-direct",
         mandateId: null,
@@ -600,12 +623,14 @@ export class TwinService {
       await this.deps.audit.complete(audit.id, {
         reply: reply.content,
         providerMetadata: reply.metadata,
+        ...(memoryHits.length > 0 ? { memoryHits } : {}),
       });
       this.deps.bus.emit({ type: "twin.idle", payload: {} });
       return {
         message: { role: "assistant", content: reply.content },
         auditId: audit.id,
         pending: false,
+        ...(memoryHits.length > 0 ? { memoryHits } : {}),
       };
     } catch (err) {
       // 3.2.F: zwei Wege ende hier in derselben Branch:

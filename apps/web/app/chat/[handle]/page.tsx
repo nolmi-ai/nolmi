@@ -10,13 +10,19 @@ import {
   useState,
 } from "react";
 import Link from "next/link";
-import type { AuditEntry, ChatMessage, TwinEvent } from "@twin-lab/shared";
+import type {
+  AuditEntry,
+  ChatMessage,
+  MemoryHit,
+  TwinEvent,
+} from "@twin-lab/shared";
 import { ToolPicker } from "./ToolPicker";
 import { EmptyState } from "../../../components/EmptyState";
 import { ModalWrapper } from "../../../components/ModalWrapper";
 import { RejectReasonModal } from "../../../components/RejectReasonModal";
 import { toast } from "../../../lib/toast";
 import { resolveToolDisplay } from "../../../lib/tool-display";
+import { MemoryHitBadge } from "../../../components/MemoryHitBadge";
 
 const RUNTIME_URL = process.env.NEXT_PUBLIC_RUNTIME_URL ?? "http://localhost:4000";
 
@@ -753,6 +759,8 @@ type ChatBlock =
       content: string;
       conversationId: string | null;
       auditId: string | null;
+      /** #100: Memory-Hits aus dem Audit-Output, falls vorhanden. */
+      memoryHits?: MemoryHit[];
     }
   | {
       kind: "mcp-tool-call";
@@ -784,6 +792,8 @@ interface AuditExecutedOutputShape {
   toolResult?: unknown;
   rejected?: boolean;
   rejectReason?: string;
+  /** #100: vom TwinService persistiert (owner-direct/executed). */
+  memoryHits?: MemoryHit[];
 }
 
 /**
@@ -865,6 +875,13 @@ function buildChatBlocksFromAudits(entries: AuditEntry[]): {
       content: replyText,
       conversationId: cid,
       auditId: entry.id,
+      // #100: Memory-Hits-Badge unter der Antwort. Nur wenn der TwinService
+      // welche persistiert hat (owner-direct mit Hybrid-Search-Treffern) —
+      // sonst rendert MemoryHitBadge null.
+      memoryHits:
+        output?.memoryHits && output.memoryHits.length > 0
+          ? output.memoryHits
+          : undefined,
     });
     newestConvId = cid;
   }
@@ -1155,6 +1172,18 @@ function DirectChat({
                         )
                       }
                     />
+                  ) : block.kind === "assistant" ? (
+                    // #100: Bubble + optionaler Memory-Hit-Badge darunter.
+                    // Beide sind links-eingerückt (max-w-3xl-Wrapper), Badge
+                    // erbt die Bubble-Indent über das gleiche Flex-Layout.
+                    <div className="space-y-1.5">
+                      <Bubble role={block.kind} content={block.content} />
+                      {block.memoryHits && block.memoryHits.length > 0 && (
+                        <div className="px-3">
+                          <MemoryHitBadge hits={block.memoryHits} />
+                        </div>
+                      )}
+                    </div>
                   ) : (
                     <Bubble role={block.kind} content={block.content} />
                   )}

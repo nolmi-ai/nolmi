@@ -46,6 +46,14 @@ export interface RetrievalResult {
   targetType: EmbeddingTargetType;
   targetId: string;
   content: string;
+  /**
+   * ISO-Timestamp des Embedding-Eintrags. Entspricht in der Regel dem
+   * Embed-Zeitpunkt des Quell-Objekts (Konversation/Diary/Segment) und
+   * dient im Frontend als „Datum der Erinnerung" für die Hit-Anzeige
+   * (#100). Lookup via `embeddingsRepo.getById` pro Top-K-Hit — bei
+   * topK=3 vernachlässigbarer Overhead.
+   */
+  createdAt: string;
   /** RRF-Score nach Merge — sortier-relevant für den Caller. */
   rrfScore: number;
   /** Cosine-Sim aus dem Vector-Hit, falls vorhanden (nur Vector-Source). */
@@ -194,11 +202,17 @@ export class MemoryRetrievalService {
           // 3.4.D-FTS-Pflicht). Ohne Klartext kein Prompt-Block.
           continue;
         }
+        // #100: createdAt aus dem Embeddings-Record. Bei Race (Hit aus
+        // RRF-Merge, dazwischen DELETE) skippen — kein Throw, der Retrieval
+        // läuft mit den restlichen Hits weiter.
+        const record = this.deps.embeddingsRepo.getById(item.embeddingId);
+        if (!record) continue;
         results.push({
           embeddingId: item.embeddingId,
           targetType: item.targetType,
           targetId: item.targetId,
           content,
+          createdAt: record.createdAt,
           rrfScore: item.rrfScore,
           vectorSimilarity: item.vectorSimilarity,
           vectorRank: item.vectorRank,

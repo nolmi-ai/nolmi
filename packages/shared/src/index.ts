@@ -166,14 +166,35 @@ export const ChatRequestSchema = z.object({
   forcedToolChoice: ForcedToolChoiceSchema.optional(),
 });
 
+// #100 Memory-Hit-Indikator: Slim-Projektion der internen `RetrievalResult`-
+// Struktur für die Frontend-Anzeige. Score-Felder (rrfScore, vectorSimilarity,
+// bm25Rank) bleiben backend-intern — User sieht eine Zahl + Snippets, kein
+// Debugging-Telemetry.
+export const MemoryHitTargetTypeSchema = z.enum([
+  "conversation",
+  "summary_segment",
+  "diary_entry",
+]);
+
+export const MemoryHitSchema = z.object({
+  targetType: MemoryHitTargetTypeSchema,
+  content: z.string(),
+  /** ISO-Timestamp des Embedding-Eintrags (≈ Datum der Erinnerung). */
+  createdAt: z.string(),
+});
+
 export const ChatResponseSchema = z.object({
   message: ChatMessageSchema,
   auditId: z.string(),
+  /** #100: Memory-Hits, die der Twin bei dieser Antwort konsultiert hat. */
+  memoryHits: z.array(MemoryHitSchema).optional(),
 });
 
 export type ChatMessage = z.infer<typeof ChatMessageSchema>;
 export type ChatRequest = z.infer<typeof ChatRequestSchema>;
 export type ChatResponse = z.infer<typeof ChatResponseSchema>;
+export type MemoryHit = z.infer<typeof MemoryHitSchema>;
+export type MemoryHitTargetType = z.infer<typeof MemoryHitTargetTypeSchema>;
 
 // 3.2.H: GET /twins/:handle/tools — Antwort-Format für den Tool-Picker. Pro
 // aktivem MCP-Skill ein Eintrag mit dem AI-SDK-Tool-Key (`toolName`) und dem
