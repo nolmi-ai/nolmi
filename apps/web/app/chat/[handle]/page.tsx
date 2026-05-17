@@ -22,6 +22,7 @@ import { ModalWrapper } from "../../../components/ModalWrapper";
 import { RejectReasonModal } from "../../../components/RejectReasonModal";
 import { toast } from "../../../lib/toast";
 import { resolveToolDisplay } from "../../../lib/tool-display";
+import { estimateToolCost, formatEstimate } from "../../../lib/tool-cost";
 import { MemoryHitBadge } from "../../../components/MemoryHitBadge";
 
 const RUNTIME_URL = process.env.NEXT_PUBLIC_RUNTIME_URL ?? "http://localhost:4000";
@@ -1688,28 +1689,36 @@ function McpToolCallBox({
         )}
       </div>
       {status === "pending" && (
-        <div className="flex gap-2 pt-1">
-          {busy ? (
-            <div className="text-xs text-accent italic">
-              Tool läuft… (kann ein paar Sekunden dauern)
-            </div>
-          ) : (
-            <>
-              <button
-                onClick={onApprove}
-                className="px-3 py-1.5 text-xs border border-accent text-accent rounded hover:bg-accent hover:text-bg transition-colors"
-              >
-                approve
-              </button>
-              <button
-                onClick={onReject}
-                className="px-3 py-1.5 text-xs border border-warn text-warn rounded hover:bg-warn hover:text-bg transition-colors"
-              >
-                reject
-              </button>
-            </>
-          )}
-        </div>
+        <>
+          {/* UX.1.A / #98: Cost-/Time-Preview vor den Buttons. Nur im
+              Pending-State — bei executed/rejected steht das Result schon
+              da, da macht Schätzung keinen Sinn mehr. */}
+          <div className="text-xs text-muted">
+            {formatEstimate(estimateToolCost(toolName, args))}
+          </div>
+          <div className="flex gap-2 pt-1">
+            {busy ? (
+              <div className="text-xs text-accent italic">
+                Tool läuft… (kann ein paar Sekunden dauern)
+              </div>
+            ) : (
+              <>
+                <button
+                  onClick={onApprove}
+                  className="px-3 py-1.5 text-xs border border-accent text-accent rounded hover:bg-accent hover:text-bg transition-colors"
+                >
+                  approve
+                </button>
+                <button
+                  onClick={onReject}
+                  className="px-3 py-1.5 text-xs border border-warn text-warn rounded hover:bg-warn hover:text-bg transition-colors"
+                >
+                  reject
+                </button>
+              </>
+            )}
+          </div>
+        </>
       )}
     </div>
   );

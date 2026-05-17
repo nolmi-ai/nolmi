@@ -7,6 +7,7 @@ import { EmptyState } from "../../components/EmptyState";
 import { PageContainer } from "../../components/PageContainer";
 import { RejectReasonModal } from "../../components/RejectReasonModal";
 import { resolveToolDisplay } from "../../lib/tool-display";
+import { estimateToolCost, formatEstimate } from "../../lib/tool-cost";
 
 const RUNTIME_URL = process.env.NEXT_PUBLIC_RUNTIME_URL ?? "http://localhost:4000";
 
@@ -258,9 +259,17 @@ function InboxInner() {
                       {isFactWrite ? (
                         <FactProposalBody entry={entry} />
                       ) : (
-                        <div className="text-sm text-text mt-2 whitespace-pre-wrap">
-                          {extractLastMessage(entry)}
-                        </div>
+                        <>
+                          <div className="text-sm text-text mt-2 whitespace-pre-wrap">
+                            {extractLastMessage(entry)}
+                          </div>
+                          {/* UX.1.A / #98: Cost-/Time-Preview nur für
+                              mcp-tool-use — andere Capabilities haben keine
+                              messbaren Cloud-Kosten. */}
+                          {entry.capability === "mcp-tool-use" ? (
+                            <ToolCostLine entry={entry} />
+                          ) : null}
+                        </>
                       )}
                     </div>
                     <div className="flex gap-2 flex-shrink-0">
@@ -582,4 +591,21 @@ function FactProposalBody({ entry }: { entry: AuditEntry }) {
 function extractReply(entry: AuditEntry): string {
   const output = entry.output as { reply?: string } | null;
   return output?.reply ?? "";
+}
+
+// ─── ToolCostLine (UX.1.A / #98) ────────────────────────────────────────────
+//
+// Schätzung-Zeile unter dem Tool-Display im Pending-Block. Defensive bei
+// fehlendem `toolCall.mcpToolName`: rendert null statt zu raten — Cost-
+// Preview ohne Tool-Name wäre Bullshit.
+function ToolCostLine({ entry }: { entry: AuditEntry }) {
+  const input = entry.input as {
+    toolCall?: { mcpToolName?: string; args?: Record<string, unknown> };
+  };
+  const toolName = input.toolCall?.mcpToolName;
+  if (!toolName) return null;
+  const estimate = estimateToolCost(toolName, input.toolCall?.args);
+  return (
+    <div className="text-xs text-muted mt-1.5">{formatEstimate(estimate)}</div>
+  );
 }

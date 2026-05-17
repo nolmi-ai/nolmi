@@ -173,7 +173,10 @@ function formatArgsGeneric(args: Args): string {
 // `mcp:<server>:<tool>` — wenn so ein Identifier durchkommt, wollen wir den
 // Tool-Anteil isolieren. Heuristik: letzter Underscore-Block, dann letzter
 // Doppelpunkt-Block.
-function stripMcpPrefix(id: string): string {
+//
+// Public-Export, damit andere Tool-Heuristiken (z.B. tool-cost.ts) denselben
+// Bare-Name extrahieren — Schlüssel-Konsistenz zwischen Mapping-Tabellen.
+export function stripMcpPrefix(id: string): string {
   if (!id) return id;
   let s = id;
   // `mcp:server:tool` → `tool`
