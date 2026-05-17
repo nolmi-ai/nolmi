@@ -219,6 +219,12 @@ Wenn jemand Twin fragt „was denkst du wirklich, nicht was Markus dir gesagt ha
 
 **Langfristige Vision:** Twin hat eigene Stimme. „Markus sieht das so, aber ich tatsächlich sehe es etwas anders." Twin als eigenständige Stimme nach genug Reifung.
 
+### Self-Authored Skills als Vererbungs-Material
+
+Self-Authored Skills (siehe `docs/BACKLOG.md` #117) sind nicht nur ein Twin-Reife-Indikator, sondern auch Vererbungs-Material: Anna erbt nicht nur Markus' Memory-Stand und Konversations-History, sondern auch die Skills, die sein Twin über Jahre selbst entwickelt hat — z.B. einen Skill für „wie ich Reisen plane" oder „wie ich auf E-Mails von Kunde X reagiere".
+
+Vision-Argument: Self-Authored Skills sind das, was einen Twin von einem generischen LLM-Assistenten unterscheidet. Sie sind die Spur gelebter Interaktion, kodifiziert als ausführbares Wissen.
+
 ---
 
 ## Übergreifende Vision-Aussage

@@ -1342,6 +1342,58 @@ Optimal-Timing für Public-Launch:
 
 **Größe:** XS (Doku-Item) · **Priorität:** must · **Aus:** Pre-Launch-Phase-A-Strategy (Block 5) · **Spur:** Pre-Launch-Phase A
 
+## Pre-Launch-Phase B — Vision-Material
+
+Items, die konzeptuell aus Vision Block 2.5/4 fallen aber jenseits des Self-Hosting-Launches liegen. Strategy-Sessions vor dem Bau jeweils Pflicht — die hier festgehaltenen MVP-Skizzen sind keine Bau-Briefings.
+
+### 116. Conversational Skill/MCP-Install
+
+Twin nimmt in der Konversation Anweisung "installiere Skill X" oder "verbinde MCP-Server Y" entgegen und führt die Installation mit Owner-Approval aus. Mobile-relevant: auf Telegram/WhatsApp gibt es keine Settings-UI, Conversational Install ist dort der einzige Weg.
+
+**MVP-Scope-Skizze:**
+- Neue Capabilities `install_skill`, `install_mcp_server` mit Approval
+- Twin antwortet z.B.: "Ich brauche Skill X für die Aufgabe. Hier ist manifest.yaml + SKILL.md. Bitte freigeben."
+- User approved → existing CLI-/Backend-Logic (#86, #87) wird aufgerufen
+- Source: manueller Paste in Chat oder Verweis auf Public-Skill-Registry (später)
+
+**Aufwand-Range:**
+- Minimal (Tool-Call + Approval mit existing #86/#87-Backend): M-L
+- Full Self-Service (Skill-Registry-Integration): XL, eigenes Item
+
+**Begründung:** Vererbungs-Story für Mobile-Use. Anna soll auf WhatsApp ihrem Twin sagen können "installiere den Calendar-Skill" ohne zum Desktop wechseln zu müssen.
+
+**Dependencies:**
+- #86 ✅ Skill-Editor-UI (Backend-Routes für Skill-CRUD)
+- #87 (in Arbeit) MCP-Configurator-UI (Backend-Routes für MCP-CRUD)
+- Mobile-Anbindung (eigenes Phase-B-Item, noch nicht angelegt)
+
+**Größe:** L · **Priorität:** later · **Aus:** Strategy-Session Tag 18 Nachmittag · **Spur:** Pre-Launch-Phase B (SaaS + Mobile)
+
+### 117. Self-Authored Skills (Twin erstellt eigene Skills)
+
+Twin beobachtet eigene Konversationen, erkennt wiederkehrende Patterns ("Owner fragt mich oft nach X mit ähnlicher Struktur"), generiert eigene Skill-Definitionen (Manifest + Instructions), und nutzt sie ab dann. Konzept analog zu autonom-skill-authoring Agent-Patterns.
+
+**Strategy-Session vorab Pflicht.** Offene Fragen:
+- **Trigger:** Wie erkennt Twin "wiederkehrendes Pattern"? Background-Pipeline, periodische Reflektion, on-demand?
+- **Generation:** Twin generiert Skill-Manifest + Instructions selbst per LLM-Call?
+- **Approval:** Self-Approval (Twin nutzt direkt), User-Approval-Flow, oder gestaffelt (erste N Nutzungen mit Approval, dann automatisch)?
+- **Versionierung:** Twin verbessert eigene Skills über Zeit — Skill-Versionen, Audit-Trail, Rollback?
+- **Vererbungs-Implikation:** Self-Authored Skills sind Teil der Twin-Identity. Bei Vererbung an Anna (Vision Block 4): wie wird Self-Authored-Status kommuniziert? Anna sieht "diesen Skill hat Markus' Twin selbst entwickelt"?
+
+**Verknüpfung zur Twin-Reife (#101):**
+- Stufe "Tief" bedeutet aktuell: viel Memory, viele Themen, lange Zeitspanne. Mit Self-Authored Skills bekommt "Tief" eine neue Dimension: Twin hat **eigene Capabilities entwickelt**.
+- Möglicher Stufen-Indikator: "Self-Authored Skills: 3" als 5. Dimension in der Maturity-Heuristik.
+
+**Dependencies:**
+- #86 ✅ Skill-Editor-UI (Backend für Skill-Persistenz)
+- Memory-Reflektion-Pipeline (existiert für Episodic, müsste erweitert werden)
+- LLM-Call mit Manifest-Schema-aware Output (Constrained Decoding?)
+- Audit/Versionierung-Infrastruktur
+
+**Begründung:** Self-Authored Skills sind die *spürbarste* Vision-Eigenschaft — Twin wird mit der Zeit nicht nur "schlauer" sondern *fähiger*. Differenzierungs-Story-Material für Pre-Launch B / Public-Launch.
+
+**Größe:** XL · **Priorität:** vision-kritisch · **Aus:** Strategy-Session Tag 18 Nachmittag · **Spur:** Pre-Launch-Phase B+ / Phase 3.7
+
 ---
 
 ## Lessons gelernt
