@@ -3,6 +3,7 @@
 import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { PageContainer } from "../../components/PageContainer";
+import { MaturityDetail } from "../../components/MaturityDetail";
 
 const RUNTIME_URL = process.env.NEXT_PUBLIC_RUNTIME_URL ?? "http://localhost:4000";
 
@@ -335,6 +336,14 @@ function SettingsInner() {
         ) : null}
       </Section>
 
+      <Section id="twin-reife" title="Twin-Reife">
+        {selectedHandle ? (
+          <MaturityDetail twinHandle={selectedHandle} />
+        ) : (
+          <div className="text-sm text-muted">Kein Twin ausgewählt.</div>
+        )}
+      </Section>
+
       <Section title={`Vertraute Twins (${trusts.length})`}>
         <p className="text-sm text-muted leading-relaxed mb-4">
           Twins die du in dieser Liste hast können dir direkt anfragen, ohne dass Approval nötig ist. Owner-Direkt-Chats laufen ohnehin ohne Approval.
@@ -511,9 +520,17 @@ function SettingsInner() {
   );
 }
 
-function Section({ title, children }: { title: string; children: React.ReactNode }) {
+function Section({
+  title,
+  id,
+  children,
+}: {
+  title: string;
+  id?: string;
+  children: React.ReactNode;
+}) {
   return (
-    <section className="bg-surface border border-border rounded p-5">
+    <section id={id} className="bg-surface border border-border rounded p-5 scroll-mt-20">
       <h2 className="text-sm font-semibold text-text mb-3 tracking-tight">
         {title}
       </h2>
