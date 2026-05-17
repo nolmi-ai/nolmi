@@ -24,6 +24,7 @@ import { toast } from "../../../lib/toast";
 import { resolveToolDisplay } from "../../../lib/tool-display";
 import { estimateToolCost, formatEstimate } from "../../../lib/tool-cost";
 import { MemoryHitBadge } from "../../../components/MemoryHitBadge";
+import { MaturityBadge } from "../../../components/MaturityBadge";
 
 const RUNTIME_URL = process.env.NEXT_PUBLIC_RUNTIME_URL ?? "http://localhost:4000";
 
@@ -329,6 +330,7 @@ function ConversationHeader({
           conversationId={directChatConvId ?? null}
           onResetSuccess={onDirectChatReset}
         />
+        <MaturityBadge twinHandle={handle} />
         <span className="text-[10px] uppercase tracking-wider text-muted border border-border rounded px-2 py-0.5">
           direct chat
         </span>
