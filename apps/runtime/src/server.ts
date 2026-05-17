@@ -17,6 +17,7 @@ import {
 } from "@twin-lab/shared";
 import { McpServersRepo } from "./mcp/repo.js";
 import { FactsRepo } from "./facts/repo.js";
+import { TwinMaturityService } from "./twin-maturity/twin-maturity-service.js";
 import type { RegistryEntry, TwinServiceRegistry } from "./twin-service-registry.js";
 import { TwinProfilesRepo } from "./twin-profiles-repo.js";
 import { encrypt } from "./crypto-utils.js";
@@ -89,6 +90,8 @@ export interface ServerDeps {
   mcpServersRepo: McpServersRepo;
   /** 3.3.D — für /twins/:handle/facts-Endpoints (CRUD-API für Semantic-Memory). */
   factsRepo: FactsRepo;
+  /** #101 — für GET /twins/:handle/maturity. */
+  twinMaturityService: TwinMaturityService;
 }
 
 export async function createServer(deps: ServerDeps) {
@@ -204,6 +207,17 @@ export async function createServer(deps: ServerDeps) {
       if (!ctx) return;
       const { entry } = ctx;
       return profileToResponse(entry);
+    },
+  );
+
+  // ─── Twin-Reife (#101) ─────────────────────────────────────────────────────
+  app.get<{ Params: { handle: string } }>(
+    "/twins/:handle/maturity",
+    async (request, reply) => {
+      const ctx = await requireOwner(request, reply, request.params.handle);
+      if (!ctx) return;
+      const { entry } = ctx;
+      return await deps.twinMaturityService.computeMaturity(entry.twinId);
     },
   );
 

@@ -11,6 +11,8 @@ import { SkillRepo } from "./skills/repo.js";
 import { ConversationsRepo } from "./conversations/repo.js";
 import { McpServersRepo } from "./mcp/repo.js";
 import { FactsRepo } from "./facts/repo.js";
+import { EmbeddingsRepo } from "./episodic/embeddings-repo.js";
+import { TwinMaturityService } from "./twin-maturity/twin-maturity-service.js";
 import { EncryptionKeyMissingError, loadMasterKey } from "./crypto-utils.js";
 
 // ─── BOOTSTRAP ───────────────────────────────────────────────────────────────
@@ -68,6 +70,16 @@ async function main() {
   const conversationsRepo = new ConversationsRepo(repo.db);
   const mcpServersRepo = new McpServersRepo(repo.db, masterKey);
   const factsRepo = new FactsRepo(repo.db);
+  // #101: TwinMaturityService — server-weite Instanz auf der geteilten
+  // db-Connection. Stateless, daher kein Per-Twin-Setup nötig wie in der
+  // Registry (Embeddings/Facts werden per twinId-Filter in den Queries
+  // skopiert).
+  const embeddingsRepoForMaturity = new EmbeddingsRepo(repo.db);
+  const twinMaturityService = new TwinMaturityService({
+    db: repo.db,
+    embeddingsRepo: embeddingsRepoForMaturity,
+    factsRepo,
+  });
   const app = await createServer({
     audit: repo.audit,
     registry,
@@ -79,6 +91,7 @@ async function main() {
     conversationsRepo,
     mcpServersRepo,
     factsRepo,
+    twinMaturityService,
   });
 
   // 5. Registry mit allen aktiven Twins füllen — entschlüsselt API-Keys.

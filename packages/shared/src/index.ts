@@ -510,3 +510,86 @@ export const FactExtractResponseSchema = z.object({
   pendingFactIds: z.array(z.string()),
 });
 export type FactExtractResponse = z.infer<typeof FactExtractResponseSchema>;
+
+// ─── TWIN-REIFE (#101) ───────────────────────────────────────────────────────
+//
+// Heuristik aus vier Dimensionen (Konversationen, Facts, Themen-Vielfalt,
+// Zeitspanne). „Themen-Vielfalt" wird durch Greedy-Cosine-Bucketing der
+// summary_segment-Embeddings im Backend bestimmt — Frontend bekommt nur die
+// Cluster-Zahl. Schwellen leben im Backend, Frontend rendert nur Strings.
+//
+// 3-von-4-Dimensionen-Regel: ein Twin erreicht Stufe X, sobald mindestens
+// drei der vier Dimensionen auf Stufe X stehen. Damit kann eine schwache
+// Dimension (z.B. wenige Facts) eine ansonsten reife Persona nicht ewig
+// blocken.
+
+export const MaturityLevelSchema = z.union([
+  z.literal(0),
+  z.literal(1),
+  z.literal(2),
+  z.literal(3),
+]);
+export type MaturityLevel = z.infer<typeof MaturityLevelSchema>;
+
+export const MATURITY_LEVEL_LABELS: Record<MaturityLevel, string> = {
+  0: "Onboarding",
+  1: "Bewohnt",
+  2: "Vertraut",
+  3: "Tief",
+};
+
+export const MaturityDimensionSchema = z.enum([
+  "conversation",
+  "facts",
+  "topics",
+  "span",
+]);
+export type MaturityDimension = z.infer<typeof MaturityDimensionSchema>;
+
+export const TwinStatsSchema = z.object({
+  conversationCount: z.number().int().nonnegative(),
+  factsCount: z.number().int().nonnegative(),
+  /** Anzahl Themen-Cluster (Greedy Cosine-Bucketing über summary_segment-Embeddings). */
+  topicCount: z.number().int().nonnegative(),
+  /** ISO-Timestamp der ältesten Chat-Konversation oder null wenn keine. */
+  firstConvAt: z.string().nullable(),
+  /** Math.floor((now - firstConvAt) / 1 Tag in ms), 0 falls firstConvAt null. */
+  daysSinceFirst: z.number().int().nonnegative(),
+});
+export type TwinStats = z.infer<typeof TwinStatsSchema>;
+
+export const DimensionLevelsSchema = z.object({
+  conversation: MaturityLevelSchema,
+  facts: MaturityLevelSchema,
+  topics: MaturityLevelSchema,
+  span: MaturityLevelSchema,
+});
+export type DimensionLevels = z.infer<typeof DimensionLevelsSchema>;
+
+export const MissingDimensionSchema = z.object({
+  dimension: MaturityDimensionSchema,
+  current: z.number(),
+  needed: z.number(),
+  /** Vorgekochter Frontend-String, z.B. "Noch 5 Konversationen für Bewohnt". */
+  label: z.string(),
+});
+export type MissingDimension = z.infer<typeof MissingDimensionSchema>;
+
+export const ProgressToNextSchema = z.object({
+  targetLevel: MaturityLevelSchema,
+  targetLabel: z.string(),
+  /** 0-100, grob Mittel der Per-Dimension-Fortschritte zur nächsten Stufe. */
+  percent: z.number().int().min(0).max(100),
+  missingDimensions: z.array(MissingDimensionSchema),
+});
+export type ProgressToNext = z.infer<typeof ProgressToNextSchema>;
+
+export const MaturityResultSchema = z.object({
+  currentLevel: MaturityLevelSchema,
+  currentLabel: z.string(),
+  stats: TwinStatsSchema,
+  dimensionLevels: DimensionLevelsSchema,
+  /** null wenn currentLevel === 3 (höchste Stufe erreicht). */
+  progressToNext: ProgressToNextSchema.nullable(),
+});
+export type MaturityResult = z.infer<typeof MaturityResultSchema>;
