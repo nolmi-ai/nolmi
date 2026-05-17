@@ -1142,7 +1142,7 @@ Cost-Heuristik braucht eine Kosten-Tabelle pro Tool-Pattern; für Phase 3.6 als 
 
 **Update Tag 18 (CLOSED):** Implementiert in Commit `12aad33` (`apps/web/lib/tool-cost.ts` mit `estimateToolCost()` + `formatEstimate()`). Heuristik-Tabelle für 16 Tools (9 Hyperbrowser + 7 Everything). Vier Display-Branches (Fallback / kostenlos / mit-cost / nur-Latenz). Deutsche Komma-Notation via `toLocaleString("de-DE")`. Integration nur in Pending-States (nicht executed/rejected).
 
-### 99. Audit-Trail-View menschlich lesbar formatieren
+### 99. ✅ Audit-Trail-View menschlich lesbar formatieren (CLOSED Tag 18)
 Aktuell ist die Audit-Detail-View Roh-JSON: Tool-Calls als `{toolName, input, output}`-Objekte, Token-Usage als nested Object, Timestamps als epoch ms. Funktional fürs Debugging, aber unzumutbar für Casual-User. Plus: Vision Block 4 (Vererbung — Anna soll später auf Markus' Audit-Trail Zugriff haben können) braucht das in menschlicher Form.
 
 Was zu tun ist: Audit-Entry-Renderer mit Tool-Call-Sätzen statt JSON:
@@ -1156,6 +1156,8 @@ Pro Tool-Type ein eigenes Render-Template (mit generischem Fallback). Wartbar, w
 
 **Größe:** M · **Priorität:** should · **Aus:** UX-Strategie-Session Tag 17 Abend (Vererbungs-Argument)
 **Stufe:** 0 → 1 · **Tranche:** B · **Spur:** UX-Reifung Welle 1 (Bau-Plan in `docs/UX-STRATEGY.md`)
+
+**Update Tag 18 (CLOSED):** Implementiert in Commits `3d70f82`, `b1ba6ea`. Phase-A-Diagnose hat das Backlog-Verständnis korrigiert: das echte Problem war nicht "Roh-JSON sichtbar" (Inbox-Pending war schon menschlich nach #95/#98), sondern "reiche Audit-Daten unsichtbar" (output, usage, memoryHits, Tool-Output). Bau: Token-Cost-Library mit Opus-4.7-Pricing (`apps/web/lib/token-cost.ts`), formatRelativeTime extrahiert (`apps/web/lib/time-format.ts`), Audit-Render-Library mit 4 Template-Klassen (`apps/web/lib/audit-render/`): TwinAnswer / ToolCall / FactProposal / A2AActivity plus GenericFallback. Inbox-Audit-Log mit Click-to-Expand pro Row + AuditDetailRenderer + Single-Expand-Pattern. Heavy Reuse von #95 (resolveToolDisplay), #98 (estimateToolCost), #100 (MemoryHitBadge). Browser-Smoke 5/6 explizit grün (A2A-Template strukturell verifiziert, Daten vorhanden).
 
 ### 100. ✅ Memory-Hit-Indikator im Chat (CLOSED Tag 18)
 Wenn Twin Memory-Hits (Episodic, Semantic) in seine Antwort einbezogen hat, gibt es heute keinen UI-Hinweis. Das ist Vision Block 2 Pattern 2 (Zeit-Erleben) — Memory soll *spürbar* sein, nicht nur funktional vorhanden.
