@@ -16,9 +16,19 @@ import { useEffect, type ReactNode } from "react";
 interface ModalWrapperProps {
   children: ReactNode;
   onClose: () => void;
+  /**
+   * Tailwind-Max-Width-Klasse für die Inner-Box. Default `max-w-md` deckt
+   * den ursprünglichen Use-Case (Reject-Reason, Reset-Confirm) ab; #86
+   * Skill-Editor braucht `max-w-2xl` für Multi-Textarea-Formulare.
+   */
+  maxWidthClass?: string;
 }
 
-export function ModalWrapper({ children, onClose }: ModalWrapperProps) {
+export function ModalWrapper({
+  children,
+  onClose,
+  maxWidthClass = "max-w-md",
+}: ModalWrapperProps) {
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       if (e.key === "Escape") onClose();
@@ -34,7 +44,7 @@ export function ModalWrapper({ children, onClose }: ModalWrapperProps) {
     >
       <div
         onClick={(e) => e.stopPropagation()}
-        className="bg-surface border border-border rounded shadow-xl max-w-md w-full"
+        className={`bg-surface border border-border rounded shadow-xl w-full ${maxWidthClass}`}
       >
         {children}
       </div>

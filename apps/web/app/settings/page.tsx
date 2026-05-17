@@ -2,8 +2,11 @@
 
 import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
+import type { SkillDetailPayload } from "@twin-lab/shared";
 import { PageContainer } from "../../components/PageContainer";
 import { MaturityDetail } from "../../components/MaturityDetail";
+import { SkillEditorModal } from "../../components/SkillEditorModal";
+import { toast } from "../../lib/toast";
 
 const RUNTIME_URL = process.env.NEXT_PUBLIC_RUNTIME_URL ?? "http://localhost:4000";
 
@@ -90,6 +93,14 @@ function SettingsInner() {
   const [skills, setSkills] = useState<Skill[]>([]);
   const [skillError, setSkillError] = useState<string | null>(null);
   const [skillBusyIds, setSkillBusyIds] = useState<Set<string>>(new Set());
+  // #86: Editor-Modal — `editingSkill` ist der voll geladene Detail-Payload
+  // für Edit-Mode, `createOpen` ist der Add-Mode-Flag. Edit-Click lädt
+  // erst den Detail per GET (Listings enthalten kein Manifest/Markdown).
+  const [editingSkill, setEditingSkill] = useState<SkillDetailPayload | null>(
+    null,
+  );
+  const [createOpen, setCreateOpen] = useState(false);
+  const [editLoadingId, setEditLoadingId] = useState<string | null>(null);
 
   const selectedHandle = useMemo(
     () => requestedHandle ?? twins[0]?.handle ?? null,
@@ -301,6 +312,30 @@ function SettingsInner() {
     }
   }
 
+  // #86: Edit-Click lädt den Detail-Payload und öffnet das Modal. GET
+  // ist nötig, weil das Listing kein Manifest/instructionsMd enthält.
+  async function openEditFor(skill: Skill) {
+    if (!selectedHandle || editLoadingId) return;
+    setEditLoadingId(skill.skillId);
+    try {
+      const res = await fetch(
+        `${RUNTIME_URL}/twins/${selectedHandle}/skills/${skill.skillId}`,
+        { credentials: "include" },
+      );
+      if (!res.ok) {
+        throw new Error(`HTTP ${res.status}`);
+      }
+      const detail = (await res.json()) as SkillDetailPayload;
+      setEditingSkill(detail);
+    } catch (err) {
+      toast.error(
+        err instanceof Error ? err.message : "Skill konnte nicht geladen werden",
+      );
+    } finally {
+      setEditLoadingId(null);
+    }
+  }
+
   return (
     <PageContainer className="space-y-8">
       <div className="flex items-baseline gap-3">
@@ -433,22 +468,29 @@ function SettingsInner() {
       </Section>
 
       <Section title={`Skills (${skills.length})`}>
-        <p className="text-sm text-muted leading-relaxed mb-4">
-          Skills geben dem Twin zusätzliches Wissen oder Fähigkeiten. Sie werden via CLI hinzugefügt und können hier individuell aktiviert oder deaktiviert werden. Aktive Skills landen automatisch im System-Prompt.
-        </p>
+        <div className="flex items-start justify-between gap-3 mb-4">
+          <p className="text-sm text-muted leading-relaxed flex-1">
+            Skills geben dem Twin zusätzliches Wissen oder Fähigkeiten. Manuelle Skills hier anlegen und bearbeiten; MCP-Skills werden via <code className="font-mono text-accent">mcp-add</code> synchronisiert. Aktive Skills landen automatisch im System-Prompt.
+          </p>
+          <button
+            type="button"
+            onClick={() => setCreateOpen(true)}
+            disabled={!selectedHandle}
+            className="px-3 py-2 text-xs border border-accent text-accent rounded hover:bg-accent hover:text-bg disabled:opacity-30 disabled:cursor-not-allowed transition-colors flex-shrink-0 font-mono"
+          >
+            + Skill anlegen
+          </button>
+        </div>
         {skills.length === 0 ? (
           <div className="text-sm text-muted">
-            <p className="mb-2">
-              Keine Skills für diesen Twin. Skills werden via CLI angelegt:
-            </p>
-            <pre className="text-xs font-mono bg-bg border border-border rounded px-3 py-2 whitespace-pre-wrap">
-              pnpm --filter @twin-lab/runtime twin:skill-create &lt;handle&gt; &lt;skill-dir&gt;
-            </pre>
+            Keine Skills für diesen Twin — klick „+ Skill anlegen", um den ersten Skill zu schreiben.
           </div>
         ) : (
           <ul className="space-y-2">
             {skills.map((skill) => {
               const busy = skillBusyIds.has(skill.skillId);
+              const editLoading = editLoadingId === skill.skillId;
+              const isMcp = skill.source === "mcp";
               return (
                 <li
                   key={skill.skillId}
@@ -480,7 +522,7 @@ function SettingsInner() {
                     </span>
                     <span
                       className={`font-mono px-2 py-0.5 rounded ${
-                        skill.source === "mcp"
+                        isMcp
                           ? "border border-accent text-accent"
                           : "border border-border text-muted"
                       }`}
@@ -491,6 +533,22 @@ function SettingsInner() {
                       {skill.instructionsLength} chars Instructions
                       {skill.hasScript && " · Script"}
                       {skill.requiresApproval && " · requires approval"}
+                    </span>
+                    <span className="ml-auto">
+                      {isMcp ? (
+                        <span className="text-muted italic">
+                          Via MCP-Server verwaltet
+                        </span>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => void openEditFor(skill)}
+                          disabled={editLoading || busy}
+                          className="text-accent hover:underline disabled:opacity-30 disabled:cursor-not-allowed font-mono uppercase tracking-wider"
+                        >
+                          {editLoading ? "Lade…" : "Bearbeiten"}
+                        </button>
+                      )}
                     </span>
                   </div>
                 </li>
@@ -516,6 +574,36 @@ function SettingsInner() {
           <li>- Bootstrap: <code className="text-accent">pnpm --filter @twin-lab/runtime twin:bootstrap &lt;name&gt;</code></li>
         </ul>
       </Section>
+
+      {selectedHandle && (
+        <>
+          <SkillEditorModal
+            open={createOpen}
+            mode="create"
+            twinHandle={selectedHandle}
+            onClose={() => setCreateOpen(false)}
+            onSuccess={() => {
+              setCreateOpen(false);
+              void loadSkills(selectedHandle);
+            }}
+          />
+          <SkillEditorModal
+            open={editingSkill !== null}
+            mode="edit"
+            twinHandle={selectedHandle}
+            skill={editingSkill ?? undefined}
+            onClose={() => setEditingSkill(null)}
+            onSuccess={() => {
+              setEditingSkill(null);
+              void loadSkills(selectedHandle);
+            }}
+            onDelete={() => {
+              setEditingSkill(null);
+              void loadSkills(selectedHandle);
+            }}
+          />
+        </>
+      )}
     </PageContainer>
   );
 }
