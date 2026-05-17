@@ -1,6 +1,6 @@
 # twin-lab — Stand
 
-**Letztes Update:** 17. Mai 2026, Vormittag (Tag 18)
+**Letztes Update:** 17. Mai 2026, Mittag (Tag 18)
 
 ## Aktuell in Arbeit
 
@@ -28,6 +28,74 @@ A2A-Bridge**. Nicht Computer-Use.
 Inhalte (11 Items in drei Tranchen) unverändert, nur Build-Pfad
 leicht angepasst (#100/#101 vorgezogen, weil Vision-kritisch für
 die Differenzierungs-Story).
+
+## Tag 18 (17. Mai 2026, Sonntag) — Pre-Launch-Phase A Block 1
+
+**Vormittag (Strategie):**
+
+Phase-3.6-Strategie-Session löste Roadmap-Pivot aus
+(Computer-Use als Edge-Case für MVP erkannt). Setzung:
+**Pre-Launch-Phase A** mit Self-Hosting-Launch in ~6 Wochen,
+Differenzierungs-Story Memory + Persona + A2A-Bridge statt
+Computer-Use. Phase 3.6 verschoben auf Phase B.
+
+Verankerung in 4 Doku-Files (Commit `5fefcbe`):
+- `docs/PRE-LAUNCH-A-STRATEGY.md` (neu, Commit `53120a1`)
+- `docs/BACKLOG.md` (9 neue Items #107–#115 für Block 3/4/5)
+- `docs/STAND.md` (Pre-Launch-Phase A statt "Phase 3.6")
+- `docs/ROADMAP.md` (Phase 3.6 als "verschoben")
+- `docs/UX-STRATEGY.md` (Verhältnis zu Pre-Launch-Phase A)
+
+TWIN-VISION.md per Setzung unverändert.
+
+**Mittag (4 Items gebaut + gepusht):**
+
+- **#95 Tool-Names human-readable** (Commit `ece8109`)
+  - `apps/web/lib/tool-display.ts` mit `resolveToolDisplay()`
+    + `formatArgs()` für 13 bekannte Tool-Patterns
+  - Hyperbrowser + Everything-Server gemappt
+  - Generic Title-Case-Fallback mit Mono-Identifier-Hint
+  - Integration in Inbox + Chat + Reject-Modal
+  - Tranche A damit komplett abgeschlossen
+
+- **#100 Memory-Hit-Indikator** (Commit `3eb645b`) — Vision-Pattern 1
+  - Backend `RetrievalResult.createdAt` + `audit.output.memoryHits` als SSoT
+  - `apps/web/components/MemoryHitBadge.tsx` mit Mono-Stil +
+    Expand-on-Click
+  - Snippets gruppiert nach `targetType` (Vergangenes Gespräch /
+    Auszug / Eigene Notiz)
+  - Nur DirectChat-Integration (A2AChat hat kein Memory-Pfad)
+  - Browser-Smoke 🟢🟢🟢 mit echten Hits
+
+- **#98 Cost-Preview vor Approve** (Commit `12aad33`)
+  - `apps/web/lib/tool-cost.ts` mit `estimateToolCost()` +
+    `formatEstimate()`
+  - Heuristik-Tabelle für 16 Tools (9 Hyperbrowser + 7 Everything)
+  - Vier Display-Branches (Fallback / kostenlos / mit-cost /
+    nur-Latenz)
+  - Deutsche Komma-Notation via `toLocaleString("de-DE")`
+  - Integration nur in Pending-States (nicht executed/rejected)
+
+- **#101 Twin-Reife-Anzeige** (Commits `63b423f`, `b6a88ef`,
+  `3a964fb`) — Vision-Pattern 2
+  - Strategy-Session vorab (4 Stufen, Heuristik-Mix,
+    Chat-Header+Settings, Stufe+Progress+Stats-Detail)
+  - Backend `TwinMaturityService` mit 4-Dimensionen-Heuristik
+    (Konvs + Facts + Themen + Zeitspanne)
+  - Greedy-Cosine-Clustering für Themen-Vielfalt
+    (kalibriert: Threshold 0.85, Schwellen [2,5,12])
+  - Frontend MaturityBadge im Chat-Header (Dauer-Sichtbarkeit) +
+    MaturityDetail in Settings (Stats + Progress + Was-fehlt)
+  - Edge-Case verifiziert: @florian-Twin zeigt "Onboarding · 0%"
+  - @markus jetzt auf Stufe "Bewohnt · 66% bis Vertraut"
+
+**Nicht-gepusht / nicht-akut Backlog:** keine
+
+**Block-1-Stand nach Tag 18:**
+- 7 von 11 Items durch (#94, #91, #95, #97, #100, #98, #101)
+- 1 partially functional (#96, architektonisch limitiert)
+- 3 offen: #99 (Audit-Trail menschlich, M), #86 (Skill-Editor-UI, L),
+  #87 (MCP-Configurator-UI, L)
 
 ## Heute (Tag 17) abgeschlossen
 
@@ -320,29 +388,21 @@ Befund. Reaktive Strategie-Session + 3.4.I-Bau (`e3a8ea1`). Plus #101.
 
 **Pre-Launch-Phase A Block 1 — UX-Welle 1 vollständig (~20–25 Tage)**
 
-Aktive Items in Bau-Reihenfolge:
-1. **#95 Tool-Names human-readable** (S, jetzt) — Tranche A
-   abschließen
-2. **#100 Memory-Hit-Indikator** (S, vorgezogen) — Vision-kritisch
-3. **#101 Twin-Reife-Anzeige** (L, vorgezogen, Strategy-Session
-   vorab) — Vision-kritisch
-4. **#98 Cost-Preview vor Approve** (M)
-5. **#99 Audit-Trail menschlich** (M) — Vision Vererbung
+Block-1-Bau-Stand:
+1. ✅ #95 Tool-Names human-readable (Commit `ece8109`)
+2. ✅ #100 Memory-Hit-Indikator (Commit `3eb645b`)
+3. ✅ #101 Twin-Reife-Anzeige (Commits `63b423f`, `b6a88ef`, `3a964fb`)
+4. ✅ #98 Cost-Preview vor Approve (Commit `12aad33`)
+5. **#99 Audit-Trail menschlich** (M, nächstes Item) — Vision Vererbung
 6. **#86 Skill-Editor-UI** (L)
 7. **#87 MCP-Configurator-UI** (L)
 
-Danach (alle aus `docs/PRE-LAUNCH-A-STRATEGY.md`):
-- **Block 2 Architektur-Follow-ups:** #105 A2A-Modal, #106
-  DirectChat-View
-- **Block 3 Computer-Use-Hook:** #107 Recherche-Workflow-Skill,
-  #108 Beta-Deklaration
-- **Block 4 Self-Hosting-Polish:** #109 DEPLOYMENT-Test, #110
-  Onboarding-Wizard, #111 Public-Repo-Hygiene
-- **Block 5 Launch-Vorbereitung:** #112 Landing, #113 Demo, #114
-  Launch-Posts, #115 Timing-Plan
+Plus Welle-1-partial:
+- ✅ #96 Empty-State Chat (partially functional, architektonisch
+  limitiert; Architektur-Follow-ups #105/#106 in Block 2)
 
-Total 37–50 Tage Pflicht bei 42 Tagen verfügbar — knapp, aber
-machbar bei strikter Scope-Disziplin.
+Danach: Block 2 (#105/#106), Block 3 (#107/#108), Block 4
+(#109/#110/#111), Block 5 (#112/#113/#114/#115).
 
 Weiterhin im Backlog (nicht zeit-kritisch, **nicht** Teil von
 Pre-Launch-Phase A):
@@ -461,3 +521,52 @@ github.com/markusbaier/twin-lab — `origin/main` auf `1e57aec`
 **Tag-12-Commits:**
 - `9b4d5c5` 3.3.A bis `a3c868b` 3.3.G3 (9 Code-Commits)
 - `189acbc` Doku Tag 12
+
+## Lessons Tag 18
+
+**1. Two-Phase-Briefing mit Stop-Punkt für Vision-kritische Items.**
+Bei #100 und #101 hat Phase-A-Diagnose / Phase-1.7-Smoke jeweils
+Backend-Annahmen korrigiert *vor* dem UI-Bau:
+- #100: "Episodic vs Semantic"-Aufteilung existierte im Backend
+  nicht (drei `targetType`s statt zwei Memory-Klassen) → Briefing
+  angepasst auf "alle drei targetTypes zusammen"
+- #101: `topicCount = 0` bei Phase-1.7-Smoke aufgedeckt →
+  `summary_segment`-Pipeline existiert, hat aber für Pilot-Twins
+  keine Daten → Switch auf `conversation`-Embeddings
+
+Lehre: bei Vision-Items mit Backend-Foundation lohnen Diagnose-/
+Smoke-Stops zwischen Phasen. Verhindert Bau in falscher Richtung.
+
+**2. Empirische Kalibrierung von Heuristik-Werten dauert mehrere
+Iterationen — und das ist okay.** Bei #101 brauchten wir drei
+Threshold-Iterationen (0.7 → 0.8 → 0.85) plus Topic-Schwellen-
+Anpassung ([3,8,20] → [2,5,12]) bevor `topicCount` plausibel war.
+Im Code dokumentiert mit Pilot-Daten-Begründung. Re-Kalibrierung
+mit Phase-B-Diversity-Daten ist eingeplant.
+
+Lehre: Cluster-Threshold ist datenabhängig, nicht theoretisch
+optimal. Conversation-Embeddings sind dichter beieinander als
+generische Embeddings — brauchen strengere Threshold-Werte als
+Standard-Empfehlungen.
+
+**3. `audit.output` ist SSoT für UI-State, nicht Response-Body.**
+Bei #100 hat Claude Code eine Architektur-Korrektur gemacht:
+Memory-Hits müssen in `audit.output.memoryHits` persistiert werden
+(nicht nur im Response-Body), weil das Frontend nach Reload den
+Audit-Stream re-lädt, nicht den ursprünglichen Chat-Response.
+Briefing hatte das nicht abgefangen.
+
+Lehre: bei UI-Items, die nach Reload sichtbar bleiben sollen, an
+Audit-Persistenz denken — Briefings sollten das explizit fragen.
+
+**4. Pattern-Reuse mit Variation > erzwungene Generalisierung.**
+MemoryHitBadge (#100) und MaturityBadge (#101) teilen visuelle
+Sprache (Mono, Border, dezent), aber unterschiedliche Interaktion
+(Expand-in-Chat vs. Navigation zu Settings). Wir haben **nicht**
+versucht, eine generische `<VisionBadge>`-Komponente zu
+abstrahieren. Konsistenz entstand durch Pattern-Disziplin, nicht
+durch shared Code.
+
+Lehre: bei zwei ähnlichen Items das zweite *nicht* abstrahieren,
+sondern konkret bauen. Abstraktion lohnt sich erst bei drei+
+Instanzen mit klar identischen Anforderungen.
