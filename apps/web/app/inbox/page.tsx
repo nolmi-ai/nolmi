@@ -1,6 +1,6 @@
 "use client";
 
-import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
+import { Fragment, Suspense, useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import type { AuditEntry, ChatMessage, TwinEvent } from "@twin-lab/shared";
 import { EmptyState } from "../../components/EmptyState";
@@ -8,6 +8,16 @@ import { PageContainer } from "../../components/PageContainer";
 import { RejectReasonModal } from "../../components/RejectReasonModal";
 import { resolveToolDisplay } from "../../lib/tool-display";
 import { estimateToolCost, formatEstimate } from "../../lib/tool-cost";
+import { formatRelative } from "../../lib/time-format";
+import {
+  A2AActivityTemplate,
+  FactProposalTemplate,
+  GenericFallbackTemplate,
+  ToolCallTemplate,
+  TwinAnswerTemplate,
+  resolveAuditTemplate,
+  type AuditTemplateProps,
+} from "../../lib/audit-render";
 
 const RUNTIME_URL = process.env.NEXT_PUBLIC_RUNTIME_URL ?? "http://localhost:4000";
 
@@ -50,6 +60,10 @@ function InboxInner() {
     auditId?: string;
     subject?: string;
   }>({ open: false });
+  // #99: pro Klick auf eine Audit-Log-Row eine Detail-Stage einklappen.
+  // Single-Expand statt Set, weil die Detail-Stages voll-breit sind und
+  // mehrere gleichzeitig die Tabelle unleserlich machen.
+  const [expandedAuditId, setExpandedAuditId] = useState<string | null>(null);
 
   const selectedHandle = useMemo(
     () => requestedHandle ?? twins[0]?.handle ?? null,
@@ -361,36 +375,62 @@ function InboxInner() {
                 <th className="text-left py-2 pr-3">Zeit</th>
                 <th className="text-left py-2 pr-3">Capability</th>
                 <th className="text-left py-2 pr-3">Status</th>
-                <th className="text-left py-2">Mandate</th>
+                <th className="text-left py-2 pr-3">Mandate</th>
+                <th className="text-right py-2 w-8"></th>
               </tr>
             </thead>
             <tbody>
-              {audit.map((entry) => (
-                <tr key={entry.id} className="border-b border-border">
-                  <td className="py-2 pr-3 text-muted">
-                    {new Date(entry.timestamp).toLocaleString()}
-                  </td>
-                  <td className="py-2 pr-3 text-text">{formatCapability(entry)}</td>
-                  <td
-                    className={
-                      entry.status === "executed"
-                        ? "py-2 pr-3 text-accent"
-                        : entry.status === "blocked" ||
-                            entry.status === "failed" ||
-                            entry.status === "rejected"
-                          ? "py-2 pr-3 text-warn"
-                          : entry.status === "pending"
+              {audit.map((entry) => {
+                const isExpanded = expandedAuditId === entry.id;
+                return (
+                  <Fragment key={entry.id}>
+                    <tr
+                      onClick={() =>
+                        setExpandedAuditId(isExpanded ? null : entry.id)
+                      }
+                      className="border-b border-border cursor-pointer hover:bg-bg"
+                    >
+                      <td className="py-2 pr-3 text-muted">
+                        {formatRelative(entry.timestamp)}
+                      </td>
+                      <td className="py-2 pr-3 text-text">
+                        {formatCapability(entry)}
+                      </td>
+                      <td
+                        className={
+                          entry.status === "executed"
                             ? "py-2 pr-3 text-accent"
-                            : "py-2 pr-3 text-muted"
-                    }
-                  >
-                    {entry.status}
-                  </td>
-                  <td className="py-2 text-muted truncate max-w-[200px]">
-                    {entry.mandateId ?? "-"}
-                  </td>
-                </tr>
-              ))}
+                            : entry.status === "blocked" ||
+                                entry.status === "failed" ||
+                                entry.status === "rejected"
+                              ? "py-2 pr-3 text-warn"
+                              : entry.status === "pending"
+                                ? "py-2 pr-3 text-accent"
+                                : "py-2 pr-3 text-muted"
+                        }
+                      >
+                        {entry.status}
+                      </td>
+                      <td className="py-2 pr-3 text-muted truncate max-w-[200px]">
+                        {entry.mandateId ?? "-"}
+                      </td>
+                      <td
+                        className="py-2 text-right text-muted font-mono"
+                        aria-hidden="true"
+                      >
+                        {isExpanded ? "▾" : "▸"}
+                      </td>
+                    </tr>
+                    {isExpanded && (
+                      <tr className="border-b border-border bg-bg">
+                        <td colSpan={5} className="p-4">
+                          <AuditDetailRenderer audit={entry} />
+                        </td>
+                      </tr>
+                    )}
+                  </Fragment>
+                );
+              })}
             </tbody>
           </table>
         )}
@@ -608,4 +648,32 @@ function ToolCostLine({ entry }: { entry: AuditEntry }) {
   return (
     <div className="text-xs text-muted mt-1.5">{formatEstimate(estimate)}</div>
   );
+}
+
+// ─── AuditDetailRenderer (#99) ──────────────────────────────────────────────
+//
+// Wählt das richtige Capability-Template und hält den Sub-Expand-State
+// (voller Tool-Output / Memory-Hits / Roh-JSON). Sub-Expand wird zurück-
+// gesetzt, wenn die Row collapsed und wieder expanded wird, weil dieser
+// Component dann komplett unmounted und neu erzeugt wird.
+function AuditDetailRenderer({ audit }: { audit: AuditEntry }) {
+  const [subExpanded, setSubExpanded] = useState(false);
+  const templateClass = resolveAuditTemplate(audit.capability);
+  const props: AuditTemplateProps = {
+    audit,
+    expanded: subExpanded,
+    onToggle: () => setSubExpanded((v) => !v),
+  };
+  switch (templateClass) {
+    case "twin-answer":
+      return <TwinAnswerTemplate {...props} />;
+    case "tool-call":
+      return <ToolCallTemplate {...props} />;
+    case "fact-proposal":
+      return <FactProposalTemplate {...props} />;
+    case "a2a-activity":
+      return <A2AActivityTemplate {...props} />;
+    default:
+      return <GenericFallbackTemplate {...props} />;
+  }
 }
