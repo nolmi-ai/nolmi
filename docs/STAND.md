@@ -1,6 +1,6 @@
 # twin-lab — Stand
 
-**Letztes Update:** 17. Mai 2026, Mittag (Tag 18)
+**Letztes Update:** 17. Mai 2026, Mittag-Nachmittag (Tag 18)
 
 ## Aktuell in Arbeit
 
@@ -48,7 +48,7 @@ Verankerung in 4 Doku-Files (Commit `5fefcbe`):
 
 TWIN-VISION.md per Setzung unverändert.
 
-**Mittag (4 Items gebaut + gepusht):**
+**Mittag-Nachmittag (5 Items gebaut + gepusht):**
 
 - **#95 Tool-Names human-readable** (Commit `ece8109`)
   - `apps/web/lib/tool-display.ts` mit `resolveToolDisplay()`
@@ -89,13 +89,24 @@ TWIN-VISION.md per Setzung unverändert.
   - Edge-Case verifiziert: @florian-Twin zeigt "Onboarding · 0%"
   - @markus jetzt auf Stufe "Bewohnt · 66% bis Vertraut"
 
+- **#99 Audit-Trail menschlich** (Commits `3d70f82`, `b1ba6ea`) —
+  Vision Vererbung
+  - Phase-A-Diagnose: Backlog-Verständnis korrigiert (echtes
+    Problem: reiche Audit-Daten unsichtbar, nicht Roh-JSON)
+  - `apps/web/lib/token-cost.ts` mit Opus-4.7-Pricing +
+    `formatRelativeTime`
+  - `apps/web/lib/audit-render/` mit 4 Template-Klassen +
+    Generic-Fallback
+  - Inbox-Audit-Log Click-to-Expand mit AuditDetailRenderer
+  - Heavy Reuse: #95 (Tool-Names), #98 (Cost), #100 (MemoryHits)
+  - Browser-Smoke 5/6 explizit grün
+
 **Nicht-gepusht / nicht-akut Backlog:** keine
 
 **Block-1-Stand nach Tag 18:**
-- 7 von 11 Items durch (#94, #91, #95, #97, #100, #98, #101)
+- 8 von 11 Items durch (#94, #91, #95, #97, #100, #98, #101, #99)
 - 1 partially functional (#96, architektonisch limitiert)
-- 3 offen: #99 (Audit-Trail menschlich, M), #86 (Skill-Editor-UI, L),
-  #87 (MCP-Configurator-UI, L)
+- 2 offen: #86 (Skill-Editor-UI, L), #87 (MCP-Configurator-UI, L)
 
 ## Heute (Tag 17) abgeschlossen
 
@@ -393,8 +404,8 @@ Block-1-Bau-Stand:
 2. ✅ #100 Memory-Hit-Indikator (Commit `3eb645b`)
 3. ✅ #101 Twin-Reife-Anzeige (Commits `63b423f`, `b6a88ef`, `3a964fb`)
 4. ✅ #98 Cost-Preview vor Approve (Commit `12aad33`)
-5. **#99 Audit-Trail menschlich** (M, nächstes Item) — Vision Vererbung
-6. **#86 Skill-Editor-UI** (L)
+5. ✅ #99 Audit-Trail menschlich (Commits `3d70f82`, `b1ba6ea`)
+6. **#86 Skill-Editor-UI** (L, nächstes Item)
 7. **#87 MCP-Configurator-UI** (L)
 
 Plus Welle-1-partial:
@@ -570,3 +581,14 @@ durch shared Code.
 Lehre: bei zwei ähnlichen Items das zweite *nicht* abstrahieren,
 sondern konkret bauen. Abstraktion lohnt sich erst bei drei+
 Instanzen mit klar identischen Anforderungen.
+
+**5. Phase-A-Diagnose korrigiert Backlog-Verständnis.** Bei #99
+hat die Diagnose gezeigt, dass das Backlog-Body veraltet war:
+"Roh-JSON sichtbar" war nicht mehr der akute Pain Point (Inbox-
+Pending war schon menschlich nach #95/#98), sondern "reiche
+Audit-Daten unsichtbar". Phase-A-Diagnose verhindert Bau in der
+falschen Richtung — und manchmal ist die Wahrheit: das eigentliche
+Problem hat sich verändert seit das Backlog-Item geschrieben wurde.
+
+Lehre: bei Items aus älteren Strategie-Sessions vor Bau prüfen ob
+Akut-Pain noch matched. Backlog-Body ist Snapshot, nicht Wahrheit.
