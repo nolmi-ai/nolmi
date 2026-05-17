@@ -1,6 +1,6 @@
 # twin-lab — Stand
 
-**Letztes Update:** 17. Mai 2026, Mittag-Nachmittag (Tag 18)
+**Letztes Update:** 17. Mai 2026, Abend (Tag 18 — Block-1-Closure)
 
 ## Aktuell in Arbeit
 
@@ -101,12 +101,39 @@ TWIN-VISION.md per Setzung unverändert.
   - Heavy Reuse: #95 (Tool-Names), #98 (Cost), #100 (MemoryHits)
   - Browser-Smoke 5/6 explizit grün
 
+- **#86 Skill-Editor-UI** (Commits `4efe6d5`, `2788b72`) — Block 1
+  - Diagnose: M nicht L (SkillRepo-Methoden existierten schon)
+  - 4 Backend-Routes mit Manifest-Spiegelung (Bug während Bau gefixt)
+  - SkillEditorModal mit Multi-Field-Form, Manifest-Textarea ohne
+    name/description (Spiegel-Pattern)
+  - ModalWrapper um maxWidthClass-Prop erweitert
+  - Add+Edit+Delete für manual-Skills, MCP-Skills read-only
+  - Browser-Smoke 6/6 grün
+
+- **#87 MCP-Configurator-UI** (Commits `8e12c43`, `a2336bf`) — Block 1
+  - Diagnose: M nicht L (CLI-Helper wiederverwendbar, kein
+    Service-Modul-Refactor nötig)
+  - Strategy-Session: Textarea-Paste, Inline-ENV-Form, Cascade-
+    Warnung, kein Edit MVP
+  - 4 Backend-Routes mit Sensitive-Felder-Disziplin
+  - McpServerAddModal mit Spec-Validation + ENV-Marker-Detection
+  - MCP-Section in Settings vor Skills (kausale Reihenfolge:
+    MCP liefert Skills)
+  - Cascade-Delete-Banner mit Skill-Count, Toast mit deletedSkills
+  - Browser-Smoke 6/6 grün
+
+- **Sticky Header für Inbox/Facts/Stream/Settings** (Commit `79d40c0`)
+  - One-Line-Fix: `sticky top-0 z-40 bg-bg` in AppHeader
+  - /chat unverändert (Chat hat fixe Viewport-Höhe + internes Overflow)
+  - z-40 (statt z-50) damit Modals/Dropdowns drüber rendern
+
 **Nicht-gepusht / nicht-akut Backlog:** keine
 
 **Block-1-Stand nach Tag 18:**
-- 8 von 11 Items durch (#94, #91, #95, #97, #100, #98, #101, #99)
-- 1 partially functional (#96, architektonisch limitiert)
-- 2 offen: #86 (Skill-Editor-UI, L), #87 (MCP-Configurator-UI, L)
+- 11 von 11 Items adressiert:
+  - 10 vollständig durch: #94, #91, #95, #97, #100, #98, #101, #99, #86, #87
+  - 1 partially functional: #96 (Architektur-Follow-ups #105/#106 in Block 2)
+- Block 1 von Pre-Launch-Phase A vollständig
 
 ## Heute (Tag 17) abgeschlossen
 
@@ -399,21 +426,22 @@ Befund. Reaktive Strategie-Session + 3.4.I-Bau (`e3a8ea1`). Plus #101.
 
 **Pre-Launch-Phase A Block 1 — UX-Welle 1 vollständig (~20–25 Tage)**
 
-Block-1-Bau-Stand:
+Block-1-Bau-Stand (vollständig nach Tag 18):
 1. ✅ #95 Tool-Names human-readable (Commit `ece8109`)
 2. ✅ #100 Memory-Hit-Indikator (Commit `3eb645b`)
 3. ✅ #101 Twin-Reife-Anzeige (Commits `63b423f`, `b6a88ef`, `3a964fb`)
 4. ✅ #98 Cost-Preview vor Approve (Commit `12aad33`)
 5. ✅ #99 Audit-Trail menschlich (Commits `3d70f82`, `b1ba6ea`)
-6. **#86 Skill-Editor-UI** (L, nächstes Item)
-7. **#87 MCP-Configurator-UI** (L)
+6. ✅ #86 Skill-Editor-UI (Commits `4efe6d5`, `2788b72`)
+7. ✅ #87 MCP-Configurator-UI (Commits `8e12c43`, `a2336bf`)
 
 Plus Welle-1-partial:
 - ✅ #96 Empty-State Chat (partially functional, architektonisch
   limitiert; Architektur-Follow-ups #105/#106 in Block 2)
 
-Danach: Block 2 (#105/#106), Block 3 (#107/#108), Block 4
-(#109/#110/#111), Block 5 (#112/#113/#114/#115).
+**Block 1 von Pre-Launch-Phase A abgeschlossen.** Nächstes ansteht:
+Block 2 (#105/#106), Block 3 (#107/#108), Block 4 (#109/#110/#111),
+Block 5 (#112/#113/#114/#115).
 
 Weiterhin im Backlog (nicht zeit-kritisch, **nicht** Teil von
 Pre-Launch-Phase A):
@@ -592,3 +620,34 @@ Problem hat sich verändert seit das Backlog-Item geschrieben wurde.
 
 Lehre: bei Items aus älteren Strategie-Sessions vor Bau prüfen ob
 Akut-Pain noch matched. Backlog-Body ist Snapshot, nicht Wahrheit.
+
+**6. Pre-Launch-Phase A Block 1 in einem Tag durchgebaut.** Block 1
+hat 11 Items (10 voll + #96 partially functional), Tag 18 hat 8 davon
+vollständig gebaut plus alle Vormittag-Pivot-Doku plus Sticky Header
+plus drei Doku-Wellen. Möglich war das durch:
+
+(a) **Diagnose-vor-Bau-Disziplin (Phase 1.1)** — drei Items (#99, #86,
+#87) wurden dadurch von L auf M reklassifiziert mit ~6h Zeitbudget-
+Gewinn. #99 deckte auf, dass das Backlog-Body veraltet war (echtes
+Problem ist "reiche Audit-Daten unsichtbar", nicht "Roh-JSON sichtbar").
+#86 und #87 zeigten, dass die Repo-/Service-Schicht (`SkillRepo`,
+`McpServersRepo`, `McpSkillSync`, `McpClientManager`) komplett
+wiederverwendbar war — nur Routes mussten exposed werden.
+
+(b) **Pattern-Reuse zwischen Items** — #99-Templates wurden aus #95/#98/
+#100 zusammengesetzt (resolveToolDisplay, estimateToolCost,
+MemoryHitBadge). #86-Edit-Modal-Pattern (ModalWrapper + Multi-Field-
+Form + zweistufige Delete-Confirm + Inline-Validation) wurde in #87
+wiederverwendet. Konsistente Visual-Sprache durch Pattern-Disziplin,
+nicht durch shared Code.
+
+(c) **Sammel-Doku am Tagesende statt Stück-für-Stück** — eine STAND-
+Welle nach 4 Bauten, eine nach #99, eine zur Tages-Closure. Plus
+BACKLOG-Closures in Drei-Items-Wellen. Spart 5-10 Min pro Item gegen
+Stück-für-Stück-Doku.
+
+Lehre: Block-Planung in M-Items mit Diagnose-Stop ist realistischer
+als L-Klassifizierung mit Strategy-Session-Buffer. Über sieben
+Bau-Items (heute) wurden drei Strategy-Sessions tatsächlich nötig
+(#101 vorab, #87 vorab, plus #99 als Diagnose-driven Re-Scope) — der
+Rest lief mit Phase-1.1-Diagnose ohne Session durch.

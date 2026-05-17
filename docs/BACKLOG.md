@@ -803,7 +803,7 @@ Argument dagegen: Reply-Detection wurde explizit eingebaut um Loop-Risiko zu ver
 
 ## Aus Phase 3.2 entstanden
 
-### 86. UI-Editor für Skills (Manifest + Markdown)
+### 86. ✅ UI-Editor für Skills (Manifest + Markdown) (CLOSED Tag 18)
 Heute werden Skills via CLI angelegt und über die UI nur als Read-Only-Liste mit Aktiv-Toggle dargestellt. Sub-Schritt 3.2.E erweitert das nicht — die CLI bleibt der primäre Einstiegspunkt für MCP-Server-Setup.
 
 Was fehlt: Skill-Detail-View mit Markdown-Editor für SKILL.md, Form-Fields für Manifest, PATCH-Endpoint analog zu Persona-Reload-CLI (#78). Vorbedingung: Skill-Sync-Endpoint aus #75. Verknüpft mit #76 (Skill-Edit/Delete via UI), könnte gemeinsam adressiert werden.
@@ -811,13 +811,17 @@ Was fehlt: Skill-Detail-View mit Markdown-Editor für SKILL.md, Form-Fields für
 **Größe:** L · **Priorität:** should · **Aus:** 3.2-Strategie-Session, langfristige UI-Editierbarkeit
 **Stufe:** 0 → 2 · **Tranche:** C · **Spur:** UX-Reifung Welle 1 (Bau-Plan in `docs/UX-STRATEGY.md`)
 
-### 87. UI-Konfigurator für MCP-Server pro Twin
+**Update Tag 18 (CLOSED):** Implementiert in Commits `4efe6d5` (Backend) und `2788b72` (UI). Diagnose-Stop hat M-Item-Realität bestätigt (nicht L wie ursprünglich klassifiziert): SkillRepo-Methoden existierten schon (`add`, `update`, `findById`, `findByName`, `remove`), nur Routes mussten exposed werden. Bau: 4 neue Backend-Routes (POST/PATCH/DELETE plus GET-Detail für Edit-Prefill) mit Manifest-Spiegelung (Top-Level name/description → Manifest), MCP-Skill-Edit-Verbot mit 403, Name-Unchangeable via Schema-Refinement (vermeidet Sync-Konflikte). UI: `SkillEditorModal` mit Multi-Field-Form, ModalWrapper um `maxWidthClass`-Prop erweitert (max-w-2xl für Skill-Modal), Manifest-Textarea ohne name/description (Spiegel-Pattern), Inline-Validation mit `border-warn` analog #99/#86-Pattern, Add+Edit+Delete in Skills-Section, Edit-Link nur für manual-Skills, MCP-Skills bekommen "Via MCP-Server verwaltet"-Hinweis. Bug während Bau gefunden+gefixt: Manifest-Spiegelung war nur bei POST, nicht PATCH. Browser-Smoke 6/6 grün.
+
+### 87. ✅ UI-Konfigurator für MCP-Server pro Twin (CLOSED Tag 18)
 Heute werden MCP-Server via CLI/SQL hinzugefügt (Sub-Schritt 3.2.E baut die CLI). Langfristig brauchen non-tech-User eine UI: Server-Add-Form mit Transport-Wahl (stdio/http), Command + Args, optionalen ENV-Vars (verschlüsselt analog zu API-Key), Default-Approval-Setting. Plus Server-Liste mit Aktiv-Toggle, Refresh-Tool-Discovery-Button, Server-Remove mit Cascade-Confirm.
 
 Konzeptionell parallel zu #86 — beide sind Backend-getriebene Configs, die heute via CLI laufen, langfristig UI brauchen. Schema und Repo (3.2.A) sind so designed, dass UI später ohne Refactor möglich ist (`hasEnv`-Marker statt Plain-ENV im Output, Encrypted-Storage, Validation im Repo).
 
 **Größe:** L · **Priorität:** should · **Aus:** 3.2-Strategie-Session
 **Stufe:** 0 → 2 · **Tranche:** C · **Spur:** UX-Reifung Welle 1 (Bau-Plan in `docs/UX-STRATEGY.md`)
+
+**Update Tag 18 (CLOSED):** Implementiert in Commits `8e12c43` (Backend) und `a2336bf` (UI). Diagnose-Stop hat MVP-Scope auf M reduziert (nicht L): MCP-Konfig war heute gar nicht in UI sichtbar (nur CLI), `McpServersRepo` + twin-eigener `McpSkillSync` + `McpClientManager` waren wiederverwendbar, kein Service-Modul-Refactor nötig. UX-Setzungen via Strategy-Session: JSON-Spec via Textarea-Paste (kein File-Upload, kein Drag-Drop), ENV-Prompt als Inline-Form-Erweiterung unter Textarea (kein Submodal), Cascade-Delete-Warnung mit Skill-Count, kein Edit-Mode für MVP (Re-Encryption + Skill-Resync zu komplex). Bau: 4 Backend-Routes mit Zod-Refinement gegen `"?"`-Marker (Defense-in-Depth), Sensitive-Felder NIE in API-Response (command/args/env/url server-only), Master-Key-Encryption bleibt backend-side. UI: `McpServerAddModal` mit Spec-Validation + ENV-Marker-Detection (nur `"?"`-Werte werden gefragt, Non-Marker-Werte bleiben Original), Submit-Komposition mit Marker-Replacement, MCP-Section in Settings **vor** Skills (kausale Reihenfolge: MCP liefert Skills), Optimistic-Toggle mit Revert, Cascade-Delete-Banner inline in der Row mit Skill-Count, Toast mit `syncedSkills`/`deletedSkills` aus Backend-Response. Browser-Smoke 6/6 grün.
 
 ### 88. Multi-Provider Tool-Use-Adapter
 Aktuelle Tool-Bridge (3.2.D) nutzt das AI-SDK direkt — `generateText({tools})` abstrahiert die Provider-API-Schemata für Anthropic/OpenAI/Google/Groq/Ollama. Funktioniert für die bestehenden Provider Out-of-the-Box ohne eigenen Adapter.
