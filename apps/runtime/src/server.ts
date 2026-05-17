@@ -10,15 +10,22 @@ import {
   FactCreateRequestSchema,
   FactExtractRequestSchema,
   FactUpdateRequestSchema,
+  McpServerCreateRequestSchema,
   SkillCreateRequestSchema,
   SkillUpdateRequestSchema,
   type AuditEntry,
   type FactConfidence,
   type FactItem,
+  type McpServer,
+  type McpServerUiPayload,
   type SkillDetailPayload,
   type TwinToolListItem,
 } from "@twin-lab/shared";
-import { McpServersRepo } from "./mcp/repo.js";
+import {
+  McpServerAlreadyExistsError,
+  McpServerValidationError,
+  McpServersRepo,
+} from "./mcp/repo.js";
 import { FactsRepo } from "./facts/repo.js";
 import { TwinMaturityService } from "./twin-maturity/twin-maturity-service.js";
 import type { RegistryEntry, TwinServiceRegistry } from "./twin-service-registry.js";
@@ -264,6 +271,9 @@ export async function createServer(deps: ServerDeps) {
 
   // ─── Tools (3.2.H — Tool-Picker-UI) ───────────────────────────────────────
   registerToolRoutes(app, deps, requireOwner);
+
+  // ─── MCP-Server (#87 — Configurator-UI) ───────────────────────────────────
+  registerMcpServerRoutes(app, deps, requireOwner);
 
   // ─── Facts (3.3.D — Semantic-Memory CRUD) ─────────────────────────────────
   registerFactRoutes(app, deps, requireOwner);
@@ -1202,6 +1212,210 @@ function registerSkillRoutes(
 
       deps.skillRepo.remove(existing.skillId);
       return reply.status(204).send();
+    },
+  );
+}
+
+// ─── MCP-SERVER ROUTES (#87) ─────────────────────────────────────────────────
+//
+// HTTP-Verträge für den Settings-MCP-Configurator. Sensitive Felder bleiben
+// server-only: kein command/args/url/env in den Listings — der UI-Payload
+// trägt nur Identität + Lifecycle + skillCount für die Cascade-Warnung.
+//
+// Add läuft analog zum CLI-Pfad (`mcp-add`):
+//   1. Spec-Schema validieren
+//   2. Repo.add (verschlüsselt env mit Master-Key)
+//   3. Twin-eigener McpSkillSync.syncOnAdd → spawnt Server + listTools + Skills
+//   4. Bei Sync-Failure: Repo.remove (Rollback, sonst halb-konfigurierter Server)
+//
+// Delete: Manager.disconnect (falls running) → Repo.remove. Skills-Cascade
+// via FK ON DELETE CASCADE (mcp_server_id → mcp_servers.id).
+
+function toMcpServerUiPayload(
+  server: McpServer,
+  skillCount: number,
+): McpServerUiPayload {
+  return {
+    serverId: server.id,
+    name: server.name,
+    transport: server.transport,
+    isActive: server.isActive,
+    defaultRequiresApproval: server.defaultRequiresApproval,
+    skillCount,
+    createdAt: server.createdAt,
+    updatedAt: server.updatedAt,
+  };
+}
+
+function registerMcpServerRoutes(
+  app: FastifyInstance,
+  deps: ServerDeps,
+  requireOwner: (
+    request: FastifyRequest,
+    reply: FastifyReply,
+    handle: string,
+  ) => Promise<{ entry: RegistryEntry; user: User } | null>,
+) {
+  // skillCount per Server in O(n_skills) — kein eigener COUNT(*)-Query, weil
+  // SkillRepo.listByMcpServer schon existiert und die Twin-Listings klein
+  // genug sind, dass eine zusätzliche SQL-Optimierung sich nicht lohnt.
+  const countSkills = (mcpServerId: string): number =>
+    deps.skillRepo.listByMcpServer(mcpServerId).length;
+
+  // ─── List ───────────────────────────────────────────────────────────────
+  app.get<{ Params: { handle: string } }>(
+    "/twins/:handle/mcp-servers",
+    async (request, reply) => {
+      const ctx = await requireOwner(request, reply, request.params.handle);
+      if (!ctx) return;
+      const { entry } = ctx;
+      const servers = deps.mcpServersRepo
+        .list(entry.twinId)
+        .map((s) => toMcpServerUiPayload(s, countSkills(s.id)))
+        .sort((a, b) => a.name.localeCompare(b.name));
+      return { servers };
+    },
+  );
+
+  // ─── Create + Sync ──────────────────────────────────────────────────────
+  app.post<{ Params: { handle: string } }>(
+    "/twins/:handle/mcp-servers",
+    async (request, reply) => {
+      const ctx = await requireOwner(request, reply, request.params.handle);
+      if (!ctx) return;
+      const { entry } = ctx;
+
+      const parsed = McpServerCreateRequestSchema.safeParse(request.body);
+      if (!parsed.success) {
+        return reply.status(400).send({ error: parsed.error.message });
+      }
+      const spec = parsed.data;
+
+      let serverId: string | null = null;
+      let synced = false;
+      try {
+        const created = deps.mcpServersRepo.add({
+          twinId: entry.twinId,
+          name: spec.name,
+          transport: spec.transport,
+          command: spec.command ?? null,
+          args: spec.args ?? null,
+          env: spec.env ?? null,
+          url: spec.url ?? null,
+          defaultRequiresApproval: spec.defaultRequiresApproval ?? true,
+        });
+        serverId = created.id;
+
+        // Twin-eigener Sync zieht die Tools, schreibt Skills, hält das
+        // Mapping mcp_server_id → skill_id in der DB.
+        const syncResult = await entry.service.mcpSkillSync.syncOnAdd(
+          created.id,
+        );
+        synced = true;
+        return reply.status(201).send({
+          ...toMcpServerUiPayload(created, syncResult.added),
+          syncedSkills: syncResult.added,
+          skippedSkills: syncResult.skipped,
+        });
+      } catch (err) {
+        if (err instanceof McpServerAlreadyExistsError) {
+          return reply
+            .status(409)
+            .send({ error: "mcp_server_name_taken", name: spec.name });
+        }
+        if (err instanceof McpServerValidationError) {
+          return reply.status(400).send({ error: err.message });
+        }
+        // Spawn-/Sync-Failure: Server-Eintrag rollback (Skills wurden noch
+        // nicht gewritten, da Sync gefailt vor Skill-Insert).
+        const message = err instanceof Error ? err.message : String(err);
+        return reply.status(400).send({
+          error: "mcp_server_spawn_failed",
+          detail: message,
+        });
+      } finally {
+        if (!synced && serverId) {
+          try {
+            deps.mcpServersRepo.remove(serverId);
+          } catch (rollbackErr) {
+            request.log.error(
+              { err: rollbackErr, serverId },
+              "[mcp-servers] Rollback nach Sync-Failure fehlgeschlagen",
+            );
+          }
+        }
+      }
+    },
+  );
+
+  // ─── Toggle active ──────────────────────────────────────────────────────
+  app.patch<{ Params: { handle: string; serverId: string } }>(
+    "/twins/:handle/mcp-servers/:serverId/active",
+    async (request, reply) => {
+      const ctx = await requireOwner(request, reply, request.params.handle);
+      if (!ctx) return;
+      const { entry } = ctx;
+      const parsed = z.object({ isActive: z.boolean() }).safeParse(request.body);
+      if (!parsed.success) {
+        return reply.status(400).send({ error: parsed.error.message });
+      }
+
+      const existing = deps.mcpServersRepo
+        .list(entry.twinId)
+        .find((s) => s.id === request.params.serverId);
+      if (!existing) {
+        return reply
+          .status(404)
+          .send({ error: "MCP-Server nicht für diesen Twin" });
+      }
+
+      deps.mcpServersRepo.setActive(existing.id, parsed.data.isActive);
+      const updated = deps.mcpServersRepo
+        .list(entry.twinId)
+        .find((s) => s.id === existing.id);
+      if (!updated) {
+        return reply.status(500).send({
+          error: "MCP-Server nach Toggle nicht gefunden",
+        });
+      }
+      return toMcpServerUiPayload(updated, countSkills(updated.id));
+    },
+  );
+
+  // ─── Delete + Cascade ───────────────────────────────────────────────────
+  app.delete<{ Params: { handle: string; serverId: string } }>(
+    "/twins/:handle/mcp-servers/:serverId",
+    async (request, reply) => {
+      const ctx = await requireOwner(request, reply, request.params.handle);
+      if (!ctx) return;
+      const { entry } = ctx;
+
+      const existing = deps.mcpServersRepo
+        .list(entry.twinId)
+        .find((s) => s.id === request.params.serverId);
+      if (!existing) {
+        return reply
+          .status(404)
+          .send({ error: "MCP-Server nicht für diesen Twin" });
+      }
+
+      const skillCount = countSkills(existing.id);
+
+      // Falls Server-Prozess gerade läuft: graceful disconnect.
+      // Manager.disconnect ist idempotent (no-op wenn kein Prozess da).
+      try {
+        await entry.service.mcp.disconnect(existing.id);
+      } catch (err) {
+        request.log.warn(
+          { err, serverId: existing.id },
+          "[mcp-servers] Disconnect vor Delete fehlgeschlagen — fahre fort",
+        );
+      }
+
+      deps.mcpServersRepo.remove(existing.id);
+      return reply
+        .status(200)
+        .send({ ok: true, deletedSkills: skillCount });
     },
   );
 }

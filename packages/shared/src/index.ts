@@ -487,6 +487,49 @@ export const McpServerUpdateInputSchema = McpServerAddInputSchema
   .partial();
 export type McpServerUpdateInput = z.infer<typeof McpServerUpdateInputSchema>;
 
+// ─── MCP SERVER UI-VERTRAG (#87) ─────────────────────────────────────────────
+//
+// Wire-Format für die MCP-Configurator-UI in Settings. Spec-Schema spiegelt
+// die CLI-Spec (`scripts/_mcp-cli-helpers.ts → McpServerSpecSchema`) plus
+// `env`-Validierung: keine Marker-`"?"`-Werte erlaubt, Frontend muss die
+// vorher durch User-Input ersetzen. Listings geben NIEMALS sensitive Felder
+// (command, args, url, env) zurück — env_json_encrypted bleibt server-only.
+
+export const McpServerCreateRequestSchema = z.object({
+  name: z.string().min(1).max(100),
+  transport: McpTransportSchema,
+  command: z.string().nullable().optional(),
+  args: z.array(z.string()).nullable().optional(),
+  url: z.string().url().nullable().optional(),
+  env: z
+    .record(z.string(), z.string())
+    .nullable()
+    .optional()
+    .refine(
+      (env) => !env || Object.values(env).every((v) => v !== "?"),
+      {
+        message:
+          "env-Werte dürfen nicht den Marker '?' enthalten — Frontend muss User-Input einsetzen",
+      },
+    ),
+  defaultRequiresApproval: z.boolean().optional(),
+});
+export type McpServerCreateRequest = z.infer<typeof McpServerCreateRequestSchema>;
+
+/** Schmaler Listings-/Detail-Payload — keine Connection-Details, kein env. */
+export const McpServerUiPayloadSchema = z.object({
+  serverId: z.string(),
+  name: z.string(),
+  transport: McpTransportSchema,
+  isActive: z.boolean(),
+  defaultRequiresApproval: z.boolean(),
+  /** Wieviele Skills mit `source='mcp'` von diesem Server stammen. */
+  skillCount: z.number().int().nonnegative(),
+  createdAt: z.string(),
+  updatedAt: z.string(),
+});
+export type McpServerUiPayload = z.infer<typeof McpServerUiPayloadSchema>;
+
 // ─── FACTS (Phase 3.3 — Semantic-Memory KV-Store) ────────────────────────────
 //
 // API-Verträge für die Facts-Endpoints aus 3.3.D. Source/Confidence-Enums
