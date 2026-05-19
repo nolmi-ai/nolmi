@@ -27,6 +27,10 @@ import type { BridgeMessage } from "./bridge/types.js";
 import type { TrustRepo } from "./trust/trust-repo.js";
 import type { SkillRepo } from "./skills/repo.js";
 import { buildSkillsBlock } from "./skills/prompt-builder.js";
+import {
+  classifyForcedTool,
+  selectForcedCandidates,
+} from "./skills/pre-pass.js";
 import type { ConversationsRepo } from "./conversations/repo.js";
 import type {
   ConversationSummariesRepo,
@@ -94,6 +98,15 @@ export interface TwinServiceDeps {
   model: LanguageModel;
   /** Kompaktes Label "<provider>/<model>", landet in Audit-Metadata. */
   modelLabel: string;
+  /**
+   * #107: Kleines Classifier-Modell für den Pre-Pass-Layer. Selber Provider/
+   * API-Key wie das Haupt-Modell, aber günstigere Stufe (z.B. Haiku statt
+   * Opus). Wird im Send-Path nur konsultiert, wenn mindestens ein aktiver
+   * Skill `triggerMode='forced'` hat — sonst gar nicht gerufen.
+   */
+  classifierModel: LanguageModel;
+  /** Kompaktes Label des Classifier-Modells, für Pre-Pass-Logs. */
+  classifierModelLabel: string;
   audit: AuditService;
   bus: EventBus;
   /** Persona kommt aus `twin_profiles.persona_md` + `display_name`/`handle`. */
@@ -1549,6 +1562,33 @@ REGEL 6: Wenn der User dich explizit bittet, ein Tool zu nutzen ("rufe das X-Too
     // Mit Tool-Use brauchen wir mehrere Steps (call → result → call → ...);
     // 5 ist der Briefing-Default und reicht für die Pilot-Tools allemal.
     //
+    // #107: Pre-Pass-Classifier — User-Picker (3.2.H) hat Vorrang. Pre-Pass
+    // wird nur konsultiert, wenn der Caller keinen forcedToolChoice
+    // durchgereicht hat UND mindestens ein aktiver Skill triggerMode='forced'
+    // hat. Bei Match wird der `effectiveForcedToolChoice` auf den Classifier-
+    // Output gesetzt; die folgende Validierung gegen `mcpTools` greift dann
+    // genauso wie beim User-Picker-Pfad.
+    let effectiveForcedToolChoice = options.forcedToolChoice;
+    if (
+      hasTools &&
+      !effectiveForcedToolChoice &&
+      selectForcedCandidates(skills).length > 0
+    ) {
+      const lastUserMessage = messages.at(-1)?.content ?? "";
+      if (lastUserMessage) {
+        const match = await classifyForcedTool({
+          userMessage: lastUserMessage,
+          skills,
+          availableToolKeys: new Set(Object.keys(mcpTools)),
+          classifierModel: this.deps.classifierModel,
+          twinId: this.deps.twinId,
+        });
+        if (match) {
+          effectiveForcedToolChoice = match.forcedToolChoice;
+        }
+      }
+    }
+
     // 3.2.H: forcedToolChoice nur wenn das Ziel-Tool im aktuellen Tool-Set
     // existiert. AI SDK 6 wirft sonst einen NoSuchToolError; lieber lautlos
     // auf Auto zurückfallen und im Audit als ganz normaler LLM-Antwort-Pfad
@@ -1556,13 +1596,13 @@ REGEL 6: Wenn der User dich explizit bittet, ein Tool zu nutzen ("rufe das X-Too
     // gerade deaktiviert wurde.
     const forcedTool =
       hasTools &&
-      options.forcedToolChoice &&
-      mcpTools[options.forcedToolChoice.toolName] !== undefined
-        ? options.forcedToolChoice
+      effectiveForcedToolChoice &&
+      mcpTools[effectiveForcedToolChoice.toolName] !== undefined
+        ? effectiveForcedToolChoice
         : null;
-    if (options.forcedToolChoice && !forcedTool) {
+    if (effectiveForcedToolChoice && !forcedTool) {
       console.warn(
-        `[mcp:tools] forcedToolChoice ${options.forcedToolChoice.toolName} ` +
+        `[mcp:tools] forcedToolChoice ${effectiveForcedToolChoice.toolName} ` +
           `nicht im aktiven Tool-Set — fallback auf toolChoice='auto'`,
       );
     }

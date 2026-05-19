@@ -170,6 +170,8 @@ async function main() {
     ownerUserId: profile.ownerUserId,
     model: mockModel,
     modelLabel: "mock/test",
+    classifierModel: mockModel,
+    classifierModelLabel: "mock/test-classifier",
     audit,
     bus,
     persona: {

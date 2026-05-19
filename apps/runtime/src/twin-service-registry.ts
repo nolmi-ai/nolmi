@@ -13,6 +13,7 @@ import {
   type ApiKeySource,
   type TwinLlmConfig,
 } from "./llm-config.js";
+import { resolveClassifierConfig } from "./skills/classifier-map.js";
 import {
   decrypt,
   EncryptionDecryptError,
@@ -358,6 +359,15 @@ export class TwinServiceRegistry {
     const model = createLlmClient(runtimeLlmConfig);
     const modelLabel = formatLlmLabel(runtimeLlmConfig);
 
+    // #107: Pre-Pass-Classifier-Modell pro Twin eager konstruieren. createLlmClient
+    // ist reine Construction (kein Netzwerk-Call, siehe llm-client.ts), also
+    // kostet das beim Boot quasi nichts und vermeidet Lazy-Init-State im
+    // Send-Path. Aktivierung des Pre-Pass selbst läuft im Send-Path
+    // conditional (nur wenn aktive forced-Skills da sind).
+    const classifierLlmConfig = resolveClassifierConfig(runtimeLlmConfig);
+    const classifierModel = createLlmClient(classifierLlmConfig);
+    const classifierModelLabel = formatLlmLabel(classifierLlmConfig);
+
     const bridgeConfig: BridgeConfig = {
       url: profile.bridgeUrl,
       handle: profile.handle,
@@ -401,6 +411,8 @@ export class TwinServiceRegistry {
       ownerUserId: profile.ownerUserId,
       model,
       modelLabel,
+      classifierModel,
+      classifierModelLabel,
       audit,
       bus,
       persona,

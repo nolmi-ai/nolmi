@@ -280,6 +280,15 @@ export const SkillOutputSchema = z.object({
 });
 export type SkillOutput = z.infer<typeof SkillOutputSchema>;
 
+// #107: triggerMode steuert, ob ein Skill vom LLM-Classifier-Pre-Pass im
+// Send-Path forciert getriggert werden darf. 'passive' (Default) heißt:
+// Skill liegt nur im System-Prompt, LLM entscheidet frei. 'forced' heißt:
+// Pre-Pass-Classifier prüft die User-Message gegen `triggerCondition` und
+// erzwingt bei Match toolChoice auf das erste Tool aus requiresTools.
+// Backward-Compat: existierende Skills ohne triggerMode werden zu 'passive'.
+export const SkillTriggerModeSchema = z.enum(["forced", "passive"]);
+export type SkillTriggerMode = z.infer<typeof SkillTriggerModeSchema>;
+
 export const SkillManifestSchema = z.object({
   name: z.string(),
   description: z.string(),
@@ -294,6 +303,21 @@ export const SkillManifestSchema = z.object({
   mcpServerId: z.string().optional(),
   mcpToolName: z.string().optional(),
   mcpInputSchema: z.unknown().optional(),
+  // #107: Pre-Pass-Classifier-Felder. `triggerMode` ist optional — undefined
+  // wird im Send-Path semantisch als 'passive' behandelt (Pre-Pass-Check
+  // matched nur `=== 'forced'`). Kein .default('passive'), weil DB-Reads
+  // im SkillRepo das Manifest als JSON-Cast ohne Zod-Parse durchreichen —
+  // ein Default würde dort nicht greifen und nur false security suggestieren.
+  // `triggerCondition` ist nur bei triggerMode='forced' relevant, aber ohne
+  // refine() — UI/CLI können auch passive Skills mit beschreibender Condition
+  // anlegen, die später per Edit auf 'forced' geflippt werden.
+  triggerMode: SkillTriggerModeSchema.optional(),
+  triggerCondition: z.string().optional(),
+  // #107: Liste der MCP-Tool-Keys, die der Skill als forced-Trigger-Ziel
+  // anbietet. Format: 'mcp:<serverHandle>:<toolName>' (analog dem AI-SDK-
+  // Tool-Key-Format aus tool-bridge.ts). Pre-Pass nimmt das erste Element
+  // als toolChoice. Manual-Skills ohne Tool-Trigger lassen das Feld weg.
+  requiresTools: z.array(z.string()).optional(),
 });
 export type SkillManifest = z.infer<typeof SkillManifestSchema>;
 

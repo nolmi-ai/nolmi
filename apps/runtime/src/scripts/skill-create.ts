@@ -190,6 +190,12 @@ async function main() {
 function mapSnakeToCamel(input: Record<string, unknown>): Record<string, unknown> {
   const KEY_MAP: Record<string, string> = {
     requires_approval: "requiresApproval",
+    // #107: Pre-Pass-Classifier-Felder im YAML als snake_case, im Schema
+    // als camelCase. requires_tools führt die Tool-Skill-Namen, die der
+    // Pre-Pass beim Match in toolChoice umwandelt.
+    trigger_mode: "triggerMode",
+    trigger_condition: "triggerCondition",
+    requires_tools: "requiresTools",
   };
   const out: Record<string, unknown> = {};
   for (const [k, v] of Object.entries(input)) {
