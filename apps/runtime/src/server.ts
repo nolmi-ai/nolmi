@@ -1805,21 +1805,28 @@ function registerConversationRoutes(
     async (request, reply) => {
       const ctx = await requireOwner(request, reply, request.params.handle);
       if (!ctx) return;
-      const { entry } = ctx;
+      const { entry, user } = ctx;
       const partner = decodeURIComponent(request.params.partnerHandle).toLowerCase();
+      const isDirectChat = partner === entry.handle.toLowerCase();
 
+      // #106: Direct-Chat hat keine Bridge-Messages — der Audit-Stream ist
+      // dort die Truth-Source. Bridge-Call würde mit „Bridge nicht
+      // erreichbar" fehlschlagen, weil es für die Self-Reference keinen
+      // gültigen Bridge-Endpoint gibt. A2A-Pfad fragt Bridge wie bisher.
       const bridgeClient = bridgeClientFor(entry);
       let bridgeMessages: Awaited<ReturnType<typeof bridgeClient.getConversationMessages>> = [];
-      try {
-        bridgeMessages = await bridgeClient.getConversationMessages(partner);
-      } catch (err) {
-        request.log.warn(
-          { err, partner },
-          "[conversations] Bridge-Conversation-Fetch fehlgeschlagen",
-        );
-        return reply.status(502).send({
-          error: "Bridge nicht erreichbar — Conversation konnte nicht geladen werden.",
-        });
+      if (!isDirectChat) {
+        try {
+          bridgeMessages = await bridgeClient.getConversationMessages(partner);
+        } catch (err) {
+          request.log.warn(
+            { err, partner },
+            "[conversations] Bridge-Conversation-Fetch fehlgeschlagen",
+          );
+          return reply.status(502).send({
+            error: "Bridge nicht erreichbar — Conversation konnte nicht geladen werden.",
+          });
+        }
       }
 
       const audits = await deps.audit.list({ limit: 1000, twinId: entry.twinId });
@@ -1828,7 +1835,26 @@ function registerConversationRoutes(
         audits,
         entry.handle,
       );
-      return { partnerHandle: partner, messages: merged };
+
+      // #106: aktive Conv-Metadata für den Reset-Filter im Frontend. null
+      // wenn keine aktive Konv da ist (kann bei A2A passieren, wo der
+      // Bridge-Verlauf existiert aber lokal noch keine Row angelegt wurde).
+      const activeConv = deps.conversationsRepo.findActive(
+        user.userId,
+        partner,
+        entry.twinId,
+      );
+      const conversation = activeConv
+        ? {
+            id: activeConv.id,
+            status: activeConv.status,
+            startedAt: activeConv.startedAt,
+            endedAt: activeConv.endedAt,
+            lastResetAt: activeConv.lastResetAt,
+          }
+        : null;
+
+      return { partnerHandle: partner, messages: merged, conversation };
     },
   );
 
@@ -1857,11 +1883,32 @@ function registerConversationRoutes(
       // Konversationen ohne Segments und ruft danach conversationsRepo.end().
       // Embedding-Failure unterbricht das Reset nicht.
       await entry.service.resetConversation(active.id);
+
+      // #106: Eager-Start der nächsten Konv mit last_reset_at = NOW(). Das
+      // ersetzt das bisherige Lazy-Start-via-getOrStart-beim-nächsten-Send.
+      // Frontend nutzt last_reset_at als Filter-Boundary im DirectChat —
+      // Audits mit timestamp < last_reset_at werden standardmäßig versteckt.
+      const lastResetAt = new Date().toISOString();
+      const fresh = deps.conversationsRepo.start({
+        ownerUserId: user.userId,
+        partnerHandle: entry.handle,
+        twinId: entry.twinId,
+        lastResetAt,
+      });
       request.log.info(
-        { conversationId: active.id, twinId: entry.twinId },
-        "[conversations] reset durch owner",
+        {
+          oldConversationId: active.id,
+          newConversationId: fresh.id,
+          twinId: entry.twinId,
+        },
+        "[conversations] reset durch owner — alte beendet, neue eager gestartet",
       );
-      return { reset: true, conversationId: active.id };
+      return {
+        reset: true,
+        oldConversationId: active.id,
+        newConversationId: fresh.id,
+        lastResetAt,
+      };
     },
   );
 

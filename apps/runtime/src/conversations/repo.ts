@@ -29,6 +29,7 @@ interface ConversationRow {
   status: ConversationStatus;
   started_at: string;
   ended_at: string | null;
+  last_reset_at: string | null;
 }
 
 export type ConversationEmbeddingStatus = "pending" | "done" | "failed";
@@ -59,6 +60,7 @@ export class ConversationsRepo {
       status: "active",
       startedAt: now,
       endedAt: null,
+      lastResetAt: input.lastResetAt ?? null,
     };
 
     // Log beim Start, nicht bei jedem getOrStart() — sonst spammt jede
@@ -91,9 +93,9 @@ export class ConversationsRepo {
       this.db
         .prepare(
           `INSERT INTO conversations
-             (id, owner_user_id, partner_handle, twin_id, status, started_at, ended_at)
+             (id, owner_user_id, partner_handle, twin_id, status, started_at, ended_at, last_reset_at)
            VALUES
-             (@id, @owner_user_id, @partner_handle, @twin_id, @status, @started_at, @ended_at)`,
+             (@id, @owner_user_id, @partner_handle, @twin_id, @status, @started_at, @ended_at, @last_reset_at)`,
         )
         .run({
           id: conv.id,
@@ -103,6 +105,7 @@ export class ConversationsRepo {
           status: conv.status,
           started_at: conv.startedAt,
           ended_at: conv.endedAt,
+          last_reset_at: conv.lastResetAt,
         });
     });
     tx();
@@ -279,5 +282,6 @@ function rowToConversation(row: ConversationRow): Conversation {
     status: row.status,
     startedAt: row.started_at,
     endedAt: row.ended_at,
+    lastResetAt: row.last_reset_at,
   };
 }

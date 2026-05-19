@@ -375,6 +375,36 @@ function ConversationDivider() {
   );
 }
 
+// #106: Soft-Hide-Reset-Marker. Zeigt den Reset-Zeitpunkt + Toggle für
+// die Pre-Reset-Audits. Visuell wie ConversationDivider, aber mit
+// klick-/state-aware Subtext statt statischem "Neue Konversation".
+function ResetMarker({
+  lastResetAt,
+  expanded,
+  onToggle,
+}: {
+  lastResetAt: string;
+  expanded: boolean;
+  onToggle: () => void;
+}) {
+  return (
+    <div className="flex items-center gap-3 my-4 text-[10px] uppercase tracking-wider text-muted">
+      <div className="flex-1 h-px bg-border" />
+      <span className="flex items-center gap-2">
+        <span>Zurückgesetzt {formatRelative(lastResetAt)}</span>
+        <button
+          type="button"
+          onClick={onToggle}
+          className="text-accent hover:underline"
+        >
+          {expanded ? "Vorherige verbergen" : "Vorherige anzeigen"}
+        </button>
+      </span>
+      <div className="flex-1 h-px bg-border" />
+    </div>
+  );
+}
+
 // ─── Direct-Chat-Actions (3.3.G3) ───────────────────────────────────────────
 //
 // Beendet die aktive Direct-Chat-Konversation des Owners mit seinem eigenen
@@ -904,6 +934,12 @@ function DirectChat({
   onConvIdChange?: (id: string | null) => void;
 }) {
   const [auditEntries, setAuditEntries] = useState<AuditEntry[]>([]);
+  // #106: Reset-Boundary aus dem Conversation-Detail. NULL = nie zurück-
+  // gesetzt → kein Filter, Vollverlauf wie historisches Verhalten.
+  // Soft-Hide: Audits mit timestamp < lastResetAt werden standardmäßig
+  // ausgeblendet, Toggle macht sie wieder sichtbar (UI-State only).
+  const [lastResetAt, setLastResetAt] = useState<string | null>(null);
+  const [showFullHistory, setShowFullHistory] = useState(false);
   // 3.2.G Optimistic-Pfad: User-Text wird sofort als pseudo-Bubble angehängt,
   // beim nächsten erfolgreichen loadAudits() ersetzt der Server-Audit ihn.
   // null = nichts in flight.
@@ -928,9 +964,38 @@ function DirectChat({
   // letzter Server-Message und der neuen Live-Pärchen.
   const [activeConvId, setActiveConvId] = useState<string | null>(null);
 
-  const { blocks: serverBlocks, newestConvId } = useMemo(
-    () => buildChatBlocksFromAudits(auditEntries),
-    [auditEntries],
+  // #106: AuditEntries-Filter VOR buildChatBlocksFromAudits — ChatBlock
+  // hat keinen timestamp, daher müssen wir auf der Audit-Ebene spalten.
+  // Boundary inklusiv (>= lastResetAt = post-Reset). NULL lastResetAt =
+  // historisches Verhalten ohne Filter.
+  const { visibleAudits, hiddenAudits } = useMemo(() => {
+    if (!lastResetAt) return { visibleAudits: auditEntries, hiddenAudits: [] as AuditEntry[] };
+    const visible: AuditEntry[] = [];
+    const hidden: AuditEntry[] = [];
+    for (const e of auditEntries) {
+      if (e.timestamp >= lastResetAt) visible.push(e);
+      else hidden.push(e);
+    }
+    return { visibleAudits: visible, hiddenAudits: hidden };
+  }, [auditEntries, lastResetAt]);
+
+  const { blocks: visibleBlocks, newestConvId } = useMemo(
+    () => buildChatBlocksFromAudits(visibleAudits),
+    [visibleAudits],
+  );
+
+  const { blocks: hiddenBlocks } = useMemo(
+    () => buildChatBlocksFromAudits(hiddenAudits),
+    [hiddenAudits],
+  );
+
+  // Server-Blocks für den Render: bei showFullHistory hidden+visible
+  // chronologisch zusammen, sonst nur visible. Inline-Hint/Marker wird
+  // im JSX-Renderer eingefügt.
+  const serverBlocks = useMemo<ChatBlock[]>(
+    () =>
+      showFullHistory ? [...hiddenBlocks, ...visibleBlocks] : visibleBlocks,
+    [hiddenBlocks, visibleBlocks, showFullHistory],
   );
 
   const chatBlocks = useMemo<ChatBlock[]>(() => {
@@ -953,12 +1018,25 @@ function DirectChat({
 
   const loadAudits = useCallback(async () => {
     try {
-      const res = await fetch(`${RUNTIME_URL}/twins/${handle}/audit?limit=50`, {
-        credentials: "include",
-      });
-      if (!res.ok) return;
-      const data = (await res.json()) as { entries: AuditEntry[] };
-      setAuditEntries(data.entries);
+      // #106: parallel Audit-Stream + Conversation-Detail. Detail liefert
+      // lastResetAt für den Soft-Hide-Filter. Detail-Fetch fail darf das
+      // Audit-Update nicht blocken — silent-fallback auf null.
+      const auditUrl = `${RUNTIME_URL}/twins/${handle}/audit?limit=50`;
+      const detailUrl = `${RUNTIME_URL}/twins/${handle}/conversations/${encodeURIComponent(handle)}`;
+      const [auditRes, detailRes] = await Promise.all([
+        fetch(auditUrl, { credentials: "include" }),
+        fetch(detailUrl, { credentials: "include" }).catch(() => null),
+      ]);
+      if (auditRes.ok) {
+        const data = (await auditRes.json()) as { entries: AuditEntry[] };
+        setAuditEntries(data.entries);
+      }
+      if (detailRes && detailRes.ok) {
+        const data = (await detailRes.json()) as {
+          conversation: { lastResetAt: string | null } | null;
+        };
+        setLastResetAt(data.conversation?.lastResetAt ?? null);
+      }
     } catch {
       // Silent fail — UI bleibt mit dem letzten Stand.
     }
@@ -1131,33 +1209,82 @@ function DirectChat({
         className="flex-1 min-h-0 overflow-y-auto px-6 py-4"
       >
         <div className="max-w-3xl mx-auto space-y-4">
-          {chatBlocks.length === 0 ? (
-            // UX.1.A.3 (#96): EmptyState statt einfacher Hint-Text. Twin-
-            // factsCount/toolsCount sind im Chat-Scope nicht ohne Extra-
-            // Query verfügbar (Briefing-Stop-Bedingung greift) — Variante
-            // ohne Zahlen, dafür mit Inbox-Pattern-Hinweis als Bridge zu #97.
-            <EmptyState
-              title={`Chat mit ${handle}`}
-              description={
-                <>
-                  Stell deinem Twin eine Frage oder erzähl, was dich
-                  gerade beschäftigt. Aktionen, die Genehmigung brauchen,
-                  landen in der Inbox.
-                </>
-              }
-            />
-          ) : (
+          {(() => {
+            // #106: EmptyState entweder bei brand-new Twin (keine Audits
+            // überhaupt) oder bei post-Reset ohne neue Audits (hidden gibt's,
+            // visible noch nicht). In beiden Fällen sieht der User die
+            // Tutorial-Surface.
+            const showEmptyState =
+              chatBlocks.length === 0 ||
+              (lastResetAt !== null &&
+                visibleBlocks.length === 0 &&
+                optimisticUser === null);
+            if (showEmptyState) {
+              return (
+                // UX.1.A.3 (#96): EmptyState statt einfacher Hint-Text. Twin-
+                // factsCount/toolsCount sind im Chat-Scope nicht ohne Extra-
+                // Query verfügbar (Briefing-Stop-Bedingung greift) — Variante
+                // ohne Zahlen, dafür mit Inbox-Pattern-Hinweis als Bridge zu #97.
+                <EmptyState
+                  title={`Chat mit ${handle}`}
+                  description={
+                    <>
+                      Stell deinem Twin eine Frage oder erzähl, was dich
+                      gerade beschäftigt. Aktionen, die Genehmigung brauchen,
+                      landen in der Inbox.
+                    </>
+                  }
+                />
+              );
+            }
+            return null;
+          })()}
+          {chatBlocks.length === 0 ? null : (
+            // #106: Reset-Marker an der Boundary zwischen hidden und
+            // visible. Bei !showFullHistory steht der Hint vor der ganzen
+            // Liste (firstVisibleIdx = 0), bei showFullHistory zwischen
+            // hidden(letztes) und visible(erstes) (firstVisibleIdx =
+            // hiddenBlocks.length).
             // #85: Trenner zwischen aufeinanderfolgenden Blöcken mit
             // unterschiedlicher conversationId. Erster Block (i===0) bekommt
             // nie einen Trenner davor. Daten-getrieben — überlebt
             // Page-Reload, weil aus dem geladenen Audit-Stream abgeleitet.
-            chatBlocks.map((block, i) => {
-              const prev = i > 0 ? chatBlocks[i - 1] : undefined;
-              const showDivider =
-                prev !== undefined && prev.conversationId !== block.conversationId;
+            (() => {
+              const firstVisibleIdx = showFullHistory ? hiddenBlocks.length : 0;
+              const showResetMarker =
+                lastResetAt !== null && hiddenBlocks.length > 0;
               return (
-                <Fragment key={i}>
-                  {showDivider && <ConversationDivider />}
+                <>
+                  {/* Hint VOR der Liste — nur wenn der Marker sonst an
+                   * Position 0 stünde (= !showFullHistory) und tatsächlich
+                   * Pre-Reset-Audits existieren. */}
+                  {showResetMarker && !showFullHistory && (
+                    <ResetMarker
+                      lastResetAt={lastResetAt!}
+                      expanded={false}
+                      onToggle={() => setShowFullHistory(true)}
+                    />
+                  )}
+                  {chatBlocks.map((block, i) => {
+                    const prev = i > 0 ? chatBlocks[i - 1] : undefined;
+                    // ConversationDivider unterdrücken, wenn an dieser
+                    // Stelle der ResetMarker erscheint — sonst doppelter Cut.
+                    const isResetBoundary =
+                      showResetMarker && showFullHistory && i === firstVisibleIdx;
+                    const showDivider =
+                      !isResetBoundary &&
+                      prev !== undefined &&
+                      prev.conversationId !== block.conversationId;
+                    return (
+                      <Fragment key={i}>
+                        {isResetBoundary && (
+                          <ResetMarker
+                            lastResetAt={lastResetAt!}
+                            expanded={true}
+                            onToggle={() => setShowFullHistory(false)}
+                          />
+                        )}
+                        {showDivider && <ConversationDivider />}
                   {block.kind === "mcp-tool-call" ? (
                     <McpToolCallBox
                       toolName={block.toolName}
@@ -1193,7 +1320,10 @@ function DirectChat({
                   )}
                 </Fragment>
               );
-            })
+            })}
+                </>
+              );
+            })()
           )}
           {busy && <div className="text-xs text-accent">twin denkt nach…</div>}
           {error && (

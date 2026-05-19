@@ -234,6 +234,12 @@ export const ConversationSchema = z.object({
   status: ConversationStatusSchema,
   startedAt: z.string(),
   endedAt: z.string().nullable(),
+  /**
+   * #106: ISO-Timestamp des letzten Resets. NULL = nie zurückgesetzt
+   * (brand-new Twin oder erste Konv). Frontend nutzt das im DirectChat,
+   * um Audits mit `timestamp < lastResetAt` standardmäßig auszublenden.
+   */
+  lastResetAt: z.string().nullable(),
 });
 export type Conversation = z.infer<typeof ConversationSchema>;
 
@@ -241,6 +247,8 @@ export const ConversationStartInputSchema = z.object({
   ownerUserId: z.string(),
   partnerHandle: z.string(),
   twinId: z.string(),
+  /** #106: Reset-Pfad gibt einen ISO-Timestamp mit; sonst null. */
+  lastResetAt: z.string().nullable().optional(),
 });
 export type ConversationStartInput = z.infer<typeof ConversationStartInputSchema>;
 
