@@ -1704,6 +1704,10 @@ interface ConversationItem {
   partnerDisplayName: string | null;
   lastMessageAt: string;
   unreadCount: number;
+  /** #105: 'active' | 'ended' aus conversations-Tabelle. Bridge-Aggregat-Treffer */
+  /** sind immer 'active' (nur aktive haben Bridge-Messages), lokale Merge-Treffer */
+  /** kommen mit ihrem echten DB-Status. */
+  status: "active" | "ended";
 }
 
 function registerConversationRoutes(
@@ -1757,8 +1761,35 @@ function registerConversationRoutes(
           partnerDisplayName: displayNames?.get(partner) ?? null,
           lastMessageAt: info.lastAt,
           unreadCount: unreadByPartner.get(partner) ?? 0,
+          status: "active",
         });
       }
+
+      // #105: lokale start-only-Konversationen ergänzen, die noch keine
+      // Bridge-Messages haben. Sonst sind frisch angelegte A2A-Konvs in der
+      // Sidebar unsichtbar. Filter:
+      //   - status='active' (ended liegt unter UI-Lifecycle-Item #118)
+      //   - partner != self (Direct-Chat-Rows raus, sonst Doppel-Render)
+      //   - Partner nicht schon im Bridge-Aggregat (Bridge-Pfad hat Vorrang)
+      const seenPartners = new Set(conversations.map((c) => c.partnerHandle));
+      const localConvs = deps.conversationsRepo.listActiveByOwnerAndTwin(
+        ctx.user.userId,
+        entry.twinId,
+      );
+      const selfHandle = entry.handle.toLowerCase();
+      for (const conv of localConvs) {
+        const partner = conv.partnerHandle.toLowerCase();
+        if (partner === selfHandle) continue;
+        if (seenPartners.has(partner)) continue;
+        conversations.push({
+          partnerHandle: partner,
+          partnerDisplayName: displayNames?.get(partner) ?? null,
+          lastMessageAt: conv.startedAt,
+          unreadCount: 0,
+          status: "active",
+        });
+      }
+
       conversations.sort((a, b) => b.lastMessageAt.localeCompare(a.lastMessageAt));
       return { conversations };
     },
@@ -1831,6 +1862,51 @@ function registerConversationRoutes(
         "[conversations] reset durch owner",
       );
       return { reset: true, conversationId: active.id };
+    },
+  );
+
+  // POST /twins/:handle/conversations/:partnerHandle — Start ohne Send (#105)
+  //
+  // Erlaubt einer A2A-Konversation den expliziten Start, bevor die erste
+  // Nachricht geschrieben wird. Body wird ignoriert (Anti-Goal: keine
+  // versteckte Send-Logic in der Start-Route). Idempotent via getOrStart —
+  // wenn bereits eine aktive Konversation für (owner, partner, twin)
+  // existiert, kommt sie zurück; sonst wird eine neue angelegt.
+  //
+  // Bridge-Handle-Validation analog zur Send-Route — verhindert dass ein
+  // Tippfehler eine orphaned-Konversation hinterlässt, die der Empfänger
+  // gar nicht kennen kann.
+  app.post<{ Params: { handle: string; partnerHandle: string } }>(
+    "/twins/:handle/conversations/:partnerHandle",
+    async (request, reply) => {
+      const ctx = await requireOwner(request, reply, request.params.handle);
+      if (!ctx) return;
+      const { entry, user } = ctx;
+      const partner = decodeURIComponent(request.params.partnerHandle).toLowerCase();
+
+      if (partner === entry.handle.toLowerCase()) {
+        return reply.status(400).send({ error: "Selbst-Start nicht erlaubt" });
+      }
+
+      const knownHandles = await fetchBridgeHandles(entry).catch(() => null);
+      if (knownHandles === null) {
+        return reply.status(502).send({
+          error: "Bridge nicht erreichbar — Empfänger konnte nicht validiert werden.",
+        });
+      }
+      if (!knownHandles.has(partner)) {
+        return reply.status(400).send({
+          error: "Diesen Handle kennt die Bridge nicht.",
+          code: "HANDLE_NOT_REGISTERED",
+        });
+      }
+
+      const conversation = deps.conversationsRepo.getOrStart(
+        user.userId,
+        partner,
+        entry.twinId,
+      );
+      return reply.status(201).send({ conversation });
     },
   );
 

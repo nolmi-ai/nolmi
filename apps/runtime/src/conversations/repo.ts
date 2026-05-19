@@ -200,6 +200,29 @@ export class ConversationsRepo {
   }
 
   /**
+   * #105: Listet alle aktiven Konversationen eines Owners pro Twin. Wird
+   * vom List-Endpoint (GET /twins/:handle/conversations) genutzt, um lokale
+   * start-only-Konversationen (#105) sichtbar zu machen, die noch keine
+   * Bridge-Messages haben. Sort DESC nach `started_at` — neueste zuerst,
+   * Caller kann das beim Merge ins Bridge-Aggregat verwenden.
+   */
+  listActiveByOwnerAndTwin(
+    ownerUserId: string,
+    twinId: string,
+  ): Conversation[] {
+    const rows = this.db
+      .prepare(
+        `SELECT * FROM conversations
+           WHERE owner_user_id = ?
+             AND twin_id = ?
+             AND status = 'active'
+           ORDER BY started_at DESC`,
+      )
+      .all(ownerUserId, twinId) as ConversationRow[];
+    return rows.map(rowToConversation);
+  }
+
+  /**
    * 3.4.G: Listet alle beendeten Konversationen eines Twins (älteste zuerst).
    * Aktive Konversationen werden ausgelassen — die sind noch in Bearbeitung
    * und das Reset wird sie selbst embedden. Wird vom Maintenance-CLI mit

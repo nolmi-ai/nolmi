@@ -1396,14 +1396,19 @@ function A2AChat({
       >
         <div className="max-w-3xl mx-auto space-y-3">
           {messages.length === 0 ? (
-            // EmptyState bewusst NICHT gerendert (UX.1.A.3 Verifikation
-            // Tag 17 Abend): `NewConversationModal` erzwingt eine erste
-            // Nachricht beim Anlegen (chat/[handle]/page.tsx:1431-1434),
-            // A2AChat mountet damit nie mit `messages.length === 0`. Der
-            // EmptyState wäre toter Code. Architektur-Fix als Backlog #105
-            // dokumentiert — bis dahin bleibt der Pfad leer (kann strukturell
-            // sowieso nicht getroffen werden).
-            null
+            // #105: EmptyState ist seit dem Start-only-Modal wieder
+            // erreichbar — User kann eine Konv anlegen ohne Erst-Message.
+            // Wording parallel zum DirectChat-EmptyState (line 1139ff), aber
+            // mit A2A-Framing: beide Twins können den Faden aufnehmen.
+            <EmptyState
+              title={`Konversation mit ${partner} gestartet`}
+              description={
+                <>
+                  Schreib eine erste Nachricht oder warte auf eine Antwort
+                  von {partner}. Beide Twins können den Faden aufnehmen.
+                </>
+              }
+            />
           ) : (
             messages.map((m) => (
               <ConversationBubble
@@ -1463,6 +1468,10 @@ function NewConversationModal({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // #105: Content ist jetzt optional — leerer Content startet die Konversation
+  // ohne erste Nachricht (POST .../conversations/:partner), gefüllter Content
+  // ist der bisherige Send-Pfad (POST .../send). EmptyState wird im A2AChat
+  // erreichbar wenn der Start-only-Pfad genutzt wird.
   async function submit() {
     setError(null);
     const target = partner.trim().toLowerCase();
@@ -1470,28 +1479,37 @@ function NewConversationModal({
       setError("Handle muss '@<name>' sein (Kleinbuchstaben, Ziffern, _ und -).");
       return;
     }
-    if (!content.trim()) {
-      setError("Eine erste Nachricht ist Pflicht.");
-      return;
-    }
+    const trimmedContent = content.trim();
+    const startOnly = trimmedContent.length === 0;
     setBusy(true);
     try {
-      const res = await fetch(
-        `${RUNTIME_URL}/twins/${handle}/conversations/${encodeURIComponent(target)}/send`,
-        {
-          method: "POST",
-          credentials: "include",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ content: content.trim() }),
-        },
-      );
+      const url = startOnly
+        ? `${RUNTIME_URL}/twins/${handle}/conversations/${encodeURIComponent(target)}`
+        : `${RUNTIME_URL}/twins/${handle}/conversations/${encodeURIComponent(target)}/send`;
+      const res = await fetch(url, {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        // Fastify lehnt POST mit application/json + leerem Body als
+        // FST_ERR_CTP_EMPTY_JSON_BODY ab — daher auch im Start-only-Pfad
+        // ein explizites `{}` mitschicken. Backend ignoriert den Body.
+        body: startOnly
+          ? JSON.stringify({})
+          : JSON.stringify({ content: trimmedContent }),
+      });
       const body = await res.json().catch(() => ({}));
       if (!res.ok) {
         throw new Error((body as { error?: string }).error ?? `HTTP ${res.status}`);
       }
       onCreated(target);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Senden fehlgeschlagen");
+      setError(
+        err instanceof Error
+          ? err.message
+          : startOnly
+            ? "Konversation konnte nicht gestartet werden"
+            : "Senden fehlgeschlagen",
+      );
     } finally {
       setBusy(false);
     }
@@ -1520,7 +1538,12 @@ function NewConversationModal({
             />
           </div>
           <div>
-            <label className="block text-xs text-muted mb-1">Erste Nachricht</label>
+            <label className="block text-xs text-muted mb-1">
+              Erste Nachricht{" "}
+              <span className="text-[10px]">
+                (optional — leer lassen, um nur eine Konversation zu starten)
+              </span>
+            </label>
             <textarea
               value={content}
               onChange={(e) => setContent(e.target.value)}
@@ -1546,10 +1569,10 @@ function NewConversationModal({
           </button>
           <button
             onClick={submit}
-            disabled={busy || !partner.trim() || !content.trim()}
+            disabled={busy || !partner.trim()}
             className="px-4 py-1.5 text-xs border border-accent text-accent rounded hover:bg-accent hover:text-bg disabled:opacity-30 disabled:cursor-not-allowed"
           >
-            {busy ? "..." : "Senden"}
+            {busy ? "..." : content.trim().length === 0 ? "Starten" : "Senden"}
           </button>
         </div>
       </div>
