@@ -1205,7 +1205,7 @@ Strategische Entscheidung vor Bau: Stufen-Definition braucht eine eigene Strateg
 
 Aus der Empty-State-Verifikation Tag 17 Abend emergiert: Die Inbox- und Chat-Empty-States sind als Component sauber gebaut (#96/#97 Commit `9121405`), aber die strukturelle Chat-Flow-Architektur macht sie praktisch fast unsichtbar. Zwei Items dokumentieren die Fixes für Welle 2.
 
-### 105. A2A-Konversations-Flow: erste Nachricht optional
+### 105. ✅ A2A-Konversations-Flow: erste Nachricht optional (CLOSED Tag 19)
 Aktuell zwingt `NewConversationModal` (`apps/web/app/chat/[handle]/page.tsx:1431-1434`) beim Anlegen einer A2A-Konversation zur Erst-Nachricht. User landet sofort im Message-Mode, sieht keinen Empty-State.
 
 **Befund aus UX.1.A.3-Verifikation Tag 17 Abend:** Diese Architektur macht das EmptyState-Pattern für A2A strukturell unerreichbar. Konzeptionell wäre „Konv anlegen ohne Pflicht-Nachricht, dann tippen" natürlicher — User sieht erst, dass die Konv existiert, und schreibt dann. In Folge dieses Befunds wurde der A2A-EmptyState im Code wieder entfernt (er war toter Pfad).
@@ -1217,7 +1217,9 @@ Backend-Frage: existiert ein Endpoint „Konversation anlegen ohne Send"? Falls 
 **Größe:** M · **Priorität:** should · **Aus:** UX.1.A.3-Verifikation Tag 17 Abend
 **Stufe:** 0 → 1 · **Spur:** UX-Reifung
 
-### 106. DirectChat: aktive Konversation als View, Audit als Historie
+**Update Tag 19 (CLOSED):** Implementiert in Commit `49e059e` (3 Files, +147/-25). Drei Patches: (1) Backend `POST /twins/:handle/conversations/:partner` (Start ohne Send, idempotent via `getOrStart`, Bridge-Handle-Validation analog zur Send-Route); (2) `NewConversationModal` Content-Feld optional, Submit-Button-Label dynamisch "Starten" vs "Senden"; (3) A2AChat-EmptyState reaktiviert mit Partner-Name-Hint. Zwei Architektur-Bugs während Bau gefixt: (a) Fastify `FST_ERR_CTP_EMPTY_JSON_BODY` bei POST mit leerem Body (Fix: `JSON.stringify({})`), (b) Sidebar-Filter-Architektur — List-Endpoint baute nur aus Bridge-Partner-Aggregat, ignorierte lokale Konvs ohne Bridge-Messages. Pre-#105 maskiert, post-#105 echter UX-Bug. Fix: neue `listActiveByOwnerAndTwin`-Repo-Methode, Merge nach Bridge-Aggregat mit Filter (no-self, no-bridge-duplicates). Sub-Bug `status: null` in List-Response durch `ConversationItem`-Interface-Erweiterung mitgelöst. Browser-Smoke 4/4 grün.
+
+### 106. ✅ DirectChat: aktive Konversation als View, Audit als Historie (CLOSED Tag 19)
 Aktuell rendert DirectChat alle Audits aus dem Audit-Stream zeitlich gestapelt. Der Reset-Button setzt einen synthetischen Conversation-Divider (`directChatResetSeq`-Mechanismus, `chat/[handle]/page.tsx:984-986`), aber die alten Audits bleiben sichtbar. Heißt: nach erstem Twin-Use ist der EmptyState für immer weg, weil immer Audit-Historie da ist.
 
 **Befund aus UX.1.A.3-Verifikation Tag 17 Abend:** Strukturell ist DirectChat ein „Audit-Log-Viewer", nicht „Konversations-View". Trade-off:
@@ -1231,6 +1233,8 @@ Was zu entscheiden ist (eigene Strategie-Session vor Bau):
 
 **Größe:** L (Strategie-Session + M-Bau) · **Priorität:** should · **Aus:** UX.1.A.3-Verifikation Tag 17 Abend
 **Stufe:** 0 → 1 · **Spur:** UX-Reifung
+
+**Update Tag 19 (CLOSED):** Implementiert in Commit `412326b` (5 Files, +255/-49). Variante B (Soft-Hide-Reset) gewählt nach Mini-Strategy-Session mit 6 Setzungen (Mental-Model Mix, Persistierung β.1 als neue Spalte, Toggle-UI Inline-Hint, UI-State only, nur Direct-Chat, EmptyState wie brand-new). Phase-1.1-Diagnose enthüllte drei Architektur-Punkte: Reset musste auf Eager-Start (statt Lazy-Start beim nächsten Send), ChatBlock hat kein timestamp-Feld (AuditEntries-Filter VOR `buildChatBlocksFromAudits`), Detail-Endpoint braucht Conversation-Metadata. Bau: Migration 020 (`last_reset_at`-Spalte), Reset-Endpoint mit Eager-Start, Detail-Endpoint mit `{id, status, startedAt, endedAt, lastResetAt}`, Frontend AuditEntries-Filter mit `showFullHistory`-State (UI-only), `ResetMarker`-Component analog `ConversationDivider`, Post-Reset-EmptyState. Sub-Bug Detail-Endpoint Self-Chat mit-gelöst (`isDirectChat`-Konditionalisierung, Bridge-Call übersprungen für Direct-Chat). **Mit Block-2-Closure ist #96 vollständig funktional** — beide Pain-Points (A: A2A-Empty-State, B: DirectChat-Audit-Log-Viewer) gelöst. A2A-Reset bleibt späteres Item (#118). Backend-Smoke 4/4 grün, Browser-Smoke 7/7 grün.
 
 ## Pre-Launch-Phase A — Block 3: Schmaler Computer-Use-Hook
 

@@ -1,6 +1,6 @@
 # twin-lab — Stand
 
-**Letztes Update:** 17. Mai 2026, Abend (Tag 18 — Block-1-Closure)
+**Letztes Update:** 19. Mai 2026, Nachmittag (Tag 19 — Block-2-Closure)
 
 ## Aktuell in Arbeit
 
@@ -28,6 +28,97 @@ A2A-Bridge**. Nicht Computer-Use.
 Inhalte (11 Items in drei Tranchen) unverändert, nur Build-Pfad
 leicht angepasst (#100/#101 vorgezogen, weil Vision-kritisch für
 die Differenzierungs-Story).
+
+## Tag 19 (19. Mai 2026, Dienstag) — Pre-Launch-Phase A Block 2
+
+**Vormittag — Diagnose Phase 1.1 für Block 2 (~30 Min):**
+
+Vor dem Bau für #105/#106 eine fokussierte Diagnose-Session.
+Hypothese A (orthogonale Items, getrennt baubar) bestätigt:
+- Chat-Monolith 1700+ Zeilen mit 15 Inline-Functions/Components
+- A2A-Flow erzwingt Erst-Message im NewConversationModal,
+  A2AChat-EmptyState ist toter Pfad
+- DirectChat ist Audit-Log-Viewer, nicht Konversations-View
+- Empfehlung Build-Reihenfolge #105 → #106 übernommen
+
+**Mittag-Nachmittag — #105 A2A-Modal (Commit `49e059e`):**
+
+Drei Patches plus zwei Architektur-Bugs während Bau:
+
+- Patch 1: Backend `POST /twins/:handle/conversations/:partner`
+  (Start ohne Send, idempotent via `getOrStart`, Bridge-Handle-
+  Validation analog zur Send-Route)
+- Patch 2: `NewConversationModal` Content-Feld optional, Submit-
+  Button-Label dynamisch "Starten" vs "Senden"
+- Patch 3: A2AChat-EmptyState reaktiviert mit Partner-Name-Hint
+- **Bug 1:** Fastify `FST_ERR_CTP_EMPTY_JSON_BODY` bei POST mit
+  `application/json` aber leerem Body. Fix: `JSON.stringify({})`
+  statt body weglassen.
+- **Bug 2:** Sidebar-Filter-Architektur. List-Endpoint baute nur
+  aus Bridge-Partner-Aggregat, ignorierte lokale `conversations`-
+  Rows. Pre-#105 maskiert (Konvs entstanden nur via Send), post-
+  #105 echter UX-Bug. Fix: neue `listActiveByOwnerAndTwin`-Repo-
+  Methode, Merge nach Bridge-Aggregat mit Filter (no-self, no-
+  bridge-duplicates).
+- Sub-Bug `status: null` in List-Response durch `ConversationItem`-
+  Interface-Erweiterung mitgelöst.
+- Browser-Smoke 4/4 grün.
+
+**Nachmittag — #106 DirectChat-View-Architektur (Commit `412326b`):**
+
+Strategy-Session mit 6 Setzungen vor Bau (Mental-Model Mix,
+Persistierung β.1 `last_reset_at` als neue Spalte, Toggle-UI
+Inline-Hint, UI-State only, nur Direct-Chat, EmptyState wie
+brand-new). Phase-1.1-Diagnose enthüllte drei Architektur-Punkte
+die das Original-Briefing nicht antizipiert hatte:
+
+- Reset endet heute alte Konv + lazy-startet neue beim nächsten
+  Send. Für `last_reset_at` muss Eager-Start (Option β):
+  Reset endet alte + startet sofort neue mit `lastResetAt = NOW()`.
+- `ChatBlock` hat kein timestamp-Feld → AuditEntries-Filter
+  VOR `buildChatBlocksFromAudits`, nicht ChatBlock-Filter.
+- Detail-Endpoint hat heute kein `conversation`-Object →
+  Erweiterung mit `{id, status, startedAt, endedAt, lastResetAt}`.
+
+Vier Patches plus Sub-Bug:
+
+- Patch 1: Migration 020 + Repo + Reset-Endpoint mit Eager-Start
+  + Detail-Endpoint mit Conversation-Metadata
+- Patch 2: Frontend AuditEntries-Filter mit `showFullHistory`-
+  State (Default false, UI-only)
+- Patch 3: `ResetMarker`-Component (analog `ConversationDivider`)
+  mit Toggle-Link "Vorherige anzeigen/verbergen"
+- Patch 4: Post-Reset-EmptyState mit Tutorial-Wording wie
+  brand-new Twin
+- **Sub-Bug:** Detail-Endpoint Self-Chat. Bridge-Call mit
+  `partner === handle` wirft 502 (Self-Reference). Fix:
+  `isDirectChat`-Konditionalisierung, Direct-Chat überspringt
+  Bridge-Call (Audit-Stream ist Truth-Source).
+- Backend-Smoke 4/4 grün, Browser-Smoke 7/7 grün.
+
+**Doku-Wellen:**
+
+- BACKLOG #118 (Konversations-Lifecycle-UI) emergent während
+  #105-Bau angelegt (Commit `74f7d5d`)
+- Tag-19-Closure (dieser Stand-Update)
+
+**Production-Deploy ausstehend.** VPS auf `56cb0dc` (Tag-18-
+Stand). Tag-19-Stand-Deploy wartet auf Tag 20+.
+
+**Block-2-Stand nach Tag 19:**
+- 2 von 2 Items durch (#105, #106)
+- #96 mit Block-2-Closure vollständig funktional (Probleme A+B
+  beide gelöst, war nach Tag 18 noch partially functional)
+- Block 2 von Pre-Launch-Phase A vollständig
+
+**Pre-Launch-Phase A Bilanz:**
+- Block 1 ✅ 11/11 (Tag 18)
+- Block 2 ✅ 2/2 (Tag 19)
+- Block 3: 0/2 offen (#107 Recherche-Workflow, #108 Beta-Deklaration)
+- Block 4: 0/3 offen (#109 DEPLOYMENT-Test, #110 Onboarding-Wizard,
+  #111 Public-Repo-Hygiene)
+- Block 5: 0/4 offen (#112 Landing, #113 Demo, #114 Launch-Posts,
+  #115 Timing)
 
 ## Tag 18 (17. Mai 2026, Sonntag) — Pre-Launch-Phase A Block 1
 
@@ -651,3 +742,69 @@ als L-Klassifizierung mit Strategy-Session-Buffer. Über sieben
 Bau-Items (heute) wurden drei Strategy-Sessions tatsächlich nötig
 (#101 vorab, #87 vorab, plus #99 als Diagnose-driven Re-Scope) — der
 Rest lief mit Phase-1.1-Diagnose ohne Session durch.
+
+## Lessons Tag 19
+
+**1. Diagnose-Phase 1.1 mit Stop-Punkt bewährt sich weiter.** Bei #106
+hat die Diagnose drei Architektur-Punkte aufgedeckt, die das Original-
+Briefing nicht antizipiert hatte: Eager-Start statt Lazy-Start für
+`last_reset_at`-Persistierung, AuditEntries-Filter statt ChatBlock-
+Filter (ChatBlock hat kein timestamp-Feld), Detail-Endpoint braucht
+Conversation-Metadata-Erweiterung. Stop-Punkt nach Diagnose
+ermöglichte Setzungs-Konkretisierung vor Bau, statt Briefing-
+Annahmen blind umzusetzen.
+
+Lehre: bei Items mit Daten-Modell-Touch zahlt sich Phase-1.1 immer
+aus — die ersten 15-30 Min Diagnose sparen Stunden falscher Bau-
+Richtung.
+
+**2. Architektur-Bugs werden durch neue Features sichtbar.** Zwei
+Beispiele aus Tag 19:
+
+- **Sidebar-Filter-Bug:** List-Endpoint baute seit jeher nur aus
+  Bridge-Partner-Aggregat, ignorierte lokale `conversations`-Rows.
+  Pre-#105 maskiert, weil Konvs nur über Bridge-Send entstehen
+  konnten. Mit #105 (Start ohne Send) wurde der Architektur-Bug
+  zum echten UX-Bug — neue A2A-Konvs waren in der Sidebar
+  unsichtbar.
+
+- **Detail-Endpoint-Self-Bug:** Bridge-Call für `partner === handle`
+  war immer semantisch falsch (Self-Reference, keine Bridge-Messages
+  möglich). Aber: pre-#106 wurde der Endpoint für Direct-Chat gar
+  nicht aufgerufen — Frontend lud nur den Audit-Stream. Mit #106
+  Detail-Erweiterung (`lastResetAt`-Feld) wurde der Self-Call zum
+  echten Bug, kommt mit 502 zurück.
+
+Lehre: bei jedem neuen Feature, das einen alten Endpoint anders
+nutzt, an die Maskierungs-Schicht denken. Phase-1.1 sollte explizit
+fragen "wer hat diesen Endpoint heute schon gerufen, und wie?".
+
+**3. Pattern-Reuse über mehrere Bauten hinweg verstärkt sich.**
+
+- `EmptyState`-Component aus Tag 17 (#96/#97) wurde von #105 für
+  A2A reaktiviert und in #106 für Post-Reset-State wiederverwendet
+  — drei Bauten, eine Component.
+- `formatRelative` aus #99 läuft in 3 Kontexten (Audit-Templates,
+  MaturityDetail, ResetMarker).
+- `ConversationStartInputSchema`-Erweiterung für `lastResetAt`
+  nutzt das Start-Pattern, das #105 etabliert hat (Konv-Anlage
+  ohne Send). Symmetrische Architektur entsteht durch Disziplin
+  über mehrere Bauten, nicht durch upfront-Design.
+
+Lehre: lieber bestehende Components erweitern als neue parallel
+bauen. Selbst wenn das Erweitern 30 Min mehr kostet, vermeidet es
+Doppel-Pflege.
+
+**4. Eager-Start statt Lazy-Start als Reset-Pattern.** Reset hat
+heute zwei Lifecycles: alte Konv enden (sofort) + neue Konv starten
+(lazy beim nächsten Send). Für `last_reset_at`-Persistierung musste
+das auf Eager-Start umgestellt werden, weil sonst die Boundary
+nicht greift. Plus: AuditEntries-Filter statt ChatBlock-Filter
+(Audits haben native `timestamp`, ChatBlocks nicht). Plus: Fastify
+`FST_ERR_CTP_EMPTY_JSON_BODY`-Pattern — `Content-Type: application/
+json` verlangt valides JSON-Body, leerer Body wirft 400. Lösung:
+`JSON.stringify({})` statt body weglassen.
+
+Lehre: bei Tracking-Daten (was wurde wann gemacht?) gilt
+Eager-Persist > Lazy-Persist. Lazy spart einen Insert, kostet aber
+Korrektheits-Schwierigkeit.
