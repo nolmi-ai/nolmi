@@ -1398,6 +1398,32 @@ Twin beobachtet eigene Konversationen, erkennt wiederkehrende Patterns ("Owner f
 
 **Größe:** XL · **Priorität:** vision-kritisch · **Aus:** Strategy-Session Tag 18 Nachmittag · **Spur:** Pre-Launch-Phase B+ / Phase 3.7
 
+### 118. Konversations-Lifecycle-UI (Beenden / Löschen / Reset)
+
+User kann A2A-Konversationen heute weder beenden noch löschen. Die DB kennt `conversations.status: 'active' | 'ended'`, aber UI hat keinen Trigger. Plus: List-Endpoint liefert `status: null` (Schema-Diskrepanz zum Detail-Endpoint).
+
+**Strategy-Fragen vorab:**
+
+- **Reset vs End vs Delete:** Was bedeuten die drei semantisch?
+  - **Reset:** Audits bleiben in DB, UI versteckt sie hinter Divider (heutige DirectChat-Logik, `chat/[handle]/page.tsx:171`)
+  - **End:** `status = 'ended'` in DB, Konversation taucht in Liste nicht mehr auf, Audits bleiben
+  - **Delete:** DB-Row weg, Audits weg, Kontext für Memory weg (?)
+- **Sichtbarkeit ended-Konversationen:** Filter-Toggle "auch beendete anzeigen"? Eigene Section?
+- **Re-Activation:** Kann beendete Konversation reaktiviert werden durch erneutes Senden? (UNIQUE-Constraint auf (owner, partner, twin)+status='active' erlaubt das technisch)
+- **Bridge-Sync:** Was passiert wenn @markus eine Konversation beendet aber @florian noch im aktiven Stand ist?
+
+**Hängt zusammen mit:**
+- #106 DirectChat-View-Architektur (Variante B Soft-Hide ist verwandtes Konzept)
+- #96 Empty-State-Architektur
+
+**Plus Sub-Bug:** List-Endpoint sollte `status` mitliefern statt `null`. Quick-Fix als Teil dieses Items.
+
+**Aufwand-Range:**
+- Quick (nur Backend-Schema-Fix + Beenden-Button): M
+- Full (Reset/End/Delete sauber getrennt + Re-Activation + UX): L+
+
+**Größe:** L (mit Strategy-Session) · **Priorität:** should · **Aus:** #105-Bau Tag 19 Vormittag · **Spur:** Pre-Launch-Phase A Block 2 oder später
+
 ---
 
 ## Lessons gelernt
