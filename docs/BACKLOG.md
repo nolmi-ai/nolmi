@@ -995,9 +995,13 @@ Twins werden überall erreichbar, Bridge-Architektur dezentralisiert.
 Twin via Telegram/WhatsApp/Signal/iMessage erreichbar — zuerst nur für Owner selbst (nicht für externe Schreiber). Telegram zuerst (Bot-API einfach, ~2-3 Tage Code), dann WhatsApp (Meta-Business-API, KYC-Bürokratie, ~5-7 Tage), dann Signal/iMessage. Channel-Adapter pro Plattform mit einheitlicher interner API. Auth pro Channel: Sender-ID mappt auf User in Twin-DB.
 **Größe:** L · **Priorität:** should · **Aus:** Backlog-Anregung Markus, 1. Mai 2026 Abend
 
+**Inspiration NanoClaw (Tag 21):** Skills-driven Channel-Install-Pattern als Vorbild — `/add-telegram`, `/add-whatsapp` etc. als Claude-Code-getriebene Skills statt monolithischer Adapter-Bau. NanoClaw Trunk shippt nur Registry + Infrastructure, Channel-Adapter sind opt-in und kopieren das benötigte Modul in den Fork. Direkter Bezug zu Twin-Lab's `examples/skills/`-Foundation (Tag 20). Cross-Reference: https://github.com/nanocoai/nanoclaw.
+
 ### 30. Multi-Channel-Adapter — Public-Mode
 Externe schreiben Twin via Channel an, Twin entscheidet ob er antwortet (Mandate-Layer wird kritisch). Zusätzlicher Sicherheits-Layer ggü. Owner-Mode. DSGVO-Erwägungen (WhatsApp-Geschäftskonto, Datenfluss US-Anbieter).
 **Größe:** L · **Priorität:** nice · **Aus:** Backlog-Anregung Markus, 1. Mai 2026 Abend
+
+**Inspiration NanoClaw (Tag 21):** Container-Isolation pro Agent-Gruppe als Pattern für Public-Mode-Sicherheit. NanoClaw runs per-Agent-Group in eigenem Docker-Container mit eigener CLAUDE.md, eigenem Memory, eigenen Mounts. Für Twin-Lab's Public-Mode (externe Sender + Approval-Gates) relevant — verstärkt Isolations-Garantie über DB-Twin-ID-Trennung hinaus. Phase-B-Architektur-Erwägung.
 
 ### 31. Föderation — Mehrere Bridges sprechen miteinander
 Phase 2 hat zentrale Bridge. Phase 4 = mehrere Bridges können sprechen (Matrix-Modell). Twin auf Bridge-A kann mit Twin auf Bridge-B reden, ohne dass beide auf derselben Bridge registriert sind.
@@ -1018,6 +1022,8 @@ Vorteile: Ökosystem-Anbindung (Google ADK, CrewAI, Langgraph alle A2A-fähig), 
 
 Vorbedingungen: Phase 4 (Multi-Channel-Architektur), Mandate-Engine reif für externe Quellen. Aufwand: 2-3 Wochen für saubere Adapter-Schicht. Bestandteil der Föderations-Strategie.
 **Größe:** L · **Priorität:** should · **Aus:** Markus' Recherche zu Google A2A Codelab, 2. Mai 2026
+
+**Inspiration NanoClaw (Tag 21):** NanoClaw's „Skills over Features"-Philosophie ist Pattern-Bestätigung für A2A als opt-in Adapter statt eingebauter Capability. Plus Credential-Vault (OneCLI Agent-Vault) als Pattern für API-Key-Isolation bei externen Protokollen — Twin-Lab heute mit AES-256-GCM-Encryption in DB, NanoClaw's Vault-Pattern als nächste Schicht für Phase B.
 
 ---
 
@@ -1426,6 +1432,10 @@ Twin nimmt in der Konversation Anweisung "installiere Skill X" oder "verbinde MC
 - Mobile-Anbindung (eigenes Phase-B-Item, noch nicht angelegt)
 
 **Größe:** L · **Priorität:** later · **Aus:** Strategy-Session Tag 18 Nachmittag · **Spur:** Pre-Launch-Phase B (SaaS + Mobile)
+
+**Inspiration NanoClaw (Tag 21):** NanoClaw's `/add-<name>`-Pattern (z.B. `/add-telegram`, `/add-codex`) ist die natürliche Evolution von Conversational Install. Claude Code übernimmt das Install-Step direkt, kopiert nur das benötigte Modul in den Fork. Vision-Bestätigung für Anna-Use-Case: „Anna sagt auf WhatsApp ‚installiere Calendar-Skill'" → Twin-Lab erkennt Intent, Claude Code bzw. Twin-Service führt aus mit Owner-Approval.
+
+Plus: NanoClaw's „AI-native, hybrid by design"-Onboarding-Philosophie (scripted Happy-Path + Claude-Code-Fallback bei Step-Failure) als Inspiration für Phase-B-Onboarding-Evolution über das heutige Wizard-Form-Pattern (#110) hinaus.
 
 ### 117. Self-Authored Skills (Twin erstellt eigene Skills)
 
