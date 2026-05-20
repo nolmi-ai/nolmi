@@ -1309,6 +1309,8 @@ Verbleibende Polish-Punkte:
 **Größe:** S-M · **Priorität:** should · **Aus:** Tag 21 #110 Phase 2A Smoke-Befund
 **Status:** offen, Phase-B-Kandidat (UX-Welle 2)
 
+**Update Tag 21 (nach Phase 2A Closure):** Foundation aus Phase 2A für den vollen Polish steht — `w-full max-w-X mx-auto`-Pattern in flex-col-Layouts (gelernt im Tag-21-Layout-Saga, siehe STAND-Lesson) und Container-Width-Hierarchie (`/login` 448px für Auth, Onboarding/Wizard 672px). Beim vollen Polish: Hierarchie nicht brechen, Pattern weiter nutzen für Step-Indicator, Mobile-Responsive, Animationen. Section-Component hat heute optionalen `title` — bleibt verfügbar für künftige Card-Gruppen, ohne in Form-Steps zurückzukommen.
+
 ## Pre-Launch-Phase A — Block 4: Self-Hosting-Polish
 
 Items aus dem Strategy-Pivot Tag 18. Block 4 macht das Repo für externe Tech-Affine deploybar. Spec: `docs/PRE-LAUNCH-A-STRATEGY.md`.

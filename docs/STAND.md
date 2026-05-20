@@ -1,6 +1,6 @@
 # twin-lab — Stand
 
-**Letztes Update:** 20. Mai 2026, Nachmittag (Tag 20 — #107 Frontend-Closure)
+**Letztes Update:** 21. Mai 2026, Abend (Tag 21 — Phase 1 Endpoint + Phase 2A Wizard-Refactor)
 
 ## Aktuell in Arbeit
 
@@ -28,6 +28,87 @@ A2A-Bridge**. Nicht Computer-Use.
 Inhalte (11 Items in drei Tranchen) unverändert, nur Build-Pfad
 leicht angepasst (#100/#101 vorgezogen, weil Vision-kritisch für
 die Differenzierungs-Story).
+
+## Tag 21 (21. Mai 2026, Donnerstag) — Pre-Launch-Phase A Block 4 #110 (Phase 1 + Phase 2A)
+
+**Vormittag — Phase 1 #110 Skill-Import-Endpoint (Commit `ec45b94`):**
+
+Foundation-Endpoint für den Wizard-MCP-Hyperbrowser-Step (Phase 2). `POST /twins/:handle/skills/import` mit Whitelist-Pattern in `packages/shared`:
+
+- `EXAMPLE_SKILL_TEMPLATES = ['recherche-workflow'] as const` als Zod-Enum
+- `SkillImportRequestSchema = z.object({ source: z.literal('example'), path: z.enum(...) })`
+- Idempotent via `force: true` — existing → 200 updated, neu → 201 created
+- Owner-Auth via existing `requireOwner`-Pattern
+- Path-Injection-Schutz: Zod-Enum + defensiver `.. / \`-Check
+
+Refactor in einem Schwung: File-IO + YAML-Parse + camelCase-Mapping + Repo-Insert aus `twin:skill-create`-CLI in `apps/runtime/src/skills/import-from-dir.ts` extrahiert. CLI nutzt die neue Funktion, Endpoint auch — keine Duplikation. Plus `config.examplesDir`-Konstante (`WORKSPACE_ROOT`-relativ, funktioniert lokal und im Container nach #120).
+
+**Source-Tracking-Setzung:** `SkillSourceSchema` in shared um `'example'` erweitert (Enum jetzt `'manual' | 'mcp' | 'example'`). Endpoint setzt explizit `source='example'`, CLI bleibt default `'manual'` (Backward-Compat). `validateSourceConsistency` vereinfacht: `mcp` verlangt MCP-Binding, alle Non-MCP-Sources verlangen null. UPDATE-Pfad flippt source unconditional → Tracking-Information für späteres Re-Import bei Template-Updates.
+
+Curl-Smoke 6/6 grün:
+- Erst-Aufruf: 201 created mit `recherche-workflow|forced|1|example`
+- Zweit-Aufruf (Idempotenz): 200 updated
+- Unbekannter Path: 400 Zod-Error
+- Path-Traversal `../persona`: 400 (Zod fängt vor Defensive-Check)
+- Unknown source: 400
+- Non-existing Twin: 404
+
+**Mittag-Nachmittag-Abend — Phase 2A Wizard-Refactor (6 Commits, alle gepusht):**
+
+Inkrementeller Refactor des bestehenden 8-Step-Wizards (Strategie α aus Phase-1.1-Diagnose: Step-für-Step entfernen statt Re-Bau).
+
+| Commit | Was | Größe |
+|---|---|---|
+| `dca5ef2` | Mandate-Step entfernt, Backend-Default `cautious` via `.optional().default()` | XS |
+| `944a09c` | Pfad-Wahl + GoodbyeScreen entfernt, hosted-Default für Phase A | XS |
+| `d20c7ff` | Bridge-Step entfernt, Defensive-Hint im Review-Header | XS |
+| `fe30af9` | Smoke-Bug-Fixes: Weiter-Button auf Step 0 + Generic-Placeholders + erster Container-Width-Versuch | XS |
+| `21407ef` | Section-Cards für Steps 1-4 (Sackgasse — visuelle Konsistenz, aber neue Inkonsistenz vs AccountBlock) | XS |
+| `c3e7dbb` | Layout-Harmonisierung (Section-Cards zurückgerollt, alle Container auf `max-w-2xl`) | S |
+| `d95f9a2` | w-full-Fix für flex-col-Shrinking + /login auf `max-w-md` | XS |
+
+Resultat:
+- Wizard von 8 → 5 Steps (Persona Wer/Wie/Worüber, LLM, Review)
+- Datei `apps/web/app/onboarding/page.tsx` von 1466 → 1239 Zeilen (−227)
+- Defaults greifen unsichtbar: `mandateTemplate='cautious'` vom Backend, `pathChoice='hosted'` impliziert, Bridge-Anbindung im Submit-Handler
+- Layout-Hierarchie: `/login` 448px (kompakt für Auth) → Onboarding/Wizard 672px (großzügig)
+- Generic-Placeholders (Open-Source-Hygiene vor #111 Apache-2.0-LICENSE)
+
+Browser-Smoke-Bilanz Tag 21:
+- 4 Smokes durchgeführt; 10/10 funktional grün (alle Steps, DB-Default `cautious`-Mandates verifiziert, Submit + Redirect)
+- 4 Layout-Iterationen: Mobile-Viewport-Falsch-Diagnose + drei echte Versuche bis `w-full`-Fix saß
+- Final: Layout-Hierarchie-Eindruck (Login kompakt, Wizard großzügig) bestätigt
+
+**Lessons Tag 21:**
+
+1. **`w-full` + `max-w-X` in flex-col-Layouts:** `max-w-X` allein gibt nur Obergrenze. In flex-col-Children muss `w-full max-w-X mx-auto` als Pattern gelten, sonst shrinkt das Element auf content-min-width statt `align-items: stretch` zu folgen. Layout-Shell ist `<body flex flex-col>` → `<main flex flex-col>` → Wizard-Container — Pattern jetzt fest.
+
+2. **Mobile-Viewport-Falle in DevTools:** Der DevTools-Header „Responsive 2519 × 775" ist nur Bezeichnung, nicht aktive Simulation. Bei Layout-Bug-Diagnose immer Cmd+Shift+M-Status aktiv prüfen plus `window.innerWidth` in der Console. Mein Diagnose-Bet auf Mobile-Viewport-Mode war auf Tag 21 deshalb falsch — der Bug war echt, nicht der Viewport.
+
+3. **Strategy-Setzungen vor Bau bei Layout-Iterationen:** Nach zwei „halbgar"-Befunden Schluss mit Trial-and-Error, stattdessen drei Setzungen festlegen (Container-Width, Card-Behandlung, Form-Field-Breite), dann Bau. Hat im Layout-Saga den Ausweg gefunden (`c3e7dbb`).
+
+4. **Diminishing-Returns-Disziplin:** Nach drei Smoke-Iterationen ohne sichtbaren Fortschritt → Push trotzdem (Stand objektiv besser als Vor-Stand) + Backlog-Item für vollen Polish. Beim vierten Versuch saß's dann doch (`d95f9a2`) — aber die Disziplin hätte auch früheren Push mit Verweis auf #121 erlaubt.
+
+**Side-Task — NanoClaw-Inspiration Cross-References (Commit `a3a96d8`):**
+
+Vier existing Backlog-Items um NanoClaw-Inspirations-Verweise erweitert: #29 + #30 (Multi-Channel-Adapter, Skills-driven Channel-Install + Container-Isolation), #36 (Google A2A, Credential-Vault), #116 (Conversational Install, `/add-<name>`-Pattern + AI-native Onboarding). Pattern-Bestätigung für `examples/skills/`-Foundation (Tag 20).
+
+**Stand Block 4 nach Tag 21:**
+
+- #110 Onboarding-Wizard: Phase 1 ✅ (Endpoint), Phase 2A ✅ (Step-Removal + Layout)
+- #110 Phase 2B offen (Tag 22+): Persona-Kollaps (M), MCP-Hyperbrowser-Step (M), Hard-Trigger in /chat (XS), Settings-Button für Wizard-Re-Aufruf (S)
+- #109 DEPLOYMENT.md + #111 Public-Repo-Hygiene: weiter offen, Reihenfolge nach #110-Closure
+- #121 Wizard-Layout-Polish: offen, Phase-B-Kandidat — w-full-Pattern + Container-Width-Hierarchie aus Phase 2A als Foundation
+
+**Pre-Launch-Phase A Bilanz nach Tag 21:**
+
+- Block 1: ✅ 11/11 (Tag 18, deployed)
+- Block 2: ✅ 2/2 (Tag 19, deployed)
+- Block 3: ◐ 1/2 (#107 ✅, #108 in Block 4/5)
+- Block 4: ◐ 0.5/3 (#110 zur Hälfte durch, #109 + #111 offen)
+- Block 5: 0/4 offen
+
+Bei 21 Tagen verfügbar (Tag 21 → Tag 42) und Block 4-Rest + Block 5 zusammen ~13-15 Tage kalkuliert bleiben ~6-8 Tage Reserve.
 
 ## Tag 20 (20. Mai 2026, Mittwoch) — Pre-Launch-Phase A Block 3 #107
 
