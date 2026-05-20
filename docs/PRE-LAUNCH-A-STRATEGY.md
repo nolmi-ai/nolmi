@@ -261,7 +261,7 @@ nicht in die letzten Tage rutschen.
   Briefing angelegt
 - `docs/BACKLOG.md` #27 — Phase 3.6 (Hyperbrowser/Computer-Use) wird
   formal auf Phase B verschoben
-- `docs/3.5-STRATEGY.md` Section „Was nach 3.5 Foundation kommt" —
+- `docs/archive/3.5-STRATEGY.md` Section „Was nach 3.5 Foundation kommt" —
   die dort formulierte Phase-3.6-Erwartung wird hier formal pausiert
-- `docs/3.4-STRATEGY.md` / `docs/3.5-STRATEGY.md` — Format-Vorlage für
+- `docs/archive/3.4-STRATEGY.md` / `docs/archive/3.5-STRATEGY.md` — Format-Vorlage für
   dieses Dokument

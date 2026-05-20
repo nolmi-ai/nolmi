@@ -13,7 +13,7 @@ import type { EmbedOptions, EmbeddingProvider } from "./types.js";
 // resolved Extractor-Objekt — so überleben gleichzeitige Erst-Aufrufe sauber
 // (keiner triggert einen zweiten Load).
 //
-// E5-Prefix-Pattern (3.4-STRATEGY.md, "E5-Pattern-Hinweis"):
+// E5-Prefix-Pattern (docs/archive/3.4-STRATEGY.md, "E5-Pattern-Hinweis"):
 //   - Query-Inputs (User-Suchanfragen) bekommen "query: " vorangestellt
 //   - Passage-Inputs (gespeicherte Memory) bekommen "passage: " vorangestellt
 // Das Modell ist auf dieses Format trainiert; Query-Passage-Cosine fällt

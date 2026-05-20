@@ -114,7 +114,7 @@ export const CONVERSATION_LIVE_WINDOW = parseIntEnv(
 //
 // 3.4.I-Refactor: das bisherige einstufige `EPISODIC_SIMILARITY_THRESHOLD`
 // ist weggefallen. Stattdessen Hybrid-Search (Vector + FTS5) mit RRF-Merge
-// und zweistufiger Threshold-Sicherung. Siehe `docs/3.4.I-STRATEGY.md`
+// und zweistufiger Threshold-Sicherung. Siehe `docs/archive/3.4.I-STRATEGY.md`
 // "Pool, Merge, Threshold".
 
 /**

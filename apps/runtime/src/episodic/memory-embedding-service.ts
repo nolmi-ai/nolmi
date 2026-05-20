@@ -14,7 +14,7 @@ import type { EmbeddingProvider } from "./providers/index.js";
 //   - Server-Route /conversations/reset: für kurze Konversationen ohne Segments
 //   - TwinDiaryService (3.4.F): nach Diary-Insert
 //
-// Failure-Policy (3.4-STRATEGY.md "Failure-Handling"):
+// Failure-Policy (docs/archive/3.4-STRATEGY.md "Failure-Handling"):
 //   Embedding-Failure unterbricht die Hauptoperation NICHT. Wir loggen den
 //   Reason, setzen status='failed' und werfen NICHT. Caller (Send-Path,
 //   Reset-Route) merken nichts; der Maintenance-CLI (3.4.G) räumt später auf.
@@ -233,7 +233,7 @@ export class MemoryEmbeddingService {
 // Konversationen schneidet die Pipeline hinten ab — ein Reset bei <50
 // Messages bleibt aber in den meisten Fällen darunter. Falls Real-Data-Test
 // zeigt dass das Truncation-Problem akut wird, ist eine LLM-Verdichtung
-// (analog Summary-Generation) der Upgrade-Pfad (3.4-STRATEGY.md
+// (analog Summary-Generation) der Upgrade-Pfad (docs/archive/3.4-STRATEGY.md
 // "Open Questions").
 
 const COUNTING_CAPABILITIES_FOR_AGGREGATION = new Set([

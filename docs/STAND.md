@@ -97,6 +97,8 @@ Erwartete Block-4-Größe: ~8.5 Tage Bau.
 
 Bau startet Tag 21 mit #110 Wizard Backend.
 
+**Plus Docs-Cleanup:** Phase-3.4 + Phase-3.5 historische Strategy-Docs (5 Files) nach `docs/archive/` verschoben. `docs/archive/README.md` mit Inventar. Aktive Strategy-Docs in `docs/` bleiben unverändert. Git-History erhalten via `git mv`. Atomic-Refactor: ~7 Source-Code-Refs (`apps/runtime/src/episodic/`, `config.ts`) plus `ROADMAP.md` und `PRE-LAUNCH-A-STRATEGY.md` auf neue Pfade umgebogen.
+
 **Pre-Launch-Phase A Bilanz nach Tag 20:**
 
 - Block 1: ✅ 11/11 (Tag 18, deployed)

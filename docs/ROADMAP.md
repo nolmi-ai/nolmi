@@ -75,7 +75,7 @@ Macht Twins inhaltlich tiefer. Reihenfolge ist klar: **Skill-System ist Fundamen
 
 **Extended Foundation: Datenschicht-Erweiterungen für die fünf abhängigen Patterns** (Zeit-Erleben, Aufmerksamkeit, Selbst-Reflexion, Lebens-Narrativ, Schlaf/Träume). Pattern-Logic kommt in eigenen späteren Phasen.
 
-Vollständige Strategie-Doku: `docs/3.4-STRATEGY.md`.
+Vollständige Strategie-Doku: `docs/archive/3.4-STRATEGY.md`.
 
 ---
 
@@ -138,9 +138,9 @@ Sieben Sub-Schritte (3.4.C entfiel, in 3.4.B integriert):
 - **3.4.E** ✅ Vector-Search im Send-Path (siebte System-Prompt-Schicht hinter summaryBlock)
 - **3.4.F** ✅ Twin-Diary-CLI (`twin:diary-add`, `twin:diary-list`)
 - **3.4.G** ✅ Maintenance-CLI `twin:memory-embed-all` (force/type/dry-run, Provider-Wechsel)
-- **3.4.H** ⏳ End-to-End-Smoke-Test (`docs/3.4-SMOKE.md`, Phasen 1+2 durch)
+- **3.4.H** ⏳ End-to-End-Smoke-Test (`docs/archive/3.4-SMOKE.md`, Phasen 1+2 durch)
 
-Vollständige Spec: `docs/3.4-STRATEGY.md`. Smoke-Protokoll: `docs/3.4-SMOKE.md`.
+Vollständige Spec: `docs/archive/3.4-STRATEGY.md`. Smoke-Protokoll: `docs/archive/3.4-SMOKE.md`.
 
 ### 3.5 — Hyperbrowser als MCP-Skill
 **Größe:** M · **Zeitfenster:** 1 Woche

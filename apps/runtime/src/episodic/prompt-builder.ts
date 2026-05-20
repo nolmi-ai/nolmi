@@ -9,7 +9,7 @@ import type { RetrievalResult } from "./memory-retrieval-service.js";
 // 3.4.I (#99): Wording schärfer. Der 3.4-Smoke hat gezeigt, dass das alte
 // "könnten passen, nicht erzwingen"-Wording dem LLM erlaubt hat, aus
 // Token-Overlap-Hits detaillierte Halluzinationen zu rekonstruieren
-// (siehe `docs/3.4-SMOKE.md` "Bayreuth-Halluzinations-Szenario"). Neuer
+// (siehe `docs/archive/3.4-SMOKE.md` "Bayreuth-Halluzinations-Szenario"). Neuer
 // Tenor: kritisch prüfen, im Zweifel weglassen, keine Konstruktion aus
 // Memory-Fragmenten.
 //

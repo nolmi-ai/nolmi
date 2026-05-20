@@ -16,7 +16,7 @@ import { nanoid } from "nanoid";
 // stattdessen mappt das Repo intern den TEXT-`id`-Wert von embeddings auf
 // den passenden rowid und nutzt diesen für vec0.
 //
-// ── Pre-Check-Befunde (3.4-STRATEGY.md "Implementation-Hinweise") ─────────
+// ── Pre-Check-Befunde (docs/archive/3.4-STRATEGY.md "Implementation-Hinweise") ─
 //
 // 1. BigInt für rowid bei vec0-Inserts:
 //    Auch wenn die rowid in JS als normale Zahl/String vorliegt, akzeptiert
@@ -42,7 +42,7 @@ import { nanoid } from "nanoid";
 // Alle Methoden nehmen twin_id explizit; Search filtert nach JOIN auf
 // e.twin_id. Pool-Vergrößerung (topK * 3) damit nach Filter noch genug
 // Kandidaten bleiben — bei sehr großen Datenmengen wäre vec0-partition_by
-// die saubere Lösung, für jetzt pragmatisch okay (siehe 3.4-STRATEGY.md
+// die saubere Lösung, für jetzt pragmatisch okay (siehe docs/archive/3.4-STRATEGY.md
 // "Open Questions").
 //
 // ── Pattern-Vorbereitungs-Helpers ─────────────────────────────────────────

@@ -9,7 +9,7 @@
 //   "@florian, was meinst du?"→ "@" stört, "," stört
 //
 // Pre-Check und 3.4.F-Test-Output haben das mehrfach reproduziert. Strategie
-// (siehe `docs/3.4.I-STRATEGY.md` "Aggressive Sanitization"): alles außer
+// (siehe `docs/archive/3.4.I-STRATEGY.md` "Aggressive Sanitization"): alles außer
 // Buchstaben/Zahlen/Whitespace zu Space, dann Whitespace normalisieren.
 //
 // Der memory_fts-Tokenizer (`unicode61 remove_diacritics 2`) macht Lowercase
