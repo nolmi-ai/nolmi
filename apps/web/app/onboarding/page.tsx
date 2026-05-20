@@ -143,7 +143,7 @@ function WizardInner({ router }: { router: ReturnType<typeof useRouter> }) {
   }
 
   return (
-    <div className="max-w-2xl mx-auto px-6 py-8 space-y-8">
+    <div className="w-full max-w-2xl mx-auto px-6 py-8 space-y-8">
       <header className="space-y-2">
         <h1 className="text-xl font-semibold text-text">Twin anlegen</h1>
         <div className="text-xs text-muted">
@@ -979,13 +979,13 @@ function AccountBlock({ onReady }: { onReady: () => void }) {
   }, []);
 
   if (loading) {
-    return <div className="max-w-2xl mx-auto px-6 mt-12 text-sm text-muted">Lade…</div>;
+    return <div className="w-full max-w-2xl mx-auto px-6 mt-12 text-sm text-muted">Lade…</div>;
   }
 
   // Mode B: bereits eingeloggt
   if (me) {
     return (
-      <div className="max-w-2xl mx-auto px-6 space-y-5 mt-12">
+      <div className="w-full max-w-2xl mx-auto px-6 space-y-5 mt-12">
         <header className="space-y-1">
           <h1 className="text-xl font-semibold text-text">Twin anlegen</h1>
           <div className="text-xs text-muted">
@@ -1023,7 +1023,7 @@ function AccountBlock({ onReady }: { onReady: () => void }) {
 
   // Modes A + C
   return (
-    <div className="max-w-2xl mx-auto px-6 space-y-5 mt-12">
+    <div className="w-full max-w-2xl mx-auto px-6 space-y-5 mt-12">
       <header className="space-y-1">
         <h1 className="text-xl font-semibold text-text">Twin anlegen</h1>
         <div className="text-xs text-muted">
