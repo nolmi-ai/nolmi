@@ -7,7 +7,7 @@ const RUNTIME_URL = process.env.NEXT_PUBLIC_RUNTIME_URL ?? "http://localhost:400
 
 // ─── ONBOARDING WIZARD ──────────────────────────────────────────────────────
 //
-// 6-Step-Flow für neue Twins. State liegt im Memory dieser Page (kein URL-
+// 5-Step-Flow für neue Twins. State liegt im Memory dieser Page (kein URL-
 // Anchor pro Step) — bewusst flach gehalten, weil Browser-Back den Wizard
 // sonst kaputt-springen würde.
 //
@@ -16,14 +16,14 @@ const RUNTIME_URL = process.env.NEXT_PUBLIC_RUNTIME_URL ?? "http://localhost:400
 //   1  Persona — Wie redest du?
 //   2  Persona — Worüber sprichst du gern?
 //   3  LLM + API-Key (mit Validation-Button)
-//   4  Bridge — nur Info
-//   5  Review + Submit
+//   4  Review + Submit
 //
-// #110 Phase 2A: Mandate-Step entfernt (war Step 4 vor Refactor). Default
-// 'cautious' wird vom Backend gesetzt. UI-Edit kommt später in Settings
-// (Phase B). Pfad-Wahl-Step (war Step 0) ebenfalls entfernt — Hosted ist
-// Default für Phase A, Self-Hoster sehen den Wizard nur wenn sie twin-lab
-// selbst betreiben.
+// #110 Phase 2A entfernte Reihe nach: Mandate-Step (Default 'cautious'
+// kommt vom Backend), Pfad-Wahl-Step (Hosted-Default für Phase A),
+// Bridge-Step (war nur Info-Karte — Bridge wird beim Submit automatisch
+// angelegt, kurzer Hinweis im Review-Header). Vorgesehene Erweiterungen:
+// MCP-Hyperbrowser-Step + Erste-Konversation-Step + Hard-Trigger +
+// Settings-Button.
 
 // ─── TYPES ──────────────────────────────────────────────────────────────────
 
@@ -53,11 +53,10 @@ const STEP_LABELS: string[] = [
   "Wie redest du?",
   "Worüber sprichst du?",
   "LLM + API-Key",
-  "Bridge",
   "Review",
 ];
 
-const TOTAL_STEPS = STEP_LABELS.length; // 6
+const TOTAL_STEPS = STEP_LABELS.length; // 5
 
 // ─── PAGE ───────────────────────────────────────────────────────────────────
 
@@ -214,8 +213,7 @@ function WizardInner({ router }: { router: ReturnType<typeof useRouter> }) {
             }}
           />
         )}
-        {step === 4 && <BridgeBlock handle={persona.handle} />}
-        {step === 5 && (
+        {step === 4 && (
           <ReviewBlock
             persona={persona}
             llmProvider={llmProvider}
@@ -228,8 +226,8 @@ function WizardInner({ router }: { router: ReturnType<typeof useRouter> }) {
         )}
       </main>
 
-      {/* Step-Nav: Step 0 hat keinen Zurück-Button, Step 3 hat eigenen "Testen"-Button, Step 5 hat Submit-Footer */}
-      {step > 0 && step !== 3 && step !== 5 && (
+      {/* Step-Nav: Step 0 hat keinen Zurück-Button, Step 3 hat eigenen "Testen"-Button, Step 4 hat Submit-Footer */}
+      {step > 0 && step !== 3 && step !== 4 && (
         <footer className="flex justify-between border-t border-border pt-4">
           <button
             onClick={goBack}
@@ -259,7 +257,7 @@ function WizardInner({ router }: { router: ReturnType<typeof useRouter> }) {
           </span>
         </footer>
       )}
-      {step === 5 && (
+      {step === 4 && (
         <footer className="flex justify-between border-t border-border pt-4">
           <button
             onClick={goBack}
@@ -297,8 +295,6 @@ function stepIsComplete(step: number, g: StepGate): boolean {
     case 3:
       return g.apiKeyValidated;
     case 4:
-      return true; // Bridge — pure Info
-    case 5:
       return true; // Review
     default:
       return false;
@@ -818,34 +814,6 @@ function LlmConfigBlock({
   );
 }
 
-// ─── BLOCK D: BRIDGE ────────────────────────────────────────────────────────
-
-function BridgeBlock({ handle }: { handle: string }) {
-  return (
-    <div className="space-y-4">
-      <p className="text-sm text-muted">
-        Dein Twin braucht einen Eintrag an der Bridge — der Hub, über den Twins
-        miteinander reden. Wird beim Submit automatisch angelegt, du musst nichts
-        konfigurieren.
-      </p>
-      <dl className="text-sm space-y-2 bg-surface border border-border rounded p-4">
-        <div className="flex gap-2">
-          <dt className="text-xs uppercase tracking-wider text-muted w-24">Bridge</dt>
-          <dd className="text-text font-mono text-xs">http://127.0.0.1:5100</dd>
-        </div>
-        <div className="flex gap-2">
-          <dt className="text-xs uppercase tracking-wider text-muted w-24">Handle</dt>
-          <dd className="text-text font-mono text-xs">{handle || "(noch leer)"}</dd>
-        </div>
-        <div className="flex gap-2">
-          <dt className="text-xs uppercase tracking-wider text-muted w-24">Status</dt>
-          <dd className="text-muted text-xs">Wird beim Submit angelegt</dd>
-        </div>
-      </dl>
-    </div>
-  );
-}
-
 // ─── BLOCK E: REVIEW + SUBMIT ───────────────────────────────────────────────
 
 function ReviewBlock({
@@ -868,6 +836,13 @@ function ReviewBlock({
   const apiKeyMasked = apiKey.length >= 9 ? `${apiKey.slice(0, 4)}…${apiKey.slice(-4)}` : "…";
   return (
     <div className="space-y-5">
+      {/* #110 Phase 2A: Bridge-Step entfernt; Defensive Hint, dass die
+       * Bridge-Anbindung beim Submit automatisch angelegt wird. */}
+      <p className="text-xs text-muted">
+        Beim Anlegen verbinden wir deinen Twin automatisch mit der Bridge —
+        du musst nichts konfigurieren.
+      </p>
+
       <Section title="Persona">
         <ReviewRow label="Name" value={persona.fullName} />
         <ReviewRow label="Handle" value={persona.handle} mono />
