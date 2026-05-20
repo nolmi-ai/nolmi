@@ -1,6 +1,6 @@
 # twin-lab — Stand
 
-**Letztes Update:** 19. Mai 2026, Nachmittag (Tag 19 — Block-2-Closure)
+**Letztes Update:** 20. Mai 2026, Nachmittag (Tag 20 — #107 Frontend-Closure)
 
 ## Aktuell in Arbeit
 
@@ -28,6 +28,66 @@ A2A-Bridge**. Nicht Computer-Use.
 Inhalte (11 Items in drei Tranchen) unverändert, nur Build-Pfad
 leicht angepasst (#100/#101 vorgezogen, weil Vision-kritisch für
 die Differenzierungs-Story).
+
+## Tag 20 (20. Mai 2026, Mittwoch) — Pre-Launch-Phase A Block 3 #107
+
+**Vorabend Tag 19 — #107 Backend (Commit `fb303de`):**
+
+Nach Block-2-Closure noch ein Backend-Block desselben Tages. Schema-Erweiterung (`triggerMode`, `triggerCondition`, `requiresTools` im `SkillManifestSchema`), Provider-Classifier-Map mit 5 Providern (Haiku/Mini/Flash/Llama/Twin-Default), Pre-Pass-Layer im `runModel` (conditional + 3s AbortController-Timeout), Recherche-Skill-Template (lokal-only via `skills-templates/.gitignore`), Persona-Block für Mode-2-Recherche-Vorschlag. Phase-1.1-Diagnose hatte vorab vier Punkte korrigiert:
+
+- Classifier-Model im Boot konstruieren (statt Send-Path) — kein Crypto-Leak in Send-Layer
+- `generateObject` + Zod-Enum statt `generateText`-mit-Trim/Lowercase (Pattern-Reuse von `ExtractionEngine`)
+- User-Picker-Priorität explizit (`!options.forcedToolChoice` als Pre-Pass-Bedingung; 3.2.H bleibt härter Override)
+- Position: nach `buildMcpToolsFromSkills`, vor `forcedTool`-Resolution
+
+Backend-Smoke 2/2 grün: Test 1 echte Recherche (113s, Multi-Step-Followup gegriffen), Test 2 No-Match 2.8s.
+
+**Vormittag Tag 20 — Frontend-Phase-1.1-Diagnose (Stop-Punkt):**
+
+Vor Frontend-Bau eine zweite Diagnose-Phase. Findings haben das Original-Briefing strukturell gekippt:
+
+- `AuditEntry` hat KEIN `kind`-Field (Discriminator ist `capability`), kein `serverName`. Briefing-Pseudocode (`a.kind === 'tool-call' && a.serverName === 'hyperbrowser-approval'`) funktioniert so nicht
+- Auto-Approve-Tool-Calls werden NICHT als separate Audit-Rows persistiert. Tool-Calls landen erst final im `owner-direct.output.toolCalls` am Cycle-Ende — Live-View hätte nichts zu pollen
+- SSE-Stream emittiert während Recherche-Cycles nur `twin.thinking` + `twin.idle`, bis zum Audit-Ende opak
+- Vier Architektur-Optionen aufgestellt (A Per-Tool-Call-Audits, B SSE-only, C Inkrementeller owner-direct-Audit, D Phasen-Spinner)
+- **Setzung: Option B (SSE-Events ohne DB-Persist), Tab-Reload-Variante 1.** Live-State ephemer; Tab-Reload verliert ihn, generic "twin denkt nach…" als Fallback. Keine Audit-DB-Inflation durch große Scrape-Outputs, klares Live-vs-Historisch-Separation
+- `research_first_use_seen`-Spalte existierte nicht (Patch 8 aus Tag-19-Briefing war Frontend-Scope) → Migration 022 nötig
+
+**Mittag-Nachmittag — #107 Frontend (Commits `150cdc8` + `d349da4`):**
+
+Drei Patches plus Backlog-Eintrag.
+
+- Patch 1 (Backend SSE): `TwinEventSchema` um `tool.call.start` + `tool.call.complete` erweitert (additive Discriminator-Union). `tool-bridge.execute()` mit neuem `BuildMcpToolsInput.bus`-Field + Args-Truncation 500 chars pro String-Feld. Failure-Pfad emittiert Complete-Event mit `status='failed'` *vor* dem Re-Throw, sonst sähe das Frontend den Fehlschlag nie. `bus` durchgereicht aus `twin-service.ts:1485`.
+- Patch 2 (Live-Progress): `useToolCallStream`-Hook in `apps/web/lib/` (eigene EventSource, ephemerer Map keyed by `callId`, race-safe twin.idle-Karenz 1.5s — schneller nächster Cycle bricht den Timer ab). `ResearchLiveProgress`-Component (Hyperbrowser-Prefix-Filter, Pulse-Icon auf running, Domain-Extract bei scrape, Failed-Inline-Hinweis). Integration in DirectChat ersetzt "twin denkt nach…" bei aktiven Tool-Calls; bei busy ohne Tool-Calls bleibt der alte Indikator.
+- Patch 3 (First-Use-Hint): Migration 022 (`research_first_use_seen INTEGER NOT NULL DEFAULT 0`), `markResearchFirstUseSeen`-Repo-Methode (idempotente UPDATE, nicht via patch-Update), `runModel` returnt `prePassSkillName`, `runOwnerDirect` flippt Flag genau einmal und setzt `firstUseHint='research'` im Return. `ResearchFirstUseModal` (ModalWrapper-basiert, 3-Bullet-Beta-Hint). `sendChat` liest jetzt Response-Body (war vorher reiner Audit-Stream-Driver — Pattern-Bruch dokumentiert).
+
+Browser-Smoke Tag 20:
+
+- **Test 1 (Mode-1 Recherche): grün** — Live-Progress sichtbar während ~60s Cycle, Tool-Calls sequenziell mit Status-Wechsel ○→✓, Domain-Anzeige bei scrape, First-Use-Modal erstmalig erschienen
+- **Test 5 (zweite Recherche): grün** — kein Modal, DB-Flag `research_first_use_seen=1` verifiziert
+- **Test 6 (Skill-Deaktivierung): modifiziert grün** — Pre-Pass blockt korrekt (kein `forcedToolChoice` in Logs, DB-State sauber), aber LLM ruft `search_with_bing` weiterhin via `toolChoice='auto'` aus Memory + Persona-Pattern + Tool-Availability. Strukturell richtig (Tag-16-Designprinzip "Tool-Aufruf darf nur Fallback sein"), aber UX-Konsequenz für späteres Item dokumentiert (#119)
+- **Emergent positiv:** Memory-Persistierung über mehrere Recherche-Cycles funktioniert. Twin macht proaktiv "haben wir schon recherchiert"-Hint statt redundanter Tool-Calls — Memory-Tiefe-Story aus der Differenzierungs-Vision wirkt im Edge-Case bereits
+
+**Doku-Welle:**
+
+- BACKLOG #119 (Skills-Deaktivierung-Pre-Pass-Trennung) emergent aus Test 6 (Commit `d349da4`) mit drei Lösungs-Optionen (MCP-Server-Toggle, Skill-aware Tool-Filtering, autonomes-Tool-Use-Setting)
+- Tag-20-Closure (dieser Stand-Update)
+
+**Production-Deploy ausstehend.** VPS auf `56cb0dc` (Tag-18-Stand). Drei-Tage-Drift im Stack: Tag 18 (Block 1, 11 Items), Tag 19 (Block 2 #105/#106 + #107 Backend), Tag 20 (#107 Frontend). Migrations 020, 021, 022 alle neu für Prod. Deploy wartet auf Bestätigung von Markus.
+
+**Block-3-Stand nach Tag 20:**
+
+- #107 vollständig (Backend `fb303de` + Frontend `150cdc8`)
+- #108 (Beta-Deklaration in README/Landing) verbleibt — XS, keine Architektur-Arbeit
+- #119 als Befund-Item für später (nice-priority, kein Block-3-Blocker)
+
+**Pre-Launch-Phase A Bilanz:**
+
+- Block 1 ✅ 11/11 (Tag 18)
+- Block 2 ✅ 2/2 (Tag 19)
+- Block 3: 1/2 durch (#107 ✅, #108 offen)
+- Block 4: 0/3 offen (#109 DEPLOYMENT-Test, #110 Onboarding-Wizard, #111 Public-Repo-Hygiene)
+- Block 5: 0/4 offen (#112 Landing, #113 Demo, #114 Launch-Posts, #115 Timing)
 
 ## Tag 19 (19. Mai 2026, Dienstag) — Pre-Launch-Phase A Block 2
 
@@ -651,6 +711,20 @@ github.com/markusbaier/twin-lab — `origin/main` auf `1e57aec`
 **Tag-12-Commits:**
 - `9b4d5c5` 3.3.A bis `a3c868b` 3.3.G3 (9 Code-Commits)
 - `189acbc` Doku Tag 12
+
+## Lessons Tag 20
+
+**1. Phase-1.1-Diagnose vor Frontend-Items fängt Briefing-Drift ab.** Der #107-Frontend-Briefing-v1-Pseudocode (`audits.filter(a => a.kind === 'tool-call')`) ist von einem Audit-Stream-Modell ausgegangen, das es im Code so nicht gibt — kein `kind`-Field, keine Per-Tool-Call-Audits im Auto-Approve-Pfad, opaker SSE-Stream während des Cycles. Diagnose hat das vor Bau aufgedeckt; Briefing v2 wurde komplett neu skizziert (Option B SSE-only statt Audit-DB-Persist). Größen-Schätzung blieb stabil (M-L, ~3.5h tatsächlich), Architektur ist sauberer als die Original-Variante.
+
+Lehre: bei Frontend-Items, die auf Backend-State pollen oder filtern, Audit/Event-Schema vor Bau im Code verifizieren — nicht aus Briefing-Pseudocode ableiten. Zwei Tag-Sessions in Folge (Tag 19 #106, Tag 20 #107) haben Phase-1.1 vor Bau Architektur-Drift gestoppt. Pattern verfestigen.
+
+**2. Smoke-Befund "unerwartetes Verhalten" — vor Bug-Fix gegen Vision prüfen.** Test 6 zeigte, dass ein deaktivierter Skill den Pre-Pass-Trigger blockt, aber den LLM nicht daran hindert, Tools autonom zu rufen. Erste Reaktion war "Bug — Skill-Toggle sollte alles blocken". Bei näherer Betrachtung Vision-konform: Tag-16-Designprinzip "Tool-Aufruf darf nur Fallback sein" verlangt genau diese Autonomie. Skill-Toggle steuert *Trigger-Aktivierung*, nicht *Tool-Verfügbarkeit*. Trennung in #119 mit drei Lösungs-Optionen festgehalten.
+
+Lehre: bei Smoke-Tests mit überraschendem Verhalten prüfen, ob das emergente Verhalten dem Vision-Prinzip entspricht, bevor ein Fix-Item entsteht. Manchmal ist der Test-Case zu eng formuliert ("Skill aus → Tool aus"), nicht das System fehlerhaft. Test 6 ist deshalb "modifiziert grün", nicht "rot".
+
+**3. Response-Body als Side-Channel zum Audit-Stream — bewusst dokumentieren.** `sendChat` hat bis Tag 20 den Response-Body ignoriert und vertraute komplett auf `loadAudits()` als SSoT. Für `firstUseHint` ist der Body aber die einzige sinnvolle Quelle, weil das Flag-Signal kein persistiertes Audit-Field ist (es ist ephemerer Lifecycle-State). Pattern-Bruch zum bisherigen "Audit-Stream = SSoT", aber gerechtfertigt. Im Code-Kommentar an der Stelle dokumentiert, damit zukünftige Reads den Grund verstehen.
+
+Lehre: wenn ein etabliertes Daten-Pattern (Audit-Stream-only) gebrochen wird, an der Bruchstelle den *Grund* festhalten, nicht nur das *Was*. Sonst wird die Inkonsistenz später für einen Cleanup-Kandidaten gehalten.
 
 ## Lessons Tag 18
 
