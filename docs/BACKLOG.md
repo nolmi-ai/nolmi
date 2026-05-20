@@ -1259,6 +1259,23 @@ Konkrete Stellen:
 
 **Größe:** XS · **Priorität:** must · **Aus:** Pre-Launch-Phase-A-Strategy (Block 3) · **Spur:** Pre-Launch-Phase A
 
+### 119. Skills-Deaktivierung blockt nur Pre-Pass, nicht autonomes Tool-Use
+
+**Befund Tag 20 (Test 6 #107):** Skill `is_active=0` deaktiviert nur den Pre-Pass-Trigger (forced toolChoice), nicht die MCP-Tool-Availability für den LLM. Wenn ein Twin Recherche-Skill aktiv hatte und mehrere Tool-Use-Patterns aus dem Send-History gelernt hat, ruft er Tools weiter autonom auf — auch nach Skill-Deaktivierung.
+
+**Ist das ein Bug?** Strukturell nein, Vision-konform: Tag-16-Designprinzip („Tool-Aufruf darf nur Fallback sein, Tools müssen direkt in der Konversation automatisch aufgerufen werden") ist genau diese Autonomie. Skill steuert Pre-Pass, nicht Tool-Block.
+
+**Aber UX-Konsequenz:** wenn User Skill deaktiviert in der Annahme „Twin macht keine Recherche mehr", wird Erwartung enttäuscht. Server-level-Block ist nötig.
+
+**Lösungs-Optionen für später:**
+
+1. **MCP-Server-Toggle:** Wenn User Recherche ganz blocken will, Hyperbrowser-Server `is_active=0` setzen (Server-level, nicht Skill-level). Macht alle Hyperbrowser-Tools für LLM unsichtbar.
+2. **Skill-aware Tool-Filtering:** Pre-Pass-Logic erweitern. Wenn ein Tool nur durch einen deaktivierten Skill exponiert wäre, aus dem LLM-Tool-Set herausfiltern. Aber: Tools sind nicht 1:1 an Skills gebunden.
+3. **Setting „Twin autonomes Tool-Use erlauben: ja/nein":** Pro Twin oder pro MCP-Server. Wenn off: kein Pre-Pass-Trigger, plus Tools werden nicht ans LLM gegeben.
+
+**Größe:** S (Variante 1) / M (Variante 2/3) · **Priorität:** nice · **Aus:** Tag-20 Test 6 #107
+**Status:** offen, kein Pre-Launch-Phase-A-Blocker
+
 ## Pre-Launch-Phase A — Block 4: Self-Hosting-Polish
 
 Items aus dem Strategy-Pivot Tag 18. Block 4 macht das Repo für externe Tech-Affine deploybar. Spec: `docs/PRE-LAUNCH-A-STRATEGY.md`.
