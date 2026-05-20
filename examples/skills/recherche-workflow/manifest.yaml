@@ -1,0 +1,14 @@
+name: recherche-workflow
+description: Twin recherchiert zu einem Thema im Web via search_with_bing + scrape_webpage (Beta — Latenz 30-90s, Single-Step-Suche).
+capability: web-research
+requires_approval: false
+version: "0.1.0"
+# #107: Pre-Pass-Classifier-Trigger. Wenn der User nach aktuellen / Web-bezogenen
+# Themen fragt, erzwingt der Send-Path toolChoice auf das erste requires_tools-
+# Element (search_with_bing) — ohne diesen Forced-Pfad halluziniert Claude Opus
+# 4.7 statt das Tool zu rufen (Tag-19-Diagnose).
+trigger_mode: forced
+trigger_condition: User fragt nach aktuellen Informationen aus dem Web, neuen Entwicklungen, oder bittet explizit um Recherche zu einem Thema.
+requires_tools:
+  - mcp:hyperbrowser-approval:search_with_bing
+  - mcp:hyperbrowser-approval:scrape_webpage

@@ -21,4 +21,4 @@ pnpm --filter @twin-lab/runtime twin:skill-create @<handle> <skill-dir> --force
 
 ## Was hier nicht versioniert ist
 
-Dieses Verzeichnis ist gitignored — Skills sind User-Daten, gehören nicht ins Repo. Ausnahme: `_test-skill/` ist whitelisted, damit das Repo ein Beispiel für das Tool-Pattern enthält. Public-Skills, die mit dem Repo geteilt werden sollen, kommen später in `apps/runtime/skills-public/`.
+Dieses Verzeichnis ist gitignored — Skills sind User-Daten, gehören nicht ins Repo. Ausnahme: `_test-skill/` ist whitelisted, damit das Repo ein Beispiel für das Tool-Pattern enthält. Offiziell ausgelieferte Production-Skills (z.B. `recherche-workflow`) leben in [`examples/skills/`](../../../examples/skills/) im Repo-Root.
