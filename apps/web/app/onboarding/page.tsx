@@ -24,6 +24,11 @@ const RUNTIME_URL = process.env.NEXT_PUBLIC_RUNTIME_URL ?? "http://localhost:400
 // angelegt, kurzer Hinweis im Review-Header). Vorgesehene Erweiterungen:
 // MCP-Hyperbrowser-Step + Erste-Konversation-Step + Hard-Trigger +
 // Settings-Button.
+//
+// Layout-Harmonisierung Tag 21: Container ist überall max-w-2xl (Login +
+// Register + Wizard alle gleich breit, 672px). Form-Steps 0-3 stehen
+// freistehend im Container ohne Card-Frame; Step 4 (Review) hat
+// Section-Cards für Persona + LLM als logische Gruppen.
 
 // ─── TYPES ──────────────────────────────────────────────────────────────────
 
@@ -138,7 +143,7 @@ function WizardInner({ router }: { router: ReturnType<typeof useRouter> }) {
   }
 
   return (
-    <div className="max-w-3xl mx-auto px-6 py-8 space-y-8">
+    <div className="max-w-2xl mx-auto px-6 py-8 space-y-8">
       <header className="space-y-2">
         <h1 className="text-xl font-semibold text-text">Twin anlegen</h1>
         <div className="text-xs text-muted">
@@ -347,49 +352,47 @@ function PersonaWhoBlock({
   };
 
   return (
-    <Section>
-      <div className="space-y-5">
-        <div>
-          <label className="block text-xs uppercase tracking-wider text-muted mb-1">
-            Voller Name
-          </label>
-          <input
-            type="text"
-            value={persona.fullName}
-            onChange={(e) => setPersona((p) => ({ ...p, fullName: e.target.value }))}
-            className="w-full bg-bg border border-border rounded px-3 py-2 text-sm text-text focus:outline-none focus:border-accent"
-            placeholder="Max Mustermann"
-          />
-        </div>
-
-        <div>
-          <label className="block text-xs uppercase tracking-wider text-muted mb-1">
-            Handle
-          </label>
-          <input
-            type="text"
-            value={persona.handle}
-            onChange={(e) => onHandleChange(e.target.value)}
-            className="w-full bg-bg border border-border rounded px-3 py-2 text-sm text-text font-mono focus:outline-none focus:border-accent"
-            placeholder="@maxm"
-          />
-          <HandleStatusLabel status={handleStatus} onPick={(h) => onHandleChange(h)} />
-        </div>
-
-        <div>
-          <label className="block text-xs uppercase tracking-wider text-muted mb-1">
-            Rolle
-          </label>
-          <input
-            type="text"
-            value={persona.role}
-            onChange={(e) => setPersona((p) => ({ ...p, role: e.target.value }))}
-            className="w-full bg-bg border border-border rounded px-3 py-2 text-sm text-text focus:outline-none focus:border-accent"
-            placeholder="Product Manager"
-          />
-        </div>
+    <div className="space-y-5">
+      <div>
+        <label className="block text-xs uppercase tracking-wider text-muted mb-1">
+          Voller Name
+        </label>
+        <input
+          type="text"
+          value={persona.fullName}
+          onChange={(e) => setPersona((p) => ({ ...p, fullName: e.target.value }))}
+          className="w-full bg-bg border border-border rounded px-3 py-2 text-sm text-text focus:outline-none focus:border-accent"
+          placeholder="Max Mustermann"
+        />
       </div>
-    </Section>
+
+      <div>
+        <label className="block text-xs uppercase tracking-wider text-muted mb-1">
+          Handle
+        </label>
+        <input
+          type="text"
+          value={persona.handle}
+          onChange={(e) => onHandleChange(e.target.value)}
+          className="w-full bg-bg border border-border rounded px-3 py-2 text-sm text-text font-mono focus:outline-none focus:border-accent"
+          placeholder="@maxm"
+        />
+        <HandleStatusLabel status={handleStatus} onPick={(h) => onHandleChange(h)} />
+      </div>
+
+      <div>
+        <label className="block text-xs uppercase tracking-wider text-muted mb-1">
+          Rolle
+        </label>
+        <input
+          type="text"
+          value={persona.role}
+          onChange={(e) => setPersona((p) => ({ ...p, role: e.target.value }))}
+          className="w-full bg-bg border border-border rounded px-3 py-2 text-sm text-text focus:outline-none focus:border-accent"
+          placeholder="Product Manager"
+        />
+      </div>
+    </div>
   );
 }
 
@@ -490,55 +493,53 @@ function PersonaToneBlock({
     }));
 
   return (
-    <Section>
-      <div className="space-y-6">
-        <div>
-          <div className="text-xs uppercase tracking-wider text-muted mb-2">
-            Tonfall (mind. 1)
-          </div>
-          <div className="flex flex-wrap gap-2">
-            {TONE_OPTIONS.map((opt) => (
-              <Pill
-                key={opt.id}
-                label={opt.label}
-                active={persona.tone.includes(opt.id)}
-                onClick={() => toggleTone(opt.id)}
-              />
-            ))}
-          </div>
+    <div className="space-y-6">
+      <div>
+        <div className="text-xs uppercase tracking-wider text-muted mb-2">
+          Tonfall (mind. 1)
         </div>
-
-        <div>
-          <div className="text-xs uppercase tracking-wider text-muted mb-2">Pronomen</div>
-          <div className="flex flex-wrap gap-2">
-            {(["du", "sie", "context-dependent"] as const).map((p) => (
-              <Pill
-                key={p}
-                label={p === "du" ? "Du" : p === "sie" ? "Sie" : "Je nach Kontext"}
-                active={persona.pronoun === p}
-                onClick={() => setPersona((s) => ({ ...s, pronoun: p }))}
-              />
-            ))}
-          </div>
-        </div>
-
-        <div>
-          <div className="text-xs uppercase tracking-wider text-muted mb-2">
-            Sonderwünsche (optional)
-          </div>
-          <div className="flex flex-wrap gap-2">
-            {PREFERENCE_OPTIONS.map((opt) => (
-              <Pill
-                key={opt.id}
-                label={opt.label}
-                active={persona.preferences.includes(opt.id)}
-                onClick={() => togglePref(opt.id)}
-              />
-            ))}
-          </div>
+        <div className="flex flex-wrap gap-2">
+          {TONE_OPTIONS.map((opt) => (
+            <Pill
+              key={opt.id}
+              label={opt.label}
+              active={persona.tone.includes(opt.id)}
+              onClick={() => toggleTone(opt.id)}
+            />
+          ))}
         </div>
       </div>
-    </Section>
+
+      <div>
+        <div className="text-xs uppercase tracking-wider text-muted mb-2">Pronomen</div>
+        <div className="flex flex-wrap gap-2">
+          {(["du", "sie", "context-dependent"] as const).map((p) => (
+            <Pill
+              key={p}
+              label={p === "du" ? "Du" : p === "sie" ? "Sie" : "Je nach Kontext"}
+              active={persona.pronoun === p}
+              onClick={() => setPersona((s) => ({ ...s, pronoun: p }))}
+            />
+          ))}
+        </div>
+      </div>
+
+      <div>
+        <div className="text-xs uppercase tracking-wider text-muted mb-2">
+          Sonderwünsche (optional)
+        </div>
+        <div className="flex flex-wrap gap-2">
+          {PREFERENCE_OPTIONS.map((opt) => (
+            <Pill
+              key={opt.id}
+              label={opt.label}
+              active={persona.preferences.includes(opt.id)}
+              onClick={() => togglePref(opt.id)}
+            />
+          ))}
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -612,105 +613,103 @@ function PersonaTopicsBlock({
     }));
 
   return (
-    <Section>
-      <div className="space-y-6">
-        <div>
-          <div className="text-xs uppercase tracking-wider text-muted mb-2">
-            Themen (mind. 1)
-          </div>
-          <div className="flex gap-2">
-            <input
-              type="text"
-              value={topicInput}
-              onChange={(e) => setTopicInput(e.target.value)}
-              onKeyDown={(e) => e.key === "Enter" && (e.preventDefault(), addTopic())}
-              className="flex-1 bg-bg border border-border rounded px-3 py-2 text-sm text-text focus:outline-none focus:border-accent"
-              placeholder="z.B. Design Systems"
-            />
-            <button
-              onClick={addTopic}
-              className="px-3 py-2 border border-accent text-accent text-sm rounded hover:bg-accent hover:text-bg transition-colors"
-            >
-              +
-            </button>
-          </div>
-          {persona.topics.length > 0 && (
-            <div className="flex flex-wrap gap-2 mt-3">
-              {persona.topics.map((t, i) => (
-                <span
-                  key={i}
-                  className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs border border-border rounded text-text"
-                >
-                  {t}
-                  <button
-                    onClick={() => rmTopic(i)}
-                    className="text-muted hover:text-warn"
-                    aria-label="Entfernen"
-                  >
-                    ×
-                  </button>
-                </span>
-              ))}
-            </div>
-          )}
+    <div className="space-y-6">
+      <div>
+        <div className="text-xs uppercase tracking-wider text-muted mb-2">
+          Themen (mind. 1)
         </div>
-
-        <div>
-          <div className="text-xs uppercase tracking-wider text-muted mb-2">
-            Beziehungen (optional)
-          </div>
-          {existingTwins.length > 0 && (
-            <div className="text-xs text-muted mb-2">
-              Vorschlag: bestehende Twins —{" "}
-              {existingTwins.map((t) => `${t.displayName} (${t.handle})`).join(", ")}
-            </div>
-          )}
-          <div className="flex gap-2">
-            <input
-              type="text"
-              value={relName}
-              onChange={(e) => setRelName(e.target.value)}
-              className="w-1/2 bg-bg border border-border rounded px-3 py-2 text-sm text-text focus:outline-none focus:border-accent"
-              placeholder="Anna Beispiel"
-            />
-            <input
-              type="text"
-              value={relDesc}
-              onChange={(e) => setRelDesc(e.target.value)}
-              className="flex-1 bg-bg border border-border rounded px-3 py-2 text-sm text-text focus:outline-none focus:border-accent"
-              placeholder="Designerin im Team"
-            />
-            <button
-              onClick={addRel}
-              className="px-3 py-2 border border-accent text-accent text-sm rounded hover:bg-accent hover:text-bg transition-colors"
-            >
-              +
-            </button>
-          </div>
-          {persona.relationships.length > 0 && (
-            <ul className="mt-3 space-y-1">
-              {persona.relationships.map((r, i) => (
-                <li
-                  key={i}
-                  className="flex items-start justify-between text-sm text-text border-b border-border py-1.5"
-                >
-                  <span>
-                    <span className="text-text">{r.name}</span>
-                    <span className="text-muted"> — {r.description}</span>
-                  </span>
-                  <button
-                    onClick={() => rmRel(i)}
-                    className="text-muted hover:text-warn text-xs"
-                  >
-                    entfernen
-                  </button>
-                </li>
-              ))}
-            </ul>
-          )}
+        <div className="flex gap-2">
+          <input
+            type="text"
+            value={topicInput}
+            onChange={(e) => setTopicInput(e.target.value)}
+            onKeyDown={(e) => e.key === "Enter" && (e.preventDefault(), addTopic())}
+            className="flex-1 bg-bg border border-border rounded px-3 py-2 text-sm text-text focus:outline-none focus:border-accent"
+            placeholder="z.B. Design Systems"
+          />
+          <button
+            onClick={addTopic}
+            className="px-3 py-2 border border-accent text-accent text-sm rounded hover:bg-accent hover:text-bg transition-colors"
+          >
+            +
+          </button>
         </div>
+        {persona.topics.length > 0 && (
+          <div className="flex flex-wrap gap-2 mt-3">
+            {persona.topics.map((t, i) => (
+              <span
+                key={i}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs border border-border rounded text-text"
+              >
+                {t}
+                <button
+                  onClick={() => rmTopic(i)}
+                  className="text-muted hover:text-warn"
+                  aria-label="Entfernen"
+                >
+                  ×
+                </button>
+              </span>
+            ))}
+          </div>
+        )}
       </div>
-    </Section>
+
+      <div>
+        <div className="text-xs uppercase tracking-wider text-muted mb-2">
+          Beziehungen (optional)
+        </div>
+        {existingTwins.length > 0 && (
+          <div className="text-xs text-muted mb-2">
+            Vorschlag: bestehende Twins —{" "}
+            {existingTwins.map((t) => `${t.displayName} (${t.handle})`).join(", ")}
+          </div>
+        )}
+        <div className="flex gap-2">
+          <input
+            type="text"
+            value={relName}
+            onChange={(e) => setRelName(e.target.value)}
+            className="w-1/2 bg-bg border border-border rounded px-3 py-2 text-sm text-text focus:outline-none focus:border-accent"
+            placeholder="Anna Beispiel"
+          />
+          <input
+            type="text"
+            value={relDesc}
+            onChange={(e) => setRelDesc(e.target.value)}
+            className="flex-1 bg-bg border border-border rounded px-3 py-2 text-sm text-text focus:outline-none focus:border-accent"
+            placeholder="Designerin im Team"
+          />
+          <button
+            onClick={addRel}
+            className="px-3 py-2 border border-accent text-accent text-sm rounded hover:bg-accent hover:text-bg transition-colors"
+          >
+            +
+          </button>
+        </div>
+        {persona.relationships.length > 0 && (
+          <ul className="mt-3 space-y-1">
+            {persona.relationships.map((r, i) => (
+              <li
+                key={i}
+                className="flex items-start justify-between text-sm text-text border-b border-border py-1.5"
+              >
+                <span>
+                  <span className="text-text">{r.name}</span>
+                  <span className="text-muted"> — {r.description}</span>
+                </span>
+                <button
+                  onClick={() => rmRel(i)}
+                  className="text-muted hover:text-warn text-xs"
+                >
+                  entfernen
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+    </div>
   );
 }
 
@@ -748,86 +747,84 @@ function LlmConfigBlock({
   );
 
   return (
-    <Section>
-      <div className="space-y-5">
-        <div>
-          <div className="text-xs uppercase tracking-wider text-muted mb-2">Provider</div>
-          <div className="grid sm:grid-cols-2 gap-3">
-            <button
-              onClick={() => setProvider("anthropic")}
-              className={`text-left p-4 rounded border transition-colors ${
-                provider === "anthropic"
-                  ? "border-accent bg-surface"
-                  : "border-border bg-surface hover:border-accent"
-              }`}
-            >
-              <div className="text-xs uppercase tracking-wider text-accent mb-1">
-                Empfohlen
-              </div>
-              <div className="text-sm text-text font-mono">anthropic / claude-opus-4-7</div>
-              <div className="text-xs text-muted mt-1">~$0,015 / Antwort</div>
-            </button>
-            <button
-              onClick={() => setProvider("openai")}
-              className={`text-left p-4 rounded border transition-colors ${
-                provider === "openai"
-                  ? "border-accent bg-surface"
-                  : "border-border bg-surface hover:border-accent"
-              }`}
-            >
-              <div className="text-sm text-text font-mono">openai / gpt-5.5</div>
-              <div className="text-xs text-muted mt-1">~$0,008 / Antwort</div>
-            </button>
-          </div>
-        </div>
-
-        <div>
-          <label className="block text-xs uppercase tracking-wider text-muted mb-1">
-            Model
-          </label>
-          <input
-            type="text"
-            value={model}
-            onChange={(e) => setModel(e.target.value)}
-            className="w-full bg-bg border border-border rounded px-3 py-2 text-sm text-text font-mono focus:outline-none focus:border-accent"
-          />
-        </div>
-
-        <div>
-          <label className="block text-xs uppercase tracking-wider text-muted mb-1">
-            API-Key{" "}
-            <a
-              href={keyHelpUrl}
-              target="_blank"
-              rel="noreferrer"
-              className="text-accent hover:underline ml-1 normal-case tracking-normal"
-            >
-              (hier holen)
-            </a>
-          </label>
-          <input
-            type="password"
-            value={apiKey}
-            onChange={(e) => setApiKey(e.target.value)}
-            className="w-full bg-bg border border-border rounded px-3 py-2 text-sm text-text font-mono focus:outline-none focus:border-accent"
-            placeholder={provider === "anthropic" ? "sk-ant-…" : "sk-…"}
-          />
-          {apiKeyError && (
-            <div className="text-xs text-warn mt-1">✗ {apiKeyError}</div>
-          )}
-          {apiKeyValidated && (
-            <div className="text-xs text-accent mt-1">✓ Key funktioniert</div>
-          )}
+    <div className="space-y-5">
+      <div>
+        <div className="text-xs uppercase tracking-wider text-muted mb-2">Provider</div>
+        <div className="grid sm:grid-cols-2 gap-3">
           <button
-            onClick={onTest}
-            disabled={validating || !apiKey.trim()}
-            className="mt-3 px-4 py-2 border border-accent text-accent text-sm rounded disabled:opacity-30 disabled:cursor-not-allowed hover:bg-accent hover:text-bg transition-colors"
+            onClick={() => setProvider("anthropic")}
+            className={`text-left p-4 rounded border transition-colors ${
+              provider === "anthropic"
+                ? "border-accent bg-surface"
+                : "border-border bg-surface hover:border-accent"
+            }`}
           >
-            {validating ? "Teste…" : "Testen"}
+            <div className="text-xs uppercase tracking-wider text-accent mb-1">
+              Empfohlen
+            </div>
+            <div className="text-sm text-text font-mono">anthropic / claude-opus-4-7</div>
+            <div className="text-xs text-muted mt-1">~$0,015 / Antwort</div>
+          </button>
+          <button
+            onClick={() => setProvider("openai")}
+            className={`text-left p-4 rounded border transition-colors ${
+              provider === "openai"
+                ? "border-accent bg-surface"
+                : "border-border bg-surface hover:border-accent"
+            }`}
+          >
+            <div className="text-sm text-text font-mono">openai / gpt-5.5</div>
+            <div className="text-xs text-muted mt-1">~$0,008 / Antwort</div>
           </button>
         </div>
       </div>
-    </Section>
+
+      <div>
+        <label className="block text-xs uppercase tracking-wider text-muted mb-1">
+          Model
+        </label>
+        <input
+          type="text"
+          value={model}
+          onChange={(e) => setModel(e.target.value)}
+          className="w-full bg-bg border border-border rounded px-3 py-2 text-sm text-text font-mono focus:outline-none focus:border-accent"
+        />
+      </div>
+
+      <div>
+        <label className="block text-xs uppercase tracking-wider text-muted mb-1">
+          API-Key{" "}
+          <a
+            href={keyHelpUrl}
+            target="_blank"
+            rel="noreferrer"
+            className="text-accent hover:underline ml-1 normal-case tracking-normal"
+          >
+            (hier holen)
+          </a>
+        </label>
+        <input
+          type="password"
+          value={apiKey}
+          onChange={(e) => setApiKey(e.target.value)}
+          className="w-full bg-bg border border-border rounded px-3 py-2 text-sm text-text font-mono focus:outline-none focus:border-accent"
+          placeholder={provider === "anthropic" ? "sk-ant-…" : "sk-…"}
+        />
+        {apiKeyError && (
+          <div className="text-xs text-warn mt-1">✗ {apiKeyError}</div>
+        )}
+        {apiKeyValidated && (
+          <div className="text-xs text-accent mt-1">✓ Key funktioniert</div>
+        )}
+        <button
+          onClick={onTest}
+          disabled={validating || !apiKey.trim()}
+          className="mt-3 px-4 py-2 border border-accent text-accent text-sm rounded disabled:opacity-30 disabled:cursor-not-allowed hover:bg-accent hover:text-bg transition-colors"
+        >
+          {validating ? "Teste…" : "Testen"}
+        </button>
+      </div>
+    </div>
   );
 }
 
@@ -904,9 +901,11 @@ function ReviewBlock({
   );
 }
 
-// `title` optional seit #110 Phase 2A: Form-Steps 1-4 nutzen Section ohne
-// Header, weil der Step-Name bereits im Wizard-Header steht (STEP_LABELS).
-// Step 5 (Review) nutzt Section weiter mit Title für Persona/LLM-Gruppen.
+// Section: Card-Frame mit optionalem Title. Heute nur im Review-Step
+// genutzt (Persona-Gruppe + LLM-Gruppe als logische Cards mit Title).
+// Form-Steps 0-3 stehen freistehend im Container — Layout-Harmonisierung
+// Tag 21 hat den Versuch eines Card-Frames pro Step zurückgerollt, weil
+// das visuell mit AccountBlock-Forms inkonsistent war.
 function Section({ title, children }: { title?: string; children: React.ReactNode }) {
   return (
     <div className="bg-surface border border-border rounded p-4 space-y-1.5">
@@ -980,13 +979,13 @@ function AccountBlock({ onReady }: { onReady: () => void }) {
   }, []);
 
   if (loading) {
-    return <div className="max-w-md mx-auto px-6 mt-12 text-sm text-muted">Lade…</div>;
+    return <div className="max-w-2xl mx-auto px-6 mt-12 text-sm text-muted">Lade…</div>;
   }
 
   // Mode B: bereits eingeloggt
   if (me) {
     return (
-      <div className="max-w-md mx-auto px-6 space-y-5 mt-12">
+      <div className="max-w-2xl mx-auto px-6 space-y-5 mt-12">
         <header className="space-y-1">
           <h1 className="text-xl font-semibold text-text">Twin anlegen</h1>
           <div className="text-xs text-muted">
@@ -1024,7 +1023,7 @@ function AccountBlock({ onReady }: { onReady: () => void }) {
 
   // Modes A + C
   return (
-    <div className="max-w-md mx-auto px-6 space-y-5 mt-12">
+    <div className="max-w-2xl mx-auto px-6 space-y-5 mt-12">
       <header className="space-y-1">
         <h1 className="text-xl font-semibold text-text">Twin anlegen</h1>
         <div className="text-xs text-muted">
