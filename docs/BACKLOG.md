@@ -1295,6 +1295,20 @@ Konkrete Stellen:
 **Größe:** XS · **Priorität:** must (Self-Hosting-Pattern braucht den Pfad) · **Aus:** Tag-20 Production-Deploy
 **Status:** offen → wird im selben Block durch Dockerfile-Edit geschlossen
 
+### 121. Wizard-Layout-Polish
+
+**Befund Tag 21 (#110 Phase 2A Smoke):** Wizard-Layout ist nach Container-Width-Fix funktional, aber nicht mit dem eingeloggten Zustand visuell konsistent.
+
+Verbleibende Polish-Punkte:
+- Step-Indicator als visueller Stepper (heute nur Text-Header „Schritt N von M")
+- Card-Styling konsistent zum DirectChat/A2A-Chat-Look
+- Mobile-Responsive prüfen
+- Form-Field-Layout (Spacing, Label-Style, Input-Width)
+- Plus generelle UX-Polish (Animations, Hover-States, etc.)
+
+**Größe:** S-M · **Priorität:** should · **Aus:** Tag 21 #110 Phase 2A Smoke-Befund
+**Status:** offen, Phase-B-Kandidat (UX-Welle 2)
+
 ## Pre-Launch-Phase A — Block 4: Self-Hosting-Polish
 
 Items aus dem Strategy-Pivot Tag 18. Block 4 macht das Repo für externe Tech-Affine deploybar. Spec: `docs/PRE-LAUNCH-A-STRATEGY.md`.

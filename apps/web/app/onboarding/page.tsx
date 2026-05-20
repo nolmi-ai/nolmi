@@ -138,7 +138,7 @@ function WizardInner({ router }: { router: ReturnType<typeof useRouter> }) {
   }
 
   return (
-    <div className="max-w-2xl mx-auto px-6 py-8 space-y-8">
+    <div className="max-w-3xl mx-auto px-6 py-8 space-y-8">
       <header className="space-y-2">
         <h1 className="text-xl font-semibold text-text">Twin anlegen</h1>
         <div className="text-xs text-muted">
@@ -226,15 +226,24 @@ function WizardInner({ router }: { router: ReturnType<typeof useRouter> }) {
         )}
       </main>
 
-      {/* Step-Nav: Step 0 hat keinen Zurück-Button, Step 3 hat eigenen "Testen"-Button, Step 4 hat Submit-Footer */}
-      {step > 0 && step !== 3 && step !== 4 && (
+      {/* Step-Nav: Standard-Footer für Steps 0/1/2 (Persona). Step 3 (LLM)
+       * hat eigenen "Testen"-Button-Footer, Step 4 (Review) hat Submit-
+       * Footer. Auf Step 0 fehlt der Zurück-Button (kein vorheriger Step),
+       * Weiter ist aber nötig — daher Zurück konditional, Weiter immer.
+       * Bug-Fix Tag 21: vor #110 Phase-2A-Cleanup blockte `step > 0`
+       * korrekt, weil Step 0 = Pfad-Wahl mit Auto-Advance war. */}
+      {step !== 3 && step !== 4 && (
         <footer className="flex justify-between border-t border-border pt-4">
-          <button
-            onClick={goBack}
-            className="text-sm text-muted hover:text-text transition-colors"
-          >
-            ← Zurück
-          </button>
+          {step > 0 ? (
+            <button
+              onClick={goBack}
+              className="text-sm text-muted hover:text-text transition-colors"
+            >
+              ← Zurück
+            </button>
+          ) : (
+            <span aria-hidden="true" />
+          )}
           <button
             onClick={goNext}
             disabled={!canAdvance}
@@ -348,7 +357,7 @@ function PersonaWhoBlock({
           value={persona.fullName}
           onChange={(e) => setPersona((p) => ({ ...p, fullName: e.target.value }))}
           className="w-full bg-bg border border-border rounded px-3 py-2 text-sm text-text focus:outline-none focus:border-accent"
-          placeholder="Heiko Gregor"
+          placeholder="Max Mustermann"
         />
       </div>
 
@@ -361,7 +370,7 @@ function PersonaWhoBlock({
           value={persona.handle}
           onChange={(e) => onHandleChange(e.target.value)}
           className="w-full bg-bg border border-border rounded px-3 py-2 text-sm text-text font-mono focus:outline-none focus:border-accent"
-          placeholder="@heiko"
+          placeholder="@maxm"
         />
         <HandleStatusLabel status={handleStatus} onPick={(h) => onHandleChange(h)} />
       </div>
@@ -375,7 +384,7 @@ function PersonaWhoBlock({
           value={persona.role}
           onChange={(e) => setPersona((p) => ({ ...p, role: e.target.value }))}
           className="w-full bg-bg border border-border rounded px-3 py-2 text-sm text-text focus:outline-none focus:border-accent"
-          placeholder="Co-Founder bei HARWAY Experience"
+          placeholder="Product Manager"
         />
       </div>
     </div>
@@ -657,14 +666,14 @@ function PersonaTopicsBlock({
             value={relName}
             onChange={(e) => setRelName(e.target.value)}
             className="w-1/3 bg-bg border border-border rounded px-3 py-2 text-sm text-text focus:outline-none focus:border-accent"
-            placeholder="Markus Baier"
+            placeholder="Anna Beispiel"
           />
           <input
             type="text"
             value={relDesc}
             onChange={(e) => setRelDesc(e.target.value)}
             className="flex-1 bg-bg border border-border rounded px-3 py-2 text-sm text-text focus:outline-none focus:border-accent"
-            placeholder="Co-Founder bei HARWAY Experience"
+            placeholder="Designerin im Team"
           />
           <button
             onClick={addRel}
@@ -958,13 +967,13 @@ function AccountBlock({ onReady }: { onReady: () => void }) {
   }, []);
 
   if (loading) {
-    return <div className="max-w-sm mx-auto px-6 mt-12 text-sm text-muted">Lade…</div>;
+    return <div className="max-w-md mx-auto px-6 mt-12 text-sm text-muted">Lade…</div>;
   }
 
   // Mode B: bereits eingeloggt
   if (me) {
     return (
-      <div className="max-w-sm mx-auto px-6 space-y-5 mt-12">
+      <div className="max-w-md mx-auto px-6 space-y-5 mt-12">
         <header className="space-y-1">
           <h1 className="text-xl font-semibold text-text">Twin anlegen</h1>
           <div className="text-xs text-muted">
@@ -1002,7 +1011,7 @@ function AccountBlock({ onReady }: { onReady: () => void }) {
 
   // Modes A + C
   return (
-    <div className="max-w-sm mx-auto px-6 space-y-5 mt-12">
+    <div className="max-w-md mx-auto px-6 space-y-5 mt-12">
       <header className="space-y-1">
         <h1 className="text-xl font-semibold text-text">Twin anlegen</h1>
         <div className="text-xs text-muted">
