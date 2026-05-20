@@ -92,6 +92,7 @@ async function main() {
     mcpServersRepo,
     factsRepo,
     twinMaturityService,
+    examplesDir: config.examplesDir,
   });
 
   // 5. Registry mit allen aktiven Twins füllen — entschlüsselt API-Keys.

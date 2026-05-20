@@ -89,9 +89,10 @@ export class SkillValidationError extends Error {
 
 /**
  * Erzwingt Konsistenz zwischen `source` und `mcpServerId`/`mcpToolName`.
- * source='mcp' verlangt beide Felder gesetzt; source='manual' verlangt beide
- * null. SQLite kann das nicht in einem CHECK-Constraint elegant ausdrücken,
- * also macht es der Repo-Layer — sowohl bei add() als auch update().
+ * source='mcp' verlangt beide Felder gesetzt; alle Non-MCP-Quellen
+ * ('manual', 'example', ggf. spätere) verlangen beide null. SQLite kann
+ * das nicht in einem CHECK-Constraint elegant ausdrücken, also macht es
+ * der Repo-Layer — sowohl bei add() als auch update().
  */
 function validateSourceConsistency(
   source: SkillSource,
@@ -109,17 +110,18 @@ function validateSourceConsistency(
         "source='mcp' verlangt mcpToolName — fehlt",
       );
     }
-  } else if (source === "manual") {
-    if (mcpServerId !== null) {
-      throw new SkillValidationError(
-        "source='manual' verlangt mcpServerId=null",
-      );
-    }
-    if (mcpToolName !== null) {
-      throw new SkillValidationError(
-        "source='manual' verlangt mcpToolName=null",
-      );
-    }
+    return;
+  }
+  // Non-MCP-Sources: kein MCP-Binding.
+  if (mcpServerId !== null) {
+    throw new SkillValidationError(
+      `source='${source}' verlangt mcpServerId=null`,
+    );
+  }
+  if (mcpToolName !== null) {
+    throw new SkillValidationError(
+      `source='${source}' verlangt mcpToolName=null`,
+    );
   }
 }
 

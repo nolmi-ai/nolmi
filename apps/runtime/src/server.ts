@@ -2,6 +2,7 @@ import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest }
 import cors from "@fastify/cors";
 import cookie from "@fastify/cookie";
 import { nanoid } from "nanoid";
+import { resolve } from "node:path";
 import { z } from "zod";
 import type Database from "better-sqlite3";
 import type { AuditRepository } from "./repository/types.js";
@@ -12,6 +13,7 @@ import {
   FactUpdateRequestSchema,
   McpServerCreateRequestSchema,
   SkillCreateRequestSchema,
+  SkillImportRequestSchema,
   SkillUpdateRequestSchema,
   type AuditEntry,
   type FactConfidence,
@@ -52,6 +54,10 @@ import {
   SkillRepo,
   SkillValidationError,
 } from "./skills/repo.js";
+import {
+  importSkillFromDir,
+  SkillImportError,
+} from "./skills/import-from-dir.js";
 import type { Skill, SkillUiPayload } from "@twin-lab/shared";
 import type { ConversationsRepo } from "./conversations/repo.js";
 import {
@@ -106,6 +112,12 @@ export interface ServerDeps {
   factsRepo: FactsRepo;
   /** #101 — für GET /twins/:handle/maturity. */
   twinMaturityService: TwinMaturityService;
+  /**
+   * #110: Absoluter Pfad zum `examples/skills/`-Verzeichnis. Wird vom
+   * Skill-Import-Endpoint genutzt, um Templates per Whitelist-Path zu laden.
+   * Quelle: `RuntimeConfig.examplesDir`.
+   */
+  examplesDir: string;
 }
 
 export async function createServer(deps: ServerDeps) {
@@ -1122,6 +1134,70 @@ function registerSkillRoutes(
           return reply.status(400).send({ error: err.message });
         }
         throw err;
+      }
+    },
+  );
+
+  // ─── #110: Import aus examples/skills/ (Production-Templates) ──────────
+  //
+  // Idempotent (force=true): existing Skill mit gleichem Namen wird
+  // überschrieben, neu eingespielt sonst. Whitelist via Zod-Enum in shared
+  // (`EXAMPLE_SKILL_TEMPLATES`), plus defensiver Path-Injection-Check.
+  app.post<{ Params: { handle: string } }>(
+    "/twins/:handle/skills/import",
+    async (request, reply) => {
+      const ctx = await requireOwner(request, reply, request.params.handle);
+      if (!ctx) return;
+      const { entry } = ctx;
+
+      const parsed = SkillImportRequestSchema.safeParse(request.body);
+      if (!parsed.success) {
+        return reply.status(400).send({ error: parsed.error.message });
+      }
+      const { path } = parsed.data;
+
+      // Defensiver Doppel-Check: Zod-Enum schließt Path-Traversal bereits aus,
+      // aber wenn die Whitelist mal um dynamische Quellen erweitert wird
+      // (`source: 'url'` etc.), bleibt diese Sperre als zweite Verteidigungs-
+      // Linie stehen.
+      if (path.includes("..") || path.includes("/") || path.includes("\\")) {
+        return reply.status(400).send({
+          error: "path enthält ungültige Zeichen (.., / oder \\ nicht erlaubt)",
+        });
+      }
+
+      const skillDir = resolve(deps.examplesDir, path);
+      try {
+        const result = importSkillFromDir({
+          skillRepo: deps.skillRepo,
+          twinId: entry.twinId,
+          skillDir,
+          force: true, // Endpoint ist idempotent — kein 409, sondern UPDATE.
+          // Tracking: aus Production-Template importiert, nicht hand-getippt.
+          // Unterscheidung von CLI-Default 'manual' für späteres Re-Import-
+          // Pattern (Template-Update → Endpoint flippt source bei UPDATE).
+          source: "example",
+        });
+        const statusCode = result.status === "created" ? 201 : 200;
+        return reply.status(statusCode).send({
+          skillId: result.skill.skillId,
+          status: result.status,
+          name: result.skill.name,
+        });
+      } catch (err) {
+        if (err instanceof SkillImportError) {
+          return reply.status(400).send({ error: err.message });
+        }
+        if (err instanceof SkillValidationError) {
+          return reply.status(400).send({ error: err.message });
+        }
+        request.log.error(
+          { err, twinId: entry.twinId, path },
+          "[skills/import] unerwarteter Fehler beim Skill-Import",
+        );
+        return reply.status(500).send({
+          error: err instanceof Error ? err.message : String(err),
+        });
       }
     },
   );

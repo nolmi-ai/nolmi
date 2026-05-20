@@ -290,7 +290,12 @@ export type ConversationStartInput = z.infer<typeof ConversationStartInputSchema
 // haben zusätzlich `requiresApproval` als Inner-Mandate, das die Engine in
 // 3.1.B+ auswerten wird.
 
-export const SkillSourceSchema = z.enum(["manual", "mcp"]);
+// #110: 'example' für Skills, die aus `examples/skills/<name>/`-Templates per
+// Wizard-Endpoint importiert wurden. Tracking-Information: erlaubt späteres
+// idempotentes Re-Import bei Template-Updates und UI-Unterscheidung zwischen
+// Production-Templates und hand-getippten Custom-Skills. CLI bleibt
+// default-mäßig auf 'manual' (Backward-Compat für bestehende Bootstrap-Pfade).
+export const SkillSourceSchema = z.enum(["manual", "mcp", "example"]);
 export type SkillSource = z.infer<typeof SkillSourceSchema>;
 
 export const SkillInputSchema = z.object({
@@ -472,6 +477,36 @@ export const SkillUpdateRequestSchema = z.object({
   scriptTs: z.string().nullable().optional(),
 });
 export type SkillUpdateRequest = z.infer<typeof SkillUpdateRequestSchema>;
+
+/**
+ * #110: Whitelist der Skill-Templates aus `examples/skills/<name>/`, die
+ * der Wizard via POST /twins/:handle/skills/import importieren darf.
+ * Neue Templates kommen hier dazu, sobald sie in `examples/skills/`
+ * gelandet sind — Zod-Enum schützt gegen Path-Injection und unbekannte
+ * Verzeichnisse.
+ */
+export const EXAMPLE_SKILL_TEMPLATES = ["recherche-workflow"] as const;
+export type ExampleSkillTemplate = (typeof EXAMPLE_SKILL_TEMPLATES)[number];
+
+/**
+ * #110: Request-Schema für POST /twins/:handle/skills/import. Generisch via
+ * `source`-Discriminator angelegt, damit später weitere Quellen (z.B.
+ * `'url'` für externe Skill-Repos oder `'manifest'` für direkten JSON-Upload)
+ * additive Varianten werden können.
+ */
+export const SkillImportRequestSchema = z.object({
+  source: z.literal("example"),
+  path: z.enum(EXAMPLE_SKILL_TEMPLATES),
+});
+export type SkillImportRequest = z.infer<typeof SkillImportRequestSchema>;
+
+/** #110: Response-Payload für POST /twins/:handle/skills/import. */
+export const SkillImportResponseSchema = z.object({
+  skillId: z.string(),
+  status: z.enum(["created", "updated"]),
+  name: z.string(),
+});
+export type SkillImportResponse = z.infer<typeof SkillImportResponseSchema>;
 
 export const SkillSchema = z.object({
   skillId: z.string(),

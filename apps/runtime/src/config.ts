@@ -38,6 +38,12 @@ export interface RuntimeConfig {
   mandatesPath: string;
   /** Verzeichnis mit allen SQL-Migrationen (`NNN_name.sql`, numerisch sortiert). */
   migrationsDir: string;
+  /**
+   * Production-Skill-Templates (#110): Wurzel der `examples/skills/<name>/`-
+   * Verzeichnisse, aus denen der Wizard offizielle Skills importiert.
+   * Im Container via Dockerfile-COPY nach `/app/examples` (siehe #120).
+   */
+  examplesDir: string;
   port: number;
   host: string;
 }
@@ -52,6 +58,7 @@ export function loadRuntimeConfig(): RuntimeConfig {
     ),
     mandatesPath: resolveWorkspacePath(process.env.MANDATES_PATH, "docs/mandates.yaml"),
     migrationsDir: resolve(WORKSPACE_ROOT, "apps/runtime/migrations"),
+    examplesDir: resolve(WORKSPACE_ROOT, "examples/skills"),
     port: parsePort(process.env.RUNTIME_PORT, 4000),
     host: process.env.RUNTIME_HOST?.trim() || "127.0.0.1",
   };
