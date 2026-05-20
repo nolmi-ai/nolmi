@@ -66,6 +66,13 @@ WORKDIR /app/apps/runtime
 
 COPY --from=builder /out ./
 
+# Production-Skill-Templates aus dem Repo-Root. examples/ ist nicht Teil des
+# Workspaces (keine package.json), wird also weder von `pnpm deploy` noch von
+# den apps/runtime/-COPYs im Builder erfasst. Self-Hosting-Pattern braucht
+# /app/examples für `twin:skill-create @<handle> /app/examples/skills/<name>`
+# (#120, Tag 20 Production-Deploy).
+COPY examples /app/examples
+
 # Mount-Point fürs Compose-Volume (TWIN_DATABASE_PATH=/data/twin.db). Wird
 # beim ersten Schreibzugriff von better-sqlite3 ohnehin angelegt — explizit
 # anlegen ist nur Doku und schützt vor Permission-Edge-Cases.

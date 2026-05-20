@@ -23,8 +23,12 @@ data
 .github
 
 # Doku — Image braucht weder README noch CLAUDE.md noch ADRs.
+# Ausnahme: examples/skills/<name>/SKILL.md ist KEIN Doku-File, sondern
+# Skill-Instruktion, die der twin:skill-create-CLI im Container einliest
+# (#120, Tag 20 Production-Deploy).
 *.md
 **/*.md
+!examples/**/*.md
 
 # IDE / Editor
 .vscode
