@@ -81,13 +81,31 @@ Browser-Smoke Tag 20:
 - #108 (Beta-Deklaration in README/Landing) verbleibt — XS, keine Architektur-Arbeit
 - #119 als Befund-Item für später (nice-priority, kein Block-3-Blocker)
 
-**Pre-Launch-Phase A Bilanz:**
+**Nachmittag Tag 20 — Block-4-Strategy-Session + #120:**
 
-- Block 1 ✅ 11/11 (Tag 18)
-- Block 2 ✅ 2/2 (Tag 19)
-- Block 3: 1/2 durch (#107 ✅, #108 offen)
-- Block 4: 0/3 offen (#109 DEPLOYMENT-Test, #110 Onboarding-Wizard, #111 Public-Repo-Hygiene)
-- Block 5: 0/4 offen (#112 Landing, #113 Demo, #114 Launch-Posts, #115 Timing)
+Plus #120 Dockerfile-Fix (Commits `3041710`, `013b499`):
+
+- `COPY examples /app/examples` im Runner-Stage
+- `.dockerignore`-Negation für `examples`-md (emergenter Befund, global `*.md`-Ausschluss filterte `SKILL.md` aus)
+- Verifikation im Image-Container 4/4 grün
+- Closes #120
+
+Block-4-Strategy-Session mit 12 Setzungen durchgegangen (Audience A primär, #110 → #109 → #111 als Reihenfolge, Apache 2.0 als LICENSE, Plain Docker + Traefik als Cookbook-Stack, Hard-Trigger-Wizard mit minimaler Persona und Default-Mandates).
+
+Strategy-Doc: `docs/BLOCK-4-STRATEGY.md`.
+Erwartete Block-4-Größe: ~8.5 Tage Bau.
+
+Bau startet Tag 21 mit #110 Wizard Backend.
+
+**Pre-Launch-Phase A Bilanz nach Tag 20:**
+
+- Block 1: ✅ 11/11 (Tag 18, deployed)
+- Block 2: ✅ 2/2 (Tag 19, deployed)
+- Block 3: ◐ 1/2 (#107 vollständig + deployed, #108 sequentiell mit #111 in Block 4 / Block 5)
+- Block 4: 0/3 offen — Strategy done, Bau startet Tag 21 (#110 → #109 → #111, ~8.5 Tage)
+- Block 5: 0/4 offen — Strategy noch offen
+
+Bei 22 Tagen verfügbar (Tag 20 → Tag 42) und Block 4+5 zusammen ~15-17 Tage kalkuliert bleiben ~5-7 Tage Reserve.
 
 ## Tag 19 (19. Mai 2026, Dienstag) — Pre-Launch-Phase A Block 2
 

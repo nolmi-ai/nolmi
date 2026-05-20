@@ -1303,6 +1303,11 @@ Items aus dem Strategy-Pivot Tag 18. Block 4 macht das Repo für externe Tech-Af
 
 **Größe:** M · **Priorität:** must · **Aus:** Pre-Launch-Phase-A-Strategy (Block 4) · **Spur:** Pre-Launch-Phase A
 
+**Status-Notiz Tag 20:** Strategy-Setzungen in `docs/BLOCK-4-STRATEGY.md`:
+- Tester: Self-Test als Dogfooding mit ehrlichen Regeln
+- Scope: Skelett-Vervollständigen + Cookbook für Plain Docker + Traefik (heutiges Pattern auf srv1046432)
+- Position in Block-4-Reihenfolge: 2 (nach #110)
+
 ### 110. Onboarding-Wizard für ersten Login + Twin-Anlage
 Aktueller Erst-Login-Flow setzt voraus, dass User direkt zur Settings/Twin-Anlage navigiert und manuell Persona-YAML, MCP-Server etc. provisioniert. Für Self-Hosting-Launch zu hoch.
 
@@ -1318,6 +1323,15 @@ Wizard ist überspringbar für Tech-Affine („Skip to dashboard"), aber Default
 
 **Größe:** M · **Priorität:** must · **Aus:** Pre-Launch-Phase-A-Strategy (Block 4) · **Spur:** Pre-Launch-Phase A
 
+**Status-Notiz Tag 20:** Strategy-Setzungen in `docs/BLOCK-4-STRATEGY.md`:
+- Audience: Tech-Affine primär, Wizard für beide nützlich
+- Trigger: Hard-Trigger mit Skip-Option
+- Persona: Minimal (4-5 Felder), Vertiefung in Settings
+- Mandates: Default-Mandates, kein Wizard-Touch
+- MCP: Hyperbrowser-Preset mit Skip-Default
+- Mehrfach-Twins: Wiederholbar via Button neben Manual
+- Position in Block-4-Reihenfolge: 1 (zuerst)
+
 ### 111. Public-Repo-Hygiene (README, LICENSE, CONTRIBUTING)
 Repo wird als Open-Source-Self-Hosting-Distro öffentlich. Hygiene-Items:
 
@@ -1328,6 +1342,12 @@ Repo wird als Open-Source-Self-Hosting-Distro öffentlich. Hygiene-Items:
 - **GitHub-Discussions** evtl. aktivieren für Community
 
 **Größe:** S · **Priorität:** must · **Aus:** Pre-Launch-Phase-A-Strategy (Block 4) · **Spur:** Pre-Launch-Phase A
+
+**Status-Notiz Tag 20:** Strategy-Setzungen in `docs/BLOCK-4-STRATEGY.md`:
+- LICENSE: Apache 2.0
+- README-Struktur: Demo-First mit Hero-GIF und Story-driven Pitch
+- CONTRIBUTING.md + Issue-Templates: Standard-Pattern
+- Position in Block-4-Reihenfolge: 3 (zuletzt)
 
 ## Pre-Launch-Phase A — Block 5: Launch-Vorbereitung
 
