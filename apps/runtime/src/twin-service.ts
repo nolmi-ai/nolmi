@@ -31,6 +31,7 @@ import {
   classifyForcedTool,
   selectForcedCandidates,
 } from "./skills/pre-pass.js";
+import { TwinProfilesRepo } from "./twin-profiles-repo.js";
 import type { ConversationsRepo } from "./conversations/repo.js";
 import type {
   ConversationSummariesRepo,
@@ -253,6 +254,14 @@ export class TwinService {
    */
   public readonly twinDiaryService: TwinDiaryService;
 
+  /**
+   * #107: Repo für den research_first_use_seen-Flag (Beta-Hint-Modal nach
+   * erster Recherche). Eigenes Repo statt deps-Plumbing, weil Service nur
+   * zwei Methoden braucht (findById + markResearchFirstUseSeen) und
+   * Construction zustandslos ist.
+   */
+  private readonly profilesRepo: TwinProfilesRepo;
+
   constructor(private deps: TwinServiceDeps) {
     this.mcp = new McpClientManager(
       deps.twinId,
@@ -302,6 +311,7 @@ export class TwinService {
     this.memoryEmbeddingService = deps.memoryEmbeddingService;
     this.memoryRetrievalService = deps.memoryRetrievalService;
     this.twinDiaryService = deps.twinDiaryService;
+    this.profilesRepo = new TwinProfilesRepo(deps.db);
   }
 
   /**
@@ -370,6 +380,12 @@ export class TwinService {
     pending: boolean;
     /** #100: Memory-Hits aus dem Owner-Bypass-Pfad. Andere Pfade leer. */
     memoryHits?: MemoryHit[];
+    /**
+     * #107: Beta-Hint-Signal nach erster Recherche pro Twin. Heute nur
+     * `'research'` als einziger Wert; Frontend matched darauf einen Modal.
+     * Undefined wenn keine Pre-Pass-Triggerung oder Flag bereits gesetzt.
+     */
+    firstUseHint?: "research";
   }> {
     // 1. Capability detecten
     const lastUser = messages.at(-1)?.content ?? "";
@@ -478,6 +494,8 @@ export class TwinService {
     pending: boolean;
     /** #100: optional, nur im Success-Pfad gesetzt wenn Hits vorlagen. */
     memoryHits?: MemoryHit[];
+    /** #107: Beta-Hint-Signal nach erster Recherche pro Twin. */
+    firstUseHint?: "research";
   }> {
     // #71b/#80: Direct-Chat-Audits werden mit der aktiven Konversation
     // verknüpft. ownerUserId muss gesetzt sein, weil Owner-Bypass nur greift
@@ -638,12 +656,26 @@ export class TwinService {
         providerMetadata: reply.metadata,
         ...(memoryHits.length > 0 ? { memoryHits } : {}),
       });
+      // #107: First-Use-Hint einmalig flippen, wenn der Pre-Pass-Classifier
+      // den Recherche-Skill getriggert hat. Frontend zeigt das Beta-Modal nur
+      // bei `firstUseHint='research'` — was nur passiert, wenn der Flag im
+      // DB-Profil vorher 0 war. Reads + Update sind sync (better-sqlite3),
+      // kein await nötig.
+      let firstUseHint: "research" | undefined;
+      if (reply.prePassSkillName === "recherche-workflow") {
+        const profile = this.profilesRepo.findById(this.deps.twinId);
+        if (profile && !profile.researchFirstUseSeen) {
+          this.profilesRepo.markResearchFirstUseSeen(this.deps.twinId);
+          firstUseHint = "research";
+        }
+      }
       this.deps.bus.emit({ type: "twin.idle", payload: {} });
       return {
         message: { role: "assistant", content: reply.content },
         auditId: audit.id,
         pending: false,
         ...(memoryHits.length > 0 ? { memoryHits } : {}),
+        ...(firstUseHint ? { firstUseHint } : {}),
       };
     } catch (err) {
       // 3.2.F: zwei Wege ende hier in derselben Branch:
@@ -1470,7 +1502,18 @@ export class TwinService {
        */
       episodicBlock?: string | null;
     } = {},
-  ): Promise<{ content: string; metadata: Record<string, unknown> }> {
+  ): Promise<{
+    content: string;
+    metadata: Record<string, unknown>;
+    /**
+     * #107: Wenn der Pre-Pass-Classifier einen forced-Skill getriggert hat,
+     * landet der Skill-Name hier. runOwnerDirect nutzt das, um den
+     * research_first_use_seen-Flag genau einmal pro Twin zu flippen und im
+     * Response-Body `firstUseHint: 'research'` zu signalisieren. Undefined
+     * wenn kein Match oder Pre-Pass nicht aktiviert war.
+     */
+    prePassSkillName?: string;
+  }> {
     // Skills landen zwischen Persona und LANGUAGE_DIRECTIVE: sie ergänzen die
     // Persona ("wer der Twin ist") um Wissen/Verhalten ("was er zusätzlich
     // kann"), sollen sie aber nicht überschreiben. Direktive bleibt am Ende
@@ -1496,7 +1539,11 @@ export class TwinService {
     //   4. LANGUAGE_DIRECTIVE (Anti-"weiss"-statt-"weiß", gilt für alle Twins)
     // Direktive ans Ende, weil LLMs den letzten System-Block stärker gewichten.
     const mcpToolsResult = options.enableMcpTools
-      ? buildMcpToolsFromSkills({ skills, mcpManager: this.mcp })
+      ? buildMcpToolsFromSkills({
+          skills,
+          mcpManager: this.mcp,
+          bus: this.deps.bus,
+        })
       : { tools: {}, skillByToolKey: new Map<string, Skill>() };
     const mcpTools = mcpToolsResult.tools;
     const skillByToolKey = mcpToolsResult.skillByToolKey;
@@ -1567,8 +1614,10 @@ REGEL 6: Wenn der User dich explizit bittet, ein Tool zu nutzen ("rufe das X-Too
     // durchgereicht hat UND mindestens ein aktiver Skill triggerMode='forced'
     // hat. Bei Match wird der `effectiveForcedToolChoice` auf den Classifier-
     // Output gesetzt; die folgende Validierung gegen `mcpTools` greift dann
-    // genauso wie beim User-Picker-Pfad.
+    // genauso wie beim User-Picker-Pfad. `prePassSkillName` fließt nach oben,
+    // damit runOwnerDirect den First-Use-Hint flippen kann.
     let effectiveForcedToolChoice = options.forcedToolChoice;
+    let prePassSkillName: string | undefined;
     if (
       hasTools &&
       !effectiveForcedToolChoice &&
@@ -1585,6 +1634,7 @@ REGEL 6: Wenn der User dich explizit bittet, ein Tool zu nutzen ("rufe das X-Too
         });
         if (match) {
           effectiveForcedToolChoice = match.forcedToolChoice;
+          prePassSkillName = match.skillName;
         }
       }
     }
@@ -1730,6 +1780,7 @@ REGEL 6: Wenn der User dich explizit bittet, ein Tool zu nutzen ("rufe das X-Too
           ? { toolCalls: toolCallsForAudit }
           : {}),
       },
+      ...(prePassSkillName ? { prePassSkillName } : {}),
     };
   }
 

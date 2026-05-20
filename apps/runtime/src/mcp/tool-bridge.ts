@@ -1,6 +1,8 @@
 import { tool, jsonSchema, type Tool } from "ai";
+import { nanoid } from "nanoid";
 import type { Skill } from "@twin-lab/shared";
 import type { McpClientManager } from "./client-manager.js";
+import type { EventBus } from "../events/bus.js";
 
 // ─── PENDING-APPROVAL-MARKER (Phase 3.2.F) ──────────────────────────────────
 //
@@ -53,6 +55,32 @@ type JsonSchemaInput = Parameters<typeof jsonSchema>[0];
 export interface BuildMcpToolsInput {
   skills: Skill[];
   mcpManager: McpClientManager;
+  /**
+   * #107: optionaler EventBus für Live-Progress-Events während Auto-Approve-
+   * Tool-Calls. Wenn gesetzt, emittiert execute() vor und nach jedem MCP-Call
+   * `tool.call.start` / `tool.call.complete` (ephemer via SSE, kein DB-Persist).
+   * Marker-Pfad (requiresApproval=true) emittiert NICHT — kein echter Call,
+   * Frontend kennt den Pending-Status schon via mcp-tool-use-Audit.
+   */
+  bus?: EventBus;
+}
+
+// #107: Tool-Args truncieren für Live-Display. Hyperbrowser-Args (query, url)
+// sind kurz, aber andere Tools könnten lange Prompts/Texts mitsenden — defensive
+// String-Truncation pro Feld auf 500 chars, Non-Strings unverändert.
+const ARG_DISPLAY_MAX_CHARS = 500;
+function truncateArgsForDisplay(
+  args: Record<string, unknown>,
+): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(args)) {
+    if (typeof v === "string" && v.length > ARG_DISPLAY_MAX_CHARS) {
+      out[k] = v.slice(0, ARG_DISPLAY_MAX_CHARS) + "…";
+    } else {
+      out[k] = v;
+    }
+  }
+  return out;
 }
 
 export type McpToolSet = Record<string, Tool>;
@@ -119,17 +147,63 @@ export function buildMcpToolsFromSkills(
             isError: false,
           };
         }
-        const result = await input.mcpManager.callTool(
-          serverId,
-          toolName,
-          argRecord,
-        );
-        // Result als JSON-serialisierbares Object an den LLM zurück. AI SDK
-        // packt das in den tool-result Content-Block.
-        return {
-          content: result.content,
-          isError: result.isError ?? false,
-        };
+        // #107: Live-Progress-Events für Auto-Approve-Pfad. Bus ist optional —
+        // Tests ohne Bus laufen normal weiter. Failure-Pfad emittet die
+        // Complete-Event mit status='failed' BEVOR wir den Error nach oben
+        // re-throwen, sonst sieht das Frontend den fehlgeschlagenen Call nie.
+        const callId = nanoid(12);
+        const startedAt = new Date().toISOString();
+        const startedAtMs = Date.now();
+        if (input.bus) {
+          input.bus.emit({
+            type: "tool.call.start",
+            payload: {
+              callId,
+              toolName: skill.name,
+              mcpServerId: serverId,
+              args: truncateArgsForDisplay(argRecord),
+              startedAt,
+            },
+          });
+        }
+        try {
+          const result = await input.mcpManager.callTool(
+            serverId,
+            toolName,
+            argRecord,
+          );
+          if (input.bus) {
+            input.bus.emit({
+              type: "tool.call.complete",
+              payload: {
+                callId,
+                status: "executed",
+                completedAt: new Date().toISOString(),
+                durationMs: Date.now() - startedAtMs,
+              },
+            });
+          }
+          // Result als JSON-serialisierbares Object an den LLM zurück. AI SDK
+          // packt das in den tool-result Content-Block.
+          return {
+            content: result.content,
+            isError: result.isError ?? false,
+          };
+        } catch (err) {
+          if (input.bus) {
+            input.bus.emit({
+              type: "tool.call.complete",
+              payload: {
+                callId,
+                status: "failed",
+                error: err instanceof Error ? err.message : String(err),
+                completedAt: new Date().toISOString(),
+                durationMs: Date.now() - startedAtMs,
+              },
+            });
+          }
+          throw err;
+        }
       },
     });
   }

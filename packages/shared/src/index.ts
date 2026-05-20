@@ -102,6 +102,34 @@ export const TwinEventSchema = z.discriminatedUnion("type", [
     type: z.literal("twin.idle"),
     payload: z.object({}),
   }),
+  // #107: Live-Progress-Events für Auto-Approve-Tool-Calls. Werden im
+  // tool-bridge.execute()-Pfad pro MCP-Call emittiert (start + complete).
+  // Nicht DB-persistiert — ephemerer Live-State, der nach `twin.idle` im
+  // Frontend mit kurzem Delay verworfen wird. Args werden vorher String-
+  // weise auf 500 chars truncated (Display-Only, nicht Re-Run-Quelle).
+  // Diagnose Tag 20: Auto-Approve-Tools (z.B. Hyperbrowser-Recherche)
+  // erzeugen keine separaten Audit-Rows, der Audit-Stream ist also opak
+  // bis zum finalen owner-direct-Audit am Cycle-Ende.
+  z.object({
+    type: z.literal("tool.call.start"),
+    payload: z.object({
+      callId: z.string(),
+      toolName: z.string(),
+      mcpServerId: z.string(),
+      args: z.record(z.string(), z.unknown()),
+      startedAt: z.string().datetime(),
+    }),
+  }),
+  z.object({
+    type: z.literal("tool.call.complete"),
+    payload: z.object({
+      callId: z.string(),
+      status: z.enum(["executed", "failed"]),
+      error: z.string().optional(),
+      completedAt: z.string().datetime(),
+      durationMs: z.number().int().nonnegative(),
+    }),
+  }),
   z.object({
     type: z.literal("heartbeat"),
     payload: z.object({ timestamp: z.string().datetime() }),

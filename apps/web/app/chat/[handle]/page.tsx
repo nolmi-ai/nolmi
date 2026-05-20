@@ -25,6 +25,9 @@ import { resolveToolDisplay } from "../../../lib/tool-display";
 import { estimateToolCost, formatEstimate } from "../../../lib/tool-cost";
 import { MemoryHitBadge } from "../../../components/MemoryHitBadge";
 import { MaturityBadge } from "../../../components/MaturityBadge";
+import { ResearchLiveProgress } from "../../../components/ResearchLiveProgress";
+import { ResearchFirstUseModal } from "../../../components/ResearchFirstUseModal";
+import { useToolCallStream } from "../../../lib/use-tool-call-stream";
 import { formatRelative } from "../../../lib/time-format";
 
 const RUNTIME_URL = process.env.NEXT_PUBLIC_RUNTIME_URL ?? "http://localhost:4000";
@@ -963,6 +966,13 @@ function DirectChat({
   // Local-ID — damit erscheint nach dem nächsten Send ein Trenner zwischen
   // letzter Server-Message und der neuen Live-Pärchen.
   const [activeConvId, setActiveConvId] = useState<string | null>(null);
+  // #107: Beta-Hint-Modal nach erster Recherche. Trigger kommt aus dem
+  // sendChat-Response-Body (`firstUseHint: 'research'`). Backend setzt das
+  // Feld idempotent — gleiche Twin/Konv → kein erneutes Modal.
+  const [showResearchHint, setShowResearchHint] = useState(false);
+  // #107: Live-Tool-Call-Stream für die Recherche-Progress-Anzeige. Hört auf
+  // tool.call.start/complete via SSE, leert sich nach twin.idle + Karenz.
+  const toolCalls = useToolCallStream({ twinHandle: handle });
 
   // #106: AuditEntries-Filter VOR buildChatBlocksFromAudits — ChatBlock
   // hat keinen timestamp, daher müssen wir auf der Audit-Ebene spalten.
@@ -1119,9 +1129,19 @@ function DirectChat({
         const body = await res.json().catch(() => ({ error: "Unknown error" }));
         throw new Error(body.error ?? `HTTP ${res.status}`);
       }
+      // #107: Response-Body lesen — bislang ignorierte sendChat den Body und
+      // vertraute komplett auf den Audit-Stream als SSoT. Für firstUseHint
+      // ist der Body aber die einzige Quelle, weil das Flag-Signal kein
+      // Audit-Field ist. catch-Fallback auf {} schützt unerwartete Body-Forms.
+      const body = (await res.json().catch(() => ({}))) as {
+        firstUseHint?: string;
+      };
       // 3.2.G: in beiden Fällen (pending oder direct reply) reload — der
       // Audit-Stream ist Single-Source-of-Truth fürs Rendering.
       await loadAudits();
+      if (body.firstUseHint === "research") {
+        setShowResearchHint(true);
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed");
     } finally {
@@ -1325,7 +1345,15 @@ function DirectChat({
               );
             })()
           )}
-          {busy && <div className="text-xs text-accent">twin denkt nach…</div>}
+          {/* #107: Recherche-Live-Progress ersetzt den generischen Spinner,
+              sobald Hyperbrowser-Tool-Calls über SSE reinkommen. Bei nicht-
+              Recherche-Sends (oder vor dem ersten Tool-Call) bleibt der
+              alte "denkt nach"-Indikator. */}
+          {toolCalls.length > 0 ? (
+            <ResearchLiveProgress toolCalls={toolCalls} />
+          ) : busy ? (
+            <div className="text-xs text-accent">twin denkt nach…</div>
+          ) : null}
           {error && (
             <div className="text-xs text-warn border border-warn/40 rounded px-3 py-2">
               {error}
@@ -1365,6 +1393,11 @@ function DirectChat({
         onConfirm={confirmRejectFromModal}
         onCancel={() => setRejectModal({ open: false })}
       />
+      {showResearchHint && (
+        <ResearchFirstUseModal
+          onDismiss={() => setShowResearchHint(false)}
+        />
+      )}
     </>
   );
 }

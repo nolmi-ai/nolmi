@@ -24,6 +24,13 @@ export interface TwinProfile {
   createdAt: number;
   updatedAt: number;
   isActive: boolean;
+  /**
+   * #107: einmaliger Beta-Hint nach erster Recherche. Flag wird im Send-Path
+   * nach Pre-Pass-Match auf 1 gesetzt; das Frontend zeigt das Modal nur, wenn
+   * `firstUseHint='research'` im Chat-Response steht — was nur passiert, wenn
+   * der Flag VOR dem Send noch 0 war.
+   */
+  researchFirstUseSeen: boolean;
 }
 
 interface TwinProfileRow {
@@ -39,6 +46,7 @@ interface TwinProfileRow {
   created_at: number;
   updated_at: number;
   is_active: number;
+  research_first_use_seen: number;
 }
 
 export interface ListFilter {
@@ -46,8 +54,15 @@ export interface ListFilter {
   ownerUserId?: string;
 }
 
-/** Felder, die bei Insert vom Repo gesetzt werden — nicht vom Caller. */
-type InsertInput = Omit<TwinProfile, "createdAt" | "updatedAt">;
+/**
+ * Felder, die bei Insert vom Repo gesetzt werden — nicht vom Caller.
+ * `researchFirstUseSeen` ist im Profil required (Read-Form), beim Insert
+ * aber optional — Bootstrap-Pfad kennt das Feld nicht, Default ist `false`.
+ */
+type InsertInput = Omit<
+  TwinProfile,
+  "createdAt" | "updatedAt" | "researchFirstUseSeen"
+> & { researchFirstUseSeen?: boolean };
 
 export class TwinProfilesRepo {
   constructor(private db: Database.Database) {}
@@ -67,6 +82,7 @@ export class TwinProfilesRepo {
       created_at: now,
       updated_at: now,
       is_active: profile.isActive ? 1 : 0,
+      research_first_use_seen: profile.researchFirstUseSeen ? 1 : 0,
     };
     this.db
       .prepare(
@@ -169,6 +185,24 @@ export class TwinProfilesRepo {
       throw new Error(`TwinProfile ${twinId} nicht gefunden`);
     }
   }
+
+  /**
+   * #107: setzt den Beta-Hint-Flag idempotent auf 1. Wird im Send-Path
+   * gerufen, sobald der Pre-Pass-Classifier den Recherche-Skill triggert
+   * und der Flag noch 0 ist. Eigene Methode statt patch-Update, weil
+   * update() die volle Profile-Spalte überschreibt — wir wollen aber nur
+   * dieses eine Boolean-Flag flippen.
+   */
+  markResearchFirstUseSeen(twinId: string): void {
+    const result = this.db
+      .prepare(
+        "UPDATE twin_profiles SET research_first_use_seen = 1, updated_at = ? WHERE twin_id = ?",
+      )
+      .run(Date.now(), twinId);
+    if (result.changes === 0) {
+      throw new Error(`TwinProfile ${twinId} nicht gefunden`);
+    }
+  }
 }
 
 function rowToProfile(row: TwinProfileRow): TwinProfile {
@@ -185,5 +219,8 @@ function rowToProfile(row: TwinProfileRow): TwinProfile {
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     isActive: row.is_active === 1,
+    // #107: SQLite-DEFAULT 0 deckt brand-new Rows ab; defensive `?? 0`-Cast
+    // schützt Tests, die das Feld in Mock-Rows nicht setzen.
+    researchFirstUseSeen: (row.research_first_use_seen ?? 0) === 1,
   };
 }
