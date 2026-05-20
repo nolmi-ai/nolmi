@@ -8,7 +8,7 @@ const RUNTIME_URL = process.env.NEXT_PUBLIC_RUNTIME_URL ?? "http://localhost:400
 
 // ─── ONBOARDING WIZARD ──────────────────────────────────────────────────────
 //
-// 8-Step-Flow für neue Twins. State liegt im Memory dieser Page (kein URL-
+// 7-Step-Flow für neue Twins. State liegt im Memory dieser Page (kein URL-
 // Anchor pro Step) — bewusst flach gehalten, weil Browser-Back den Wizard
 // sonst kaputt-springen würde.
 //
@@ -17,20 +17,21 @@ const RUNTIME_URL = process.env.NEXT_PUBLIC_RUNTIME_URL ?? "http://localhost:400
 //   1  Persona — Wer bist du?
 //   2  Persona — Wie redest du?
 //   3  Persona — Worüber sprichst du gern?
-//   4  Mandate-Template
-//   5  LLM + API-Key (mit Validation-Button)
-//   6  Bridge — nur Info
-//   7  Review + Submit
+//   4  LLM + API-Key (mit Validation-Button)
+//   5  Bridge — nur Info
+//   6  Review + Submit
 //
 // Bei Step-0-Wahl 'self-hosted' wird Goodbye gezeigt statt weiter; das ist
 // kein Schritt 1.
+//
+// #110 Phase 2A: Mandate-Step entfernt (war Step 4). Default 'cautious' wird
+// vom Backend gesetzt. UI-Edit kommt später in Settings (Phase B).
 
 // ─── TYPES ──────────────────────────────────────────────────────────────────
 
 type Tone = "direct" | "polite" | "casual" | "formal";
 type Pronoun = "du" | "sie" | "context-dependent";
 type Preference = "no-emojis" | "no-platitudes" | "short-answers";
-type MandateTemplateId = "cautious" | "trusting" | "business";
 type LlmProvider = "anthropic" | "openai";
 
 interface Relationship {
@@ -54,13 +55,12 @@ const STEP_LABELS: string[] = [
   "Wer bist du?",
   "Wie redest du?",
   "Worüber sprichst du?",
-  "Mandate",
   "LLM + API-Key",
   "Bridge",
   "Review",
 ];
 
-const TOTAL_STEPS = STEP_LABELS.length; // 8
+const TOTAL_STEPS = STEP_LABELS.length; // 7
 
 // ─── PAGE ───────────────────────────────────────────────────────────────────
 
@@ -93,7 +93,9 @@ function WizardInner({ router }: { router: ReturnType<typeof useRouter> }) {
     topics: [],
     relationships: [],
   });
-  const [mandateTemplate, setMandateTemplate] = useState<MandateTemplateId>("cautious");
+  // #110 Phase 2A: Mandate-Step entfernt. Backend setzt Default 'cautious'
+  // wenn `mandateTemplate` im Submit-Payload fehlt; UI-Edit verschoben in
+  // Settings (Phase B / spätere #110-Erweiterung).
   const [llmProvider, setLlmProvider] = useState<LlmProvider>("anthropic");
   const [llmModel, setLlmModel] = useState("claude-opus-4-7");
   const [apiKey, setApiKey] = useState("");
@@ -131,7 +133,6 @@ function WizardInner({ router }: { router: ReturnType<typeof useRouter> }) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           persona,
-          mandateTemplate,
           llmConfig: { provider: llmProvider, model: llmModel, apiKey },
         }),
       });
@@ -183,9 +184,6 @@ function WizardInner({ router }: { router: ReturnType<typeof useRouter> }) {
           <PersonaTopicsBlock persona={persona} setPersona={setPersona} />
         )}
         {step === 4 && (
-          <MandateTemplateBlock value={mandateTemplate} onChange={setMandateTemplate} />
-        )}
-        {step === 5 && (
           <LlmConfigBlock
             provider={llmProvider}
             setProvider={(p) => {
@@ -235,11 +233,10 @@ function WizardInner({ router }: { router: ReturnType<typeof useRouter> }) {
             }}
           />
         )}
-        {step === 6 && <BridgeBlock handle={persona.handle} />}
-        {step === 7 && (
+        {step === 5 && <BridgeBlock handle={persona.handle} />}
+        {step === 6 && (
           <ReviewBlock
             persona={persona}
-            mandateTemplate={mandateTemplate}
             llmProvider={llmProvider}
             llmModel={llmModel}
             apiKey={apiKey}
@@ -250,8 +247,8 @@ function WizardInner({ router }: { router: ReturnType<typeof useRouter> }) {
         )}
       </main>
 
-      {/* Step-Nav: Block 0 hat schon Auto-Advance, Block 5 hat eigenen "Testen"-Button */}
-      {step > 0 && step !== 5 && step !== 7 && (
+      {/* Step-Nav: Block 0 hat schon Auto-Advance, Block 4 hat eigenen "Testen"-Button */}
+      {step > 0 && step !== 4 && step !== 6 && (
         <footer className="flex justify-between border-t border-border pt-4">
           <button
             onClick={goBack}
@@ -268,7 +265,7 @@ function WizardInner({ router }: { router: ReturnType<typeof useRouter> }) {
           </button>
         </footer>
       )}
-      {step === 5 && (
+      {step === 4 && (
         <footer className="flex justify-between border-t border-border pt-4">
           <button
             onClick={goBack}
@@ -281,7 +278,7 @@ function WizardInner({ router }: { router: ReturnType<typeof useRouter> }) {
           </span>
         </footer>
       )}
-      {step === 7 && (
+      {step === 6 && (
         <footer className="flex justify-between border-t border-border pt-4">
           <button
             onClick={goBack}
@@ -320,13 +317,11 @@ function stepIsComplete(step: number, g: StepGate): boolean {
     case 3:
       return g.persona.topics.length >= 1;
     case 4:
-      return true; // immer ein Default gesetzt
-    case 5:
       return g.apiKeyValidated;
+    case 5:
+      return true; // Bridge — pure Info
     case 6:
-      return true;
-    case 7:
-      return true;
+      return true; // Review
     default:
       return false;
   }
@@ -784,84 +779,6 @@ function PersonaTopicsBlock({
   );
 }
 
-// ─── BLOCK B: MANDATE-TEMPLATE ──────────────────────────────────────────────
-
-const MANDATE_TEMPLATES: {
-  id: MandateTemplateId;
-  name: string;
-  description: string;
-  bullets: string[];
-}[] = [
-  {
-    id: "cautious",
-    name: "Vorsichtig",
-    description: "Default. Alles geht erst durch deine Approval.",
-    bullets: [
-      "Chat-Antworten: nur nach Freigabe",
-      "Twin-Nachrichten: nur nach Freigabe",
-      "Recherche, Termine: deaktiviert",
-    ],
-  },
-  {
-    id: "trusting",
-    name: "Vertrauensvoll",
-    description: "Alltägliches läuft autonom — sensible Themen brauchen Approval.",
-    bullets: [
-      "Chat-Antworten: ohne Freigabe",
-      "Twin-Nachrichten: ohne Freigabe — außer bei Termin/Geld/Vertrag",
-      "Recherche: autonom",
-    ],
-  },
-  {
-    id: "business",
-    name: "Geschäftlich",
-    description: "Business-Mode. Privates wird abgewiesen.",
-    bullets: [
-      "Chat: nur geschäftliche Themen, mit Freigabe",
-      "Twin-Nachrichten: mit Freigabe",
-      "Recherche: autonom; Termine: mit Freigabe",
-    ],
-  },
-];
-
-function MandateTemplateBlock({
-  value,
-  onChange,
-}: {
-  value: MandateTemplateId;
-  onChange: (id: MandateTemplateId) => void;
-}) {
-  return (
-    <div className="space-y-4">
-      <p className="text-sm text-muted">
-        Was darf der Twin in deinem Namen tun? Du kannst diese Einstellung
-        später jederzeit ändern.
-      </p>
-      <div className="grid sm:grid-cols-3 gap-3">
-        {MANDATE_TEMPLATES.map((tpl) => (
-          <button
-            key={tpl.id}
-            onClick={() => onChange(tpl.id)}
-            className={`text-left p-4 rounded border transition-colors h-full ${
-              value === tpl.id
-                ? "border-accent bg-surface"
-                : "border-border bg-surface hover:border-accent"
-            }`}
-          >
-            <div className="text-base text-text font-semibold mb-1">{tpl.name}</div>
-            <div className="text-xs text-muted mb-3">{tpl.description}</div>
-            <ul className="text-xs text-muted space-y-1">
-              {tpl.bullets.map((b, i) => (
-                <li key={i}>- {b}</li>
-              ))}
-            </ul>
-          </button>
-        ))}
-      </div>
-    </div>
-  );
-}
-
 // ─── BLOCK C: LLM + API-KEY ─────────────────────────────────────────────────
 
 function LlmConfigBlock({
@@ -1009,7 +926,6 @@ function BridgeBlock({ handle }: { handle: string }) {
 
 function ReviewBlock({
   persona,
-  mandateTemplate,
   llmProvider,
   llmModel,
   apiKey,
@@ -1018,7 +934,6 @@ function ReviewBlock({
   onSubmit,
 }: {
   persona: PersonaState;
-  mandateTemplate: MandateTemplateId;
   llmProvider: LlmProvider;
   llmModel: string;
   apiKey: string;
@@ -1048,10 +963,6 @@ function ReviewBlock({
             value={persona.relationships.map((r) => `${r.name} (${r.description})`).join(", ")}
           />
         )}
-      </Section>
-
-      <Section title="Mandate">
-        <ReviewRow label="Template" value={mandateTemplate} />
       </Section>
 
       <Section title="LLM">

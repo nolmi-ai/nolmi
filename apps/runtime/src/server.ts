@@ -570,7 +570,15 @@ const PersonaInputSchema = z.object({
 
 const OnboardingSubmitSchema = z.object({
   persona: PersonaInputSchema,
-  mandateTemplate: z.enum(["cautious", "trusting", "business"]),
+  // #110 Phase 2A: optional. Wizard sendet das Feld nicht mehr — der Wahlschritt
+  // ist entfernt, weil Mandate-Konzepte für Erstnutzer schwer sind. Default
+  // 'cautious' (alles geht durch Approval) bleibt sicher und kann später in
+  // Settings angepasst werden. Backward-Compat: Clients, die das Feld noch
+  // mitschicken, werden akzeptiert.
+  mandateTemplate: z
+    .enum(["cautious", "trusting", "business"])
+    .optional()
+    .default("cautious"),
   llmConfig: z.object({
     provider: z.enum(LLM_PROVIDERS),
     model: z.string().min(1),
