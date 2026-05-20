@@ -1259,6 +1259,8 @@ Konkrete Stellen:
 
 **Größe:** XS · **Priorität:** must · **Aus:** Pre-Launch-Phase-A-Strategy (Block 3) · **Spur:** Pre-Launch-Phase A
 
+**Status Tag 20:** UI-Hint-Teil ist durch #107 Patch 3 (ResearchFirstUseModal, Commit `150cdc8`) bereits ausgeliefert — Erstnutzung pro Twin-Owner blendet 3-Bullet-Beta-Hinweis ein. Verbleibend für #108: README-Hauptpitch-Block und Landing-Page-Feature-Deklaration mit „(Beta)"-Kennzeichnung. Reine Doku-Arbeit, keine Architektur-Änderung — nicht blockierend für Production-Deploy von #107.
+
 ### 119. Skills-Deaktivierung blockt nur Pre-Pass, nicht autonomes Tool-Use
 
 **Befund Tag 20 (Test 6 #107):** Skill `is_active=0` deaktiviert nur den Pre-Pass-Trigger (forced toolChoice), nicht die MCP-Tool-Availability für den LLM. Wenn ein Twin Recherche-Skill aktiv hatte und mehrere Tool-Use-Patterns aus dem Send-History gelernt hat, ruft er Tools weiter autonom auf — auch nach Skill-Deaktivierung.
@@ -1275,6 +1277,17 @@ Konkrete Stellen:
 
 **Größe:** S (Variante 1) / M (Variante 2/3) · **Priorität:** nice · **Aus:** Tag-20 Test 6 #107
 **Status:** offen, kein Pre-Launch-Phase-A-Blocker
+
+### 120. Dockerfile kopiert `examples/` nicht ins Container-Image
+
+**Befund Tag 20 (Production-Deploy):** `examples/skills/` wurde heute Mittag als Production-Template-Pattern angelegt (Commit `ad0063f`), ist aber nicht im Runtime-Container-Image. `apps/runtime/Dockerfile` COPYt nur `apps/runtime/`, `packages/shared/` und Workspace-Configs — `pnpm deploy --filter @twin-lab/runtime --prod /out` materialisiert nur workspace-relevante Files. Folge: Skill-Create-CLI im Container findet `/app/examples/skills/recherche-workflow` nicht.
+
+**Workaround Tag 20:** `docker cp /docker/twin-lab-web/repo/examples twin-lab-runtime:/app/examples` — transient, beim nächsten Container-Recreate weg.
+
+**Fix:** Single `COPY examples /app/examples` im Runner-Stage des Dockerfile. examples/ ist statischer Content ohne Build-Step, braucht keinen Builder-Pfad.
+
+**Größe:** XS · **Priorität:** must (Self-Hosting-Pattern braucht den Pfad) · **Aus:** Tag-20 Production-Deploy
+**Status:** offen → wird im selben Block durch Dockerfile-Edit geschlossen
 
 ## Pre-Launch-Phase A — Block 4: Self-Hosting-Polish
 
