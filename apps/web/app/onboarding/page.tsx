@@ -2,30 +2,28 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import Link from "next/link";
 
 const RUNTIME_URL = process.env.NEXT_PUBLIC_RUNTIME_URL ?? "http://localhost:4000";
 
 // ─── ONBOARDING WIZARD ──────────────────────────────────────────────────────
 //
-// 7-Step-Flow für neue Twins. State liegt im Memory dieser Page (kein URL-
+// 6-Step-Flow für neue Twins. State liegt im Memory dieser Page (kein URL-
 // Anchor pro Step) — bewusst flach gehalten, weil Browser-Back den Wizard
 // sonst kaputt-springen würde.
 //
 // Steps:
-//   0  Pfad-Wahl                  → 'hosted' | 'self-hosted'
-//   1  Persona — Wer bist du?
-//   2  Persona — Wie redest du?
-//   3  Persona — Worüber sprichst du gern?
-//   4  LLM + API-Key (mit Validation-Button)
-//   5  Bridge — nur Info
-//   6  Review + Submit
+//   0  Persona — Wer bist du?
+//   1  Persona — Wie redest du?
+//   2  Persona — Worüber sprichst du gern?
+//   3  LLM + API-Key (mit Validation-Button)
+//   4  Bridge — nur Info
+//   5  Review + Submit
 //
-// Bei Step-0-Wahl 'self-hosted' wird Goodbye gezeigt statt weiter; das ist
-// kein Schritt 1.
-//
-// #110 Phase 2A: Mandate-Step entfernt (war Step 4). Default 'cautious' wird
-// vom Backend gesetzt. UI-Edit kommt später in Settings (Phase B).
+// #110 Phase 2A: Mandate-Step entfernt (war Step 4 vor Refactor). Default
+// 'cautious' wird vom Backend gesetzt. UI-Edit kommt später in Settings
+// (Phase B). Pfad-Wahl-Step (war Step 0) ebenfalls entfernt — Hosted ist
+// Default für Phase A, Self-Hoster sehen den Wizard nur wenn sie twin-lab
+// selbst betreiben.
 
 // ─── TYPES ──────────────────────────────────────────────────────────────────
 
@@ -51,7 +49,6 @@ interface PersonaState {
 }
 
 const STEP_LABELS: string[] = [
-  "Pfad",
   "Wer bist du?",
   "Wie redest du?",
   "Worüber sprichst du?",
@@ -60,7 +57,7 @@ const STEP_LABELS: string[] = [
   "Review",
 ];
 
-const TOTAL_STEPS = STEP_LABELS.length; // 7
+const TOTAL_STEPS = STEP_LABELS.length; // 6
 
 // ─── PAGE ───────────────────────────────────────────────────────────────────
 
@@ -81,7 +78,6 @@ export default function OnboardingPage() {
 // Sub-Page für den eigentlichen Wizard-State, nachdem Account bestätigt ist.
 function WizardInner({ router }: { router: ReturnType<typeof useRouter> }) {
   const [step, setStep] = useState(0);
-  const [pathChoice, setPathChoice] = useState<"hosted" | "self-hosted" | null>(null);
 
   const [persona, setPersona] = useState<PersonaState>({
     fullName: "",
@@ -108,16 +104,10 @@ function WizardInner({ router }: { router: ReturnType<typeof useRouter> }) {
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
 
-  // Self-Hosted-Pfad: vollständig anderer Screen.
-  if (pathChoice === "self-hosted") {
-    return <GoodbyeScreen />;
-  }
-
   const goNext = () => setStep((s) => Math.min(s + 1, TOTAL_STEPS - 1));
   const goBack = () => setStep((s) => Math.max(s - 1, 0));
 
   const canAdvance = stepIsComplete(step, {
-    pathChoice,
     persona,
     handleStatus,
     apiKeyValidated,
@@ -161,15 +151,6 @@ function WizardInner({ router }: { router: ReturnType<typeof useRouter> }) {
 
       <main className="space-y-6">
         {step === 0 && (
-          <PathChoiceBlock
-            value={pathChoice}
-            onChoose={(v) => {
-              setPathChoice(v);
-              if (v === "hosted") goNext();
-            }}
-          />
-        )}
-        {step === 1 && (
           <PersonaWhoBlock
             persona={persona}
             setPersona={setPersona}
@@ -177,13 +158,13 @@ function WizardInner({ router }: { router: ReturnType<typeof useRouter> }) {
             setHandleStatus={setHandleStatus}
           />
         )}
-        {step === 2 && (
+        {step === 1 && (
           <PersonaToneBlock persona={persona} setPersona={setPersona} />
         )}
-        {step === 3 && (
+        {step === 2 && (
           <PersonaTopicsBlock persona={persona} setPersona={setPersona} />
         )}
-        {step === 4 && (
+        {step === 3 && (
           <LlmConfigBlock
             provider={llmProvider}
             setProvider={(p) => {
@@ -233,8 +214,8 @@ function WizardInner({ router }: { router: ReturnType<typeof useRouter> }) {
             }}
           />
         )}
-        {step === 5 && <BridgeBlock handle={persona.handle} />}
-        {step === 6 && (
+        {step === 4 && <BridgeBlock handle={persona.handle} />}
+        {step === 5 && (
           <ReviewBlock
             persona={persona}
             llmProvider={llmProvider}
@@ -247,8 +228,8 @@ function WizardInner({ router }: { router: ReturnType<typeof useRouter> }) {
         )}
       </main>
 
-      {/* Step-Nav: Block 0 hat schon Auto-Advance, Block 4 hat eigenen "Testen"-Button */}
-      {step > 0 && step !== 4 && step !== 6 && (
+      {/* Step-Nav: Step 0 hat keinen Zurück-Button, Step 3 hat eigenen "Testen"-Button, Step 5 hat Submit-Footer */}
+      {step > 0 && step !== 3 && step !== 5 && (
         <footer className="flex justify-between border-t border-border pt-4">
           <button
             onClick={goBack}
@@ -265,7 +246,7 @@ function WizardInner({ router }: { router: ReturnType<typeof useRouter> }) {
           </button>
         </footer>
       )}
-      {step === 4 && (
+      {step === 3 && (
         <footer className="flex justify-between border-t border-border pt-4">
           <button
             onClick={goBack}
@@ -278,7 +259,7 @@ function WizardInner({ router }: { router: ReturnType<typeof useRouter> }) {
           </span>
         </footer>
       )}
-      {step === 6 && (
+      {step === 5 && (
         <footer className="flex justify-between border-t border-border pt-4">
           <button
             onClick={goBack}
@@ -296,7 +277,6 @@ function WizardInner({ router }: { router: ReturnType<typeof useRouter> }) {
 // ─── STEP-COMPLETION ────────────────────────────────────────────────────────
 
 interface StepGate {
-  pathChoice: "hosted" | "self-hosted" | null;
   persona: PersonaState;
   handleStatus: HandleStatus;
   apiKeyValidated: boolean;
@@ -305,80 +285,24 @@ interface StepGate {
 function stepIsComplete(step: number, g: StepGate): boolean {
   switch (step) {
     case 0:
-      return g.pathChoice === "hosted";
-    case 1:
       return (
         g.persona.fullName.trim().length > 0 &&
         g.persona.role.trim().length > 0 &&
         g.handleStatus.kind === "available"
       );
-    case 2:
+    case 1:
       return g.persona.tone.length >= 1;
-    case 3:
+    case 2:
       return g.persona.topics.length >= 1;
-    case 4:
+    case 3:
       return g.apiKeyValidated;
-    case 5:
+    case 4:
       return true; // Bridge — pure Info
-    case 6:
+    case 5:
       return true; // Review
     default:
       return false;
   }
-}
-
-// ─── BLOCK 0: PFAD-WAHL ─────────────────────────────────────────────────────
-
-function PathChoiceBlock({
-  value,
-  onChoose,
-}: {
-  value: "hosted" | "self-hosted" | null;
-  onChoose: (v: "hosted" | "self-hosted") => void;
-}) {
-  return (
-    <div className="space-y-4">
-      <p className="text-sm text-muted">
-        Wie willst du den Twin betreiben? Du kannst die Wahl später nicht
-        einfach ändern — beim Self-Hosted bist du selbst für Setup und Wartung
-        verantwortlich.
-      </p>
-      <div className="grid sm:grid-cols-2 gap-4">
-        <button
-          onClick={() => onChoose("hosted")}
-          className={`text-left p-5 rounded border transition-colors ${
-            value === "hosted"
-              ? "border-accent bg-surface"
-              : "border-border bg-surface hover:border-accent"
-          }`}
-        >
-          <div className="text-xs uppercase tracking-wider text-accent mb-2">
-            Empfohlen
-          </div>
-          <div className="text-base text-text font-semibold mb-1">Hosted</div>
-          <div className="text-xs text-muted">
-            Wir hosten den Twin. Du bringst nur deinen API-Key mit.
-          </div>
-        </button>
-        <button
-          onClick={() => onChoose("self-hosted")}
-          className={`text-left p-5 rounded border transition-colors ${
-            value === "self-hosted"
-              ? "border-accent bg-surface"
-              : "border-border bg-surface hover:border-accent"
-          }`}
-        >
-          <div className="text-xs uppercase tracking-wider text-muted mb-2">
-            Für Entwickler
-          </div>
-          <div className="text-base text-text font-semibold mb-1">Self-Hosted</div>
-          <div className="text-xs text-muted">
-            Klone das Repo, baue selbst. Volle Kontrolle, keine Garantien.
-          </div>
-        </button>
-      </div>
-    </div>
-  );
 }
 
 // ─── BLOCK A.1: WER BIST DU? ────────────────────────────────────────────────
@@ -1016,43 +940,6 @@ function ReviewRow({
       <dd className={`flex-1 text-text ${mono ? "font-mono text-xs pt-0.5" : ""}`}>
         {value}
       </dd>
-    </div>
-  );
-}
-
-// ─── GOODBYE ────────────────────────────────────────────────────────────────
-
-function GoodbyeScreen() {
-  return (
-    <div className="max-w-xl mx-auto px-6 space-y-6 mt-12">
-      <h1 className="text-xl font-semibold text-text">Self-Hosted</h1>
-      <p className="text-sm text-muted leading-relaxed">
-        Für die selbst-gehostete Variante: hol dir den Code, leg deine eigene
-        Bridge auf, betreib's auf deinem Gerät. Volle Kontrolle, keine Garantien.
-      </p>
-      <ul className="space-y-2 text-sm">
-        <li>
-          <a
-            href="https://github.com/markusbaier/twin-lab"
-            target="_blank"
-            rel="noreferrer"
-            className="text-accent hover:underline"
-          >
-            github.com/markusbaier/twin-lab
-          </a>
-          <span className="text-muted"> — Code & README</span>
-        </li>
-        <li>
-          <span className="text-text font-mono text-xs">docs/SETUP.md</span>
-          <span className="text-muted"> — Tag-1-Anleitung</span>
-        </li>
-      </ul>
-      <Link
-        href="/"
-        className="inline-block px-4 py-2 border border-accent text-accent text-sm rounded hover:bg-accent hover:text-bg transition-colors"
-      >
-        Zur Hauptseite
-      </Link>
     </div>
   );
 }
