@@ -7,27 +7,26 @@ const RUNTIME_URL = process.env.NEXT_PUBLIC_RUNTIME_URL ?? "http://localhost:400
 
 // ─── ONBOARDING WIZARD ──────────────────────────────────────────────────────
 //
-// 5-Step-Flow für neue Twins. State liegt im Memory dieser Page (kein URL-
+// 3-Step-Flow für neue Twins. State liegt im Memory dieser Page (kein URL-
 // Anchor pro Step) — bewusst flach gehalten, weil Browser-Back den Wizard
 // sonst kaputt-springen würde.
 //
 // Steps:
-//   0  Persona — Wer bist du?
-//   1  Persona — Wie redest du?
-//   2  Persona — Worüber sprichst du gern?
-//   3  LLM + API-Key (mit Validation-Button)
-//   4  Review + Submit
+//   0  Persona — drei Sub-Sektionen mit border-t-Trennern
+//         (Wer bist du? / Wie redest du? / Worüber sprichst du?)
+//   1  LLM + API-Key (mit Validation-Button)
+//   2  Review + Submit
 //
-// #110 Phase 2A entfernte Reihe nach: Mandate-Step (Default 'cautious'
-// kommt vom Backend), Pfad-Wahl-Step (Hosted-Default für Phase A),
-// Bridge-Step (war nur Info-Karte — Bridge wird beim Submit automatisch
-// angelegt, kurzer Hinweis im Review-Header). Vorgesehene Erweiterungen:
-// MCP-Hyperbrowser-Step + Erste-Konversation-Step + Hard-Trigger +
-// Settings-Button.
+// #110 Phase 2A entfernte Reihe nach: Mandate-Step, Pfad-Wahl-Step,
+// Bridge-Step (Defaults greifen unsichtbar — cautious-Mandate, hosted,
+// Bridge-auto-Anbindung). #110 Phase 2B (Tag 22): Persona-Kollaps — die
+// drei separaten Persona-Steps zu einem Step zusammengeklappt, alle
+// Validation in case 0 von stepIsComplete. Vorgesehene Erweiterungen:
+// MCP-Hyperbrowser-Step + Hard-Trigger + Settings-Button.
 //
 // Layout-Harmonisierung Tag 21: Container ist überall max-w-2xl (Login +
-// Register + Wizard alle gleich breit, 672px). Form-Steps 0-3 stehen
-// freistehend im Container ohne Card-Frame; Step 4 (Review) hat
+// Register + Wizard alle gleich breit, 672px). Form-Steps stehen
+// freistehend im Container ohne Card-Frame; Step 2 (Review) hat
 // Section-Cards für Persona + LLM als logische Gruppen.
 
 // ─── TYPES ──────────────────────────────────────────────────────────────────
@@ -54,14 +53,12 @@ interface PersonaState {
 }
 
 const STEP_LABELS: string[] = [
-  "Wer bist du?",
-  "Wie redest du?",
-  "Worüber sprichst du?",
+  "Persona",
   "LLM + API-Key",
   "Review",
 ];
 
-const TOTAL_STEPS = STEP_LABELS.length; // 5
+const TOTAL_STEPS = STEP_LABELS.length; // 3
 
 // ─── PAGE ───────────────────────────────────────────────────────────────────
 
@@ -155,20 +152,36 @@ function WizardInner({ router }: { router: ReturnType<typeof useRouter> }) {
 
       <main className="space-y-6">
         {step === 0 && (
-          <PersonaWhoBlock
-            persona={persona}
-            setPersona={setPersona}
-            handleStatus={handleStatus}
-            setHandleStatus={setHandleStatus}
-          />
+          // #110 Phase 2B Persona-Kollaps: drei alte Steps (Wer/Wie/Worüber)
+          // hier inline mit Subheadings + border-t-Trennern. Components
+          // unverändert — nutzen schon zentralen persona-State.
+          <div className="space-y-0">
+            <h2 className="text-sm font-semibold text-text mb-4 mt-0">
+              Wer bist du?
+            </h2>
+            <PersonaWhoBlock
+              persona={persona}
+              setPersona={setPersona}
+              handleStatus={handleStatus}
+              setHandleStatus={setHandleStatus}
+            />
+
+            <div className="border-t border-border my-8 pt-8">
+              <h2 className="text-sm font-semibold text-text mb-4">
+                Wie redest du?
+              </h2>
+              <PersonaToneBlock persona={persona} setPersona={setPersona} />
+            </div>
+
+            <div className="border-t border-border my-8 pt-8">
+              <h2 className="text-sm font-semibold text-text mb-4">
+                Worüber sprichst du?
+              </h2>
+              <PersonaTopicsBlock persona={persona} setPersona={setPersona} />
+            </div>
+          </div>
         )}
         {step === 1 && (
-          <PersonaToneBlock persona={persona} setPersona={setPersona} />
-        )}
-        {step === 2 && (
-          <PersonaTopicsBlock persona={persona} setPersona={setPersona} />
-        )}
-        {step === 3 && (
           <LlmConfigBlock
             provider={llmProvider}
             setProvider={(p) => {
@@ -218,7 +231,7 @@ function WizardInner({ router }: { router: ReturnType<typeof useRouter> }) {
             }}
           />
         )}
-        {step === 4 && (
+        {step === 2 && (
           <ReviewBlock
             persona={persona}
             llmProvider={llmProvider}
@@ -231,13 +244,12 @@ function WizardInner({ router }: { router: ReturnType<typeof useRouter> }) {
         )}
       </main>
 
-      {/* Step-Nav: Standard-Footer für Steps 0/1/2 (Persona). Step 3 (LLM)
-       * hat eigenen "Testen"-Button-Footer, Step 4 (Review) hat Submit-
-       * Footer. Auf Step 0 fehlt der Zurück-Button (kein vorheriger Step),
-       * Weiter ist aber nötig — daher Zurück konditional, Weiter immer.
-       * Bug-Fix Tag 21: vor #110 Phase-2A-Cleanup blockte `step > 0`
-       * korrekt, weil Step 0 = Pfad-Wahl mit Auto-Advance war. */}
-      {step !== 3 && step !== 4 && (
+      {/* Step-Nav (#110 Phase 2B nach Persona-Kollaps): nur Step 0 (Persona)
+       * hat Standard-Footer. Step 1 (LLM) hat eigenen "Testen"-Button-
+       * Footer, Step 2 (Review) hat Submit-Footer. Auf Step 0 fehlt der
+       * Zurück-Button (kein vorheriger Step), Weiter ist aber nötig —
+       * daher Zurück konditional via `step > 0`, Weiter immer. */}
+      {step !== 1 && step !== 2 && (
         <footer className="flex justify-between border-t border-border pt-4">
           {step > 0 ? (
             <button
@@ -258,7 +270,7 @@ function WizardInner({ router }: { router: ReturnType<typeof useRouter> }) {
           </button>
         </footer>
       )}
-      {step === 3 && (
+      {step === 1 && (
         <footer className="flex justify-between border-t border-border pt-4">
           <button
             onClick={goBack}
@@ -271,7 +283,7 @@ function WizardInner({ router }: { router: ReturnType<typeof useRouter> }) {
           </span>
         </footer>
       )}
-      {step === 4 && (
+      {step === 2 && (
         <footer className="flex justify-between border-t border-border pt-4">
           <button
             onClick={goBack}
@@ -297,18 +309,19 @@ interface StepGate {
 function stepIsComplete(step: number, g: StepGate): boolean {
   switch (step) {
     case 0:
+      // #110 Phase 2B Persona-Kollaps: alle Pflicht-Felder aus den ehemals
+      // drei Persona-Steps zusammen. Beziehungen + Pronomen + Preferences
+      // bleiben optional, also nicht im Gate.
       return (
         g.persona.fullName.trim().length > 0 &&
         g.persona.role.trim().length > 0 &&
-        g.handleStatus.kind === "available"
+        g.handleStatus.kind === "available" &&
+        g.persona.tone.length >= 1 &&
+        g.persona.topics.length >= 1
       );
     case 1:
-      return g.persona.tone.length >= 1;
-    case 2:
-      return g.persona.topics.length >= 1;
-    case 3:
       return g.apiKeyValidated;
-    case 4:
+    case 2:
       return true; // Review
     default:
       return false;
