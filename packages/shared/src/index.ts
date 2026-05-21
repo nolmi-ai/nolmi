@@ -479,6 +479,26 @@ export const SkillUpdateRequestSchema = z.object({
 export type SkillUpdateRequest = z.infer<typeof SkillUpdateRequestSchema>;
 
 /**
+ * #110: strukturierte Persona-Form, die der Onboarding-Wizard sammelt und
+ * `buildPersonaMarkdown` zu System-Prompt-Markdown rendert. Seit Phase 2B
+ * Commit 11 wird das Object auch als `twin_profiles.persona_input_json`
+ * persistiert — Pre-Fill für Settings-Re-Configuration.
+ */
+export const PersonaInputSchema = z.object({
+  fullName: z.string().min(1),
+  handle: z.string().regex(/^@[a-z0-9_-]+$/),
+  role: z.string().min(1),
+  tone: z.array(z.enum(["direct", "polite", "casual", "formal"])).min(1),
+  pronoun: z.enum(["du", "sie", "context-dependent"]),
+  preferences: z.array(z.enum(["no-emojis", "no-platitudes", "short-answers"])),
+  topics: z.array(z.string().min(1)).min(1),
+  relationships: z.array(
+    z.object({ name: z.string(), description: z.string() }),
+  ),
+});
+export type PersonaInput = z.infer<typeof PersonaInputSchema>;
+
+/**
  * #110: Whitelist der Skill-Templates aus `examples/skills/<name>/`, die
  * der Wizard via POST /twins/:handle/skills/import importieren darf.
  * Neue Templates kommen hier dazu, sobald sie in `examples/skills/`
@@ -539,6 +559,55 @@ export const PresetActivationResultSchema = z.object({
   reason: z.string().optional(),
 });
 export type PresetActivationResult = z.infer<typeof PresetActivationResultSchema>;
+
+/**
+ * #110 Phase 2B Commit 11: Pre-Fill-Payload für die Settings-Page.
+ *
+ * `personaSource`:
+ * - `"structured"` — `persona_input_json` ist gesetzt, `persona`-Object
+ *   ist verfügbar
+ * - `"legacy_markdown"` — Bootstrap-CLI-Twin oder Pre-Migration-Onboarding,
+ *   `persona` ist null → Frontend zeigt Hint und kein Pre-Fill
+ *
+ * `activePresets` ist die Liste der Skill-Namen, die source=`example`
+ * haben — entspricht 1:1 den Preset-IDs aus `examples/skills/`.
+ */
+export const SettingsDataResponseSchema = z.object({
+  persona: PersonaInputSchema.nullable(),
+  personaSource: z.enum(["structured", "legacy_markdown"]),
+  llmConfig: z.object({
+    provider: z.string(),
+    model: z.string(),
+    apiKeyMasked: z.string(),
+  }),
+  activePresets: z.array(z.string()),
+});
+export type SettingsDataResponse = z.infer<typeof SettingsDataResponseSchema>;
+
+/**
+ * #110 Phase 2B Commit 11: Update-Payload für PATCH /twins/:handle/full-config.
+ * Alle Felder optional — Frontend sendet nur das, was sich geändert hat.
+ *
+ * `llmConfig.apiKey`:
+ * - `undefined` oder Feld nicht gesetzt → no-change
+ * - `null` → no-change (explizites Signal, falls UI vereinheitlicht)
+ * - String → validateApiKey + re-encrypt
+ *
+ * `presets` ist immer der Soll-Zustand (delete-and-re-insert). Wenn Feld
+ * nicht gesetzt: kein Touch an Preset-Skills.
+ */
+export const FullConfigUpdateRequestSchema = z.object({
+  persona: PersonaInputSchema.optional(),
+  llmConfig: z
+    .object({
+      provider: z.string().min(1).optional(),
+      model: z.string().min(1).optional(),
+      apiKey: z.string().min(1).nullable().optional(),
+    })
+    .optional(),
+  presets: z.array(z.string()).optional(),
+});
+export type FullConfigUpdateRequest = z.infer<typeof FullConfigUpdateRequestSchema>;
 
 export const SkillSchema = z.object({
   skillId: z.string(),

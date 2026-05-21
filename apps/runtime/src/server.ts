@@ -12,6 +12,8 @@ import {
   FactExtractRequestSchema,
   FactUpdateRequestSchema,
   McpServerCreateRequestSchema,
+  PersonaInputSchema,
+  FullConfigUpdateRequestSchema,
   SkillCreateRequestSchema,
   SkillImportRequestSchema,
   SkillUpdateRequestSchema,
@@ -31,7 +33,7 @@ import {
 import { FactsRepo } from "./facts/repo.js";
 import { TwinMaturityService } from "./twin-maturity/twin-maturity-service.js";
 import type { RegistryEntry, TwinServiceRegistry } from "./twin-service-registry.js";
-import { TwinProfilesRepo } from "./twin-profiles-repo.js";
+import { TwinProfilesRepo, type TwinProfile } from "./twin-profiles-repo.js";
 import { encrypt } from "./crypto-utils.js";
 import { LLM_PROVIDERS, type StoredLlmConfig } from "./llm-config.js";
 import { buildPersonaMarkdown } from "./onboarding/persona-builder.js";
@@ -292,6 +294,9 @@ export async function createServer(deps: ServerDeps) {
 
   // ─── MCP-Server (#87 — Configurator-UI) ───────────────────────────────────
   registerMcpServerRoutes(app, deps, requireOwner);
+
+  // ─── Settings (#110 Phase 2B Commit 11 — Pre-Fill + Edit) ─────────────────
+  registerTwinSettingsRoutes(app, deps, requireOwner);
 
   // ─── Facts (3.3.D — Semantic-Memory CRUD) ─────────────────────────────────
   registerFactRoutes(app, deps, requireOwner);
@@ -563,16 +568,9 @@ function registerLegacyAliases(
 // 2.5.3 (Backlog #37). Nach Submit muss `pnpm dev` neu gestartet werden,
 // damit der neue Twin live wird.
 
-const PersonaInputSchema = z.object({
-  fullName: z.string().min(1),
-  handle: z.string().regex(/^@[a-z0-9_-]+$/),
-  role: z.string().min(1),
-  tone: z.array(z.enum(["direct", "polite", "casual", "formal"])).min(1),
-  pronoun: z.enum(["du", "sie", "context-dependent"]),
-  preferences: z.array(z.enum(["no-emojis", "no-platitudes", "short-answers"])),
-  topics: z.array(z.string().min(1)).min(1),
-  relationships: z.array(z.object({ name: z.string(), description: z.string() })),
-});
+// #110 Phase 2B Commit 11: PersonaInputSchema lebt jetzt in @twin-lab/shared
+// (oben in den Imports). Settings-Frontend nutzt das gleiche Schema für
+// Pre-Fill + Update — Single-Source-of-Truth.
 
 const OnboardingSubmitSchema = z.object({
   persona: PersonaInputSchema,
@@ -733,6 +731,10 @@ function registerOnboardingRoutes(app: FastifyInstance, deps: ServerDeps) {
         handle: persona.handle,
         displayName: persona.fullName,
         personaMd,
+        // #110 Phase 2B Commit 11: strukturierte Form für späteren Settings-
+        // Pre-Fill mitspeichern. `persona` ist das vom Wizard validierte
+        // PersonaInput-Object (matched PersonaInputSchema in shared).
+        personaInputJson: persona,
         mandates,
         llmConfig: storedLlmConfig,
         bridgeUrl,
@@ -1539,6 +1541,210 @@ function registerMcpServerRoutes(
     },
   );
 }
+
+// ─── SETTINGS ROUTES (#110 Phase 2B Commit 11) ──────────────────────────────
+//
+// GET /twins/:handle/settings-data: Pre-Fill-Daten für die Settings-Page.
+// Liefert die strukturierte Persona-Form (oder Hint, dass Legacy-Twin),
+// LLM-Provider/Model + API-Key-Maske, und die Liste der aktiven Preset-
+// Skills (source='example').
+//
+// PATCH /twins/:handle/full-config: atomarer Update-Pfad für Persona +
+// LLM-Config + Presets. Alle drei Block sind optional — Frontend sendet
+// nur das, was sich geändert hat. API-Key kennt `null` als no-change-
+// Signal; sonst wird er validiert + neu encrypted. Presets sind ein
+// Soll-Zustand (Delete-and-Re-Insert von source='example'-Skills).
+//
+// Hot-Reload: nach Persona- oder LLM-Updates muss die Registry den Twin
+// neu laden, sonst lesen aktive Sessions weiter den alten Stand. Wir
+// nutzen `registry.reloadTwin` (idempotenter Remove-and-Add-Pfad).
+
+function registerTwinSettingsRoutes(
+  app: FastifyInstance,
+  deps: ServerDeps,
+  requireOwner: (
+    request: FastifyRequest,
+    reply: FastifyReply,
+    handle: string,
+  ) => Promise<{ entry: RegistryEntry; user: User } | null>,
+) {
+  // ─── GET /twins/:handle/settings-data ──────────────────────────────────
+  app.get<{ Params: { handle: string } }>(
+    "/twins/:handle/settings-data",
+    async (request, reply) => {
+      const ctx = await requireOwner(request, reply, request.params.handle);
+      if (!ctx) return;
+      const { entry } = ctx;
+      const profile = entry.profile;
+
+      const persona = profile.personaInputJson;
+      const activePresets = deps.skillRepo
+        .list(profile.twinId, { activeOnly: false })
+        .filter((s) => s.source === "example")
+        .map((s) => s.name)
+        .sort();
+
+      return {
+        persona,
+        personaSource: persona ? "structured" : "legacy_markdown",
+        llmConfig: {
+          provider: profile.llmConfig.provider,
+          model: profile.llmConfig.model,
+          apiKeyMasked: entry.llmDisplay.apiKeyMasked,
+        },
+        activePresets,
+      };
+    },
+  );
+
+  // ─── PATCH /twins/:handle/full-config ──────────────────────────────────
+  app.patch<{ Params: { handle: string } }>(
+    "/twins/:handle/full-config",
+    async (request, reply) => {
+      const ctx = await requireOwner(request, reply, request.params.handle);
+      if (!ctx) return;
+      const { entry } = ctx;
+
+      const parsed = FullConfigUpdateRequestSchema.safeParse(request.body);
+      if (!parsed.success) {
+        return reply.status(400).send({ error: parsed.error.message });
+      }
+      const body = parsed.data;
+
+      let touchedProfile = false;
+      let touchedLlm = false;
+
+      // 1. Persona-Update — gleichzeitig persona_md + persona_input_json
+      //    aktualisieren, damit beide Repräsentationen konsistent bleiben.
+      let nextPersonaMd: string | undefined;
+      let nextPersonaInput: PersonaInputUpdate | undefined;
+      if (body.persona) {
+        nextPersonaMd = buildPersonaMarkdown(body.persona);
+        nextPersonaInput = body.persona;
+        touchedProfile = true;
+      }
+
+      // 2. LLM-Update — apiKey explizit behandeln: null/undefined = no-change,
+      //    String = validateApiKey + encrypt.
+      let nextLlmConfig: StoredLlmConfig | undefined;
+      if (body.llmConfig) {
+        const existing = entry.profile.llmConfig;
+        const provider = body.llmConfig.provider ?? existing.provider;
+        const model = body.llmConfig.model ?? existing.model;
+        let apiKeyEncrypted = existing.apiKeyEncrypted;
+
+        if (body.llmConfig.apiKey != null) {
+          const trimmedKey = body.llmConfig.apiKey.trim();
+          if (!trimmedKey) {
+            return reply.status(400).send({
+              error: "API-Key ist leer — null senden für no-change",
+            });
+          }
+          // Provider/Model können sich gerade ändern; wir validieren gegen
+          // die finalen Werte, damit ein Provider-Wechsel mit gültigem
+          // Schlüssel direkt erkannt wird.
+          const validation = await validateApiKey(
+            provider as (typeof LLM_PROVIDERS)[number],
+            trimmedKey,
+            model,
+          );
+          if (!validation.valid) {
+            return reply.status(400).send({
+              error: `API-Key ungültig: ${validation.reason}`,
+            });
+          }
+          apiKeyEncrypted = encrypt(trimmedKey, deps.masterKey);
+        }
+
+        nextLlmConfig = {
+          ...existing,
+          provider: provider as (typeof LLM_PROVIDERS)[number],
+          model,
+          apiKeyEncrypted,
+          apiKeySource: "user",
+        };
+        touchedProfile = true;
+        touchedLlm = true;
+      }
+
+      // 3. Profile-Update in einem Repo-Call (atomic UPDATE pro Row).
+      if (touchedProfile) {
+        deps.profilesRepo.update(entry.twinId, {
+          ...(nextPersonaMd !== undefined && { personaMd: nextPersonaMd }),
+          ...(nextPersonaInput !== undefined && {
+            personaInputJson: nextPersonaInput,
+          }),
+          ...(nextLlmConfig !== undefined && { llmConfig: nextLlmConfig }),
+        });
+      }
+
+      // 4. Preset-Update als Soll-Zustand. Delete-all-example-Skills,
+      //    dann re-import. Whitelist via Scanner (Single-Source-of-Truth
+      //    examples/skills/-Folder).
+      const presetResults: PresetActivationResult[] = [];
+      if (body.presets) {
+        const existingExampleSkills = deps.skillRepo
+          .list(entry.twinId, { activeOnly: false })
+          .filter((s) => s.source === "example");
+        for (const skill of existingExampleSkills) {
+          try {
+            deps.skillRepo.remove(skill.skillId);
+          } catch (err) {
+            request.log.warn(
+              { err, skillId: skill.skillId },
+              "[settings/full-config] preset-skill remove failed",
+            );
+          }
+        }
+        const activated = await activatePresets({
+          presetIds: body.presets,
+          twinId: entry.twinId,
+          examplesDir: deps.examplesDir,
+          skillRepo: deps.skillRepo,
+          logger: app.log,
+        });
+        presetResults.push(...activated);
+      }
+
+      // 5. Hot-Reload-Notiz: Skills werden per-Send-Call frisch aus der DB
+      //    gelesen (3.1.B-Pattern), also greifen Preset-Updates sofort.
+      //    Persona-MD und LLM-Config werden aber nur beim TwinService-Boot
+      //    gelesen — die Registry hat heute keinen `reloadTwin`-Pfad. Bis das
+      //    in einem Folge-Commit kommt, sendet das Backend ein
+      //    `requiresRestart`-Flag und das Frontend zeigt einen Hinweis.
+      const requiresRestart = touchedProfile || touchedLlm;
+
+      // 6. Frische settings-data zurückgeben — Frontend reload-frei.
+      const refreshed = deps.profilesRepo.findById(entry.twinId);
+      if (!refreshed) {
+        return reply.status(500).send({ error: "Profil nach Update weg" });
+      }
+      const refreshedEntry = deps.registry.getEntry(refreshed.handle);
+      const apiKeyMasked =
+        refreshedEntry?.llmDisplay.apiKeyMasked ?? entry.llmDisplay.apiKeyMasked;
+      const activePresets = deps.skillRepo
+        .list(entry.twinId, { activeOnly: false })
+        .filter((s) => s.source === "example")
+        .map((s) => s.name)
+        .sort();
+
+      return reply.status(200).send({
+        persona: refreshed.personaInputJson,
+        personaSource: refreshed.personaInputJson ? "structured" : "legacy_markdown",
+        llmConfig: {
+          provider: refreshed.llmConfig.provider,
+          model: refreshed.llmConfig.model,
+          apiKeyMasked,
+        },
+        activePresets,
+        presetResults,
+        requiresRestart,
+      });
+    },
+  );
+}
+
+type PersonaInputUpdate = NonNullable<TwinProfile["personaInputJson"]>;
 
 // ─── TOOL ROUTES (3.2.H — Tool-Picker-UI) ────────────────────────────────────
 //

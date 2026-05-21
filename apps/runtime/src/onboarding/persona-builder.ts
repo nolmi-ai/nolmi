@@ -1,22 +1,15 @@
+import type { PersonaInput } from "@twin-lab/shared";
+
 // ─── PERSONA-MARKDOWN BUILDER ────────────────────────────────────────────────
 //
 // Onboarding-Wizard sammelt strukturierten Input. Hier wird daraus ein
 // Markdown-Block geformt, der dasselbe Format hat wie die handgeschriebenen
 // docs/persona*.md — wird unverändert ins twin_profiles.persona_md gespeichert
-// und beim Boot als Persona-System-Prompt geladen.
+// und beim Boot als Persona-System-Prompt geladen. Seit #110 Phase 2B
+// Commit 11 wird das `PersonaInput`-Object zusätzlich strukturiert in
+// `twin_profiles.persona_input_json` persistiert für späteren Edit-Pre-Fill.
 //
 // Sektionen-Reihenfolge: Identität → Stil → Themen → Beziehungen (optional).
-
-export interface PersonaInput {
-  fullName: string; // "Heiko Gregor"
-  handle: string; // "@heiko"
-  role: string; // "Co-Founder bei HARWAY Experience"
-  tone: Array<"direct" | "polite" | "casual" | "formal">;
-  pronoun: "du" | "sie" | "context-dependent";
-  preferences: Array<"no-emojis" | "no-platitudes" | "short-answers">;
-  topics: string[]; // ["Design Systems", "Multi-Agent Workflows"]
-  relationships: Array<{ name: string; description: string }>;
-}
 
 const TONE_LINES: Record<PersonaInput["tone"][number], string> = {
   direct: "Direkt, auf den Punkt",

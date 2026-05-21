@@ -1,5 +1,5 @@
 import type Database from "better-sqlite3";
-import type { Mandate } from "@twin-lab/shared";
+import type { Mandate, PersonaInput } from "@twin-lab/shared";
 import type { StoredLlmConfig } from "./llm-config.js";
 
 // ─── TWIN PROFILES REPOSITORY ────────────────────────────────────────────────
@@ -16,6 +16,13 @@ export interface TwinProfile {
   handle: string;
   displayName: string;
   personaMd: string;
+  /**
+   * #110 Phase 2B Commit 11: strukturierte Persona-Form, für Settings-
+   * Pre-Fill. Null bei Legacy-Twins (bootstrap-CLI, Pre-Migration-023);
+   * Onboarding-Submit speichert das Object seit Commit 11 parallel zur
+   * `personaMd`-Markdown-Form.
+   */
+  personaInputJson: PersonaInput | null;
   mandates: Mandate[];
   llmConfig: StoredLlmConfig;
   bridgeUrl: string;
@@ -38,6 +45,7 @@ interface TwinProfileRow {
   handle: string;
   display_name: string;
   persona_md: string;
+  persona_input_json: string | null;
   mandates_json: string;
   llm_config: string;
   bridge_url: string;
@@ -58,11 +66,16 @@ export interface ListFilter {
  * Felder, die bei Insert vom Repo gesetzt werden — nicht vom Caller.
  * `researchFirstUseSeen` ist im Profil required (Read-Form), beim Insert
  * aber optional — Bootstrap-Pfad kennt das Feld nicht, Default ist `false`.
+ * `personaInputJson` ist analog optional: Bootstrap-CLI hat keine
+ * strukturierte Form, Onboarding-Submit übergibt das Object explizit.
  */
 type InsertInput = Omit<
   TwinProfile,
-  "createdAt" | "updatedAt" | "researchFirstUseSeen"
-> & { researchFirstUseSeen?: boolean };
+  "createdAt" | "updatedAt" | "researchFirstUseSeen" | "personaInputJson"
+> & {
+  researchFirstUseSeen?: boolean;
+  personaInputJson?: PersonaInput | null;
+};
 
 export class TwinProfilesRepo {
   constructor(private db: Database.Database) {}
@@ -74,6 +87,10 @@ export class TwinProfilesRepo {
       handle: profile.handle,
       display_name: profile.displayName,
       persona_md: profile.personaMd,
+      persona_input_json:
+        profile.personaInputJson != null
+          ? JSON.stringify(profile.personaInputJson)
+          : null,
       mandates_json: JSON.stringify(profile.mandates),
       llm_config: JSON.stringify(profile.llmConfig),
       bridge_url: profile.bridgeUrl,
@@ -87,11 +104,13 @@ export class TwinProfilesRepo {
     this.db
       .prepare(
         `INSERT INTO twin_profiles
-           (twin_id, handle, display_name, persona_md, mandates_json, llm_config,
-            bridge_url, bridge_token, owner_user_id, created_at, updated_at, is_active)
+           (twin_id, handle, display_name, persona_md, persona_input_json,
+            mandates_json, llm_config, bridge_url, bridge_token, owner_user_id,
+            created_at, updated_at, is_active)
          VALUES
-           (@twin_id, @handle, @display_name, @persona_md, @mandates_json, @llm_config,
-            @bridge_url, @bridge_token, @owner_user_id, @created_at, @updated_at, @is_active)`,
+           (@twin_id, @handle, @display_name, @persona_md, @persona_input_json,
+            @mandates_json, @llm_config, @bridge_url, @bridge_token, @owner_user_id,
+            @created_at, @updated_at, @is_active)`,
       )
       .run(row);
     return rowToProfile(row);
@@ -149,16 +168,17 @@ export class TwinProfilesRepo {
     this.db
       .prepare(
         `UPDATE twin_profiles SET
-           handle        = @handle,
-           display_name  = @display_name,
-           persona_md    = @persona_md,
-           mandates_json = @mandates_json,
-           llm_config    = @llm_config,
-           bridge_url    = @bridge_url,
-           bridge_token  = @bridge_token,
-           owner_user_id = @owner_user_id,
-           updated_at    = @updated_at,
-           is_active     = @is_active
+           handle             = @handle,
+           display_name       = @display_name,
+           persona_md         = @persona_md,
+           persona_input_json = @persona_input_json,
+           mandates_json      = @mandates_json,
+           llm_config         = @llm_config,
+           bridge_url         = @bridge_url,
+           bridge_token       = @bridge_token,
+           owner_user_id      = @owner_user_id,
+           updated_at         = @updated_at,
+           is_active          = @is_active
          WHERE twin_id = @twin_id`,
       )
       .run({
@@ -166,6 +186,10 @@ export class TwinProfilesRepo {
         handle: merged.handle,
         display_name: merged.displayName,
         persona_md: merged.personaMd,
+        persona_input_json:
+          merged.personaInputJson != null
+            ? JSON.stringify(merged.personaInputJson)
+            : null,
         mandates_json: JSON.stringify(merged.mandates),
         llm_config: JSON.stringify(merged.llmConfig),
         bridge_url: merged.bridgeUrl,
@@ -211,6 +235,10 @@ function rowToProfile(row: TwinProfileRow): TwinProfile {
     handle: row.handle,
     displayName: row.display_name,
     personaMd: row.persona_md,
+    // #110 Phase 2B Commit 11: NULL bei Legacy-Twins (Pre-Migration-023 oder
+    // Bootstrap-CLI). Defensive try/catch gegen korruptes JSON in der Spalte
+    // — Settings-Layer behandelt das wie Legacy, kein Crash.
+    personaInputJson: parsePersonaInputJsonOrNull(row.persona_input_json ?? null),
     mandates: JSON.parse(row.mandates_json) as Mandate[],
     llmConfig: JSON.parse(row.llm_config) as StoredLlmConfig,
     bridgeUrl: row.bridge_url,
@@ -223,4 +251,13 @@ function rowToProfile(row: TwinProfileRow): TwinProfile {
     // schützt Tests, die das Feld in Mock-Rows nicht setzen.
     researchFirstUseSeen: (row.research_first_use_seen ?? 0) === 1,
   };
+}
+
+function parsePersonaInputJsonOrNull(raw: string | null): PersonaInput | null {
+  if (raw == null) return null;
+  try {
+    return JSON.parse(raw) as PersonaInput;
+  } catch {
+    return null;
+  }
 }
