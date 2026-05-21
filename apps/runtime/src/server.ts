@@ -1575,7 +1575,15 @@ function registerTwinSettingsRoutes(
       const ctx = await requireOwner(request, reply, request.params.handle);
       if (!ctx) return;
       const { entry } = ctx;
-      const profile = entry.profile;
+
+      // Bug-Fix Tag 22: `entry.profile` ist Registry-Cache vom Boot/Hot-Load.
+      // Nach Settings-Updates (PATCH /full-config) hat die DB den neuen Stand,
+      // aber Registry-Cache nicht. Heißt: User reloadet Settings und sieht
+      // weiterhin den alten Wert. Fix: fresh `findById` aus dem Repo.
+      const profile = deps.profilesRepo.findById(entry.twinId);
+      if (!profile) {
+        return reply.status(404).send({ error: "Twin nicht in DB" });
+      }
 
       const persona = profile.personaInputJson;
       const activePresets = deps.skillRepo
@@ -1590,6 +1598,11 @@ function registerTwinSettingsRoutes(
         llmConfig: {
           provider: profile.llmConfig.provider,
           model: profile.llmConfig.model,
+          // API-Key-Maske aus llmDisplay (Boot-decrypteter Masked-String).
+          // Auch das ist stale nach PATCH; akzeptabel weil Maske nur die
+          // ersten/letzten 4 chars zeigt und unsere Maske über das ganze
+          // Onboarding-Submit konsistent ist. Für vollständige Frische
+          // wäre Registry-Reload nötig (siehe requiresRestart-Doku).
           apiKeyMasked: entry.llmDisplay.apiKeyMasked,
         },
         activePresets,
@@ -1628,7 +1641,15 @@ function registerTwinSettingsRoutes(
       //    String = validateApiKey + encrypt.
       let nextLlmConfig: StoredLlmConfig | undefined;
       if (body.llmConfig) {
-        const existing = entry.profile.llmConfig;
+        // Bug-Fix Tag 22: existing aus DB statt aus Registry-Cache, damit
+        // nach mehreren aufeinanderfolgenden Settings-Updates der jeweils
+        // aktuelle Stand als Basis dient. Registry-Cache bleibt sonst auf
+        // Boot-Snapshot stehen.
+        const dbProfile = deps.profilesRepo.findById(entry.twinId);
+        if (!dbProfile) {
+          return reply.status(404).send({ error: "Twin nicht in DB" });
+        }
+        const existing = dbProfile.llmConfig;
         const provider = body.llmConfig.provider ?? existing.provider;
         const model = body.llmConfig.model ?? existing.model;
         let apiKeyEncrypted = existing.apiKeyEncrypted;
@@ -1668,14 +1689,16 @@ function registerTwinSettingsRoutes(
       }
 
       // 3. Profile-Update in einem Repo-Call (atomic UPDATE pro Row).
+      // Patch explizit gebaut statt via conditional-spread — leichter zu
+      // lesen und gegen JS-Spread-Subtleties (z.B. accidental undefined-
+      // properties) immun.
       if (touchedProfile) {
-        deps.profilesRepo.update(entry.twinId, {
-          ...(nextPersonaMd !== undefined && { personaMd: nextPersonaMd }),
-          ...(nextPersonaInput !== undefined && {
-            personaInputJson: nextPersonaInput,
-          }),
-          ...(nextLlmConfig !== undefined && { llmConfig: nextLlmConfig }),
-        });
+        const patchObj: Record<string, unknown> = {};
+        if (nextPersonaMd !== undefined) patchObj.personaMd = nextPersonaMd;
+        if (nextPersonaInput !== undefined)
+          patchObj.personaInputJson = nextPersonaInput;
+        if (nextLlmConfig !== undefined) patchObj.llmConfig = nextLlmConfig;
+        deps.profilesRepo.update(entry.twinId, patchObj);
       }
 
       // 4. Preset-Update als Soll-Zustand. Delete-all-example-Skills,

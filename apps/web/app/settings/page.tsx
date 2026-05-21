@@ -2,7 +2,13 @@
 
 import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import type { McpServerUiPayload, SkillDetailPayload } from "@twin-lab/shared";
+import type {
+  McpServerUiPayload,
+  PersonaInput,
+  Preset,
+  SettingsDataResponse,
+  SkillDetailPayload,
+} from "@twin-lab/shared";
 import { PageContainer } from "../../components/PageContainer";
 import { MaturityDetail } from "../../components/MaturityDetail";
 import { SkillEditorModal } from "../../components/SkillEditorModal";
@@ -110,6 +116,29 @@ function SettingsInner() {
     null,
   );
 
+  // #110 Phase 2B Commit 11B: Settings-Edit-Sections (Persona / LLM / Presets).
+  // `settingsData` ist die Server-Snapshot, `personaForm` / `llmForm` /
+  // `presetsSelected` halten den Edit-Stand. Dirty-Tracking via Snapshot-
+  // Vergleich beim Save (kein deep-equal-Library nötig — JSON.stringify
+  // reicht für unsere flachen Form-Objects).
+  const [settingsData, setSettingsData] = useState<SettingsDataResponse | null>(
+    null,
+  );
+  const [personaForm, setPersonaForm] = useState<PersonaInput | null>(null);
+  const [llmForm, setLlmForm] = useState<{
+    provider: "anthropic" | "openai";
+    model: string;
+  }>({ provider: "anthropic", model: "" });
+  const [apiKeyInput, setApiKeyInput] = useState("");
+  const [apiKeyMode, setApiKeyMode] = useState<
+    "masked" | "editing" | "validated"
+  >("masked");
+  const [apiKeyTesting, setApiKeyTesting] = useState(false);
+  const [apiKeyError, setApiKeyError] = useState<string | null>(null);
+  const [presetsAvailable, setPresetsAvailable] = useState<Preset[]>([]);
+  const [presetsSelected, setPresetsSelected] = useState<string[]>([]);
+  const [savingFullConfig, setSavingFullConfig] = useState(false);
+
   const selectedHandle = useMemo(
     () => requestedHandle ?? twins[0]?.handle ?? null,
     [requestedHandle, twins],
@@ -198,6 +227,180 @@ function SettingsInner() {
     }
   }, []);
 
+  // #110 Phase 2B Commit 11B: Settings-Data + Preset-Katalog laden.
+  const loadSettingsData = useCallback(async (handle: string) => {
+    try {
+      const res = await fetch(`${RUNTIME_URL}/twins/${handle}/settings-data`, {
+        credentials: "include",
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = (await res.json()) as SettingsDataResponse;
+      setSettingsData(data);
+      setPersonaForm(data.persona); // null bei legacy_markdown
+      setLlmForm({
+        provider:
+          data.llmConfig.provider === "anthropic" ||
+          data.llmConfig.provider === "openai"
+            ? data.llmConfig.provider
+            : "anthropic",
+        model: data.llmConfig.model,
+      });
+      setPresetsSelected(data.activePresets);
+      setApiKeyMode("masked");
+      setApiKeyInput("");
+      setApiKeyError(null);
+    } catch (err) {
+      console.error("loadSettingsData failed:", err);
+    }
+  }, []);
+
+  const loadPresetsAvailable = useCallback(async () => {
+    try {
+      const res = await fetch(`${RUNTIME_URL}/examples/presets`, {
+        credentials: "include",
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = (await res.json()) as { presets: Preset[] };
+      setPresetsAvailable(data.presets);
+    } catch (err) {
+      console.error("loadPresetsAvailable failed:", err);
+    }
+  }, []);
+
+  async function testApiKey() {
+    if (!apiKeyInput.trim()) return;
+    setApiKeyTesting(true);
+    setApiKeyError(null);
+    try {
+      const res = await fetch(`${RUNTIME_URL}/onboarding/validate-api-key`, {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          provider: llmForm.provider,
+          model: llmForm.model,
+          apiKey: apiKeyInput,
+        }),
+      });
+      const body = (await res.json()) as
+        | { valid: true }
+        | { valid: false; reason: string };
+      if (!res.ok) {
+        throw new Error(
+          "error" in body
+            ? (body as { error: string }).error
+            : `HTTP ${res.status}`,
+        );
+      }
+      if (body.valid) {
+        setApiKeyMode("validated");
+        setApiKeyError(null);
+      } else {
+        setApiKeyError(body.reason);
+      }
+    } catch (err) {
+      setApiKeyError(err instanceof Error ? err.message : "Test fehlgeschlagen");
+    } finally {
+      setApiKeyTesting(false);
+    }
+  }
+
+  // Dirty-Check: vergleicht aktuellen Form-Stand mit Server-Snapshot.
+  // JSON.stringify ist OK für unsere flachen Form-Objects; bei Edge-Cases
+  // mit unbestimmter Key-Reihenfolge wäre normalize-and-compare besser.
+  const isDirty = useMemo(() => {
+    if (!settingsData) return false;
+    const personaDirty =
+      JSON.stringify(personaForm) !== JSON.stringify(settingsData.persona);
+    const llmDirty =
+      llmForm.provider !== settingsData.llmConfig.provider ||
+      llmForm.model !== settingsData.llmConfig.model;
+    const apiKeyDirty = apiKeyMode === "validated";
+    const presetsDirty =
+      JSON.stringify([...presetsSelected].sort()) !==
+      JSON.stringify([...settingsData.activePresets].sort());
+    return personaDirty || llmDirty || apiKeyDirty || presetsDirty;
+  }, [settingsData, personaForm, llmForm, apiKeyMode, presetsSelected]);
+
+  async function saveFullConfig() {
+    if (!selectedHandle || !settingsData) return;
+    setSavingFullConfig(true);
+    try {
+      const body: Record<string, unknown> = {};
+      // Persona: nur senden, wenn geändert oder zum ersten Mal strukturiert
+      // (Legacy-Twin füllt Form aus → personaForm wird zu structured).
+      if (
+        personaForm &&
+        JSON.stringify(personaForm) !== JSON.stringify(settingsData.persona)
+      ) {
+        body.persona = personaForm;
+      }
+      const llmChanged =
+        llmForm.provider !== settingsData.llmConfig.provider ||
+        llmForm.model !== settingsData.llmConfig.model ||
+        apiKeyMode === "validated";
+      if (llmChanged) {
+        body.llmConfig = {
+          provider: llmForm.provider,
+          model: llmForm.model,
+          apiKey: apiKeyMode === "validated" ? apiKeyInput : null,
+        };
+      }
+      if (
+        JSON.stringify([...presetsSelected].sort()) !==
+        JSON.stringify([...settingsData.activePresets].sort())
+      ) {
+        body.presets = presetsSelected;
+      }
+
+      const res = await fetch(
+        `${RUNTIME_URL}/twins/${selectedHandle}/full-config`,
+        {
+          method: "PATCH",
+          credentials: "include",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        },
+      );
+      const result = await res.json();
+      if (!res.ok) {
+        toast.error(result.error ?? "Speichern fehlgeschlagen");
+        return;
+      }
+      const refreshed = result as SettingsDataResponse & {
+        requiresRestart?: boolean;
+      };
+      setSettingsData(refreshed);
+      setPersonaForm(refreshed.persona);
+      setLlmForm({
+        provider:
+          refreshed.llmConfig.provider === "anthropic" ||
+          refreshed.llmConfig.provider === "openai"
+            ? refreshed.llmConfig.provider
+            : "anthropic",
+        model: refreshed.llmConfig.model,
+      });
+      setPresetsSelected(refreshed.activePresets);
+      setApiKeyMode("masked");
+      setApiKeyInput("");
+      setApiKeyError(null);
+      // Profile re-laden, damit Twin-Profil-Section neue Werte zeigt
+      // (Provider/Model/API-Key-Maske).
+      void loadProfile(selectedHandle);
+      toast.success(
+        refreshed.requiresRestart
+          ? "Gespeichert — Änderungen aktiv nach nächstem Twin-Restart"
+          : "Gespeichert",
+      );
+    } catch (err) {
+      toast.error(
+        err instanceof Error ? err.message : "Netzwerk-Fehler beim Speichern",
+      );
+    } finally {
+      setSavingFullConfig(false);
+    }
+  }
+
   // Bei Twin-Wechsel: Profil + Trusts + Skills neu. Pollen entfällt — alle
   // drei ändern sich nur über lokale User-Aktionen oder die CLI (Skills).
   useEffect(() => {
@@ -210,11 +413,32 @@ function SettingsInner() {
     setSkillError(null);
     setMcpServers([]);
     setMcpDeleteConfirmId(null);
+    // #110 Phase 2B Commit 11B: Settings-Edit-State auch bei Twin-Wechsel
+    // zurücksetzen, damit kein State aus dem alten Twin in den neuen leakt.
+    setSettingsData(null);
+    setPersonaForm(null);
+    setApiKeyMode("masked");
+    setApiKeyInput("");
+    setApiKeyError(null);
+    setPresetsSelected([]);
     loadProfile(selectedHandle);
     loadTrusts(selectedHandle);
     loadSkills(selectedHandle);
     loadMcpServers(selectedHandle);
-  }, [selectedHandle, loadProfile, loadTrusts, loadSkills, loadMcpServers]);
+    loadSettingsData(selectedHandle);
+  }, [
+    selectedHandle,
+    loadProfile,
+    loadTrusts,
+    loadSkills,
+    loadMcpServers,
+    loadSettingsData,
+  ]);
+
+  // Preset-Katalog ist twin-unabhängig — einmalig laden.
+  useEffect(() => {
+    void loadPresetsAvailable();
+  }, [loadPresetsAvailable]);
 
   async function addTrust() {
     if (!selectedHandle) return;
@@ -787,17 +1011,59 @@ function SettingsInner() {
         )}
       </Section>
 
-      <Section title="Persona und Mandates">
-        <p className="text-sm text-muted leading-relaxed">
-          Persona und Mandates werden aus Files unter <code className="text-accent">/docs</code> in die DB geschrieben. Bearbeitung in der UI kommt in einer späteren Phase.
-        </p>
-        <ul className="mt-3 text-sm text-muted space-y-1">
-          <li>- <code className="text-accent">docs/persona.md</code> Stil, Themen, Tonalitaet</li>
-          <li>- <code className="text-accent">docs/persona-meta.yaml</code> Name, Handle</li>
-          <li>- <code className="text-accent">docs/mandates.yaml</code> was der Twin darf</li>
-          <li>- Bootstrap: <code className="text-accent">pnpm --filter @twin-lab/runtime twin:bootstrap &lt;name&gt;</code></li>
-        </ul>
-      </Section>
+      {/* #110 Phase 2B Commit 11B: Persona / LLM / Presets als Edit-Sections.
+       * Daten kommen aus GET /twins/:handle/settings-data, Submit geht
+       * atomar an PATCH /twins/:handle/full-config (alle drei Blocks in
+       * einem Call). Form-Code self-contained (β-Approach) — Wizard-
+       * Components leben in /onboarding/page.tsx, hier nicht importiert,
+       * Re-Use ist als #124 Phase-2C-Kandidat im Backlog. */}
+      <PersonaEditSection
+        settingsData={settingsData}
+        personaForm={personaForm}
+        setPersonaForm={setPersonaForm}
+        selectedHandle={selectedHandle}
+      />
+
+      <LlmEditSection
+        settingsData={settingsData}
+        llmForm={llmForm}
+        setLlmForm={setLlmForm}
+        apiKeyInput={apiKeyInput}
+        setApiKeyInput={setApiKeyInput}
+        apiKeyMode={apiKeyMode}
+        setApiKeyMode={setApiKeyMode}
+        apiKeyTesting={apiKeyTesting}
+        apiKeyError={apiKeyError}
+        setApiKeyError={setApiKeyError}
+        onTestApiKey={testApiKey}
+      />
+
+      <PresetsEditSection
+        available={presetsAvailable}
+        selected={presetsSelected}
+        onToggle={(id) =>
+          setPresetsSelected((curr) =>
+            curr.includes(id) ? curr.filter((x) => x !== id) : [...curr, id],
+          )
+        }
+      />
+
+      {settingsData && (
+        <div className="flex items-center justify-end gap-3 pt-2">
+          {isDirty && !savingFullConfig && (
+            <span className="text-xs text-muted italic">
+              Ungespeicherte Änderungen
+            </span>
+          )}
+          <button
+            onClick={saveFullConfig}
+            disabled={!isDirty || savingFullConfig}
+            className="px-4 py-2 border border-accent text-accent text-sm rounded disabled:opacity-30 disabled:cursor-not-allowed hover:bg-accent hover:text-bg transition-colors"
+          >
+            {savingFullConfig ? "Speichert…" : "Speichern"}
+          </button>
+        </div>
+      )}
 
       {selectedHandle && (
         <>
@@ -961,4 +1227,605 @@ function formatGermanDate(unixMs: number): string {
     hour: "2-digit",
     minute: "2-digit",
   });
+}
+
+// ─── #110 Phase 2B Commit 11B: Settings-Edit-Sections ────────────────────────
+//
+// Form-Code self-contained (β-Approach): ~250 Z aus Wizard-Components in
+// /onboarding/page.tsx hierher kopiert mit Settings-spezifischen Anpassungen
+// (Handle read-only, API-Key-Edit-Mode, kein Handle-Live-Check). Shared-
+// Extract zu apps/web/components/* ist als Backlog #124 für Phase 2C
+// vorgesehen.
+
+const EMPTY_PERSONA: PersonaInput = {
+  fullName: "",
+  handle: "",
+  role: "",
+  tone: [],
+  pronoun: "du",
+  preferences: [],
+  topics: [],
+  relationships: [],
+};
+
+const TONE_OPTIONS = [
+  { id: "direct" as const, label: "Direkt" },
+  { id: "polite" as const, label: "Höflich" },
+  { id: "casual" as const, label: "Locker" },
+  { id: "formal" as const, label: "Formell" },
+];
+const PRONOUN_OPTIONS = [
+  { id: "du" as const, label: "Du" },
+  { id: "sie" as const, label: "Sie" },
+  { id: "context-dependent" as const, label: "Je nach Kontext" },
+];
+const PREFERENCE_OPTIONS = [
+  { id: "no-emojis" as const, label: "Keine Emojis" },
+  { id: "no-platitudes" as const, label: "Keine Floskeln" },
+  { id: "short-answers" as const, label: "Knappe Antworten" },
+];
+
+function PersonaEditSection({
+  settingsData,
+  personaForm,
+  setPersonaForm,
+  selectedHandle,
+}: {
+  settingsData: SettingsDataResponse | null;
+  personaForm: PersonaInput | null;
+  setPersonaForm: (p: PersonaInput) => void;
+  selectedHandle: string | null;
+}) {
+  if (!settingsData) {
+    return (
+      <Section title="Persona">
+        <div className="text-sm text-muted">Lade Persona…</div>
+      </Section>
+    );
+  }
+
+  const isLegacy = settingsData.personaSource === "legacy_markdown";
+  // Bei Legacy-Twin: leere Form aufmachen, sobald User klickt. Bis dahin
+  // nur Hint zeigen.
+  const persona = personaForm ?? EMPTY_PERSONA;
+  const updatePersona = (patch: Partial<PersonaInput>) => {
+    setPersonaForm({ ...persona, ...patch, handle: persona.handle });
+  };
+
+  return (
+    <Section title="Persona">
+      {isLegacy && !personaForm && (
+        <div className="space-y-3">
+          <p className="text-sm text-muted leading-relaxed">
+            Persona dieses Twins wurde mit einer älteren Version oder via
+            Bootstrap-CLI angelegt. Für strukturierte Bearbeitung muss sie
+            einmalig in die neue Form übertragen werden.
+          </p>
+          <button
+            type="button"
+            onClick={() =>
+              setPersonaForm({
+                ...EMPTY_PERSONA,
+                handle: selectedHandle ?? "",
+              })
+            }
+            className="px-3 py-1.5 text-xs border border-accent text-accent rounded hover:bg-accent hover:text-bg transition-colors"
+          >
+            Persona neu strukturieren
+          </button>
+        </div>
+      )}
+
+      {(!isLegacy || personaForm) && (
+        <div className="space-y-5">
+          <div>
+            <label className="block text-xs uppercase tracking-wider text-muted mb-1">
+              Voller Name
+            </label>
+            <input
+              type="text"
+              value={persona.fullName}
+              onChange={(e) => updatePersona({ fullName: e.target.value })}
+              className="w-full bg-bg border border-border rounded px-3 py-2 text-sm text-text focus:outline-none focus:border-accent"
+            />
+          </div>
+
+          <div>
+            <label className="block text-xs uppercase tracking-wider text-muted mb-1">
+              Handle
+            </label>
+            <input
+              type="text"
+              value={persona.handle}
+              disabled
+              className="w-full bg-bg border border-border rounded px-3 py-2 text-sm text-muted font-mono opacity-60 cursor-not-allowed"
+            />
+            <div className="text-xs text-muted mt-1">
+              Handle-Änderung ist heute noch nicht implementiert (Backlog #123).
+            </div>
+          </div>
+
+          <div>
+            <label className="block text-xs uppercase tracking-wider text-muted mb-1">
+              Rolle
+            </label>
+            <input
+              type="text"
+              value={persona.role}
+              onChange={(e) => updatePersona({ role: e.target.value })}
+              className="w-full bg-bg border border-border rounded px-3 py-2 text-sm text-text focus:outline-none focus:border-accent"
+            />
+          </div>
+
+          <div>
+            <div className="text-xs uppercase tracking-wider text-muted mb-2">
+              Tonfall (mind. 1)
+            </div>
+            <div className="flex flex-wrap gap-2">
+              {TONE_OPTIONS.map((opt) => (
+                <SettingsPill
+                  key={opt.id}
+                  label={opt.label}
+                  active={persona.tone.includes(opt.id)}
+                  onClick={() =>
+                    updatePersona({
+                      tone: persona.tone.includes(opt.id)
+                        ? persona.tone.filter((x) => x !== opt.id)
+                        : [...persona.tone, opt.id],
+                    })
+                  }
+                />
+              ))}
+            </div>
+          </div>
+
+          <div>
+            <div className="text-xs uppercase tracking-wider text-muted mb-2">
+              Pronomen
+            </div>
+            <div className="flex flex-wrap gap-2">
+              {PRONOUN_OPTIONS.map((opt) => (
+                <SettingsPill
+                  key={opt.id}
+                  label={opt.label}
+                  active={persona.pronoun === opt.id}
+                  onClick={() => updatePersona({ pronoun: opt.id })}
+                />
+              ))}
+            </div>
+          </div>
+
+          <div>
+            <div className="text-xs uppercase tracking-wider text-muted mb-2">
+              Sonderwünsche (optional)
+            </div>
+            <div className="flex flex-wrap gap-2">
+              {PREFERENCE_OPTIONS.map((opt) => (
+                <SettingsPill
+                  key={opt.id}
+                  label={opt.label}
+                  active={persona.preferences.includes(opt.id)}
+                  onClick={() =>
+                    updatePersona({
+                      preferences: persona.preferences.includes(opt.id)
+                        ? persona.preferences.filter((x) => x !== opt.id)
+                        : [...persona.preferences, opt.id],
+                    })
+                  }
+                />
+              ))}
+            </div>
+          </div>
+
+          <TopicsEditor persona={persona} updatePersona={updatePersona} />
+          <RelationshipsEditor persona={persona} updatePersona={updatePersona} />
+        </div>
+      )}
+    </Section>
+  );
+}
+
+function TopicsEditor({
+  persona,
+  updatePersona,
+}: {
+  persona: PersonaInput;
+  updatePersona: (patch: Partial<PersonaInput>) => void;
+}) {
+  const [input, setInput] = useState("");
+  const add = () => {
+    const t = input.trim();
+    if (!t) return;
+    updatePersona({ topics: [...persona.topics, t] });
+    setInput("");
+  };
+  return (
+    <div>
+      <div className="text-xs uppercase tracking-wider text-muted mb-2">
+        Themen (mind. 1)
+      </div>
+      <div className="flex gap-2">
+        <input
+          type="text"
+          value={input}
+          onChange={(e) => setInput(e.target.value)}
+          onKeyDown={(e) => e.key === "Enter" && (e.preventDefault(), add())}
+          className="flex-1 bg-bg border border-border rounded px-3 py-2 text-sm text-text focus:outline-none focus:border-accent"
+          placeholder="z.B. Design Systems"
+        />
+        <button
+          onClick={add}
+          className="px-3 py-2 border border-accent text-accent text-sm rounded hover:bg-accent hover:text-bg transition-colors"
+        >
+          +
+        </button>
+      </div>
+      {persona.topics.length > 0 && (
+        <div className="flex flex-wrap gap-2 mt-3">
+          {persona.topics.map((t, i) => (
+            <span
+              key={i}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs border border-border rounded text-text"
+            >
+              {t}
+              <button
+                onClick={() =>
+                  updatePersona({
+                    topics: persona.topics.filter((_, idx) => idx !== i),
+                  })
+                }
+                className="text-muted hover:text-warn"
+                aria-label="Entfernen"
+              >
+                ×
+              </button>
+            </span>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function RelationshipsEditor({
+  persona,
+  updatePersona,
+}: {
+  persona: PersonaInput;
+  updatePersona: (patch: Partial<PersonaInput>) => void;
+}) {
+  const [name, setName] = useState("");
+  const [desc, setDesc] = useState("");
+  const add = () => {
+    const n = name.trim();
+    const d = desc.trim();
+    if (!n || !d) return;
+    updatePersona({
+      relationships: [...persona.relationships, { name: n, description: d }],
+    });
+    setName("");
+    setDesc("");
+  };
+  return (
+    <div>
+      <div className="text-xs uppercase tracking-wider text-muted mb-2">
+        Beziehungen (optional)
+      </div>
+      <div className="flex gap-2">
+        <input
+          type="text"
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          className="w-1/2 bg-bg border border-border rounded px-3 py-2 text-sm text-text focus:outline-none focus:border-accent"
+          placeholder="Anna Beispiel"
+        />
+        <input
+          type="text"
+          value={desc}
+          onChange={(e) => setDesc(e.target.value)}
+          className="flex-1 bg-bg border border-border rounded px-3 py-2 text-sm text-text focus:outline-none focus:border-accent"
+          placeholder="Designerin im Team"
+        />
+        <button
+          onClick={add}
+          className="px-3 py-2 border border-accent text-accent text-sm rounded hover:bg-accent hover:text-bg transition-colors"
+        >
+          +
+        </button>
+      </div>
+      {persona.relationships.length > 0 && (
+        <ul className="mt-3 space-y-1">
+          {persona.relationships.map((r, i) => (
+            <li
+              key={i}
+              className="flex items-start justify-between text-sm text-text border-b border-border py-1.5"
+            >
+              <span>
+                <span className="text-text">{r.name}</span>
+                <span className="text-muted"> — {r.description}</span>
+              </span>
+              <button
+                onClick={() =>
+                  updatePersona({
+                    relationships: persona.relationships.filter(
+                      (_, idx) => idx !== i,
+                    ),
+                  })
+                }
+                className="text-muted hover:text-warn text-xs"
+              >
+                entfernen
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
+function SettingsPill({
+  label,
+  active,
+  onClick,
+}: {
+  label: string;
+  active: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      className={`px-3 py-1.5 text-xs border rounded transition-colors ${
+        active
+          ? "border-accent text-accent bg-surface"
+          : "border-border text-muted hover:border-accent hover:text-text"
+      }`}
+    >
+      {label}
+    </button>
+  );
+}
+
+function LlmEditSection({
+  settingsData,
+  llmForm,
+  setLlmForm,
+  apiKeyInput,
+  setApiKeyInput,
+  apiKeyMode,
+  setApiKeyMode,
+  apiKeyTesting,
+  apiKeyError,
+  setApiKeyError,
+  onTestApiKey,
+}: {
+  settingsData: SettingsDataResponse | null;
+  llmForm: { provider: "anthropic" | "openai"; model: string };
+  setLlmForm: (next: { provider: "anthropic" | "openai"; model: string }) => void;
+  apiKeyInput: string;
+  setApiKeyInput: (v: string) => void;
+  apiKeyMode: "masked" | "editing" | "validated";
+  setApiKeyMode: (m: "masked" | "editing" | "validated") => void;
+  apiKeyTesting: boolean;
+  apiKeyError: string | null;
+  setApiKeyError: (err: string | null) => void;
+  onTestApiKey: () => void;
+}) {
+  if (!settingsData) {
+    return (
+      <Section title="LLM + API-Key">
+        <div className="text-sm text-muted">Lade LLM-Config…</div>
+      </Section>
+    );
+  }
+  return (
+    <Section title="LLM + API-Key">
+      <div className="space-y-5">
+        <div>
+          <div className="text-xs uppercase tracking-wider text-muted mb-2">
+            Provider
+          </div>
+          <div className="grid sm:grid-cols-2 gap-3">
+            <button
+              onClick={() => {
+                setLlmForm({
+                  provider: "anthropic",
+                  model:
+                    llmForm.provider !== "anthropic"
+                      ? "claude-opus-4-7"
+                      : llmForm.model,
+                });
+                setApiKeyMode("masked");
+              }}
+              className={`text-left p-4 rounded border transition-colors ${
+                llmForm.provider === "anthropic"
+                  ? "border-accent bg-surface"
+                  : "border-border bg-surface hover:border-accent"
+              }`}
+            >
+              <div className="text-sm text-text font-mono">
+                anthropic / claude-opus-4-7
+              </div>
+              <div className="text-xs text-muted mt-1">~$0,015 / Antwort</div>
+            </button>
+            <button
+              onClick={() => {
+                setLlmForm({
+                  provider: "openai",
+                  model:
+                    llmForm.provider !== "openai" ? "gpt-5.5" : llmForm.model,
+                });
+                setApiKeyMode("masked");
+              }}
+              className={`text-left p-4 rounded border transition-colors ${
+                llmForm.provider === "openai"
+                  ? "border-accent bg-surface"
+                  : "border-border bg-surface hover:border-accent"
+              }`}
+            >
+              <div className="text-sm text-text font-mono">openai / gpt-5.5</div>
+              <div className="text-xs text-muted mt-1">~$0,008 / Antwort</div>
+            </button>
+          </div>
+        </div>
+
+        <div>
+          <label className="block text-xs uppercase tracking-wider text-muted mb-1">
+            Model
+          </label>
+          <input
+            type="text"
+            value={llmForm.model}
+            onChange={(e) => setLlmForm({ ...llmForm, model: e.target.value })}
+            className="w-full bg-bg border border-border rounded px-3 py-2 text-sm text-text font-mono focus:outline-none focus:border-accent"
+          />
+        </div>
+
+        <div>
+          <label className="block text-xs uppercase tracking-wider text-muted mb-1">
+            API-Key
+          </label>
+          {apiKeyMode === "masked" ? (
+            <div className="flex items-center gap-3">
+              <span className="font-mono text-sm text-muted">
+                {settingsData.llmConfig.apiKeyMasked}
+              </span>
+              <button
+                type="button"
+                onClick={() => {
+                  setApiKeyMode("editing");
+                  setApiKeyInput("");
+                }}
+                className="text-xs text-accent hover:underline"
+              >
+                Ändern
+              </button>
+            </div>
+          ) : (
+            <div className="space-y-2">
+              <input
+                type="password"
+                value={apiKeyInput}
+                onChange={(e) => {
+                  setApiKeyInput(e.target.value);
+                  if (apiKeyMode === "validated") setApiKeyMode("editing");
+                }}
+                placeholder={
+                  llmForm.provider === "anthropic" ? "sk-ant-…" : "sk-…"
+                }
+                className="w-full bg-bg border border-border rounded px-3 py-2 text-sm text-text font-mono focus:outline-none focus:border-accent"
+              />
+              {apiKeyError && (
+                <div className="text-xs text-warn">✗ {apiKeyError}</div>
+              )}
+              {apiKeyMode === "validated" && (
+                <div className="text-xs text-accent">
+                  ✓ Key funktioniert — beim Speichern wird er übernommen.
+                </div>
+              )}
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={onTestApiKey}
+                  disabled={apiKeyTesting || !apiKeyInput.trim()}
+                  className="px-3 py-1.5 border border-accent text-accent text-xs rounded disabled:opacity-30 disabled:cursor-not-allowed hover:bg-accent hover:text-bg transition-colors"
+                >
+                  {apiKeyTesting ? "Teste…" : "Testen"}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setApiKeyMode("masked");
+                    setApiKeyInput("");
+                    setApiKeyError(null);
+                  }}
+                  className="text-xs text-muted hover:text-text"
+                >
+                  Abbrechen
+                </button>
+              </div>
+              <div className="text-xs text-muted">
+                Ohne Testen + Speichern bleibt der bisherige Key aktiv.
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+    </Section>
+  );
+}
+
+function PresetsEditSection({
+  available,
+  selected,
+  onToggle,
+}: {
+  available: Preset[];
+  selected: string[];
+  onToggle: (id: string) => void;
+}) {
+  if (available.length === 0) {
+    return (
+      <Section title="Presets">
+        <div className="text-sm text-muted">
+          Keine Presets verfügbar. Self-Hoster: lege Templates in{" "}
+          <span className="font-mono">examples/skills/&lt;name&gt;/</span> ab.
+        </div>
+      </Section>
+    );
+  }
+  return (
+    <Section title="Presets">
+      <p className="text-sm text-muted leading-relaxed mb-4">
+        Pattern-Skills aktivieren oder deaktivieren. Speichern oben sendet die
+        Auswahl als Soll-Zustand — neue Picks werden importiert, abgewählte
+        gelöscht.
+      </p>
+      <div className="space-y-3">
+        {available.map((preset) => {
+          const active = selected.includes(preset.id);
+          return (
+            <button
+              key={preset.id}
+              type="button"
+              onClick={() => onToggle(preset.id)}
+              className={`w-full text-left p-4 rounded border transition-colors ${
+                active
+                  ? "border-accent bg-surface"
+                  : "border-border bg-surface hover:border-accent"
+              }`}
+            >
+              <div className="flex items-start justify-between gap-3">
+                <div className="flex-1 min-w-0">
+                  <div className="text-sm font-semibold text-text">
+                    {preset.name}
+                  </div>
+                  <div className="text-xs text-muted mt-1">
+                    {preset.description}
+                  </div>
+                  {preset.requiresMcpServers.length > 0 && (
+                    <div className="text-xs text-muted italic mt-2">
+                      ⚠ Erfordert MCP-Server:{" "}
+                      <span className="font-mono not-italic">
+                        {preset.requiresMcpServers.join(", ")}
+                      </span>
+                      . MCP-Setup über die Section weiter oben.
+                    </div>
+                  )}
+                </div>
+                <div
+                  className={`shrink-0 mt-0.5 text-xs uppercase tracking-wider ${
+                    active ? "text-accent" : "text-muted"
+                  }`}
+                >
+                  {active ? "✓ Aktiv" : "Inaktiv"}
+                </div>
+              </div>
+            </button>
+          );
+        })}
+      </div>
+    </Section>
+  );
 }

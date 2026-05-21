@@ -1326,6 +1326,35 @@ Verbleibende Polish-Punkte:
 
 **Cross-Reference:** `apps/runtime/src/skills/scan-examples-presets.ts:extractMcpServersFromRequiresTools` extrahiert heute schon die MCP-Server-Namen aus `requires_tools`. Für #122 muss die Frontend-Card pro MCP-Server ein Password-Input rendern und Submit-Backend den MCP-Add-Workflow auslösen (analog `McpServerAddModal` aus #87, aber inline statt Modal).
 
+### 123. Handle-Editierung im Settings-Wizard
+
+**Befund Tag 22 (#110 Phase 2B Commit 11):** Settings-Page hat Handle heute read-only mit Hint. Handle-Änderung verlangt:
+
+- Bridge-Re-Register: alter Handle abmelden, neuer Handle registrieren (POST `/twins/register` an die Bridge mit neuem Token)
+- Conversation-Migration: alle existing Bridge-Conversations sind am alten Handle gebunden — entweder migrieren oder Hint zeigen
+- Skill- und MCP-Server-Mapping: an `twin_id` gebunden (nicht handle), kein Touch nötig
+- URL-Update für aktive Sessions (Tabs/Bookmarks zeigen alten `/chat/@old-handle`)
+- Conflict-Handling: 409 wenn neuer Handle vergeben
+
+**Größe:** M-L · **Priorität:** nice · **Aus:** Tag 22 #110 Phase 2B Commit 11
+**Status:** offen, Phase-B-Kandidat (wenn User-Demand kommt)
+
+### 124. Wizard-Components zu shared `apps/web/components/`-Folder extrahieren
+
+**Befund Tag 22 (#110 Phase 2B Commit 11B):** Persona-/LLM-/Presets-Form-Code existiert heute dupliziert in `apps/web/app/onboarding/page.tsx` (Wizard) und `apps/web/app/settings/page.tsx` (Settings-Edit-Sections). ~250 Zeilen Duplikation (Persona-Felder + Tone/Pronoun/Preferences-Pills + Topics/Beziehungen-Editor + LLM-Provider-Cards + Preset-Cards). β-Approach wurde gewählt für 11B, weil γ-Extract substantieller Refactor des Onboarding-Files gewesen wäre und das Settings-Bau-Scope gesprengt hätte.
+
+**Plan:** Components extrahieren zu `apps/web/components/`:
+
+- `persona-form.tsx` mit Props `{value, onChange, handleReadOnly?, handleLiveCheck?}` — Settings setzt `handleReadOnly=true`, Wizard nutzt `handleLiveCheck=true` (mit Debounce + Status-Label)
+- `llm-config-form.tsx` mit Props `{provider, model, onProviderChange, onModelChange, apiKeyMode, apiKeyInput, ...}` — Wizard nutzt Create-Mode (immer editierbar), Settings nutzt Edit-Mode mit Maske + Ändern-Button
+- `presets-form.tsx` mit Props `{available, selected, onToggle, loading?, error?}`
+- Plus Utility-Components: `Pill`, `HandleStatusLabel`
+
+Beide Pages importieren die shared Components. Onboarding-File würde ~1497 → ~1100 Z, Settings ~1670 → ~1300 Z.
+
+**Größe:** L · **Priorität:** nice · **Aus:** Tag 22 #110 Phase 2B Commit 11B
+**Status:** offen, Phase-2C-Kandidat (kein Phase-A-Blocker — Duplikation funktioniert)
+
 ## Pre-Launch-Phase A — Block 4: Self-Hosting-Polish
 
 Items aus dem Strategy-Pivot Tag 18. Block 4 macht das Repo für externe Tech-Affine deploybar. Spec: `docs/PRE-LAUNCH-A-STRATEGY.md`.
