@@ -183,10 +183,37 @@ function WizardInner({ router }: { router: ReturnType<typeof useRouter> }) {
     }
   }
 
+  // #110 Phase 2B Commit 10: Logout-Escape im Wizard-Header. Macht den
+  // Hard-Trigger /chat → /onboarding UX-kompatibel, wenn ein User mit
+  // 0 owned Twins ohne weitere Aktion sofort im Wizard landet — sonst
+  // wäre der einzige Weg raus Browser-Back zum AccountBlock-Login-Toggle.
+  // Pattern (POST /auth/logout + window.location-Hard-Reload) gespiegelt
+  // aus AccountBlock weiter unten, damit Top-Nav-Cache zurückgesetzt wird.
+  async function logoutFromWizard() {
+    try {
+      await fetch(`${RUNTIME_URL}/auth/logout`, {
+        method: "POST",
+        credentials: "include",
+      });
+    } catch {
+      // egal — Hard-Reload kommt sowieso
+    }
+    window.location.href = "/login";
+  }
+
   return (
     <div className="w-full max-w-2xl mx-auto px-6 py-8 space-y-8">
       <header className="space-y-2">
-        <h1 className="text-xl font-semibold text-text">Twin anlegen</h1>
+        <div className="flex items-baseline justify-between gap-4">
+          <h1 className="text-xl font-semibold text-text">Twin anlegen</h1>
+          <button
+            type="button"
+            onClick={logoutFromWizard}
+            className="text-xs text-muted hover:text-text transition-colors"
+          >
+            Logout
+          </button>
+        </div>
         <div className="text-xs text-muted">
           Schritt {step + 1} von {TOTAL_STEPS}
           {" — "}
