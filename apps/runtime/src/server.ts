@@ -58,7 +58,13 @@ import {
   importSkillFromDir,
   SkillImportError,
 } from "./skills/import-from-dir.js";
-import type { Skill, SkillUiPayload } from "@twin-lab/shared";
+import { scanExamplesPresets } from "./skills/scan-examples-presets.js";
+import { activatePresets } from "./skills/activate-presets.js";
+import type {
+  PresetActivationResult,
+  Skill,
+  SkillUiPayload,
+} from "@twin-lab/shared";
 import type { ConversationsRepo } from "./conversations/repo.js";
 import {
   mergeAuditIntoBridgeMessages,
@@ -584,6 +590,14 @@ const OnboardingSubmitSchema = z.object({
     model: z.string().min(1),
     apiKey: z.string().min(1),
   }),
+  // #110 Phase 2B: optionale Liste von Preset-IDs aus `examples/skills/`.
+  // Backend whiteliste-validiert die IDs zur Submit-Zeit gegen den
+  // Scan-Output (Single-Source-of-Truth examples/skills/-Folder).
+  // Activation ist soft — Failures landen im Response, Twin bleibt
+  // angelegt. MCP-Server-Provisioning ist NICHT Teil dieser Aktivierung
+  // (siehe #122) — Pattern-Skills werden importiert, Tool-Bindings
+  // erfordern manuelles MCP-Setup in Settings.
+  presets: z.array(z.string()).optional().default([]),
 });
 
 const ValidateApiKeySchema = z.object({
@@ -593,6 +607,18 @@ const ValidateApiKeySchema = z.object({
 });
 
 function registerOnboardingRoutes(app: FastifyInstance, deps: ServerDeps) {
+  // ─── #110 Phase 2B: Preset-Katalog (öffentlich) ──────────────────────────
+  //
+  // Liest examples/skills/ als Single-Source-of-Truth. Kein Auth — die Liste
+  // ist nicht twin- oder user-spezifisch, Inhalte stehen 1:1 auf GitHub.
+  // Schlägt nie fehl: ungültige Manifests werden geskippt mit Warn-Log.
+  app.get("/examples/presets", async (request) => {
+    const presets = scanExamplesPresets(deps.examplesDir, {
+      warn: (msg, meta) => request.log.warn(meta ?? {}, msg),
+    });
+    return { presets };
+  });
+
   // ─── Handle-Uniqueness ───────────────────────────────────────────────────
   app.get<{ Querystring: { handle?: string } }>(
     "/onboarding/check-handle",
@@ -643,7 +669,7 @@ function registerOnboardingRoutes(app: FastifyInstance, deps: ServerDeps) {
     if (!parsed.success) {
       return reply.status(400).send({ error: parsed.error.message });
     }
-    const { persona, mandateTemplate, llmConfig } = parsed.data;
+    const { persona, mandateTemplate, llmConfig, presets } = parsed.data;
 
     // 1. Defensive Handle-Check (UNIQUE catched es spätestens, aber 409
     //    früh ist freundlicher).
@@ -725,13 +751,23 @@ function registerOnboardingRoutes(app: FastifyInstance, deps: ServerDeps) {
     // der Wizard-Redirect zu /chat/<handle> ohne Runtime-Restart funktioniert.
     // Bei Hot-Load-Fehler: Profil bleibt in DB, User bekommt 201 mit
     // ehrlichem Restart-Hinweis (Restart hilft, weil loadAll() das Profil
-    // dann beim Boot picked).
+    // dann beim Boot picked). Preset-Activation läuft auch im Fehlerfall
+    // nicht, weil die Pattern-Skills ohne Registry-Eintrag keine Engine
+    // hätten — Twin müsste dann nach Restart neu via Settings ergänzen.
     try {
       await deps.registry.addTwin(profile.twinId);
+      const presetResults = await activatePresets({
+        presetIds: presets,
+        twinId: profile.twinId,
+        examplesDir: deps.examplesDir,
+        skillRepo: deps.skillRepo,
+        logger: app.log,
+      });
       return reply.status(201).send({
         twinId: profile.twinId,
         handle: profile.handle,
         requiresRestart: false,
+        presetResults,
       });
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);

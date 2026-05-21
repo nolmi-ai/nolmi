@@ -1311,6 +1311,21 @@ Verbleibende Polish-Punkte:
 
 **Update Tag 21 (nach Phase 2A Closure):** Foundation aus Phase 2A für den vollen Polish steht — `w-full max-w-X mx-auto`-Pattern in flex-col-Layouts (gelernt im Tag-21-Layout-Saga, siehe STAND-Lesson) und Container-Width-Hierarchie (`/login` 448px für Auth, Onboarding/Wizard 672px). Beim vollen Polish: Hierarchie nicht brechen, Pattern weiter nutzen für Step-Indicator, Mobile-Responsive, Animationen. Section-Component hat heute optionalen `title` — bleibt verfügbar für künftige Card-Gruppen, ohne in Form-Steps zurückzukommen.
 
+### 122. MCP-Server-Auto-Provisioning im Onboarding
+
+**Befund Tag 22 (#110 Phase 2B Commit 9):** Preset-Step im Wizard (`examples/skills/<name>`-Pattern-Skills als Multi-Select) aktiviert heute nur Skill-Import via `importSkillFromDir`. Presets mit MCP-Server-Abhängigkeit (Beispiel: `recherche-workflow` referenziert `mcp:hyperbrowser-approval:search_with_bing` + `mcp:hyperbrowser-approval:scrape_webpage` in `requires_tools`) erfordern manuelles MCP-Setup in Settings nach dem Wizard — das Pattern-Skill ist da, aber das Pre-Pass-Tool-Forcing greift ins Leere, solange die referenzierten Tool-Skills (vom MCP-Sync-Pfad) nicht existieren. Card-Hint im Wizard informiert User über den Folgeschritt, schließt die Lücke aber nicht aktiv.
+
+**Plan:** Preset-Karten erweitern um API-Key-Password-Inputs pro benötigtem MCP-Server (`requiresMcpServers`-Feld aus dem Scanner kommt heute schon mit). Submit-Endpoint:
+
+1. Pattern-Skill via `importSkillFromDir` (heute schon)
+2. **NEU:** MCP-Server pro `requiresMcpServers`-Eintrag via `mcpServersRepo.add` + `entry.service.mcpSkillSync.syncOnAdd` anlegen — Spec aus `mcp-servers/<server-name>.json` als Template, `env`-Marker `?` durch User-eingegebenen API-Key ersetzen
+3. Validation: leere API-Keys für selektierte Presets blockieren Submit (oder gelöste UX: Preset-Toggle erfordert API-Key-Eingabe)
+
+**Größe:** M-L · **Priorität:** should · **Aus:** Tag 22 #110 Phase 2B Commit 9
+**Status:** offen, Phase-2C oder Phase-B-Kandidat
+
+**Cross-Reference:** `apps/runtime/src/skills/scan-examples-presets.ts:extractMcpServersFromRequiresTools` extrahiert heute schon die MCP-Server-Namen aus `requires_tools`. Für #122 muss die Frontend-Card pro MCP-Server ein Password-Input rendern und Submit-Backend den MCP-Add-Workflow auslösen (analog `McpServerAddModal` aus #87, aber inline statt Modal).
+
 ## Pre-Launch-Phase A — Block 4: Self-Hosting-Polish
 
 Items aus dem Strategy-Pivot Tag 18. Block 4 macht das Repo für externe Tech-Affine deploybar. Spec: `docs/PRE-LAUNCH-A-STRATEGY.md`.

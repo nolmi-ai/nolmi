@@ -2,12 +2,13 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
+import type { Preset } from "@twin-lab/shared";
 
 const RUNTIME_URL = process.env.NEXT_PUBLIC_RUNTIME_URL ?? "http://localhost:4000";
 
 // ─── ONBOARDING WIZARD ──────────────────────────────────────────────────────
 //
-// 3-Step-Flow für neue Twins. State liegt im Memory dieser Page (kein URL-
+// 4-Step-Flow für neue Twins. State liegt im Memory dieser Page (kein URL-
 // Anchor pro Step) — bewusst flach gehalten, weil Browser-Back den Wizard
 // sonst kaputt-springen würde.
 //
@@ -15,14 +16,18 @@ const RUNTIME_URL = process.env.NEXT_PUBLIC_RUNTIME_URL ?? "http://localhost:400
 //   0  Persona — drei Sub-Sektionen mit border-t-Trennern
 //         (Wer bist du? / Wie redest du? / Worüber sprichst du?)
 //   1  LLM + API-Key (mit Validation-Button)
-//   2  Review + Submit
+//   2  Presets — Multi-Select aus examples/skills/, 0-n wählbar
+//   3  Review + Submit
 //
 // #110 Phase 2A entfernte Reihe nach: Mandate-Step, Pfad-Wahl-Step,
 // Bridge-Step (Defaults greifen unsichtbar — cautious-Mandate, hosted,
-// Bridge-auto-Anbindung). #110 Phase 2B (Tag 22): Persona-Kollaps — die
-// drei separaten Persona-Steps zu einem Step zusammengeklappt, alle
-// Validation in case 0 von stepIsComplete. Vorgesehene Erweiterungen:
-// MCP-Hyperbrowser-Step + Hard-Trigger + Settings-Button.
+// Bridge-auto-Anbindung). #110 Phase 2B (Tag 22): Persona-Kollaps (Commit
+// 8 e90568b) — die drei separaten Persona-Steps zu einem Step
+// zusammengeklappt. Commit 9 (heute): Preset-Step — Pattern-Skills aus
+// `examples/skills/` als Multi-Select-Karten, Aktivierung via
+// /onboarding/submit-presets-Parameter. Skill-only, kein MCP-Server-
+// Provisioning (siehe #122). Vorgesehene Erweiterungen: Hard-Trigger +
+// Settings-Button.
 //
 // Layout-Harmonisierung Tag 21: Container ist überall max-w-2xl (Login +
 // Register + Wizard alle gleich breit, 672px). Form-Steps stehen
@@ -55,10 +60,11 @@ interface PersonaState {
 const STEP_LABELS: string[] = [
   "Persona",
   "LLM + API-Key",
+  "Presets",
   "Review",
 ];
 
-const TOTAL_STEPS = STEP_LABELS.length; // 3
+const TOTAL_STEPS = STEP_LABELS.length; // 4
 
 // ─── PAGE ───────────────────────────────────────────────────────────────────
 
@@ -102,6 +108,15 @@ function WizardInner({ router }: { router: ReturnType<typeof useRouter> }) {
 
   const [handleStatus, setHandleStatus] = useState<HandleStatus>({ kind: "idle" });
 
+  // #110 Phase 2B Commit 9: Preset-Step-State. presetsAvailable wird lazy
+  // beim ersten Eintritt in Step 2 (Presets) geladen; presetsSelected ist
+  // die User-Auswahl, wird im Submit-Payload mitgeschickt.
+  const [presetsAvailable, setPresetsAvailable] = useState<Preset[]>([]);
+  const [presetsLoading, setPresetsLoading] = useState(false);
+  const [presetsError, setPresetsError] = useState<string | null>(null);
+  const [presetsLoaded, setPresetsLoaded] = useState(false);
+  const [presetsSelected, setPresetsSelected] = useState<string[]>([]);
+
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
 
@@ -114,6 +129,34 @@ function WizardInner({ router }: { router: ReturnType<typeof useRouter> }) {
     apiKeyValidated,
   });
 
+  // #110 Phase 2B Commit 9: Preset-Liste lazy beim ersten Step-2-Eintritt
+  // laden. Wenn User Step 2 nie erreicht (Skip ist nicht möglich, aber
+  // potenzielle künftige Wizard-Pfade könnten das tun), wird nie gefetcht.
+  // `presetsLoaded` verhindert Refetch beim Step-Back-Forward.
+  useEffect(() => {
+    if (step !== 2 || presetsLoaded) return;
+    setPresetsLoading(true);
+    setPresetsError(null);
+    fetch(`${RUNTIME_URL}/examples/presets`, { credentials: "include" })
+      .then(async (res) => {
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        return res.json() as Promise<{ presets: Preset[] }>;
+      })
+      .then((data) => {
+        setPresetsAvailable(data.presets);
+        setPresetsLoaded(true);
+      })
+      .catch((err: unknown) => {
+        setPresetsError(err instanceof Error ? err.message : "Fehler beim Laden");
+      })
+      .finally(() => setPresetsLoading(false));
+  }, [step, presetsLoaded]);
+
+  const togglePreset = (id: string) =>
+    setPresetsSelected((prev) =>
+      prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id],
+    );
+
   async function submit() {
     setSubmitting(true);
     setSubmitError(null);
@@ -125,6 +168,7 @@ function WizardInner({ router }: { router: ReturnType<typeof useRouter> }) {
         body: JSON.stringify({
           persona,
           llmConfig: { provider: llmProvider, model: llmModel, apiKey },
+          presets: presetsSelected,
         }),
       });
       const body = await res.json().catch(() => ({}));
@@ -232,11 +276,22 @@ function WizardInner({ router }: { router: ReturnType<typeof useRouter> }) {
           />
         )}
         {step === 2 && (
+          <PresetsBlock
+            available={presetsAvailable}
+            selected={presetsSelected}
+            onToggle={togglePreset}
+            loading={presetsLoading}
+            error={presetsError}
+          />
+        )}
+        {step === 3 && (
           <ReviewBlock
             persona={persona}
             llmProvider={llmProvider}
             llmModel={llmModel}
             apiKey={apiKey}
+            presetsAvailable={presetsAvailable}
+            presetsSelected={presetsSelected}
             submitting={submitting}
             submitError={submitError}
             onSubmit={submit}
@@ -244,12 +299,14 @@ function WizardInner({ router }: { router: ReturnType<typeof useRouter> }) {
         )}
       </main>
 
-      {/* Step-Nav (#110 Phase 2B nach Persona-Kollaps): nur Step 0 (Persona)
-       * hat Standard-Footer. Step 1 (LLM) hat eigenen "Testen"-Button-
-       * Footer, Step 2 (Review) hat Submit-Footer. Auf Step 0 fehlt der
-       * Zurück-Button (kein vorheriger Step), Weiter ist aber nötig —
-       * daher Zurück konditional via `step > 0`, Weiter immer. */}
-      {step !== 1 && step !== 2 && (
+      {/* Step-Nav (#110 Phase 2B nach Persona-Kollaps + Preset-Step):
+       * Steps 0 (Persona) und 2 (Presets) haben Standard-Footer. Step 1
+       * (LLM) hat eigenen "Testen"-Button-Footer mit Auto-Advance, Step 3
+       * (Review) hat Submit-Footer. Auf Step 0 fehlt der Zurück-Button
+       * (kein vorheriger Step), Weiter ist aber nötig — daher Zurück
+       * konditional via `step > 0`, Weiter immer (canAdvance disabled
+       * den Button bei Validation-Fail). */}
+      {step !== 1 && step !== 3 && (
         <footer className="flex justify-between border-t border-border pt-4">
           {step > 0 ? (
             <button
@@ -283,7 +340,7 @@ function WizardInner({ router }: { router: ReturnType<typeof useRouter> }) {
           </span>
         </footer>
       )}
-      {step === 2 && (
+      {step === 3 && (
         <footer className="flex justify-between border-t border-border pt-4">
           <button
             onClick={goBack}
@@ -322,6 +379,8 @@ function stepIsComplete(step: number, g: StepGate): boolean {
     case 1:
       return g.apiKeyValidated;
     case 2:
+      return true; // Presets — Multi-Select, 0-n wählbar
+    case 3:
       return true; // Review
     default:
       return false;
@@ -841,6 +900,117 @@ function LlmConfigBlock({
   );
 }
 
+// ─── BLOCK D: PRESETS (#110 Phase 2B Commit 9) ─────────────────────────────
+//
+// Multi-Select-Liste der Pattern-Skills aus `examples/skills/`. Backend
+// liefert sie via GET /examples/presets (Single-Source-of-Truth: das
+// File-System). Self-Hoster, die eigene Templates anlegen, sehen sie
+// automatisch hier.
+//
+// Card-Hint bei `requiresMcpServers.length > 0`: User wird informiert,
+// dass der Skill ohne entsprechenden MCP-Server (in Settings nach dem
+// Wizard) nicht Tool-Calls forcen kann. Echtes MCP-Server-Provisioning
+// im Wizard ist #122.
+
+function PresetsBlock({
+  available,
+  selected,
+  onToggle,
+  loading,
+  error,
+}: {
+  available: Preset[];
+  selected: string[];
+  onToggle: (id: string) => void;
+  loading: boolean;
+  error: string | null;
+}) {
+  if (loading) {
+    return (
+      <div className="text-sm text-muted">Lade verfügbare Presets…</div>
+    );
+  }
+  if (error) {
+    return (
+      <div className="text-xs text-warn border border-warn rounded px-3 py-2">
+        Konnte Presets nicht laden: {error}
+      </div>
+    );
+  }
+  if (available.length === 0) {
+    return (
+      <div className="text-sm text-muted">
+        Keine Presets verfügbar. Self-Hoster: lege Templates in
+        <span className="font-mono"> examples/skills/&lt;name&gt;/</span> ab.
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-4">
+      <p className="text-sm text-muted">
+        Pattern-Skills aktivieren. Du kannst auch keine wählen — alles ist
+        später in Settings ergänzbar.
+      </p>
+      <div className="space-y-3">
+        {available.map((preset) => (
+          <PresetCard
+            key={preset.id}
+            preset={preset}
+            isSelected={selected.includes(preset.id)}
+            onToggle={() => onToggle(preset.id)}
+          />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function PresetCard({
+  preset,
+  isSelected,
+  onToggle,
+}: {
+  preset: Preset;
+  isSelected: boolean;
+  onToggle: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onToggle}
+      className={`w-full text-left p-4 rounded border transition-colors ${
+        isSelected
+          ? "border-accent bg-surface"
+          : "border-border bg-surface hover:border-accent"
+      }`}
+    >
+      <div className="flex items-start justify-between gap-3">
+        <div className="flex-1 min-w-0">
+          <div className="text-sm font-semibold text-text">{preset.name}</div>
+          <div className="text-xs text-muted mt-1">{preset.description}</div>
+          {preset.requiresMcpServers.length > 0 && (
+            <div className="text-xs text-muted italic mt-2">
+              ⚠ Erfordert MCP-Server:{" "}
+              <span className="font-mono not-italic">
+                {preset.requiresMcpServers.join(", ")}
+              </span>
+              . Nach Twin-Anlegen in Settings hinzufügen.
+            </div>
+          )}
+        </div>
+        <div
+          className={`shrink-0 mt-0.5 text-xs uppercase tracking-wider ${
+            isSelected ? "text-accent" : "text-muted"
+          }`}
+        >
+          {isSelected ? "✓ Aktiv" : "Inaktiv"}
+        </div>
+      </div>
+    </button>
+  );
+}
+
 // ─── BLOCK E: REVIEW + SUBMIT ───────────────────────────────────────────────
 
 function ReviewBlock({
@@ -848,6 +1018,8 @@ function ReviewBlock({
   llmProvider,
   llmModel,
   apiKey,
+  presetsAvailable,
+  presetsSelected,
   submitting,
   submitError,
   onSubmit,
@@ -856,11 +1028,16 @@ function ReviewBlock({
   llmProvider: LlmProvider;
   llmModel: string;
   apiKey: string;
+  presetsAvailable: Preset[];
+  presetsSelected: string[];
   submitting: boolean;
   submitError: string | null;
   onSubmit: () => void;
 }) {
   const apiKeyMasked = apiKey.length >= 9 ? `${apiKey.slice(0, 4)}…${apiKey.slice(-4)}` : "…";
+  const selectedPresets = presetsSelected
+    .map((id) => presetsAvailable.find((p) => p.id === id))
+    .filter((p): p is Preset => Boolean(p));
   return (
     <div className="space-y-5">
       {/* #110 Phase 2A: Bridge-Step entfernt; Defensive Hint, dass die
@@ -896,6 +1073,26 @@ function ReviewBlock({
         <ReviewRow label="Model" value={llmModel} mono />
         <ReviewRow label="API-Key" value={apiKeyMasked} mono />
       </Section>
+
+      {selectedPresets.length > 0 && (
+        <Section title="Presets">
+          {selectedPresets.map((preset) => (
+            <div key={preset.id} className="flex gap-3 text-sm">
+              <dt className="text-xs uppercase tracking-wider text-muted w-28 flex-shrink-0 pt-0.5 font-mono">
+                {preset.id}
+              </dt>
+              <dd className="flex-1 text-text">
+                {preset.name}
+                {preset.requiresMcpServers.length > 0 && (
+                  <span className="text-muted text-xs ml-2 italic">
+                    (MCP-Setup nötig)
+                  </span>
+                )}
+              </dd>
+            </div>
+          ))}
+        </Section>
+      )}
 
       {submitError && (
         <div className="text-xs text-warn border border-warn rounded px-3 py-2">

@@ -508,6 +508,38 @@ export const SkillImportResponseSchema = z.object({
 });
 export type SkillImportResponse = z.infer<typeof SkillImportResponseSchema>;
 
+/**
+ * #110 Phase 2B: ein Preset, das der Wizard aus `examples/skills/` anbietet.
+ * `requiresMcpServers` extrahiert aus `manifest.requires_tools` die einzigartigen
+ * MCP-Server-Namen (z.B. `mcp:hyperbrowser-approval:search_with_bing`
+ * → `hyperbrowser-approval`) — für Card-Hint im Wizard. Tatsächliches
+ * MCP-Server-Provisioning ist heute manuell (Settings) und kommt in #122.
+ */
+export const PresetSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  description: z.string(),
+  requiresMcpServers: z.array(z.string()),
+});
+export type Preset = z.infer<typeof PresetSchema>;
+
+export const PresetsListResponseSchema = z.object({
+  presets: z.array(PresetSchema),
+});
+export type PresetsListResponse = z.infer<typeof PresetsListResponseSchema>;
+
+/**
+ * #110 Phase 2B: Result-Item pro Preset im Onboarding-Submit-Response.
+ * `imported` = Skill erfolgreich angelegt, `failed` = soft-fail (geloggt,
+ * Twin bleibt angelegt), `unknown` = Preset-ID nicht in Scan-Whitelist.
+ */
+export const PresetActivationResultSchema = z.object({
+  id: z.string(),
+  status: z.enum(["imported", "failed", "unknown"]),
+  reason: z.string().optional(),
+});
+export type PresetActivationResult = z.infer<typeof PresetActivationResultSchema>;
+
 export const SkillSchema = z.object({
   skillId: z.string(),
   twinId: z.string(),
