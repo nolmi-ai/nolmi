@@ -46,6 +46,29 @@ Wichtige Weichen, die geklärt sind — Referenz für alle weiteren Items:
 
 **packages/shared braucht eigenes dist/ für Production-Container (NEU 4. Mai).** Lokal funktionierte `main: "src/index.ts"` durch tsx und Next-dev-Auflösung. Production-Container-Node ohne tsx-Loader brach mit ERR_UNKNOWN_FILE_EXTENSION. Pattern: shared baut explizit nach `dist/`, `package.json` zeigt mit main/types/exports darauf, `files: ["dist"]` für pnpm-deploy. Plus predev-Hook in jeder App, damit lokale Entwicklung weiter ohne manuellen Build-Schritt funktioniert. Dockerfiles bauen shared explizit vor App-Build.
 
+**Mandate-Terminologie-Klarstellung (NEU 21. Mai).** Google's **AP2 (Agent Payments Protocol)** verwendet „Mandate" als cryptographisch-signierte Intent-Contracts für Payment-Authorization („Intent Mandate" für Suchauftrag, „Cart Mandate" für Kauf-Approval).
+
+twin-lab's **Mandate-Layer** ist semantisch unterschiedlich: Approval-Gate für Twin-Aktionen (Skill-Calls, Send-To-Twin, etc.), gespeichert in `mandates_json` pro Twin, drei Templates cautious/trusting/business. Kein Payment-Bezug, kein Cryptographic-Signing.
+
+Beide Begriffe leben in unterschiedlichen Bedeutungsräumen (Twin-Verhaltens-Policy vs. Payment-Authorization-Contract). Sollte twin-lab in Phase 6+ Payment-Integration bekommen, ist explizite Disambiguierung nötig — z.B. „twin-lab Behavior-Mandate" vs. „AP2 Payment-Mandate", oder eines der beiden umbenannt. Bis dahin: keine Aktion, eigene Bedeutung etabliert.
+
+Plus: **AITP** (Agent Interaction & Transaction Protocol, NEAR AI) ist ein weiterer parallel-Standard für Agent-to-Agent + Payment mit NEAR/EVM-Wallet-Capabilities. Awareness-Item, Phase-6+-Territorium wenn Blockchain-Bezahlebene aktiv (#32-orthogonal).
+
+### Protokoll-Landscape (Stand Tag 22)
+
+Vier etablierte Agentic-Standards, jeweils ein Layer:
+
+| Layer | Standard | Twin-Lab-Position |
+|---|---|---|
+| Agent↔Tools | MCP (Anthropic) | ✅ Live in Phase 3.2 |
+| Agent↔Agent | A2A (Google) | Backlog #36, Phase 4 |
+| Agent↔User | AG-UI (CopilotKit) | Backlog #125, Phase 4+ |
+| Agent↔Payment | AP2 (Google) | Phase 6+ |
+| Agent↔Federation/Identity | ANP | Backlog #31 + #32, Phase 4/5+ |
+| Agent↔Transaction (alt) | AITP (NEAR AI) | Awareness, Phase 6+ |
+
+**Twin-Lab-Strategie:** Eigene Bridge + SSE bleibt Foundation für Twin-Lab-spezifische Pfade (Mandate-Layer, Owner-Recognition, Trust-Relationships, Reply-Detection). Standards werden als Adapter-Schichten obendrauf eingebunden — analog zur A2A-Strategie aus 2. Mai 2026: „zusätzlich, nicht statt".
+
 ---
 
 ## Phase 2.5 — Konkrete nächste Sub-Schritte
@@ -1011,6 +1034,15 @@ Phase 2 hat zentrale Bridge. Phase 4 = mehrere Bridges können sprechen (Matrix-
 Voll-P2P, keine Bridge mehr. DIDs (Decentralized Identifiers) für Identität. Optional: Blockchain als Bezahlebene OBEN AUF Messaging — nicht als Messaging-Layer selbst.
 **Größe:** XL · **Priorität:** nice · **Aus:** Strategische Vision
 
+**Konkrete Spec-Referenz: Agent Network Protocol (ANP).** `agent-network-protocol.com` bietet einen layered Protocol-Stack genau für dieses Szenario:
+
+- **did:wba** (Web-Based-Agent-DID) für verifiable Agent-Identität und readable Handles
+- **Agent Description + Discovery Protocol** für Capability-Publishing
+- **Messaging Profiles** (P3 Direct, P4 Group, P5/P6 E2EE, P7 Attachments, P8 Federation/Cross-Domain)
+- **AP2-Integration** für Payment-Flows mit ANP-Identity-Chain
+
+ANP wäre die konkrete Implementierung dessen, was #32 abstrakt vorsieht. Alternative Specs (TBD): IETF Agent-Working-Groups, W3C DID-Methods, andere DID-Implementierungen (did:web, did:key). GitHub: `agent-network-protocol/AgentNetworkProtocol`.
+
 ### 36. Google A2A-Protokoll-Kompatibilität
 Twins als A2A-Server zusätzlich zur internen Bridge erreichbar machen. Implementierung:
 - `/.well-known/agent.json` mit Persona-Description und Skills
@@ -1024,6 +1056,30 @@ Vorbedingungen: Phase 4 (Multi-Channel-Architektur), Mandate-Engine reif für ex
 **Größe:** L · **Priorität:** should · **Aus:** Markus' Recherche zu Google A2A Codelab, 2. Mai 2026
 
 **Inspiration NanoClaw (Tag 21):** NanoClaw's „Skills over Features"-Philosophie ist Pattern-Bestätigung für A2A als opt-in Adapter statt eingebauter Capability. Plus Credential-Vault (OneCLI Agent-Vault) als Pattern für API-Key-Isolation bei externen Protokollen — Twin-Lab heute mit AES-256-GCM-Encryption in DB, NanoClaw's Vault-Pattern als nächste Schicht für Phase B.
+
+### 125. AG-UI-Protokoll-Kompatibilität (Agent↔User Interaction)
+
+AG-UI (Agent-User Interaction Protocol, von CopilotKit + Partner-Frameworks) ist der dritte etablierte Agentic-Standard neben MCP (Agent↔Tools, von Anthropic) und A2A (Agent↔Agent, von Google). Open, event-basiert, baut auf HTTP/WebSockets für streaming Agent-Frontend-Kommunikation.
+
+twin-lab heute: Custom SSE-Stream mit eigenen Events (`twin.thinking`, `tool.call.start/complete`, `pending-added`, `pending-resolved`, `reply-received`). Funktional ähnlich zu AG-UI's Building Blocks (Streaming chat, Thinking steps, Tool output streaming, Interrupts, Custom events).
+
+**Vorteile AG-UI-Adapter:**
+
+- Client-Ökosystem (CopilotKit, React Native, Terminal-Clients community)
+- Ökosystem-Anbindung wie bei A2A (#36) — externe Frontends können twin-lab-Twins anbinden ohne custom SSE-Schema zu lernen
+- Standardisierte Discovery + Capabilities-Exchange
+
+**Nachteile / Trade-offs:**
+
+- twin-lab-spezifische Events (z.B. `reply-received` für A2A-Symmetrie, `pending-added` für Approval-Workflow) müssen als AG-UI Custom-Events gemappt werden
+- Adapter-Schicht obendrauf, eigene SSE bleibt für Twin-Lab-spezifische Pfade (Mandate-Layer, Trust-Relationships)
+
+**Pattern:** A2A-Strategie analog — AG-UI wird zusätzlich gebaut, nicht als Ersatz. Eigene SSE bleibt für Approval/Mandate/Trust-Pfade, AG-UI als Standard-Interface obendrauf für externe Clients.
+
+**Vorbedingungen:** Phase 4 Multi-Channel-Foundation (#29/#30) — analog zu A2A, AG-UI ergibt erst Sinn wenn Twin via mehrere Kanäle erreichbar ist und externe Clients ein Standard-Interface brauchen.
+
+**Größe:** L · **Priorität:** should · **Aus:** Markus' Protokoll-Landscape-Review, 21. Mai 2026 Abend (Tag 22). Spec: https://docs.ag-ui.com/introduction
+**Status:** offen, Phase 4 oder später
 
 ---
 
