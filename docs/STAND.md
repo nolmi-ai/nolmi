@@ -1,6 +1,6 @@
 # twin-lab — Stand
 
-**Letztes Update:** 21. Mai 2026, Abend (Tag 21 — Phase 1 Endpoint + Phase 2A Wizard-Refactor)
+**Letztes Update:** 22. Mai 2026, Abend (Tag 22 — #110 abgeschlossen, Phase 2B komplett)
 
 ## Aktuell in Arbeit
 
@@ -28,6 +28,71 @@ A2A-Bridge**. Nicht Computer-Use.
 Inhalte (11 Items in drei Tranchen) unverändert, nur Build-Pfad
 leicht angepasst (#100/#101 vorgezogen, weil Vision-kritisch für
 die Differenzierungs-Story).
+
+## Tag 22 (22. Mai 2026, Freitag) — Pre-Launch-Phase A Block 4 #110 (Phase 2B + Closure)
+
+**Tagesziel:** #110 zu Ende bringen über die Phase-2B-Commit-Sequenz (Persona-Kollaps, Preset-Step, Hard-Trigger, Settings-Backend + Settings-Frontend). Erreicht: 5 Commits gepusht, Wizard von 8 → 4 Steps, Settings-Page jetzt vollständig UI-editierbar für Persona/LLM/Presets.
+
+**Commit-Sequenz:**
+
+| Commit | Was | Größe |
+|---|---|---|
+| `e90568b` | Persona-Kollaps: drei Persona-Steps (Wer/Wie/Worüber) zu einem zusammengelegt, Validation als 5-fach-AND in `stepIsComplete` case 0. STEP_LABELS 5 → 3, plus Topics-State-Persistenz-Bonus (kein Remount mehr beim Sektion-Wechsel). | M |
+| `18fad06` | Preset-Step (Skill-only): Wizard-Step 3 (Presets) mit GET `/examples/presets` Backend-Scanner und Submit-Endpoint-Erweiterung um `presets[]`. Multi-Select, Whitelist gegen Scan-Output, soft-fail-Activation via `activatePresets`. Card-Hint für MCP-Server-Bedarf (Auto-Provisioning → #122). | M |
+| `08ee3bf` | Hard-Trigger `/chat`-page: bei 0 owned Twins automatisch `router.replace('/onboarding')`. Plus Wizard-Logout-Link im Header als Escape (`/auth/logout` + `window.location.href = "/login"`-Pattern aus AccountBlock). Smoke 6/6. | S |
+| `b130953` | Settings-Backend (Phase 11A): Migration 023 (`persona_input_json TEXT` nullable), Onboarding-Submit speichert sowohl `persona_md` als auch `persona_input_json`. Neue Endpoints `GET /twins/:handle/settings-data` + `PATCH /twins/:handle/full-config` mit atomarem Update (Persona/LLM/Presets). API-Key `null` = no-change. `requiresRestart`-Flag für Persona/LLM-Updates (Registry hat keinen Hot-Reload-Pfad). Curl-Smoke 8/8. | M |
+| `003c17b` | Settings-Frontend (Phase 11B): existing `/settings?twin=@handle`-Page um drei Edit-Sections erweitert (Persona, LLM + API-Key mit Edit-Mode, Presets als Multi-Select). Globaler Save-Button mit dirty-tracking via `JSON.stringify`-Vergleich. Re-Use-Strategie β (Self-Contained, ~250 Z Duplikation; γ-Extract als #124). Defensive Read-from-DB-Fixes für GET-/PATCH-Endpoints gegen Registry-Cache-Stale. Smoke 8/8. | M-L |
+
+**Resultate Wizard nach Phase 2B:**
+
+- 8 Steps (Pre-Phase-2A) → 4 Steps: Persona / LLM + API-Key / Presets / Review
+- 1466 Z (Pre-Phase-2A) → 1497 Z (Phase 2B Closure) bei deutlich klarerer Struktur
+- Hard-Trigger schließt `/chat`-Empty-State-Loophole — neue User landen automatisch im Wizard
+- Settings-Page jetzt vollständige UI-Edit-Surface für Persona + LLM + Presets (vorher nur CLI: `twin:reload`, `twin:set-api-key`)
+- Defaults greifen unsichtbar: `mandateTemplate='cautious'` (Backend), Hosted-Pfad, Bridge-Auto-Anbindung
+- Migration 023 (`persona_input_json`) schafft strukturierte Pre-Fill-Daten für Settings-Re-Configuration
+
+**Browser-Smoke-Bilanz Tag 22:**
+
+- 2 Browser-Smokes durchgeführt (Phase 11B-Frontend), je 8 Tests
+- 1 Phantom-Bug-Report (Test 4: LLM-Model-Update wurde scheinbar nicht persistiert) — Verifikation per Inkognito-Tab + Normal-Tab zeigte Browser-Cache war die Ursache, Backend war immer korrekt
+- 16/16 testbar grün, plus 2 Curl-API-Tests aus Phase 11A für API-Key-Encryption verifiziert
+- Defensive Read-from-DB-Fixes nach Phantom-Bug eingebaut (Registry-Cache-Stale-Schutz)
+
+**Lessons Tag 22:**
+
+1. **Phase-1.1-Diagnose hat sich zum 6. Mal bewährt:** Existing `/settings?twin=@handle`-Page übersehen, kollidiert mit gebriefer neuer Sub-Route `/chat/@handle/settings`. Diagnose deckte den Architektur-Konflikt rechtzeitig auf, Strategie auf Integration in existing Page revidiert. Ohne Diagnose-Stop wäre eine zweite parallele Settings-Surface entstanden.
+
+2. **Realismus-Check vor Bau:** M-Schätzung wurde zu L beim Commit 11. Split in 11A (Backend) + 11B (Frontend) statt Mega-Commit. Plus γ-Refactor (shared components) auf Backlog #124 statt heute. Atomare Schnitte halten Push-Punkte und Smoke-Loops klein.
+
+3. **Setzungen-Tabelle im Briefing ist verbindlich:** Briefings haben oft eine Vor-Setzungs-Tabelle aus der User-Klärungs-Phase. Setzungen aus dieser Tabelle nicht erneut via AskUserQuestion zur Wahl stellen — Feedback-Memory dafür angelegt.
+
+4. **Stale-Browser-Tab erzeugt Phantom-Bugs:** Bei Frontend-State-Verdacht erst Inkognito-Tab-Check, dann Backend-Diagnose. Tag-22-Phantom-Bug (Test 4) erzeugte vollen Diagnose-Pfad mit Logging-Pfad und Curl-Script, dabei war's Browser-Cache. Künftig Inkognito-Test als erster Schritt.
+
+5. **DB-Schema-Annahmen sind Risiko:** Briefing nahm `llm_config_json` als Spaltenname an, real heißt sie `llm_config` (Migration 002). Schema-Annahmen vor SQL-Tests via `PRAGMA table_info(twin_profiles)` oder Migrationen-Read prüfen.
+
+6. **Cookie-Hygiene:** Smoke-Outputs zeigen manchmal Cookie-Anfang. Künftige Smokes nach Test-Sequenz Cookie rotieren (logout + login → neuer Cookie). Plus Disziplin: nicht im Chat-Output teilen.
+
+**Stand Block 4 nach Tag 22:**
+
+- **#110 Onboarding-Wizard: ✅ abgeschlossen** (Phase 1 + Phase 2A + Phase 2B, 13 Commits insgesamt über Tag 21 + Tag 22)
+- #109 DEPLOYMENT.md: offen (Self-Test als Dogfooding + Plain-Docker+Traefik-Cookbook)
+- #111 Repo-Hygiene: offen (Apache 2.0 LICENSE + Demo-First-README + CONTRIBUTING + Issue-Templates)
+- #108 Beta-Deklaration: sequentiell mit #111 + Block 5 (#112 Landing)
+
+**Production-Deploy-Stand:**
+
+VPS hat Stand Tag 20 (Commit `56cb0dc`). Drift jetzt: Tag 21 (Phase 1 + 2A) + Tag 22 (Phase 2B) — 13 Commits in main, Migrations 023 neu, examples/-Container-Path-Workaround vom Tag 20 transient. Production-Re-Deploy bei nächstem Block-4-Push oder dediziert.
+
+**Pre-Launch-Phase A Bilanz nach Tag 22:**
+
+- Block 1: ✅ 11/11 (Tag 18, deployed)
+- Block 2: ✅ 2/2 (Tag 19, deployed)
+- Block 3: ◐ 1/2 (#107 ✅, #108 sequentiell mit Block 4/5)
+- Block 4: ◐ 1/3 (**#110 ✅**, #109 + #111 offen)
+- Block 5: 0/4 offen
+
+Bei 20 Tagen verfügbar (Tag 22 → Tag 42) und Block 4-Rest + Block 5 zusammen ~11-13 Tage kalkuliert bleiben ~7-9 Tage Reserve.
 
 ## Tag 21 (21. Mai 2026, Donnerstag) — Pre-Launch-Phase A Block 4 #110 (Phase 1 + Phase 2A)
 
