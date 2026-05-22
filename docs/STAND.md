@@ -1,6 +1,6 @@
 # twin-lab — Stand
 
-**Letztes Update:** 22. Mai 2026, Abend (Tag 22 — #110 abgeschlossen, Phase 2B komplett)
+**Letztes Update:** 22. Mai 2026, Vormittag (Tag 23 — Production-Re-Deploy durch, #109-Bau startet)
 
 ## Aktuell in Arbeit
 
@@ -28,6 +28,49 @@ A2A-Bridge**. Nicht Computer-Use.
 Inhalte (11 Items in drei Tranchen) unverändert, nur Build-Pfad
 leicht angepasst (#100/#101 vorgezogen, weil Vision-kritisch für
 die Differenzierungs-Story).
+
+## Tag 23 (22. Mai 2026, Donnerstag) — Pre-Launch-Phase A Block 4 (Production-Re-Deploy + #109 Start)
+
+**Stand Tag 23 Vormittag:** Production-Re-Deploy durch (Tag-21+22-Drift abgebaut + Migration 023 live). Plus Build-ARG-Bug strukturell entdeckt und in Backlog #126. Plus Turbopuffer als Phase-B-Option dokumentiert. origin/main = `121950a`.
+
+### Production-Re-Deploy (~1.5h)
+
+**Drift-Stand vor Re-Deploy:** Production auf `ad0063f` (Tag 20), origin auf `574f3b2` (Tag 22). 14 Commits + Migration 023 pending.
+
+**Phase-1.1-Diagnose:** Production-Verzeichnis `/docker/twin-lab-web/` (nicht `twin-lab/` wie angenommen). Override-File mit docs/, mcp-servers/, model-cache-Mounts plus ENV `TWIN_LAB_MODEL_CACHE_DIR`. DB unter Docker-Volume `/var/lib/docker/volumes/twin-lab-web-data/_data`. examples/ strukturell im Image (Tag-20-Fix `013b499` verifiziert).
+
+**Build-Pattern-Klärung:** Twin-Lab-Compose ist image-tag-only. `docker compose build` warnt "No services to build". Korrekter Pfad: direkt `docker build -t twin-lab-runtime:latest -f apps/runtime/Dockerfile .` aus Repo-Root. Lesson aus Tag 17 hat sich bestätigt — DEPLOYMENT.md §3 hat den Build-Block, aber wir hatten ihn nicht beim Re-Deploy-Briefing inkorporiert.
+
+**Build-ARG-Bug (#126):** Web-Image gebaut ohne `NEXT_PUBLIC_RUNTIME_URL`-Build-ARG, Default `http://localhost:4000` wurde ins Client-Bundle gebakt. Folge: "Failed to fetch" beim Login + CORS-Errors bei /twins-Calls. Diagnose über Browser DevTools (Network-Tab zeigt localhost:4000-Request).
+
+**Fix:**
+```bash
+docker build --no-cache \
+  --build-arg NEXT_PUBLIC_RUNTIME_URL=https://runtime.twin.harwayexperience.com \
+  -t twin-lab-web:latest -f apps/web/Dockerfile .
+```
+
+Plus `docker compose up -d --force-recreate web` damit Container neues Image nutzt (ohne --force-recreate sah compose Image-Name unverändert + machte nichts).
+
+**Migration 023:** sauber durch beim Container-Boot via init-db.ts: "023_persona_input_json.sql angewendet, 22 Migration(en) bereits angewendet (skipped)". Schema hat jetzt 14. Spalte persona_input_json.
+
+**Production-Smoke:** Login funktional, /chat lädt, /settings zeigt drei neue Sections (Persona/LLM/Presets) mit Legacy-Hint für @markus (persona_input_json NULL).
+
+### Backlog-Updates
+
+- #126 neu: Build-Time-Validation für NEXT_PUBLIC_* Variables (S/should, vor Self-Hosting-Launch zu lösen — wird als Sub-Aktion in #109 dokumentiert)
+- Memory-Persistenz-Setzung erweitert um Turbopuffer als Phase-B-Option (neben sqlite-vec Self-Hosting-Pfad)
+
+### Was als nächstes ansteht
+
+**Heute Nachmittag — Tag 23 Phase 2:** #109 DEPLOYMENT.md iterativ ausbauen.
+
+- Vier TODO-Sektionen vollausarbeiten (ENV-Reference, Deploy-Sequenz, Smoke-Tests, Backup, Domain-Setup)
+- Plain-Docker+Traefik-Cookbook
+- #126 Build-ARG-Pflicht integrieren (Sub-Aktion)
+- Schreibtisch-Walkthrough iterativ (jede Sektion sofort prüfen)
+
+Realistisch zwei-tägig (Tag 23 Nachmittag + Tag 24).
 
 ## Tag 22 (22. Mai 2026, Freitag) — Pre-Launch-Phase A Block 4 #110 (Phase 2B + Closure)
 
@@ -877,6 +920,24 @@ github.com/markusbaier/twin-lab — `origin/main` auf `1e57aec`
 **Tag-12-Commits:**
 - `9b4d5c5` 3.3.A bis `a3c868b` 3.3.G3 (9 Code-Commits)
 - `189acbc` Doku Tag 12
+
+## Lessons Tag 23 Vormittag
+
+**1. Phase-1.1-Diagnose hat sich zum siebten Mal bewährt.** Re-Deploy-Briefing nahm `/docker/twin-lab/` an, real `/docker/twin-lab-web/`. Plus Compose-Pattern (image-tag-only, build extern) wäre ohne Diagnose schiefgegangen.
+
+Lehre: bei jedem Re-Deploy zuerst Production-Working-Directory via `docker inspect ... --format '{{ index .Config.Labels "com.docker.compose.project.working_dir" }}'` verifizieren statt annehmen.
+
+**2. NEXT_PUBLIC_* sind Build-Time, nicht Runtime.** Next.js bakes diese ENV-Variables zur Build-Zeit ins Client-Bundle. Compose-environment greift nur server-side, nicht im Browser-JavaScript. Build-ARG ist Pflicht. #126 strukturell zu lösen.
+
+Lehre: bei Next.js-Self-Hosting-Doku immer Build-ARG-Pflicht explizit dokumentieren. Default in Dockerfile sollte fail-fast sein (leerer String + Build-Validation), nicht `http://localhost:4000`.
+
+**3. Stale-Image-Recreate-Trap: `up -d` ohne `--force-recreate`.** Wenn Image-Tag gleich bleibt (latest), aber neues Build vorliegt: compose macht nichts ohne `--force-recreate`. Plus `compose ps` zeigt "Created 2 days ago" als Status, leicht zu übersehen.
+
+Lehre: nach Image-Rebuild immer `docker compose up -d --force-recreate <service>`. Plus Pre-Flight-Check: `docker ps --format '{{.Names}} {{.Status}} {{.RunningFor}}'` vor + nach Recreate vergleichen.
+
+**4. Browser-Network-Tab löst CORS-Verdacht in Sekunden.** Curl-Test gegen den Endpoint (mit Origin-Header) ist guter Confirmation-Schritt, aber tatsächlicher Bug-Hunt startet im Browser DevTools Network-Tab. Welche URL wird gefetched? Welcher Status? Das sagt Root-Cause direkter als alle Curl-Variationen.
+
+Lehre: bei Browser-Bugs immer DevTools-Network-Tab als erster Diagnose-Schritt — vor Curl, vor Server-Logs.
 
 ## Lessons Tag 20
 
