@@ -1115,6 +1115,29 @@ Eigene Skills schreiben vs. agentskills.io-Community-Skills nutzen vs. Hybrid. E
 ### Memory-Persistenz — lokal vs. Cloud
 Memory in Phase 3 lokal in Twin-DB. Bei Multi-Tenant-Cloud-Deployment (2.5.6) muss entschieden werden: pro User isoliert in geteilter DB, oder pro User eigene SQLite-Instanz. Performance vs. Isolation-Trade-off.
 
+**Update Tag 23 (22. Mai 2026):** Für Phase B SaaS-Hosting gibt es neben SQLite-Skalierung eine dritte Option: Hosted-Vector-Search-Service.
+
+**Turbopuffer** (turbopuffer.com) ist Vector + Full-Text Search auf Object Storage (S3) mit Memory/SSD-Cache-Layer davor. Produktions-Use bei Cursor, Notion, Anthropic, Linear. Sub-10ms p50 für warme Namespaces. Hybrid-Search (Vector + BM25 = unser Pattern aus 3.4), Metadata-Filtering, Multi-Tenancy via Namespace-pro-Customer.
+
+Pricing: $64/mo Launch, $256/mo Scale, $4096/mo Enterprise (BYOC). 10x billiger als klassische Vector-DBs durch Object-Storage-Foundation — kalte Namespaces kosten nur Storage, warme werden gecacht.
+
+**Architektur-Eignung für twin-lab Phase B:**
+- Multi-Tenancy passt strukturell (Namespace pro Twin oder pro User)
+- Cold/Warm-Tiering passt zum Memory-Pattern (alte Konversationen selten gequeried, neue heißer)
+- Hybrid-Search ist Datenschicht-kompatibel mit unserem 3.4-FTS5-Setup
+- Bridge bleibt unverändert, Episodic-Memory-Layer würde Turbopuffer-Calls statt sqlite-vec-Calls machen
+
+**Trade-offs vs. sqlite-vec:**
+- Bricht Self-Hosting-Story (Phase A): Hobby-User können nicht mehr voll-lokal hosten ohne Turbopuffer-Account
+- Mindestkosten $64/mo schliessen Free-Tier-Hobby-User aus
+- Lock-In auf Hosted-Service vs. heutige Portabilität (SQLite-File mitnehmen)
+
+**Empfehlung:** Für Phase A unverändert sqlite-vec lokal. Für Phase B SaaS-Hosting als konkrete Option neben sqlite-vec-Skalierung in Strategy-Session prüfen — vor allem wenn Embedding-Volumen pro User in den Millionen-Bereich wächst (Long-Tail-Konversationen, Cross-Twin-Search aus Phase 4 #31).
+
+Alternative Hosted-Optionen für gleiche Strategy-Session: Pinecone, Qdrant, Weaviate, pgvector. sqlite-vec selbst-skalierend (pro-User SQLite-File oder shared mit twin_id-Filter) bleibt Self-Hosting-freundlicher Pfad.
+
+Spec: turbopuffer.com/docs
+
 ### Owner-Mode vs. Public-Mode Priorisierung
 In Phase 4: Owner-Mode (Markus chattet via Telegram mit eigenem Twin) deutlich einfacher als Public-Mode (externe schreiben Twin an, Mandate entscheidet). Owner-Mode zuerst, Public-Mode später wenn Mandate-Layer reif.
 
@@ -1410,6 +1433,21 @@ Beide Pages importieren die shared Components. Onboarding-File würde ~1497 → 
 
 **Größe:** L · **Priorität:** nice · **Aus:** Tag 22 #110 Phase 2B Commit 11B
 **Status:** offen, Phase-2C-Kandidat (kein Phase-A-Blocker — Duplikation funktioniert)
+
+### 126. Build-Time-Validation für NEXT_PUBLIC_* Variables
+
+**Befund Tag 23 (22. Mai 2026):** Production-Re-Deploy hat Web mit Default-localhost:4000 ins Client-Bundle gebakt, weil Build-ARG nicht übergeben wurde. Login + alle /twins-Calls failten mit "Failed to fetch" weil Browser localhost:4000 nicht erreichen kann.
+
+Mitigation-Optionen:
+a) Default leer + Build-Fail wenn nicht gesetzt
+b) Build-Script wrapper das ARGs als Pflicht erzwingt
+c) CI/CD-Pipeline mit fixen ENV-Variables
+d) DEPLOYMENT.md (#109) dokumentiert Build-Command explizit
+
+**Größe:** S · **Priorität:** should · **Aus:** Tag 23 Production-Re-Deploy
+**Status:** offen, vor Self-Hosting-Launch (Phase A) zu lösen
+
+Hinweis: passt thematisch zu #109 DEPLOYMENT.md, kann als Sub-Aktion dort gelöst werden statt eigener Bau.
 
 ## Pre-Launch-Phase A — Block 4: Self-Hosting-Polish
 
