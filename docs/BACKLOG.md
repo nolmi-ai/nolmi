@@ -1449,6 +1449,20 @@ d) DEPLOYMENT.md (#109) dokumentiert Build-Command explizit
 
 Hinweis: passt thematisch zu #109 DEPLOYMENT.md, kann als Sub-Aktion dort gelöst werden statt eigener Bau.
 
+### 127. .env.example säubern — Phase-1-Legacy-Variables entfernen
+
+**Befund Tag 23 (#109-Bau):** `.env.example` enthält noch Phase-1-Markus-only-Mode-Variables:
+- `BRIDGE_URL` (Zeile 43)
+- `BRIDGE_TWIN_HANDLE` (Zeile 44)
+- `BRIDGE_TWIN_TOKEN` (Zeile 45)
+
+Diese werden in Phase A nicht mehr genutzt (Bridge-Config ist per-Twin in DB seit 2.5.4 — `TWIN_LAB_DEFAULT_BRIDGE_URL` für neue Twins, alles andere im Onboarding-Wizard). Sie verwirren Self-Hoster die sich fragen "muss ich das setzen?".
+
+**Fix:** Variables aus `.env.example` entfernen. Code-Pfade vorab prüfen ob noch jemand drauf liest (vermutlich nur Bootstrap-CLI).
+
+**Größe:** XS · **Priorität:** should · **Aus:** Tag 23 #109-Bau
+**Status:** offen, vor Self-Hosting-Launch
+
 ## Pre-Launch-Phase A — Block 4: Self-Hosting-Polish
 
 Items aus dem Strategy-Pivot Tag 18. Block 4 macht das Repo für externe Tech-Affine deploybar. Spec: `docs/PRE-LAUNCH-A-STRATEGY.md`.
