@@ -1,6 +1,6 @@
 # twin-lab — Stand
 
-**Letztes Update:** 22. Mai 2026, Vormittag (Tag 23 — Production-Re-Deploy durch, #109-Bau startet)
+**Letztes Update:** 22. Mai 2026, Freitag Vormittag (Tag 23 — Production-Re-Deploy durch, #109-Bau startet)
 
 ## Aktuell in Arbeit
 
@@ -29,7 +29,7 @@ Inhalte (11 Items in drei Tranchen) unverändert, nur Build-Pfad
 leicht angepasst (#100/#101 vorgezogen, weil Vision-kritisch für
 die Differenzierungs-Story).
 
-## Tag 23 (22. Mai 2026, Donnerstag) — Pre-Launch-Phase A Block 4 (Production-Re-Deploy + #109 Start)
+## Tag 23 (22. Mai 2026, Freitag) — Pre-Launch-Phase A Block 4 (Production-Re-Deploy + #109 Start)
 
 **Stand Tag 23 Vormittag:** Production-Re-Deploy durch (Tag-21+22-Drift abgebaut + Migration 023 live). Plus Build-ARG-Bug strukturell entdeckt und in Backlog #126. Plus Turbopuffer als Phase-B-Option dokumentiert. origin/main = `121950a`.
 
