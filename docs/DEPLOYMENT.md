@@ -1,7 +1,8 @@
 # DEPLOYMENT — Twin-Lab Self-Hosting
 
-> **Status:** §1–§7 voll ausgebaut (Tag 23). §9 Backup + §10
-> Cookbook folgen Tag 24.
+> **Status:** §1–§7 voll-ausgebaut. Original-Skelett hatte §3
+> (First-Time), §5 (ENV), §6 (Updates — jetzt in §3 konsolidiert),
+> §7 (Smoke) TODO. §8 Backup + §9/§10 Cookbook folgen Tag 24.
 
 Diese Anleitung beschreibt das Self-Hosting-Setup von Twin-Lab auf
 einem Linux-VPS mit Docker. Sie ergänzt das knappere Setup-README
@@ -959,8 +960,12 @@ fehlgeschlagenen Requests gehen:
   Der Browser versucht localhost zu callen, kommt aber nie an.
   Häufigster Self-Hosting-Bug.
 - **Requests gehen an `https://runtime.<domain>` aber mit 401
-  oder CORS-Error** → `SESSION_COOKIE_DOMAIN` falsch gesetzt,
-  Cookie geht nicht an die Runtime-Subdomain mit. Siehe §5.2.
+  oder CORS-Error** → Browser-Console zeigt typisch
+  "Cross-Origin Request Blocked" oder "Missing Access-Control-
+  Allow-Origin". Cookie geht nicht an die Runtime-Subdomain
+  weil `SESSION_COOKIE_DOMAIN` ohne führenden Punkt gesetzt ist
+  (richtig: `.deine-domain.tld`, falsch: `deine-domain.tld`).
+  Siehe §5.2.
 
 **Wurzel** (häufigster Fall): `NEXT_PUBLIC_RUNTIME_URL` ist eine
 Build-Time-Variable, kein Runtime-ENV. Die `environment:`-Sektion
@@ -968,7 +973,8 @@ im Compose-File greift nicht — der Wert ist im Web-Client-Bundle
 hartkodiert.
 
 **Fix:** Web-Image neu bauen mit Build-ARG. Voller Befehl in
-§3.1.2 / §3.2.2. Dann `docker compose up -d --force-recreate web`.
+§3.2.2 (Re-Deploy-Kontext; beim Erst-Setup analog §3.1.2). Dann
+`docker compose up -d --force-recreate web`.
 
 Verifikation nach Rebuild: gleicher DevTools-Network-Check, jetzt
 müssen alle Requests an `https://runtime.<deine-domain>` gehen.
@@ -980,7 +986,7 @@ müssen alle Requests an `https://runtime.<deine-domain>` gehen.
 Fix aus dem Pull ist nicht da, neue UI-Sections fehlen,
 Migration-Logs zeigen nichts Neues.
 
-**Diagnose** — Pre-Flight-Vergleich:
+**Diagnose** — Primary-Check:
 
 ```bash
 docker ps --format '{{.Names}} {{.Status}} {{.RunningFor}}'
@@ -988,15 +994,16 @@ docker ps --format '{{.Names}} {{.Status}} {{.RunningFor}}'
 # Wenn "2 days ago": Container wurde NICHT neu erstellt
 ```
 
-Plus Image-Digest-Vergleich:
-
-```bash
-docker inspect twin-lab-web --format '{{.Image}}'
-docker image inspect twin-lab-web:latest --format '{{.Id}}'
-# Wenn die beiden IDs unterschiedlich sind: Container läuft
-# an einem alten Image-Build, obwohl :latest auf neueres Image
-# zeigt
-```
+> Optional bei Unsicherheit — Image-Digest-Vergleich:
+>
+> ```bash
+> docker inspect twin-lab-web --format '{{.Image}}'
+> docker image inspect twin-lab-web:latest --format '{{.Id}}'
+> ```
+>
+> Wenn die beiden IDs unterschiedlich sind: Container läuft an
+> einem alten Image-Build, obwohl `:latest` auf neueres Image
+> zeigt.
 
 **Wurzel:** `docker compose up -d` ohne `--force-recreate`
 erkennt keine Image-Änderung wenn der Tag gleich bleibt
