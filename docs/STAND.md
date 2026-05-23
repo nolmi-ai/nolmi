@@ -160,21 +160,101 @@ Re-Deploy hat aufgedeckt: existing DEPLOYMENT.md §3.2 Pattern erwartet immer Re
 
 Schärft Pattern für künftige Self-Hoster und vermeidet unnötige Rebuilds bei Doku-Updates.
 
+### #130-Architektur-Strategy-Session (Commit `b800d20`, ~45 Min)
+
+Tag-25-Nachmittag-Welle-2 — vor Phase-1-Bau eine Item-spezifische Architektur-Session. Tiefe rechtfertigte eigenes Doc analog zu BLOCK-4-STRATEGY-Pattern: 7 Achsen × Setzungs-Tabellen + 5-Phasen-Bau-Sequenz (~4.5 Bautage).
+
+**Sieben Achsen-Setzungen (mit Web-Recherche Tag 25 Nachmittag):**
+
+| Achse | Setzung |
+|---|---|
+| a) Bot-Library | Telegraf (Stand 2026, TypeScript-First, aktive Maintenance — node-telegram-bot-api ist stagniert) |
+| b) Token-Encryption | Reuse existing AES-256-GCM via `crypto-utils.ts` |
+| c) Webhook-Domain | Path-Prefix unter `runtime.*` (keine neue Subdomain) |
+| d) Schema | Zwei separate Tabellen (`telegram_configs` + `telegram_messages`) |
+| e) Owner-Pairing | Pairing-Code via `/start <code>` (Telegram-User-ID als persistente Auth) |
+| f) Webhook vs Polling | Webhook Production, Polling Local-Dev (ENV-Switch) |
+| g) Cross-Channel-Threading | Channel-unified Conversation (existing Conversation-Schema + Channel-Marker) |
+
+**Bau-Output:**
+
+- `docs/130-TELEGRAM-STRATEGY.md` neu (177 Z, H1 + 5 H2 + 7+5 H3)
+- BLOCK-5-STRATEGY-#130-Sektion + BACKLOG-#130-Body mit Verweis-Edits
+
+### #130 Phase 1 — Backend-Foundation (Commit `843c714`, ~2.5h)
+
+Erste echte Code-Phase von #130. Migration + zwei Repos + Smoke-Script.
+
+**Bau-Output (858 Z Code):**
+
+- Migration `024_telegram_adapter.sql` mit `telegram_configs` + `telegram_messages` (FK auf `twin_profiles(twin_id)`, 5 Indices, Stufe-2-Vorbereitungs-Kommentar)
+- `apps/runtime/src/telegram/configs-repo.ts` mit Class `TelegramConfigsRepo` (11 Methoden + 3 Error-Classes + Pairing-Lifecycle atomar via SQLite-Transaction)
+- `apps/runtime/src/telegram/messages-repo.ts` mit Class `TelegramMessagesRepo` (5 Methoden + UNIQUE-Constraint gegen Webhook-Retry-Doppel-Inserts)
+- `apps/runtime/src/scripts/test-telegram-repos.ts` mit 10 Lifecycle-Steps
+
+**Verifizierte Eigenschaften (Smoke 10/10 grün):**
+
+- Encryption-Roundtrip (Token encrypted gespeichert, dekryptiert matched Original)
+- Public-Type strippt `bot_token_encrypted` + `webhook_secret`
+- UNIQUE(twin_id) blockt Doppel-Konfig pro Twin
+- UNIQUE(twin_id, chat_id, message_id) blockt Telegram-Retry-Doppel-Inserts
+- Pairing-Code-Lifecycle atomar (validate-and-consume in einer Transaktion)
+- Audit-Trail-Asymmetrie: Config-Delete behält Messages, nur Twin-Delete kaskadiert beide
+
+**Phase-1.1-Diagnose-Findings (kritisch):**
+
+- `EncryptionService` ist tatsächlich `encrypt()`/`decrypt()`-Funktionen in `crypto-utils.ts`, keine Class
+- MCP-Server-Repo lebt unter `apps/runtime/src/mcp/repo.ts` (Domain-Folder-Pattern), nicht `db/repos/`
+- Existing FK-Targets sind auf `twin_profiles(twin_id)`, nicht `twins(id)` — wäre ohne Diagnose Migration-Failure
+- Timestamps Repo-seitig (kein DB-Default)
+- ID-Pattern `tg_cfg_${nanoid(16)}` / `tg_msg_${nanoid(16)}` (Prefix + nanoid)
+- Keine Unit-Test-Suite — Smoke-Scripts unter `apps/runtime/src/scripts/test-*.ts` als Konvention
+
+**Walkthrough-Befunde (eingearbeitet):**
+
+- B6 Migration-Kommentar über UNIQUE(twin_id) für Stufe-2-Vorbereitung
+- B7 JSDoc bei `decryptToken` mit auffälligem SERVER-INTERNAL-Marker + `@internal`-Tag
+- B8 JSDoc bei `updateToken` mit setWebhook-Caller-Pflicht-Hinweis
+
+**Smoke-Test-Korrektur:** initial erwartete der Smoke CASCADE für Messages bei Config-Delete. Strategy-Doc §Anmerkungen sagt Audit-Trail-Asymmetrie (SET NULL für Messages). Test auf Strategy-Realität korrigiert — Pattern „Strategy-Doc + Smoke als zwei unabhängige Verifikations-Quellen" hat funktioniert.
+
+### Wettbewerbs-Recherche-Session OpenAI/Anthropic-OAuth (kein Commit dieser Session)
+
+Nutzer-Frage Tag 25 Nachmittag: „OpenClaw und Hermes Agent erlauben Subscription-OAuth — können wir das auch?"
+
+**Befund Selbst-Korrektur:** Tag-25-Vormittag-Wettbewerbs-Analyse (NanoClaw/Hermes mit 29k-100k+ Stars) war zu schnell aus Such-Snippets übernommen, mit teilweise unverifizierter Existenz/Reichweite. Heute Nachmittag mit gezielter Recherche tieferer Stand:
+
+- **OpenAI Codex hat offiziellen OAuth-Flow** (`developers.openai.com/codex/auth`) — dokumentiert für eigene Codex-Produkte (CLI, IDE, App, Cloud), nicht explizit für 3rd-Party-Apps
+- **OpenClaw nutzt Codex-OAuth-Flow für eigene App** (`docs.openclaw.ai/concepts/oauth`) mit detailliertem PKCE-Pattern — laut OpenClaw-Doku „explicitly supported", laut OpenAI-Doku nicht explizit für externe Apps adressiert. ToS-Stance fluide.
+- **Anthropic** hat Anfang April 2026 Claude Pro/Max via 3rd-Party-Agent-Frameworks gekappt, laut OpenClaw-Doku „wieder erlaubt" — Status nicht öffentlich publiziert
+
+**Konsequenz:** Patterns sind interessant aber risikoreich für Phase-A-Launch (jederzeit revozierbar). Beide als Phase-B-Backlog-Items mit Implementations-Skizzen + dokumentierten ToS-Grauzonen-Risiken.
+
+### #131 + #132 Subscription-Auth-Backlog-Items (Commit `445fb67`, ~20 Min)
+
+- **#131 OpenAI Subscription-OAuth (Beta, Codex-Pattern):** PKCE-Flow analog OpenClaw, 8-Schritte-Implementations-Skizze, Größe L (4-5 Bautage), Priorität `later`, Spur Pre-Launch-Phase B
+- **#132 Anthropic Subscription-Auth (Claude-CLI-Reuse-Pattern):** CLI-Detection + Credential-Mirror, 4-Schritte-Skizze, Größe M (2-3 Bautage), Priorität `later`, Spur Pre-Launch-Phase B
+- Alle 4 Quellen-Links HTTP 200 verifiziert
+- Format konsistent zu existing Phase-B-Items (#116/#117) — Drifts (could → later, Phase B+ → Pre-Launch-Phase B) korrekt korrigiert
+
 ### Was als nächstes ansteht
 
-**Tag 26 (morgen) Vormittag — #130 Telegram-Adapter Strategy-Session:**
+**Tag 26 — #130 Phase 2 (Telegraf-Service + Owner-Pairing-Flow, ~1.5 Bautage):**
 
-Architektur-Fragen vor Bau-Briefing klären:
-- Bot-API-Library: `telegraf` vs `node-telegram-bot-api`
-- Token-Encryption-Pattern (Pattern aus existing ENCRYPTION_KEY-Setup übernehmen?)
-- Owner-Pairing-Flow: `/start`-Command-Implementation, Telegram-User-ID-Matching gegen Owner-Email-Hash
-- Webhook-Domain-Setup auf VPS: neue Traefik-Subdomain `telegram.twin.harwayexperience.com` oder Path-Routing unter `runtime.twin.harwayexperience.com/webhooks/telegram/:twin-handle`?
-- Migration-Pattern: encrypted Bot-Token-Storage in `telegram_chats`-Tabelle
-- Test-Strategy: lokaler Telegram-Bot vs Production-Bot für Smoke-Tests
+Phase-2-Briefing wird eigene Strategy-Klärungen brauchen:
+- TelegramBotRegistry-Pattern (ein Bot pro Twin, Multi-Tenant-Lifecycle)
+- Webhook-Endpoint-Integration in existing Fastify-Routen
+- `/start <code>`-Command-Handler mit Pairing-Validation
+- ENV-Switch `TELEGRAM_USE_POLLING` für Local-Dev
+- Smoke: lokaler Bot via BotFather erstellt, Pairing-Flow End-to-End
 
-Erwartete Größe Strategy-Session: 1.5-2h.
+**Tag 27 oder später — Phase 3 (Message-Routing + LLM-Integration, ~1 Bautag):**
 
-**Tag 26 Nachmittag — #130 Bau-Briefing + Phase-1.1-Diagnose**, ggf. Bau-Start.
+Inbound-Message → Conversation-Resolution → Twin-Service → LLM-Response → Outbound-Send. Cross-Channel-Conversation-Threading (Channel-Marker pro Message).
+
+**Mögliche Zwischen-Tag — Wettbewerbs-Verifikation (1-2h):**
+
+Tag-25-Vormittag-Wettbewerbs-Analyse hat unverifizierte Stars/Reichweite-Zahlen genutzt. Vor Block-5-Items #112-#114 (Landing-Vergleichs-Tabelle, Launch-Posts-Wettbewerbs-Positionierung) eine 1-2h-Verifikations-Session: sind die Projekte/Zahlen verlässlich? Falls nein, BLOCK-5-STRATEGY-Wettbewerbs-Tabelle anpassen. Falls ja, Setzungen bleiben. Optional, kein Blocker.
 
 ## Tag 24 (23. Mai 2026, Samstag) — Pre-Launch-Phase A Block 4 (#109 Closure)
 
@@ -1145,6 +1225,10 @@ Lehre: Re-Deploy-Patterns sollten Code-Drift vs Doku-Drift explizit unterscheide
 **6. Phase-1.1-Diagnose-Catch bei Re-Deploy: VPS-Stand wurde unterschätzt.** Claude Code-Diagnose ging von `121950a` als VPS-Stand aus (basierend auf Memory), Realität war `574f3b2` (3 Commits älter). Das hätte bei nicht-Doku-Drift problematisch werden können — eine zusätzliche Migration-Verifikation wäre vergessen worden.
 
 Lehre: bei Production-Aktionen NIE auf Memory verlassen, IMMER auf VPS verifizieren („`git log -1` zeigt $X" als ersten Phase-1.1-Schritt). Production-Realität trumpft jede Erwartung.
+
+**7. Selbst-Korrektur bei Web-Recherche-Strategy-Entscheidungen ist Disziplin, nicht Schwäche.** Tag-25-Vormittag wurde Wettbewerbs-Analyse (NanoClaw/Hermes mit Stars-Zahlen) zu schnell von Such-Snippets in „etablierte Fakten" überführt. Tag-25-Nachmittag mit Nutzer-Punkt zu OAuth-Frage musste ich öffnen dass ich Vormittag zu schnell war. Pattern: bei mainstream-bekannten Projekten mit hohen Stars-Zahlen (>10k) ist ein Sanity-Check (Wikipedia-Existenz, Anthropic-interne Erwähnung, GitHub-Direkt-Repo-Verifikation) angebracht, nicht nur Such-Snippet-Akzeptanz. Plus: bei kritischen Strategy-Entscheidungen (Pivot, Launch-Verschiebung) explizit benennen welche Aussagen aus Such-Snippets stammen und welche aus offizieller Doku.
+
+Lehre: Web-Recherche-Quellen-Stratifizierung als Phase-1.1-Disziplin für Strategy-Sessions. Snippet-Befund ≠ verifizierte offizielle Quelle ≠ selbst-gefetchte Doku — drei Vertrauens-Stufen, bei Setzungs-Entscheidungen Stufe 2+ Pflicht.
 
 ## Lessons Tag 24
 
