@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Self-Hosting Documentation
+    url: https://github.com/markusbaier/twin-lab/blob/main/docs/DEPLOYMENT.md
+    about: Setup and deployment instructions
+  - name: Security Issue
+    url: https://github.com/markusbaier/twin-lab/blob/main/SECURITY.md
+    about: For security vulnerabilities, please follow the disclosure process
