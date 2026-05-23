@@ -224,6 +224,11 @@ Twins werden überall erreichbar. **Phase 4-Inhalte mit Vision-Updates:**
 ### 4.1 — Telegram-Adapter (Owner-Mode)
 **Zeitfenster:** ~1 Woche
 
+**Status-Notiz Tag 25:** Stufe 1 (Owner-Only-Bridge, Single-User) auf
+Pre-Launch-Phase A vorgezogen als #130 (Wettbewerbs-Pivot, siehe
+`docs/BLOCK-5-STRATEGY.md`). Vollausbau (Stufe 2/3, Multi-User,
+External-Sender-Approval) bleibt Phase 4.1 in Phase B.
+
 ### 4.2 — WhatsApp-Adapter (Owner-Mode)
 **Zeitfenster:** 2-3 Wochen inkl. KYC-Bürokratie
 

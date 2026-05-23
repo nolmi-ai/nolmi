@@ -2,8 +2,11 @@
 
 **Datum:** 17. Mai 2026 (Tag 18, Strategie-Session Vormittag)
 **Ziel:** Twin-Lab Open-Source-Repo öffentlich nutzbar für Tech-Affine,
-~6 Wochen Bauzeit
-**Launch-Datum:** Ende Juni / Anfang Juli 2026 (weiches Ziel)
+~8 Wochen Bauzeit
+**Launch-Datum:** KW 29-30 (15.-22. Juli 2026, weiches Ziel)
+**Verschoben von KW 25-27 (Ende Juni / Anfang Juli):** Wettbewerbs-Pivot
+Tag 25 (Telegram-Adapter Stufe 1 vorgezogen, siehe
+`docs/BLOCK-5-STRATEGY.md`).
 **Scope:** Self-Hosting only. SaaS folgt in Phase B.
 
 **Charakter dieses Dokuments:** Strategie-Setzung, **nicht Bau-Briefing**.
@@ -153,10 +156,12 @@ BACKLOG.md; Items mit `(neu)` werden im Folge-Briefing dort angelegt.
 - **Public-Repo-Hygiene:** README mit klarer Pitch + Quick-Start,
   LICENSE (MIT? Apache 2.0?), CONTRIBUTING.md, Issue-Templates.
 
-### Block 5 — Launch-Vorbereitung (~5–7 Tage)
+### Block 5 — Launch-Vorbereitung (~11–12 Tage)
 
 **Neue Items, im Folge-Briefing anzulegen:**
 
+- **#130 Telegram-Adapter Stufe 1** (Owner-Only-Bridge) — Wettbewerbs-Pivot
+  Tag 25, vorgezogen aus ROADMAP Phase 4.1. Siehe `docs/BLOCK-5-STRATEGY.md`.
 - **Landing-Page** (minimal, README-style ok): What is Twin-Lab,
   Differenzierungs-Pitch, Quick-Start-Demo.
 - **Demo-Video oder schriftlicher Walkthrough** (5–10 Min).
@@ -171,12 +176,12 @@ BACKLOG.md; Items mit `(neu)` werden im Folge-Briefing dort angelegt.
 | Block 2 — Architektur-Follow-ups | 5–8 |
 | Block 3 — Schmaler Computer-Use-Hook | 2–3 |
 | Block 4 — Self-Hosting-Polish | 5–7 |
-| Block 5 — Launch-Vorbereitung | 5–7 |
-| **Total** | **37–50 Tage Pflicht** |
+| Block 5 — Launch-Vorbereitung | 11–12 |
+| **Total** | **43–55 Tage Pflicht** |
 
-Bei **42 Tagen verfügbar** (6 Wochen × 7 Tage; in der Praxis mit
-Wochenenden-Mix-Use realistisch) ist das **knapp, aber machbar bei
-strikter Scope-Disziplin**.
+Bei **56 Tagen verfügbar** (8 Wochen × 7 Tage; in der Praxis mit
+Wochenenden-Mix-Use realistisch, nach Tag-25-Pivot von 6 auf 8 Wochen)
+ist das **knapp, aber machbar bei strikter Scope-Disziplin**.
 
 ## Anti-Goals für Pre-Launch-Phase A
 
@@ -184,6 +189,10 @@ strikter Scope-Disziplin**.
 - **Persona-Builder als Chat** statt YAML — Phase B
 - **MCP-Marketplace** statt CLI/UI-Configurator — Phase B
 - **Mandate-Wizard mit Presets** — Phase B
+- **Telegram-Adapter Stufe 2/3** (External Senders mit Pre-Approval,
+  Voll-Multi-Twin-Router) — Phase B (ROADMAP Phase 4.1 Vollausbau).
+  Anmerkung: Stufe 1 (Owner-Only-Bridge) ist als #130 in Phase A
+  vorgezogen (Wettbewerbs-Pivot Tag 25).
 - **Phase 3.6 formell** mit `claude_computer_use_agent` — Phase B
   oder später
 - **Mobile-App** — langfristig, UX-Stufe 3

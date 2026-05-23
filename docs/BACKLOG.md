@@ -1489,6 +1489,40 @@ README-Quick-Start + Tech-Stack-Story sagen Claude Opus 4.7 als Primary-LLM. `.e
 **Größe:** XS · **Priorität:** should · **Aus:** #111 Schritt 7 Phase-1.1-Diagnose · **Spur:** Pre-Launch-Phase A (vor Self-Hosting-Launch)
 **Status:** offen
 
+### 130. Telegram-Adapter Stufe 1 (Owner-Only-Bridge)
+
+Wettbewerbs-Pivot aus Tag 25 Strategy-Session (`docs/BLOCK-5-STRATEGY.md`): NanoClaw + Hermes Agent haben Multi-Channel-Messaging als Default. Twin-Lab ohne Messaging-Integration wirkt rückständig im Self-Hosting-Markt, auch wenn Multi-Twin ein anderes Konzept ist. Telegram-Stufe-1 verteidigt minimal-viable.
+
+**Scope Stufe 1 — Owner-Only-Bridge:**
+
+- Owner verbindet eigenen Telegram-Account via `/start`-Command zum eigenen Twin
+- Twin antwortet auf Owner-Messages mit voller Memory-Tiefe und Persona
+- Bot-Token-Storage encrypted in Settings pro Twin
+- Webhook-Pattern (`/webhooks/telegram/:twin-handle`) hinter Traefik
+- Single-User pro Twin, kein External-Sender-Auth-Flow (das wäre Stufe 2)
+
+**Implementation-Skizze:**
+
+- Migration für `telegram_chats`-Tabelle + Bot-Token-Storage (encrypted via existing ENCRYPTION_KEY-Pattern)
+- `apps/runtime/src/telegram/`-Service mit Bot-API-Client (`node-telegram-bot-api` oder `telegraf`)
+- Webhook-Endpoint mit Auth-Token-Verification (Telegram-Webhook-Secret)
+- Owner-Pairing-Flow: `/start`-Command matched Telegram-User-ID gegen Owner-Email-Hash, persistiert Mapping
+- Settings-UI: pro Twin „Telegram-Bot konfigurieren" mit Bot-Token-Eingabe + Test-Connection-Button + Pairing-Status
+- Conversation-Persistence in existing audit-stream (Channel-Marker `telegram` zusätzlich zu `web`)
+
+**Smoke-Tests:**
+
+- Send-Receive-Roundtrip
+- Multi-Turn-Konversation mit Memory-Recall über mehrere Sessions
+- Memory-Hit-Badge auch sichtbar wenn Konversation via Telegram begann und im Web fortgeführt wird
+- Cross-Channel: User schreibt im Web, dann auf Telegram weiter — Conversation-Thread bleibt zusammen
+
+**Größe:** L · **Priorität:** must · **Aus:** Block-5-Strategy Tag 25 (Wettbewerbs-Pivot) · **Spur:** Pre-Launch-Phase A (Block 5)
+
+**Status-Notiz Tag 25:** Wettbewerbs-Pivot aus Block-5-Strategy-Session. Vorgezogen aus ROADMAP Phase 4.1 (Stufe 1 Owner-Only-Bridge). Strategy-Setzungen in `docs/BLOCK-5-STRATEGY.md`.
+
+**Phase-B-Implikation:** Stufe 2 (External Senders mit Pre-Approval) und Stufe 3 (Voll-Multi-Twin-Router) bleiben Phase B. WhatsApp + Discord + Slack folgen in ROADMAP Phase 4.1-4.5 wie geplant.
+
 ## Pre-Launch-Phase A — Block 4: Self-Hosting-Polish
 
 Items aus dem Strategy-Pivot Tag 18. Block 4 macht das Repo für externe Tech-Affine deploybar. Spec: `docs/PRE-LAUNCH-A-STRATEGY.md`.
