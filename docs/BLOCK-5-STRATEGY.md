@@ -38,6 +38,8 @@ Implementation-Skizze und Smoke-Tests siehe BACKLOG #130.
 
 **Erwartete Größe:** L (4-5 Bautage).
 
+**Detail-Architektur:** Siehe [`docs/130-TELEGRAM-STRATEGY.md`](./130-TELEGRAM-STRATEGY.md) für sieben Architektur-Achsen (Library, Encryption, Webhook-Domain, Schema, Pairing-Flow, Polling-Switch, Cross-Channel-Threading) und 5-Phasen-Bau-Sequenz.
+
 ## Setzungen #112 Landing-Page
 
 | Aspekt | Setzung | Begründung |

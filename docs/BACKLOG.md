@@ -1521,6 +1521,8 @@ Wettbewerbs-Pivot aus Tag 25 Strategy-Session (`docs/BLOCK-5-STRATEGY.md`): Nano
 
 **Status-Notiz Tag 25:** Wettbewerbs-Pivot aus Block-5-Strategy-Session. Vorgezogen aus ROADMAP Phase 4.1 (Stufe 1 Owner-Only-Bridge). Strategy-Setzungen in `docs/BLOCK-5-STRATEGY.md`.
 
+**Architektur-Detail:** Siehe [`docs/130-TELEGRAM-STRATEGY.md`](./130-TELEGRAM-STRATEGY.md) (Tag-25-Nachmittag-Session, sieben Achsen + 5-Phasen-Sequenz).
+
 **Phase-B-Implikation:** Stufe 2 (External Senders mit Pre-Approval) und Stufe 3 (Voll-Multi-Twin-Router) bleiben Phase B. WhatsApp + Discord + Slack folgen in ROADMAP Phase 4.1-4.5 wie geplant.
 
 ## Pre-Launch-Phase A — Block 4: Self-Hosting-Polish
