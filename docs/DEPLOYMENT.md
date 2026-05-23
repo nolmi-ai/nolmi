@@ -1,8 +1,9 @@
 # DEPLOYMENT — Twin-Lab Self-Hosting
 
-> **Status:** §1–§7 voll-ausgebaut. Original-Skelett hatte §3
-> (First-Time), §5 (ENV), §6 (Updates — jetzt in §3 konsolidiert),
-> §7 (Smoke) TODO. §8 Backup + §9/§10 Cookbook folgen Tag 24.
+> **Status:** §1–§9 voll-ausgebaut (Tag 23 + Tag 24). Original-
+> Skelett hatte §3 (First-Time), §5 (ENV), §6 (Updates — jetzt
+> in §3 konsolidiert), §7 (Smoke) TODO; §8 Backup und §9 Plain-
+> Docker+Traefik-Cookbook sind Tag-24-Neuzugänge.
 
 Diese Anleitung beschreibt das Self-Hosting-Setup von Twin-Lab auf
 einem Linux-VPS mit Docker. Sie ergänzt das knappere Setup-README
@@ -305,7 +306,7 @@ Twin-Lab hat eine UI-Signup-Route. Nach Container-Up:
 > Für Production-Self-Hosting empfohlen:
 >
 > - **Traefik-BasicAuth-Middleware** vor der App (Standard-Pattern,
->   schnell konfiguriert — siehe §10 Cookbook)
+>   schnell konfiguriert — siehe §9 Cookbook)
 > - Oder DNS-Eintrag nur intern (VPN-only-Zugriff)
 >
 > Native Allowlist im Twin-Lab ist Backlog-Item für künftige Phase.
@@ -314,7 +315,7 @@ Twin-Lab hat eine UI-Signup-Route. Nach Container-Up:
 
 #### 3.2.1 Pre-Flight
 
-**DB-Backup** vor jedem Update (Volume-Backup-Pattern siehe §9):
+**DB-Backup** vor jedem Update (Volume-Backup-Pattern siehe §8):
 
 ```bash
 cd /docker/twin-lab-web
@@ -325,7 +326,7 @@ docker run --rm \
 ```
 
 Das Tarball landet in `/docker/twin-lab-web/` und sammelt sich
-über Zeit an. Rotation und alternative Pfade siehe §9.
+über Zeit an. Rotation und alternative Pfade siehe §8.
 
 **Stand-Check** — was kommt rein:
 
@@ -1158,6 +1159,588 @@ RUN apt-get update && \
 >   Encryption-Key-Mismatch)
 > - Memory-Retrieval gibt keine Hits trotz Konversationen in DB
 > - Migration-Lock bei interrupted Deploy
+
+---
+
+## 8. Backup + Recovery
+
+Twin-Lab-DB ist die einzige nicht-regenerierbare Quelle des
+Stacks (Conversations, Memory, Skills, Mandates, MCP-Server,
+Trust-Beziehungen, Facts). Ohne Backup-Disziplin: ein
+korrupter Container-Recreate oder eine fehlerhafte Migration
+kostet Daten.
+
+### 8.1 Was wird gebackuppt?
+
+**Pflicht:**
+
+- **SQLite-DB** im Docker-Volume `twin-lab-web-data` (`/data/twin.db`)
+  — Source-of-Truth für Twin-Profiles, Konversationen, Memory,
+  Skills, Mandates, MCP-Server, Trust-Beziehungen, Facts.
+- **`.env`** im Compose-Working-Directory — alle Secrets
+  (`TWIN_LAB_ENCRYPTION_KEY`, `TWIN_LAB_SESSION_SECRET`,
+  `BRIDGE_REGISTER_TOKEN`). Nicht im Repo, nicht regenerierbar.
+- **`docker-compose.override.yml`** — eigene Mount-Pfade,
+  domain-spezifisch konfiguriert. Nicht im Repo.
+
+**Optional:**
+
+- **`model-cache/`** Bind-Mount (~560 MB Embedding-Modell) —
+  regenerierbar via HuggingFace-Re-Download beim nächsten
+  Embed-Call (30–60s erstes Mal nach Container-Recreate, danach
+  bleibt das Modell im Cache bis zum nächsten Volume-Reset).
+  Backup spart Boot-Zeit, ist aber kein Datenverlust-Risiko.
+
+### 8.2 Backup-Strategie
+
+**Vor jedem Re-Deploy:** Pflicht-Backup. Der Volume-Dump-Befehl
+in §3.2.1 ist die Minimal-Variante. Nimm ihn jedes Mal.
+
+**Tägliche automatisierte Backups:** Empfohlen für Production.
+Cron-Pattern in §8.4.
+
+**Rotation-Konvention** (anpassbar):
+
+Default-Pattern (siehe §8.4): 7d rolling — täglich Backup, die
+letzten 7 Tage werden vorgehalten. Monthly-Backups (1× pro
+Monat, letzte 4 erhalten) sind als Pattern-Erweiterung möglich,
+Hinweis-Box am Ende von §8.4.
+
+Twin-Lab-DB ist typisch < 100 MB, Storage ist kein Constraint.
+Wer mehr will, baut auf das Pattern auf.
+
+**Lokation:** lokal `/docker/twin-lab-web/backups/`.
+
+> **⚠️ Lokale Backups sind tote Backups, wenn der VPS stirbt.**
+>
+> Für echtes Disaster-Recovery: Off-Site-Backup ist Pflicht
+> (rsync zu zweitem VPS, Backblaze B2, AWS S3, Borgbackup-Repo
+> bei Hetzner Storage Box, etc.). Off-Site-Strategien sind
+> eigene Disziplin — nicht in dieser Doku, aber ohne sie kein
+> Disaster-Recovery. Siehe §8.6.
+
+### 8.3 Manuelles Backup
+
+**Volume-Dump:**
+
+```bash
+cd /docker/twin-lab-web
+mkdir -p backups
+docker run --rm \
+  -v twin-lab-web-data:/source:ro \
+  -v $(pwd)/backups:/backup \
+  alpine tar czf /backup/twin-lab-db-$(date +%Y%m%d-%H%M).tar.gz -C /source .
+```
+
+**ENV + Override separat sichern** (kleine Files, einfach
+mitkopieren):
+
+```bash
+cp .env backups/.env-$(date +%Y%m%d-%H%M).bak
+cp docker-compose.override.yml backups/override-$(date +%Y%m%d-%H%M).yml.bak
+```
+
+**Verifikation:**
+
+```bash
+ls -lh backups/twin-lab-db-*.tar.gz | tail -3
+tar -tzf backups/twin-lab-db-<DATUM>.tar.gz | head -10
+# Erwartung: twin.db + twin.db-shm + twin.db-wal in der Listung
+```
+
+> **Konsistenz bei laufendem Container:** Backup während aktiver
+> Container ist im WAL-Mode meistens konsistent (SQLite Crash-
+> Safe Design). Bei kritischen Stunden mit hohem Schreib-Volumen
+> kann `docker compose stop runtime` vor Backup +
+> `docker compose start runtime` danach absolute Konsistenz
+> garantieren — für Standard-Self-Hosting-Lasten nicht nötig.
+
+### 8.4 Cron-basiertes automatisches Backup
+
+Script unter `/usr/local/bin/twin-lab-backup.sh`:
+
+```bash
+#!/usr/bin/env bash
+set -euo pipefail
+
+BACKUP_DIR=/docker/twin-lab-web/backups
+TIMESTAMP=$(date +%Y%m%d-%H%M)
+
+mkdir -p "$BACKUP_DIR"
+
+# Volume-Dump
+docker run --rm \
+  -v twin-lab-web-data:/source:ro \
+  -v "$BACKUP_DIR":/backup \
+  alpine tar czf "/backup/twin-lab-db-$TIMESTAMP.tar.gz" -C /source .
+
+# ENV + Override
+cp /docker/twin-lab-web/.env "$BACKUP_DIR/.env-$TIMESTAMP.bak"
+cp /docker/twin-lab-web/docker-compose.override.yml \
+   "$BACKUP_DIR/override-$TIMESTAMP.yml.bak"
+
+# Rotation: 7d rolling (Daily-Files älter als 7 Tage löschen)
+find "$BACKUP_DIR" -name "twin-lab-db-*.tar.gz" -mtime +7 -delete
+find "$BACKUP_DIR" -name ".env-*.bak" -mtime +7 -delete
+find "$BACKUP_DIR" -name "override-*.yml.bak" -mtime +7 -delete
+
+echo "[$TIMESTAMP] Backup OK"
+```
+
+Ausführbar machen und in cron einhängen:
+
+```bash
+chmod +x /usr/local/bin/twin-lab-backup.sh
+crontab -e
+# Eintrag:
+# 0 3 * * * /usr/local/bin/twin-lab-backup.sh >> /var/log/twin-lab-backup.log 2>&1
+```
+
+Erwartung: jeden Tag um 3:00 läuft das Backup, Log unter
+`/var/log/twin-lab-backup.log` zeigt die "Backup OK"-Lines.
+
+> **Log-Diagnostik:** Bei Fehler schlägt `set -e` das Script ab,
+> ohne "Backup OK" zu loggen. Wenn `tail /var/log/twin-lab-
+> backup.log` älter als 1 Tag zeigt: Cron oder Backup gebrochen
+> — `/usr/local/bin/twin-lab-backup.sh` manuell laufen lassen,
+> Stack-Trace lesen.
+
+> **Monats-Rotation** (zusätzlich zu 7d rolling): Pattern via
+> separates monthly Cron-File mit eigenem Backup-Pfad
+> (`/docker/twin-lab-web/backups/monthly/`) und `find -mtime +120
+> -delete`. Wer das mehrstufig will, baut auf das Pattern oben
+> auf.
+
+### 8.5 Restore
+
+> **⚠️ Restore überschreibt die aktuelle DB komplett.**
+>
+> Kein Merge, kein "nur fehlende Daten ergänzen". Die laufende
+> DB wird durch den Backup-Stand ersetzt. Vor Restore: aktuelle
+> DB noch einmal sichern (§8.3), damit der Pre-Restore-Stand
+> reproduzierbar ist falls der Restore-Stand auch kaputt ist.
+
+**Sequenz:**
+
+```bash
+cd /docker/twin-lab-web
+
+# 1. Aktuellen Stand vorsichtshalber sichern
+docker run --rm \
+  -v twin-lab-web-data:/source:ro \
+  -v $(pwd)/backups:/backup \
+  alpine tar czf /backup/pre-restore-$(date +%Y%m%d-%H%M).tar.gz -C /source .
+
+# 2. Container herunterfahren
+docker compose down
+# Named Volumes überleben `down` ohne `--volumes`-Flag — die DB
+# bleibt im Volume erhalten, wird gleich überschrieben.
+
+# 3. Volume aus Tarball wiederherstellen
+docker run --rm \
+  -v twin-lab-web-data:/target \
+  -v $(pwd)/backups:/backup:ro \
+  alpine sh -c "rm -rf /target/* && tar xzf /backup/twin-lab-db-<DATUM>.tar.gz -C /target"
+
+# 4. (Optional) ENV + Override zurückkopieren
+cp backups/.env-<DATUM>.bak .env
+cp backups/override-<DATUM>.yml.bak docker-compose.override.yml
+
+# 5. Container hochfahren
+docker compose up -d
+
+# 6. Smoke-Tests
+# Siehe §6 — Container-Status, Migration-Verifikation,
+# Browser-Smoke, Bridge-Test.
+```
+
+> **`<DATUM>` einsetzen:** Datum aus `ls -lh backups/`
+> ermitteln und im Tar-Befehl + ENV-Cp-Befehlen ersetzen. Format:
+> `YYYYMMDD-HHMM`, z.B. `20260524-0700`.
+>
+> **Schritt 4 ist optional.** Wenn `.env` und `override.yml`
+> unverändert bleiben sollen (nur DB-Restore): Schritt 4 skippen.
+> DB-Restore in Schritt 3 ist unabhängig.
+
+> **⚠️ Schritt 3 löscht den Volume-Inhalt vor Restore.**
+>
+> Sicherheits-Netz vor Ausführung:
+>
+> ```bash
+> docker volume inspect twin-lab-web-data
+> ```
+>
+> Erwartung: Volume existiert, Mountpoint stimmt
+> (`/var/lib/docker/volumes/twin-lab-web-data/_data`). Bei Typo
+> im Volume-Namen würde das `rm -rf /target/*` das falsche Volume
+> leeren oder ins Leere greifen.
+
+### 8.6 Disaster-Recovery (volle VPS-Wiederherstellung)
+
+Bei VPS-Verlust (Hardware-Crash, Provider-Ausfall, Account-
+Sperrung): nicht der "Stack down"-Fall, sondern "VPS weg, Off-
+Site-Backup ist alles was du noch hast".
+
+Checkliste:
+
+1. **Neue VPS provisionieren** (gleiche Specs siehe §2.1)
+2. **DNS-Records umlenken** (§2.2)
+3. **First-Time-Setup folgen** (§3.1 — Repo klonen, Override
+   anlegen, Images bauen)
+4. **`.env` aus Off-Site-Backup zurückkopieren** (siehe
+   WICHTIG-Box unten zu `TWIN_LAB_ENCRYPTION_KEY`)
+5. **DB-Restore aus Off-Site-Backup** (§8.5, Schritte 3 + 5)
+
+> **⚠️ KRITISCH — `TWIN_LAB_ENCRYPTION_KEY` aus Off-Site-Backup
+> wiederherstellen.**
+>
+> Der Key MUSS aus dem Off-Site-Backup zurückgespielt werden,
+> nicht neu generiert. Wenn ein neuer Key entsteht (z.B. via
+> `openssl rand -base64 32` wie beim First-Time-Setup): alle in
+> der DB verschlüsselten API-Keys sind unbrauchbar. Self-Hoster
+> muss dann jeden Twin neu konfigurieren (API-Keys über
+> Onboarding-Wizard oder Settings neu eintragen).
+
+> Ohne Off-Site-Backup ist Disaster-Recovery nicht möglich —
+> lokale Backups sind tote Backups wenn die VPS weg ist.
+
+---
+
+## 9. Plain-Docker+Traefik-Cookbook
+
+Linearer Walkthrough von leerer Ubuntu-VPS zu lauffähigem Twin-
+Lab-Stack in einer Sitzung. Audience: Tech-Affiner mit Docker-
+Compose-Grundkenntnis und 0 Twin-Lab-Vorwissen. Cross-Refs zu
+§3/§5/§6/§8 sind Diagnose-Anker — der Cookbook selbst läuft
+isoliert durch.
+
+### 9.1 Voraussetzungen
+
+- **VPS** mit Ubuntu 22.04+ (oder vergleichbare Debian-basierte
+  Distro), mindestens 2 vCPU + 4 GB RAM + 20 GB Disk. Anbieter:
+  Hetzner, Hostinger, Contabo, DigitalOcean — egal.
+- **Eigene Domain** mit DNS-Zugriff. Im Folgenden
+  `<deine-domain>` als Platzhalter.
+- **SSH-Root** oder sudo-fähiger User auf dem VPS.
+- **Lokaler Editor + Git** (für Twin-Lab-Repo-Klonung).
+- **Bridge-Zugang** — Pflicht für Twin-Creation. Closed-Beta-
+  Token bei Markus (markus@harway.de) anfragen ODER eigene
+  Bridge bauen (siehe Box in §9.4). Ohne eines von beiden
+  funktioniert die Twin-Anlage nicht.
+
+### 9.2 VPS vorbereiten
+
+**System-Updates + Docker:**
+
+```bash
+ssh root@<vps-ip>
+
+# Updates
+apt update && apt upgrade -y
+
+# Docker (offizielle Repo-Methode)
+curl -fsSL https://get.docker.com | sh
+systemctl enable --now docker
+
+# Verifikation
+docker --version
+docker compose version
+```
+
+**Firewall (UFW):**
+
+```bash
+ufw allow 22/tcp
+ufw allow 80/tcp
+ufw allow 443/tcp
+ufw enable
+```
+
+**DNS-Records anlegen** beim DNS-Provider:
+
+| Subdomain | Typ | Wert |
+|-----------|-----|------|
+| `app.<deine-domain>` | A | `<vps-ip>` |
+| `runtime.<deine-domain>` | A | `<vps-ip>` |
+| `bridge.<deine-domain>` | A | `<vps-ip>` (nur bei eigener Bridge) |
+
+Plus AAAA-Records für IPv6 falls verfügbar. Propagation kann
+~5 Minuten dauern — `dig +short app.<deine-domain>` zeigt nur
+die IP, sofort lesbar.
+
+### 9.3 Traefik-Stack aufsetzen
+
+> **Wer Traefik schon laufen hat**, kann §9.3 überspringen. Nur
+> kurz prüfen ob das `traefik-proxy`-Network existiert:
+>
+> ```bash
+> docker network ls | grep traefik-proxy
+> # Erwartung: traefik-proxy-Zeile vorhanden
+> ```
+>
+> Falls nicht: `docker network create traefik-proxy` reicht.
+
+**Traefik-Verzeichnis:**
+
+```bash
+mkdir -p /docker/traefik
+cd /docker/traefik
+mkdir -p letsencrypt
+touch letsencrypt/acme.json
+chmod 600 letsencrypt/acme.json
+```
+
+**`docker-compose.yml`** unter `/docker/traefik/`:
+
+```yaml
+services:
+  traefik:
+    image: traefik:v3.0
+    container_name: traefik
+    restart: unless-stopped
+    command:
+      - "--providers.docker=true"
+      - "--providers.docker.exposedbydefault=false"
+      - "--providers.docker.network=traefik-proxy"
+      - "--entrypoints.web.address=:80"
+      - "--entrypoints.web.http.redirections.entrypoint.to=websecure"
+      - "--entrypoints.web.http.redirections.entrypoint.scheme=https"
+      - "--entrypoints.websecure.address=:443"
+      - "--certificatesresolvers.le.acme.email=mail@<deine-domain>"
+      - "--certificatesresolvers.le.acme.storage=/letsencrypt/acme.json"
+      - "--certificatesresolvers.le.acme.httpchallenge.entrypoint=web"
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./letsencrypt:/letsencrypt
+    networks:
+      - traefik-proxy
+
+networks:
+  traefik-proxy:
+    name: traefik-proxy
+```
+
+`mail@<deine-domain>` ersetzen mit deiner echten Email — Let's
+Encrypt nutzt sie für Cert-Renewal-Notifications.
+
+**Network anlegen + Stack hochfahren:**
+
+```bash
+docker network create traefik-proxy
+docker compose up -d
+docker compose logs traefik --tail 30
+# Erwartung: "Configuration loaded" + "Server is listening"
+```
+
+> **Dashboard-Auth:** Das Traefik-Dashboard ist hier nicht
+> aktiviert (standardmäßig `--api.dashboard=false`). Wer es zum
+> Debugging aktiviert (z.B. via `--api.dashboard=true
+> --api.insecure=true`), MUSS BasicAuth-Middleware drauflegen —
+> siehe §9.6-Pattern.
+
+### 9.4 Twin-Lab-Stack from-scratch
+
+> **Bridge-Zugang ist Pflicht für Twin-Creation.**
+>
+> Onboarding-Wizard und Bootstrap-CLI registrieren beide den
+> Handle an der Bridge (`POST /twins/register`), bei Fehler
+> brechen sie ab. Zwei Pfade:
+>
+> - **Shared Production-Bridge**: Token bei Markus
+>   (markus@harway.de) anfragen
+> - **Eigene Bridge**: aufsetzen via
+>   [twin-lab-bridge](https://github.com/markusbaier/twin-lab-bridge),
+>   Token via `openssl rand -hex 32`
+>
+> Ohne eines von beiden kommst du hier nicht weiter.
+>
+> *Side-Note:* Nach erfolgter Twin-Anlage übersteht der Runtime
+> kurzfristige Bridge-Ausfälle (Reconnect-Loop ohne Crash) —
+> A2A-Resilience-Eigenschaft. Backlog #128 dokumentiert den
+> Bridge-optional-Mode für Single-User-Self-Hosting ohne A2A-
+> Bedarf.
+
+**Verzeichnis + Repo:**
+
+```bash
+mkdir -p /docker/twin-lab-web
+cd /docker/twin-lab-web
+git clone https://github.com/markusbaier/twin-lab.git repo
+```
+
+**`.env` aus Template + Secrets generieren:**
+
+```bash
+cp repo/.env.example .env
+
+ENCRYPTION_KEY=$(openssl rand -base64 32)
+SESSION_SECRET=$(openssl rand -base64 48)
+
+cat > .env <<EOF
+TWIN_LAB_ENCRYPTION_KEY=$ENCRYPTION_KEY
+TWIN_LAB_SESSION_SECRET=$SESSION_SECRET
+TWIN_LAB_DEFAULT_BRIDGE_URL=https://bridge.<deine-domain>
+BRIDGE_REGISTER_TOKEN=<bei-markus-anfragen-oder-eigene>
+SESSION_COOKIE_DOMAIN=.<deine-domain>
+SESSION_COOKIE_SECURE=true
+EOF
+
+echo "Generated .env. Now edit BRIDGE_REGISTER_TOKEN + Domain-Placeholders:"
+$EDITOR .env
+```
+
+Secrets werden automatisch generiert + eingefügt; Placeholders
+(`<deine-domain>`, `<bei-markus-anfragen-oder-eigene>`) musst
+du im Editor ersetzen. Details zu jeder Variable in §5.2.
+
+**Override + Symlink:**
+
+```bash
+cp repo/docker/twin-lab-web/docker-compose.override.yml.example \
+   docker-compose.override.yml
+$EDITOR docker-compose.override.yml
+
+ln -s repo/docker/twin-lab-web/docker-compose.yml docker-compose.yml
+
+docker compose config --quiet && echo "Compose OK"
+```
+
+Drei Pfade im Override müssen für deine VPS stimmen:
+
+- `/docker/twin-lab-web/repo/docs:/app/docs:ro` — Repo-Pfad
+- `/docker/twin-lab-web/repo/mcp-servers:/app/mcp-servers:ro` —
+  Repo-Pfad
+- `/docker/twin-lab-web/model-cache:/app/data/model-cache` —
+  Bind-Mount für Embedding-Modell
+
+Falls du das Repo nicht unter `/docker/twin-lab-web/repo/`
+geklont hast, alle drei Pfade auf deine Lokation anpassen.
+Hintergrund + warum jedes Mount existiert: §4.
+
+**Images bauen** — Web mit Build-ARG (Pflicht, siehe §3.3):
+
+```bash
+cd /docker/twin-lab-web/repo
+
+docker build -t twin-lab-runtime:latest -f apps/runtime/Dockerfile .
+
+docker build \
+  -t twin-lab-web:latest \
+  -f apps/web/Dockerfile \
+  --build-arg NEXT_PUBLIC_RUNTIME_URL=https://runtime.<deine-domain> \
+  --build-arg NEXT_PUBLIC_DEPLOYMENT_LABEL=production \
+  .
+```
+
+**Container hochfahren:**
+
+```bash
+cd /docker/twin-lab-web
+docker compose up -d
+docker compose ps
+# Erwartung: alle Services Up
+```
+
+**DB-Init verifizieren:**
+
+```bash
+docker compose logs runtime | grep -E "Migration|db:init"
+# Erwartete Lines siehe §3.1.4 / §6.1
+```
+
+**Erster User-Account:**
+
+Browser auf `https://app.<deine-domain>/` → `/login` →
+"Registrieren" → Onboarding-Wizard. Detail-Walkthrough siehe
+§3.1.5 (inklusive Sicherheits-Hinweis zur fehlenden Allowlist —
+unbedingt §9.6 vor Public-DNS lesen).
+
+### 9.5 Smoke-Verifikation
+
+Vier Stufen aus §6 durchlaufen:
+
+1. **Container-Status** (§6.1) — `docker compose ps` + Runtime-
+   Boot-Logs
+2. **Migration** (§6.2) — `schema_migrations`-Check via Node-
+   Script
+3. **Browser-Smoke** (§6.3) — DevTools-Network-Tab: alle Requests
+   gehen an `runtime.<deine-domain>`, nicht localhost
+4. **Bridge** (§6.4) — `[bridge:stream] verbunden` in Runtime-
+   Logs. Bei nur einem Twin im Setup: voller A2A-Test braucht
+   zweiten Twin, Boot-Log-Verifikation reicht für Initial-
+   Inbetriebnahme.
+
+> **Wenn "Failed to fetch" beim Login:** Build-ARG-Bug. Siehe
+> §7 erster Eintrag. Web-Image neu bauen.
+
+### 9.6 BasicAuth-Schutz vor Public-DNS
+
+Standard-Pattern für die Signup-Allowlist-Lücke (§3.1.5). Bevor
+die Domain extern bekannt ist:
+
+**apache2-utils installieren:**
+
+```bash
+apt install -y apache2-utils
+```
+
+**`htpasswd`-Datei erzeugen:**
+
+```bash
+htpasswd -Bc /docker/twin-lab-web/htpasswd <user-name>
+# Passwort wird abgefragt, dann gehasht in der Datei abgelegt
+```
+
+Die `htpasswd`-Datei liegt unter
+`/docker/twin-lab-web/htpasswd` (absoluter Pfad auf dem Host).
+Im Compose-Mount wird sie via relativem Pfad
+`./htpasswd:/htpasswd:ro` referenziert (relativ zum Compose-
+Working-Dir).
+
+**Compose-Labels** — in der existing `labels:`-Section von
+`twin-lab-web` in `docker-compose.override.yml` ergänzen (NICHT
+neue Section anlegen — Traefik merged sonst nicht sauber). Zwei
+neue Label-Zeilen + ein Mount:
+
+```yaml
+services:
+  web:
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.twin-web.rule=Host(`app.<deine-domain>`)"
+      # ... weitere existing Labels ...
++     - "traefik.http.middlewares.twin-auth.basicauth.usersfile=/htpasswd"
++     - "traefik.http.routers.twin-web.middlewares=twin-auth"
+    volumes:
++     - ./htpasswd:/htpasswd:ro
+```
+
+`docker compose up -d --force-recreate web` aktiviert die
+Middleware. Browser fragt jetzt erst BasicAuth ab, bevor die
+Signup-Route überhaupt erreichbar ist.
+
+### 9.7 Cron-Backup einrichten
+
+Optional, aber Production-Empfehlung: §8.4 Cron-Script anlegen +
+in crontab eintragen. Voller Walkthrough dort.
+
+### 9.8 Was kommt danach
+
+- **Re-Deploys** bei Code-Updates: §3.2 Standard-Update-Pfad
+  (`git pull` → rebuild mit Build-ARG → `--force-recreate`)
+- **Smoke alle 1-2 Wochen** als Health-Check, §6 abgehen
+- **Backlog für Updates:** GitHub-Watch auf
+  [markusbaier/twin-lab](https://github.com/markusbaier/twin-lab)
+  abonnieren (Watch → Custom → Releases or All Activity). Falls
+  noch keine Release-Tags existieren: `commits/main` als
+  Fallback verfolgen.
+
+Bei Problemen: §7 Troubleshooting hat die häufigsten Patterns.
+Bei Lücken in dieser Doku: Issue auf
+[github.com/markusbaier/twin-lab/issues](https://github.com/markusbaier/twin-lab/issues).
 
 ---
 

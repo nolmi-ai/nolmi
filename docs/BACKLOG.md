@@ -1463,6 +1463,25 @@ Diese werden in Phase A nicht mehr genutzt (Bridge-Config ist per-Twin in DB sei
 **Größe:** XS · **Priorität:** should · **Aus:** Tag 23 #109-Bau
 **Status:** offen, vor Self-Hosting-Launch
 
+### 128. Bridge-optional-Mode für Single-Twin-Self-Hosting
+
+**Befund Tag 24 (#109 §9 Code-Check):** Twin-Creation (Wizard + Bootstrap-CLI) verlangt heute zwingend eine erreichbare Bridge. Self-Hoster ohne Bridge-Zugang können keinen Twin anlegen.
+
+Runtime selbst ist Bridge-resilient (Reconnect-Loop ohne Crash für existing Twins), aber Anlege-Pfade sind hart:
+
+- `apps/runtime/src/server.ts:696` — Onboarding-Submit ruft `registerHandleOnBridge`, bei Fehler 502 (kein Twin in DB)
+- `apps/runtime/src/scripts/bootstrap-twin.ts:94,102` — wirft wenn `BRIDGE_URL`/`BRIDGE_<NAME>_TOKEN` leer
+
+**Use-Case:** Single-User-Self-Hosting ohne A2A-Bedarf. User will mit eigenem Twin chatten (Memory, Skills, Settings), aber braucht keine Twin-zu-Twin-Kommunikation.
+
+**Implementation-Ideen:**
+- Onboarding-Submit-Branch: wenn `TWIN_LAB_DEFAULT_BRIDGE_URL` leer → Skip Bridge-Register, Twin-Create mit `bridge_url: null`
+- A2A-Features (Send-To-Twin, Inbox) UI blendet aus wenn Twin ohne Bridge-Config
+- Nachträglich Bridge-Anbindung: Settings-Page bekommt "Bridge einhängen"-Section
+
+**Größe:** M-L · **Priorität:** nice · **Aus:** Tag 24 Cookbook-Walkthrough (#109 §9)
+**Status:** offen, Phase-B-Kandidat
+
 ## Pre-Launch-Phase A — Block 4: Self-Hosting-Polish
 
 Items aus dem Strategy-Pivot Tag 18. Block 4 macht das Repo für externe Tech-Affine deploybar. Spec: `docs/PRE-LAUNCH-A-STRATEGY.md`.

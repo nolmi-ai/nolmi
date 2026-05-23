@@ -1,6 +1,6 @@
 # twin-lab — Stand
 
-**Letztes Update:** 22. Mai 2026, Freitag Vormittag (Tag 23 — Production-Re-Deploy durch, #109-Bau startet)
+**Letztes Update:** 23. Mai 2026, Samstag Abend (Tag 24 — #109 abgeschlossen)
 
 ## Aktuell in Arbeit
 
@@ -28,6 +28,58 @@ A2A-Bridge**. Nicht Computer-Use.
 Inhalte (11 Items in drei Tranchen) unverändert, nur Build-Pfad
 leicht angepasst (#100/#101 vorgezogen, weil Vision-kritisch für
 die Differenzierungs-Story).
+
+## Tag 24 (23. Mai 2026, Samstag) — Pre-Launch-Phase A Block 4 (#109 Closure)
+
+**Stand Tag 24 Abend:** #109 DEPLOYMENT.md abgeschlossen — 540 → ~1700 Zeilen über Tag 23+24. Neun voll-ausgebaute Sektionen für Self-Hosting-Launch. Plus Backlog #128 Bridge-optional-Mode als Phase-B-Kandidat aus §9-Code-Check. origin/main = `8cdd7ea` (Stand vor Tag-24-Closure-Commit).
+
+### #109 Tag-24-Bau (~4h)
+
+**§8 Backup + Recovery** (eigenständige Sektion):
+
+- §8.1 Was wird gebackuppt (DB + ENV + Override; model-cache optional)
+- §8.2 Strategie (7d rolling + Monthly als Pattern-Erweiterung)
+- §8.3 Manuelles Backup mit WAL-Konsistenz-Hint
+- §8.4 Cron-Script `/usr/local/bin/twin-lab-backup.sh` mit `set -euo pipefail` + `find -mtime +7 -delete`
+- §8.5 Restore mit Pre-Restore-Backup-Schritt + rm-vor-tar WICHTIG-Box + `docker volume inspect`-Sicherheits-Netz
+- §8.6 Disaster-Recovery 5-Punkte-Checkliste + ENCRYPTION_KEY-eigene-WICHTIG-Box
+
+**§9 Plain-Docker+Traefik-Cookbook** (linearer from-scratch Walkthrough):
+
+- §9.1 Voraussetzungen mit Bridge-Pflicht-Anchoring
+- §9.2 VPS vorbereiten (Updates + Docker + UFW + DNS)
+- §9.3 Traefik-Stack mit Skip-Hint + Dashboard-Auth-Warning
+- §9.4 Twin-Lab-Stack mit Bridge-Pflicht-Box + Heredoc-`.env`-Pattern + Override-Pfade inline
+- §9.5 Smoke-Verifikation (Verweis §6)
+- §9.6 BasicAuth-Schutz vor Public-DNS mit Vorher/Nachher-Snippet
+- §9.7 Cron-Backup-Verweis §8.4
+- §9.8 Was kommt danach
+
+**§9-Code-Check entdeckte Single-Twin-Realität:**
+
+- Twin-Creation (Wizard + Bootstrap-CLI) verlangt erreichbare Bridge
+- Runtime selbst ist Bridge-resilient (Reconnect-Loop für existing Twins)
+- Single-Twin-Modus ohne Bridge nicht möglich → §9.4-Box auf Pflicht-Anchoring umgeschrieben
+
+### Backlog-Updates
+
+- #128 neu: Bridge-optional-Mode für Single-Twin-Self-Hosting (M-L/nice, Phase-B-Kandidat)
+
+### Was als nächstes ansteht
+
+**Block 4 Rest nach #109:**
+
+- #111 Repo-Hygiene (Apache 2.0 LICENSE + Demo-First-README + CONTRIBUTING + Issue-Templates)
+- #108 Beta-Deklaration (sequentiell mit #111 + #112)
+
+**Block 5:**
+
+- #112 Landing-Page
+- #113 Demo-Video
+- #114 Launch-Posts
+- #115 Launch-Timing
+
+Realistisch: #111 ist 1-2 Tage, #108 + #112 + #113 + #114 + #115 zusammen 3-5 Tage. Phase-A-Reserve ~5-7 Tage.
 
 ## Tag 23 (22. Mai 2026, Freitag) — Pre-Launch-Phase A Block 4 (Production-Re-Deploy + #109 Start)
 
@@ -920,6 +972,24 @@ github.com/markusbaier/twin-lab — `origin/main` auf `1e57aec`
 **Tag-12-Commits:**
 - `9b4d5c5` 3.3.A bis `a3c868b` 3.3.G3 (9 Code-Commits)
 - `189acbc` Doku Tag 12
+
+## Lessons Tag 24
+
+**1. Cookbook-Sektionen brauchen Use-Case-Code-Verifikation vor Bau.** §9 hatte initial "Single-Twin ohne Bridge möglich" als Annahme angesetzt — Code-Check (Onboarding-Submit + Bootstrap-CLI) entdeckte Realität: Bridge ist hart für Twin-Creation, Runtime ist resilient nur für existing Twins.
+
+Lehre: bei jedem Use-Case in Cookbook-Doku die Implementations-Realität verifizieren bevor wir es als "funktioniert" beschreiben. Befund-Pfad: `apps/runtime/src/server.ts:696` + `apps/runtime/src/scripts/bootstrap-twin.ts:94,102`.
+
+**2. Wortlaut-kritische Befunde direkt umsetzen, nicht paraphrasieren.** Drei Befunde aus dem ersten §9-Walkthrough (Heredoc-Pattern, Override-Pfade inline, Bridge-Realität) wurden nicht 1:1 umgesetzt und mussten in einer zweiten Runde nachgezogen werden. Claude Code paraphrasiert sonst, was bei copy-paste-fertigen Code-Blöcken nicht reicht.
+
+Lehre: bei Wortlaut-Vorgaben "RAW WORTLAUT" explicit machen oder Self-Hoster-Code-Blöcke 1:1 aus dem Brief übernehmen.
+
+**3. Numerierungs-Konvention früh klären.** Briefing-Fehler gestern: §9 statt §8 für Backup vorgeschlagen. Renumber Tag 24 hat Audit + Cross-Reference-Check gekostet (14 Stellen über die Datei verteilt).
+
+Lehre: bei Sektion-Hinzufügen prüfen ob Numerierung sequenziell bleibt. Bei Renumber-Operation: vorab `grep -nE "§N|§N+1"` über die Datei, dann jede Stelle einzeln durchgehen.
+
+**4. Walkthrough-Disziplin bei Long-Form-Sektionen.** §9 hatte ~289 Zeilen, Walkthrough fand 11 Befunde initial + 1 Code-Check-Realität. Pro ~25 Zeilen ein Befund — Pattern-Realität, kein Anomalie. Long-Form braucht mehr Walkthrough-Loops als kompakte Sektionen.
+
+Lehre: bei Sektionen >150 Zeilen 2-3 Walkthrough-Runden einplanen. Erste Runde inhaltliche Befunde, zweite Runde Wortlaut-Polish, dritte Runde Cross-Reference + Konsistenz.
 
 ## Lessons Tag 23 Vormittag
 
