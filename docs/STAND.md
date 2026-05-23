@@ -237,24 +237,60 @@ Nutzer-Frage Tag 25 Nachmittag: „OpenClaw und Hermes Agent erlauben Subscripti
 - Alle 4 Quellen-Links HTTP 200 verifiziert
 - Format konsistent zu existing Phase-B-Items (#116/#117) — Drifts (could → later, Phase B+ → Pre-Launch-Phase B) korrekt korrigiert
 
+### #130 Phase 2 — Telegraf-Service + Owner-Pairing-Flow (Commit `82bb36d`, ~4h)
+
+Zweite Code-Phase. Service-Layer komplett: PairingService + TelegramBotRegistry + Telegraf-Setup + Webhook-Endpoint + Boot-Hook + Manual-Smoke-Helper.
+
+**Bau-Output (1403 Insertions, 14 Files):**
+
+- `apps/runtime/src/telegram/pairing-service.ts` (Code-Generation + atomare Validation, 6-stellig, 10min TTL)
+- `apps/runtime/src/telegram/telegraf-setup.ts` (createTelegrafBot-Factory mit Three-State-Text-Handler)
+- `apps/runtime/src/telegram/bot-registry.ts` (Multi-Tenant-Lifecycle + eager-load + lazy + webhook-dispatch + shutdown)
+- `apps/runtime/src/telegram/webhook-routes.ts` (registerTelegramWebhookRoutes mit Handle-Lookup + Secret-Verify)
+- `apps/runtime/src/scripts/setup-telegram-manual-smoke.ts` (Helper für Pairing-Setup ohne Settings-UI)
+- `apps/runtime/src/scripts/test-telegram-phase2.ts` (8-Step-Smoke)
+- ENV-Schema: `parseBoolEnv` + `telegramUsePolling` + `runtimePublicUrl` + Cross-Validation
+- TelegramConfigsRepo erweitert um `findAll()` + `findByTwinHandle()` (mit JOIN auf twin_profiles)
+- Boot-Hook in `index.ts` zwischen Z.96-101 (eagerLoadAllBots) und nach Z.133 (start(logger))
+- DEPLOYMENT.md §10 (Production-Setup für Self-Hoster, drei Sub-Sektionen)
+- SETUP.md erweitert um „Telegram-Bot Local Development" (Polling-Default + ngrok-Alternative)
+
+**Semantik-Korrektur während Bau (eagerLoadPairedBots → eagerLoadAllBots):**
+
+Phase-2-Manual-Smoke-Helper-Schreiben deckte Chicken-and-Egg-Design-Gap auf: ursprüngliche Tag-25-Strategy-Setzung „Eager für gepaarte, Lazy für ungepaarte" verhinderte First-Pairing. Frisch konfigurierter Bot ohne `paired_owner_telegram_user_id` wurde vom Boot-Loader übersprungen → `/start <code>` kam nirgendwo an → konnte nie gepaart werden.
+
+Korrektur: alle Configs eager laden (Bot-Liveness am Token, nicht am Pairing). Pairing-State nur in Text-Handler relevant.
+
+**Three-State-Text-Handler** (folgt aus Semantik-Korrektur):
+
+- Unpaired Bot: `"This bot isn't paired yet. The owner should send /start <code>..."`
+- Paired Bot, wrong User: `"This bot is paired with a different Telegram account..."`
+- Paired Bot, Owner: `"(Phase 2 stub — LLM integration in Phase 3)"`
+
+**Smoke 8/8 grün** (Pairing-Lifecycle inkl. expired-Code-Filter + Wrong-Code + Resolve-By-User + Unpair + findByTwinHandle + BotRegistry-Eager-Load).
+
+**Manual-Smoke 5/5 grün** (via BotFather-Bot `@twin_lab_markus_test_bot`, Test-Pfade: Help-Reply / Wrong-Code / Unpaired-State / Valid-Pair / Owner-Text). Cleanup via Helper-Script-Flag `--cleanup`.
+
+**Phase-2.5-Scope-Anpassung:** ursprünglich war Phase 2.5 als Mini-Phase für Pairing-Code-Generation-API + setWebhook-Trigger geplant. Entscheidung Tag 25 Abend: Phase 2.5 entfällt, Scope zusammengelegt mit Phase 3. Phase 3 deckt damit: Message-Routing + LLM-Integration + Pairing-API + setWebhook-Lifecycle. Geschätzt 1.5-2 Tage (statt ursprünglich 1 Tag).
+
 ### Was als nächstes ansteht
 
-**Tag 26 — #130 Phase 2 (Telegraf-Service + Owner-Pairing-Flow, ~1.5 Bautage):**
+**Tag 26 — #130 Phase 3 (Message-Routing + LLM-Integration + Pairing-API + setWebhook, ~1.5-2 Bautage):**
 
-Phase-2-Briefing wird eigene Strategy-Klärungen brauchen:
-- TelegramBotRegistry-Pattern (ein Bot pro Twin, Multi-Tenant-Lifecycle)
-- Webhook-Endpoint-Integration in existing Fastify-Routen
-- `/start <code>`-Command-Handler mit Pairing-Validation
-- ENV-Switch `TELEGRAM_USE_POLLING` für Local-Dev
-- Smoke: lokaler Bot via BotFather erstellt, Pairing-Flow End-to-End
+Phase-3-Scope wurde Tag 25 Abend erweitert um Pairing-Code-Generation-API + setWebhook-Trigger (Phase 2.5 entfällt). Strategy-Klärungen vor Bau:
 
-**Tag 27 oder später — Phase 3 (Message-Routing + LLM-Integration, ~1 Bautag):**
+- Conversation-Resolution-Heuristik (last-active vs neue Conversation pro Chat)
+- Message-Router-Service-Layering (zwischen Telegraf-Handler und Twin-Service)
+- Pairing-Code-Generation-API als POST-Route — wo lebt sie (Auth-Required, Owner-only)?
+- setWebhook-Call-Trigger-Position (in PairingService oder direkt nach configsRepo.create() bei Re-Tokenization)
 
-Inbound-Message → Conversation-Resolution → Twin-Service → LLM-Response → Outbound-Send. Cross-Channel-Conversation-Threading (Channel-Marker pro Message).
+**Tag 27 — Production-Deploy Phase 1 + 2 + 3 (gemeinsam):**
 
-**Mögliche Zwischen-Tag — Wettbewerbs-Verifikation (1-2h):**
+Migration + Bot-Lifecycle + Message-Routing zusammen deployen. Telegram-Bot-Smoke auf Production-VPS mit echtem Webhook (statt Local-Polling).
 
-Tag-25-Vormittag-Wettbewerbs-Analyse hat unverifizierte Stars/Reichweite-Zahlen genutzt. Vor Block-5-Items #112-#114 (Landing-Vergleichs-Tabelle, Launch-Posts-Wettbewerbs-Positionierung) eine 1-2h-Verifikations-Session: sind die Projekte/Zahlen verlässlich? Falls nein, BLOCK-5-STRATEGY-Wettbewerbs-Tabelle anpassen. Falls ja, Setzungen bleiben. Optional, kein Blocker.
+**Wettbewerbs-Verifikation-Zwischen-Tag (optional, ~1-2h):**
+
+Tag-25-Vormittag-Wettbewerbs-Analyse hat unverifizierte Stars/Reichweite-Zahlen genutzt. Vor Block-5-Items #112-#114 (Landing-Vergleichs-Tabelle, Launch-Posts-Wettbewerbs-Positionierung) eine Verifikations-Session — sind die Projekte/Zahlen verlässlich? Falls nein, BLOCK-5-STRATEGY-Wettbewerbs-Tabelle anpassen. Falls ja, Setzungen bleiben. Nicht launch-blocking, aber sauberer vor Marketing-Items.
 
 ## Tag 24 (23. Mai 2026, Samstag) — Pre-Launch-Phase A Block 4 (#109 Closure)
 
@@ -1229,6 +1265,14 @@ Lehre: bei Production-Aktionen NIE auf Memory verlassen, IMMER auf VPS verifizie
 **7. Selbst-Korrektur bei Web-Recherche-Strategy-Entscheidungen ist Disziplin, nicht Schwäche.** Tag-25-Vormittag wurde Wettbewerbs-Analyse (NanoClaw/Hermes mit Stars-Zahlen) zu schnell von Such-Snippets in „etablierte Fakten" überführt. Tag-25-Nachmittag mit Nutzer-Punkt zu OAuth-Frage musste ich öffnen dass ich Vormittag zu schnell war. Pattern: bei mainstream-bekannten Projekten mit hohen Stars-Zahlen (>10k) ist ein Sanity-Check (Wikipedia-Existenz, Anthropic-interne Erwähnung, GitHub-Direkt-Repo-Verifikation) angebracht, nicht nur Such-Snippet-Akzeptanz. Plus: bei kritischen Strategy-Entscheidungen (Pivot, Launch-Verschiebung) explizit benennen welche Aussagen aus Such-Snippets stammen und welche aus offizieller Doku.
 
 Lehre: Web-Recherche-Quellen-Stratifizierung als Phase-1.1-Disziplin für Strategy-Sessions. Snippet-Befund ≠ verifizierte offizielle Quelle ≠ selbst-gefetchte Doku — drei Vertrauens-Stufen, bei Setzungs-Entscheidungen Stufe 2+ Pflicht.
+
+**8. Lifecycle-States in Strategy-Setzungen orthogonal halten — nicht implicit-mischen.** Tag-25-Strategy-Doc setzte für #130 Phase 2 „Hybrid: Eager-Load für gepaarte Twins, Lazy für ungepaarte". Klang sauber. Beim Phase-2-Manual-Smoke-Helper-Schreiben wurde Chicken-and-Egg sichtbar: Bot-Liveness war an Owner-Pairing-State gekoppelt, aber Owner-Pairing braucht aktiven Bot der `/start <code>` empfangen kann. Diese zwei Konzepte sind orthogonal — Bot-Token-Validity ist Infrastruktur, Owner-Pairing ist Authorization. Strategy-Setzung mischte sie implicit.
+
+Lehre: Strategy-Setzungen für Multi-State-Lifecycles (Bot-Lifecycle, Conversation-Lifecycle, etc.) immer durch eine „sind diese States orthogonal oder hängen sie kausal voneinander ab?"-Frage durchgehen. Falls orthogonal: gates separat halten, nie einen State als Lifecycle-Filter für einen anderen nutzen.
+
+**9. Manual-Smoke ist Pflicht-Verifikation, nicht „nice to have".** Phase-2-Smoke-Script war 8/8 grün vor Manual-Smoke. Die Three-State-Text-Handler-Logik war erst beim echten BotFather-Test live verifizierbar (Telegram-Reaction-Latenz, Bot-Antwort-Wording aus User-Perspektive, Telegraf-Update-Object-Shape). Smoke-Script kann nicht alle Real-World-Surfaces simulieren — gerade bei Integration mit external Services (Telegram-API, LLM-Provider, MCP-Servers).
+
+Lehre: bei Items mit externer Service-Integration immer Manual-Smoke vor Commit. Smoke-Script als notwendig-aber-nicht-hinreichend behandeln. Pattern: Smoke-Script grün → Manual-Smoke vorbereiten → Manual-Smoke grün → Commit. Reihenfolge sehr wichtig, nicht „Commit, dann Manual-Smoke später".
 
 ## Lessons Tag 24
 
