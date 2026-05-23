@@ -1525,6 +1525,78 @@ Wettbewerbs-Pivot aus Tag 25 Strategy-Session (`docs/BLOCK-5-STRATEGY.md`): Nano
 
 **Phase-B-Implikation:** Stufe 2 (External Senders mit Pre-Approval) und Stufe 3 (Voll-Multi-Twin-Router) bleiben Phase B. WhatsApp + Discord + Slack folgen in ROADMAP Phase 4.1-4.5 wie geplant.
 
+### 131. OpenAI Subscription-OAuth (Beta, Codex-Pattern)
+
+OpenAI Codex hat OAuth-Flow für Subscription-Auth (ChatGPT Plus/Pro/Team), offiziell für eigene Codex-Produkte. OpenClaw und vergleichbare Tools nutzen den Flow auch für eigene Apps — laut OpenClaw-Doku „explicitly supported", laut OpenAI-Codex-Doku nicht explizit für externe Apps adressiert.
+
+**Status:** Backlog, nicht in Phase A. Bau in Phase B nach Launch + Feedback.
+
+**Implementations-Skizze (für späteren Bau):**
+
+OAuth-Flow analog OpenClaw (PKCE):
+
+1. PKCE-Verifier/Challenge + Random-State generieren
+2. Browser auf `https://auth.openai.com/oauth/authorize?...` öffnen
+3. Callback auf `http://127.0.0.1:1455/auth/callback` (oder Twin-Lab-eigener Port)
+4. Token-Exchange auf `https://auth.openai.com/oauth/token`
+5. AccountId aus Access-Token extrahieren
+6. `{access, refresh, expires, accountId}` per Twin verschlüsselt speichern (Reuse Existing EncryptionService aus `apps/runtime/src/crypto-utils.ts`)
+7. Refresh-Loop mit File-Lock
+8. Settings-UI: User wählt Auth-Mode pro Twin (API-Key vs Subscription-OAuth)
+
+**Risiken (im UI explizit machen):**
+
+- OpenAI hat den Pattern nicht prominent für externe Apps dokumentiert
+- Pattern kann jederzeit von OpenAI gekappt werden (Präzedenz: Anthropic Claude Pro/Max Anfang April 2026 — initial gekappt, später laut OpenClaw-Doku „wieder erlaubt", Status fluide)
+- ChatGPT-ToS lässt programmatische Nutzung in Grauzone
+- Twin-Lab-Default bleibt API-Key (BYOK), OAuth ist explizites Opt-in mit ToS-Disclaimer
+
+**Quellen:**
+
+- OpenAI offizielle Codex-Auth-Doku: https://developers.openai.com/codex/auth
+- OpenClaw OAuth-Doku (PKCE-Flow-Details): https://docs.openclaw.ai/concepts/oauth
+
+**Größe:** L (4-5 Bautage — PKCE-Client + Refresh-Service + Settings-UI + ToS-Disclaimer-Flow + Smoke). **Priorität:** later. **Spur:** Pre-Launch-Phase B.
+
+**Status-Notiz Tag 25:** Recherche-Session zu Subscription-Auth-Patterns. OpenClaw nutzt diesen Pattern produktiv, dokumentiert PKCE-Flow präzise. Implementations-Pfad konkret skizziert, aber Pattern hat ToS-Grauzone-Charakter. Bau nicht launch-kritisch, Wartemodus bis Phase B + Nutzer-Demand.
+
+### 132. Anthropic Subscription-Auth (Claude-CLI-Reuse-Pattern)
+
+Anthropic hat keine offizielle 3rd-Party-OAuth-Surface für Claude Pro/Max-Subscription-Nutzung in externen Apps. Stattdessen: Claude-CLI-Reuse-Pattern — wenn auf dem Host-System ein gültiger Claude-CLI-Login existiert, kann eine externe App diese Credentials wiederverwenden.
+
+Anthropic-Stance war fluide: Anfang April 2026 wurde Claude Pro/Max via 3rd-Party-Agent-Frameworks gekappt, OpenClaw-Doku sagt Stand Tag 25: „Anthropic staff told us this usage is allowed again". Status nicht offiziell publiziert, basiert auf direkter Kommunikation.
+
+**Status:** Backlog, nicht in Phase A. Bau in Phase B nach Launch + Feedback, abhängig von Anthropic-Stance-Stabilität.
+
+**Implementations-Skizze (für späteren Bau):**
+
+Claude-CLI-Reuse-Pattern (analog OpenClaw):
+
+1. Detect Claude-CLI-Auth auf Host-System (`~/.claude/auth.json` oder OS-Keychain)
+2. Twin-Lab liest Credentials, mirrored mit Provenance (nicht eigene Refresh-Rotation, sondern externes CLI bleibt Source-of-Truth)
+3. API-Calls gegen Anthropic-API mit Subscription-Auth-Token statt API-Key
+4. Settings-UI: pro Twin „Use Claude-CLI Subscription" als Opt-in mit Detection-Status
+
+**Alternativ-Pattern (falls Phase-1.1-Recherche zeigt es ist mit Setup-Token möglich):**
+
+- Anthropic bietet „Setup-Token" für Claude-Code als offizieller Token-Auth-Pfad
+- Wenn dieser Token in externer App genutzt werden kann, wäre das offiziellerer Pfad als CLI-Reuse
+
+**Risiken:**
+
+- Anthropic-Stance fluide (initial gekappt, laut OpenClaw-Doku „wieder erlaubt") — Status kann sich jederzeit ändern
+- Pattern hängt von lokal verfügbarem Claude-CLI-Login ab — Self-Hoster ohne Claude-CLI können's nicht nutzen
+- Wenn Anthropic offiziell wieder kappt, Twin-Lab-Setting muss als „deprecated" gemarkt werden
+
+**Quellen:**
+
+- Anthropic Claude-Code-Plan-Doku: https://support.claude.com/en/articles/11145838-using-claude-code-with-your-pro-or-max-plan
+- OpenClaw OAuth-Doku (Anthropic-Sektion): https://docs.openclaw.ai/concepts/oauth#anthropic-legacy-token-compatibility
+
+**Größe:** M (2-3 Bautage — CLI-Detection + Credential-Mirror + Settings-UI + Status-Monitoring). **Priorität:** later. **Spur:** Pre-Launch-Phase B.
+
+**Status-Notiz Tag 25:** Pattern-Symmetrie zu #131. Anthropic-Stance weniger klar als OpenAI-Codex-OAuth-Stance — laut OpenClaw-Doku wieder erlaubt, aber nicht öffentlich publiziert. Bau erst sinnvoll wenn Anthropic offizielle Position publiziert.
+
 ## Pre-Launch-Phase A — Block 4: Self-Hosting-Polish
 
 Items aus dem Strategy-Pivot Tag 18. Block 4 macht das Repo für externe Tech-Affine deploybar. Spec: `docs/PRE-LAUNCH-A-STRATEGY.md`.
