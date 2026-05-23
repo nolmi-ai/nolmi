@@ -108,22 +108,73 @@ Bei 17 Tagen verfügbar (Tag 25 → Tag 42) und Block 5 ~5-7 Tage kalkuliert ble
 
 ### Production-Deploy-Stand
 
-VPS auf `121950a` (Tag 23). Drift seit dann: Tag 24 (`cf2ccf6`) + #111 Schritt 6 (`eef78f3`) + #111 Schritt 7 (`217d299`) + Closure-Commit. Vier Commits, alle reine Doku, kein Runtime-Effekt.
+Production-VPS synchron mit origin/main `bb50b14` nach Tag-25-Nachmittag-Re-Deploy (Schritt 9, Pfad A). Container-Restart nicht nötig wegen reiner Doku-Drift. Container-Uptime 18-19h durchgehend. Details siehe Sub-Sektion „Production-Re-Deploy Schritt 9" unten.
 
-**Re-Deploy als Schritt 9 morgen Vormittag** als separate Aktivität mit eigener Smoke-Verifikation. Pattern aus Tag-23-Vormittag (compose-pull + force-recreate).
+### Block-5-Strategy-Session (Commit `4cf9457`, ~1.5h)
+
+Tag-25-Nachmittag — vor Block-5-Bau eine Strategy-Session, weil BLOCK-4-STRATEGY nur Block 4 abgedeckt hatte. Pattern wie Tag-20-Session (BLOCK-4-STRATEGY-Anlage). Vier Items: #112 Landing / #113 Demo / #114 Launch-Posts / #115 Launch-Timing.
+
+**Wichtigster Befund — Wettbewerbs-Discovery via Web-Search:**
+
+| Projekt | Stars | Released | Differenzierung gegen Twin-Lab |
+|---|---|---|---|
+| NanoClaw | 29.2k | Jan 2026 | Single-Agent, 13 Messaging-Plattformen, Container-Isolation |
+| Hermes Agent (Nous) | 100k+ | Feb 2026 | Single-Agent, persistent memory + auto-skills |
+| OpenClaw | 100k+ | Nov 2025 | Monolithic Agent-Platform |
+
+Beide Konkurrenten haben **Multi-Channel-Messaging als Default**. Twin-Lab heute Web-UI only — wirkt rückständig auch wenn Multi-Twin ein anderes Konzept ist.
+
+**Pivot-Entscheidung:** Telegram-Adapter Stufe 1 (Owner-Only-Bridge) auf Phase A vorgezogen aus ROADMAP Phase 4.1. Neues Backlog-Item **#130 Telegram-Adapter** mit Größe L (4-5 Bautage). Block-5-Bau-Reihenfolge wird `#130 → #113 → #112 → #114 → #115` weil Hero-GIF in #113 Telegram zeigen muss.
+
+**Konsequenz: Launch-Window verschiebt von KW 25-27 (Ende Juni / Anfang Juli) auf KW 29-30 (15.-22. Juli 2026)** — ~2 Wochen Verzögerung gegenüber Original. Bei 17 Tagen Reserve (Tag 25 → Tag 42) bleiben ~5-6 Tage Buffer nach Block-5-Bau.
+
+**Bau-Output:**
+
+- `docs/BLOCK-5-STRATEGY.md` neu mit Setzungen für 5 Items + Bau-Reihenfolge + Tag-Schätzungen + Anmerkungen
+- `docs/BACKLOG.md` mit #130 als Phase-A-Item
+- `docs/PRE-LAUNCH-A-STRATEGY.md` mit Hybrid-Header-Edit (Audience + weiches Ziel preserved) + Block-5-Sektion erweitert + Pflicht-Aufwand-Summe updated (42→56 Tage verfügbar, 43-55 Total)
+- `docs/ROADMAP.md` mit Phase-4.1-Status-Notiz (Stufe 1 vorgezogen, Vollausbau bleibt Phase B)
+
+### Production-Re-Deploy Schritt 9 (kein Commit, ~30 Min)
+
+VPS-Stand vor Re-Deploy war `574f3b2` (Tag 22) — **10 Commits Drift**, nicht 5 wie ursprünglich angenommen. Phase-1.1-Diagnose von Claude Code hatte korrekt `121950a` als VPS-Annahme — Realität war tiefer, aber:
+
+**Code-vs-Doku-Diff `git diff --stat HEAD..origin/main -- apps/ packages/ examples/skills/` = LEER.** Trotz 10 Commits Drift = reine Doku.
+
+**Pfad gewählt: A — nur `git pull`, kein Container-Restart.** Begründung: zero Code-Drift, kein Bind-Mount-Trigger, package.json-Metadaten werden Runtime nicht gelesen, Restart-Risk > Restart-Nutzen.
+
+**Sequenz auf VPS:**
+
+1. `git fetch origin` + `git log HEAD..origin/main --oneline` (Drift sichtbar gemacht)
+2. `git diff --stat HEAD..origin/main -- apps/ packages/ examples/skills/` (Code-Drift-Verifikation = leer)
+3. `git pull origin main` (Fast-forward 574f3b2 → 4cf9457, 16 Files)
+4. Container-Sanity: `docker compose ps` (alle Up, 18-19h Uptime), Logs grep error/warn (leer), `runtime/health` 200, `app/` 307 → `/login?next=%2F` (Next.js Auth-Middleware-Default)
+
+**Resultat: Production-VPS synchron mit origin/main `4cf9457` ohne Container-Restart, ohne Downtime.** Sauberer Doku-Only-Drift-Re-Deploy.
+
+### Doku-Only-Drift-Pattern Mini-Commit (Commit `bb50b14`, ~10 Min)
+
+Re-Deploy hat aufgedeckt: existing DEPLOYMENT.md §3.2 Pattern erwartet immer Rebuild — deckt nicht den Doku-Only-Drift-Fall ab.
+
+**Edit:** Blockquote-Box am Anfang von §3.2.2 mit Erkennungs-Regel (Doku-Pfade-Liste) + Verifikations-Snippet (`git diff --stat HEAD..origin/main -- apps/ packages/`).
+
+Schärft Pattern für künftige Self-Hoster und vermeidet unnötige Rebuilds bei Doku-Updates.
 
 ### Was als nächstes ansteht
 
-**Schritt 9 — Production-Re-Deploy** (morgen Vormittag):
-- compose-pull aus origin/main
-- `--force-recreate web + runtime`
-- Smoke: Login + /chat + /settings + Onboarding-Wizard durchklicken
+**Tag 26 (morgen) Vormittag — #130 Telegram-Adapter Strategy-Session:**
 
-**Block 5 Start — Strategy-Session vorab nötig.** BLOCK-4-STRATEGY enthält keine Setzungen für Block 5. Vier Items: #112 Landing / #113 Demo / #114 Launch-Posts / #115 Launch-Timing. Strategy-Fragen werden vermutlich sein:
-- #112 Landing-Page-Plattform (separates Repo, GitHub-Pages, Astro-Subdomain?)
-- #113 Demo-Format (Video vs schriftlicher Walkthrough vs Hybrid mit 60-s-GIF)
-- #114 Submission-Reihenfolge + Subreddit-Strategie
-- #115 Wochentag + Uhrzeit + Multi-Channel-Koordination
+Architektur-Fragen vor Bau-Briefing klären:
+- Bot-API-Library: `telegraf` vs `node-telegram-bot-api`
+- Token-Encryption-Pattern (Pattern aus existing ENCRYPTION_KEY-Setup übernehmen?)
+- Owner-Pairing-Flow: `/start`-Command-Implementation, Telegram-User-ID-Matching gegen Owner-Email-Hash
+- Webhook-Domain-Setup auf VPS: neue Traefik-Subdomain `telegram.twin.harwayexperience.com` oder Path-Routing unter `runtime.twin.harwayexperience.com/webhooks/telegram/:twin-handle`?
+- Migration-Pattern: encrypted Bot-Token-Storage in `telegram_chats`-Tabelle
+- Test-Strategy: lokaler Telegram-Bot vs Production-Bot für Smoke-Tests
+
+Erwartete Größe Strategy-Session: 1.5-2h.
+
+**Tag 26 Nachmittag — #130 Bau-Briefing + Phase-1.1-Diagnose**, ggf. Bau-Start.
 
 ## Tag 24 (23. Mai 2026, Samstag) — Pre-Launch-Phase A Block 4 (#109 Closure)
 
@@ -1082,6 +1133,18 @@ Lehre: bei Items mit >1 Sub-Schritt jeden Sub-Schritt mit eigenem Commit + Walkt
 **3. Public-Surface-Files brauchen Cross-Platform-Check.** Quick-Start `open http://localhost:3000` ist macOS-spezifisch — Linux nutzt `xdg-open`, Windows `start`. Zu Kommentar machen verhindert Shell-Errors für 70%+ der Audience. Pattern: bei Bash-Snippets in Public-Doku immer „ist das command auf macOS + Linux + Windows verfügbar?"-Check.
 
 Lehre: jeder Befehl in Public-Bash-Snippets muss entweder cross-platform sein oder als Kommentar/Hinweis stehen, nicht als ausführbare Zeile.
+
+**4. Wettbewerbs-Discovery via Web-Search vor Block-5-Setzungen war entscheidend.** Hätte ich (Claude in der Strategy-Session) NanoClaw + Hermes Agent ohne Web-Search aus Training-Data gekannt, wären die Setzungen suboptimal gewesen. Web-Search vor Strategy-Sessions sollte Default-Pattern werden für jeden Markt-bezogenen Entscheidungs-Punkt — Self-Hosting-Markt entwickelt sich zu schnell für Training-Data-Verlass.
+
+Lehre: bei künftigen Strategy-Sessions die „kennen-wir-Wettbewerb"-Frage explizit machen und beantworten via Search, bevor Setzungen festgemacht werden.
+
+**5. Doku-Only-Drift ist ein realer Re-Deploy-Fall, der DEPLOYMENT-Patterns brauchen.** Existing §3.2 war für Code-Updates dimensioniert, Doku-Only-Updates haben anderen Risk-Profile (Restart-Nutzen ≈ 0). Erkennungs-Regel via `git diff --stat -- apps/ packages/` ist verlässlich.
+
+Lehre: Re-Deploy-Patterns sollten Code-Drift vs Doku-Drift explizit unterscheiden. Self-Hoster-Audience braucht beide Pfade dokumentiert.
+
+**6. Phase-1.1-Diagnose-Catch bei Re-Deploy: VPS-Stand wurde unterschätzt.** Claude Code-Diagnose ging von `121950a` als VPS-Stand aus (basierend auf Memory), Realität war `574f3b2` (3 Commits älter). Das hätte bei nicht-Doku-Drift problematisch werden können — eine zusätzliche Migration-Verifikation wäre vergessen worden.
+
+Lehre: bei Production-Aktionen NIE auf Memory verlassen, IMMER auf VPS verifizieren („`git log -1` zeigt $X" als ersten Phase-1.1-Schritt). Production-Realität trumpft jede Erwartung.
 
 ## Lessons Tag 24
 
