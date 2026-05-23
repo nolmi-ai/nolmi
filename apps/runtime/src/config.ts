@@ -46,9 +46,40 @@ export interface RuntimeConfig {
   examplesDir: string;
   port: number;
   host: string;
+  /**
+   * #130 Phase 2 — Telegram-Adapter-Modus. Default `false` = Webhook (Production).
+   * Local-Dev setzt `true` für Long-Polling, damit ohne öffentliche URL gearbeitet
+   * werden kann. Wenn `false`, muss `runtimePublicUrl` gesetzt sein, damit der
+   * `setWebhook`-Call beim Pairing eine erreichbare URL hat.
+   */
+  telegramUsePolling: boolean;
+  /**
+   * #130 Phase 2 — Public-URL der Runtime (z.B. `https://runtime.twin.harway
+   * experience.com` oder ngrok-URL für Local-Dev). Wird beim Telegram-`setWebhook`
+   * mit `/webhooks/telegram/<handle>` konkateniert. Optional wenn
+   * `telegramUsePolling=true`, Pflicht sonst (Cross-Validation in loadRuntimeConfig).
+   */
+  runtimePublicUrl: string | null;
 }
 
 export function loadRuntimeConfig(): RuntimeConfig {
+  const telegramUsePolling = parseBoolEnv(
+    process.env.TELEGRAM_USE_POLLING,
+    false,
+    "TELEGRAM_USE_POLLING",
+  );
+  const runtimePublicUrl = process.env.RUNTIME_PUBLIC_URL?.trim() || null;
+
+  // Cross-Validation: Webhook-Mode braucht Public-URL für setWebhook beim Pairing.
+  // Im Polling-Mode irrelevant, Bot pollt selbst Telegram.
+  if (!telegramUsePolling && !runtimePublicUrl) {
+    throw new Error(
+      "RUNTIME_PUBLIC_URL ist Pflicht, wenn TELEGRAM_USE_POLLING=false. " +
+        "Entweder Polling aktivieren (Local-Dev) oder eine öffentliche Runtime-URL " +
+        "setzen (z.B. https://runtime.example.com oder eine ngrok-URL).",
+    );
+  }
+
   return {
     dbPath: resolveWorkspacePath(process.env.TWIN_DATABASE_PATH, "data/twin.db"),
     personaPath: resolveWorkspacePath(process.env.PERSONA_PATH, "docs/persona.md"),
@@ -61,6 +92,8 @@ export function loadRuntimeConfig(): RuntimeConfig {
     examplesDir: resolve(WORKSPACE_ROOT, "examples/skills"),
     port: parsePort(process.env.RUNTIME_PORT, 4000),
     host: process.env.RUNTIME_HOST?.trim() || "127.0.0.1",
+    telegramUsePolling,
+    runtimePublicUrl,
   };
 }
 
@@ -203,6 +236,26 @@ function parseIntEnv(raw: string | undefined, fallback: number, name: string): n
     );
   }
   return parsed;
+}
+
+/**
+ * Parser für Boolean-ENVs (#130 Phase 2 — `TELEGRAM_USE_POLLING` etc.).
+ * Akzeptiert "true"/"1" und "false"/"0", case-insensitive. Wirft bei
+ * anderen Werten — sonst läuft Production mit stillem Default und niemand
+ * merkt es. Gleiche Fehlerstrenge wie parseIntEnv.
+ */
+function parseBoolEnv(
+  raw: string | undefined,
+  fallback: boolean,
+  name: string,
+): boolean {
+  const trimmed = raw?.trim().toLowerCase();
+  if (!trimmed) return fallback;
+  if (trimmed === "true" || trimmed === "1") return true;
+  if (trimmed === "false" || trimmed === "0") return false;
+  throw new Error(
+    `${name} muss "true"/"1" oder "false"/"0" sein (got: "${raw}")`,
+  );
 }
 
 /**

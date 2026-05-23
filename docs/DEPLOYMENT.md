@@ -1755,6 +1755,52 @@ Bei Lücken in dieser Doku: Issue auf
 
 ---
 
+## 10. Telegram-Bot Integration (#130, optional)
+
+Twin-Lab can connect each twin to a Telegram bot, allowing owners to interact with their twin via Telegram in addition to the web UI. Setup is optional — skip this section if you don't need Telegram integration.
+
+### 10.1 Production setup (webhook-based)
+
+For production deployments, webhook mode is required (polling is for local development).
+
+**1. Create a bot via @BotFather on Telegram:**
+
+```
+/newbot
+[follow prompts to set name + username]
+```
+
+BotFather returns a bot token of the form `<bot_id>:<token>`.
+
+**2. Configure the runtime:**
+
+In your `.env` file (or compose-overlay):
+
+```
+TELEGRAM_USE_POLLING=false
+RUNTIME_PUBLIC_URL=https://runtime.your-domain.com
+```
+
+`RUNTIME_PUBLIC_URL` must be HTTPS — Telegram rejects HTTP webhooks. This is the public URL Telegram will call to deliver bot updates.
+
+**3. Pair the bot to a twin:**
+
+(Settings UI for bot configuration arrives in Phase 4 of #130. Until then, manual setup via runtime CLI — see future Phase-2.5/Phase-3 docs.)
+
+### 10.2 Reverse proxy considerations
+
+Telegram webhook calls hit `POST /webhooks/telegram/:twin_handle` on the runtime container. If your Traefik (or other reverse-proxy) routes all `runtime.*` paths to the runtime container, no extra configuration is needed.
+
+If you have custom path-filtering, ensure `/webhooks/telegram/*` is forwarded — both with the `X-Telegram-Bot-Api-Secret-Token` header preserved (used for webhook authentication).
+
+### 10.3 Troubleshooting
+
+- **Webhook not receiving updates:** Verify `RUNTIME_PUBLIC_URL` is HTTPS and resolvable from public internet. Check Telegram webhook info via `https://api.telegram.org/bot<token>/getWebhookInfo`.
+- **401 on webhook calls:** Bot's stored `webhook_secret` doesn't match what Telegram sends. Re-pair the bot (regenerates secret).
+- **Polling vs webhook mismatch:** If you switch from polling to webhook (or vice versa), restart the runtime — registry-state caches the mode at boot.
+
+---
+
 ## Mitwirkende
 
 Diese Anleitung ist iterativ. Wenn dir beim Self-Hosting was fehlt

@@ -65,6 +65,7 @@
     "nanoid": "^5.0.0",
     "ollama-ai-provider-v2": "^1.2.0",
     "sqlite-vec": "^0.1.9",
+    "telegraf": "^4.16.3",
     "yaml": "^2.5.0",
     "zod": "^3.23.0"
   },

@@ -135,6 +135,34 @@ export class TelegramConfigsRepo {
   }
 
   /**
+   * Alle Configs (gepaarte und ungepaarte). Wird beim Boot von der
+   * TelegramBotRegistry für den Eager-Load aufgerufen — gepaarte Configs
+   * werden danach in den Bot-Map registriert.
+   */
+  findAll(): TelegramConfigRow[] {
+    return this.db
+      .prepare(`SELECT * FROM telegram_configs ORDER BY created_at ASC`)
+      .all() as TelegramConfigRow[];
+  }
+
+  /**
+   * Webhook-Routing via Twin-Handle aus URL-Pfad
+   * (`/webhooks/telegram/:twin_handle`). JOIN auf twin_profiles ist
+   * billig — beide Tabellen klein, beide handle-Spalten indiziert
+   * (twin_profiles UNIQUE, telegram_configs FK auf twin_id).
+   */
+  findByTwinHandle(handle: string): TelegramConfigRow | null {
+    const row = this.db
+      .prepare(
+        `SELECT tc.* FROM telegram_configs tc
+           JOIN twin_profiles tp ON tp.twin_id = tc.twin_id
+          WHERE tp.handle = ?`,
+      )
+      .get(handle) as TelegramConfigRow | undefined;
+    return row ?? null;
+  }
+
+  /**
    * Replace bot token. Also rotates webhook_secret (defense-in-depth).
    *
    * Pairing-State und User-ID bleiben unverändert: Re-Token bei gleichem

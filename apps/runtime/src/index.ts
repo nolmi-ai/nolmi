@@ -14,6 +14,9 @@ import { FactsRepo } from "./facts/repo.js";
 import { EmbeddingsRepo } from "./episodic/embeddings-repo.js";
 import { TwinMaturityService } from "./twin-maturity/twin-maturity-service.js";
 import { EncryptionKeyMissingError, loadMasterKey } from "./crypto-utils.js";
+import { TelegramConfigsRepo } from "./telegram/configs-repo.js";
+import { PairingService } from "./telegram/pairing-service.js";
+import { TelegramBotRegistry } from "./telegram/bot-registry.js";
 
 // ─── BOOTSTRAP ───────────────────────────────────────────────────────────────
 //
@@ -80,6 +83,18 @@ async function main() {
     embeddingsRepo: embeddingsRepoForMaturity,
     factsRepo,
   });
+
+  // #130 Phase 2 — Telegram-Adapter-Services. Configs-Repo + PairingService
+  // sind dünn (kein Network), Eager-Load passiert weiter unten nach
+  // app.listen() ist nicht nötig — die Repos werden auch vom Server gebraucht.
+  const telegramConfigsRepo = new TelegramConfigsRepo(repo.db, masterKey);
+  const pairingService = new PairingService(telegramConfigsRepo);
+  const telegramBotRegistry = new TelegramBotRegistry(
+    telegramConfigsRepo,
+    pairingService,
+    config.telegramUsePolling,
+  );
+
   const app = await createServer({
     audit: repo.audit,
     registry,
@@ -93,7 +108,15 @@ async function main() {
     factsRepo,
     twinMaturityService,
     examplesDir: config.examplesDir,
+    telegramConfigsRepo,
+    telegramBotRegistry,
   });
+
+  // #130 Phase 2 — Eager-Load aller konfigurierten Bots (gepaart wie
+  // ungepaart). Synchron, populiert nur die Bot-Map; Polling-Launch passiert
+  // nach app.listen analog zu startBridges. Pairing-State gated nur das
+  // Text-Antwortverhalten, nicht die Bot-Liveness.
+  telegramBotRegistry.eagerLoadAllBots();
 
   // 5. Registry mit allen aktiven Twins füllen — entschlüsselt API-Keys.
   // Decrypt-Fehler (falscher Master-Key, korrupter Eintrag) werfen mit klarer
@@ -132,12 +155,18 @@ async function main() {
   // 8. Bridges starten (nach Server-Listen, damit Logger via app.log läuft)
   await registry.startBridges(app.log);
 
+  // #130 Phase 2 — Polling-Launches starten (Webhook-Mode: No-Op). Logger
+  // verfügbar erst nach app.listen; analog startBridges-Reihenfolge.
+  telegramBotRegistry.start(app.log);
+
   // 9. Graceful Shutdown
   const shutdown = async (signal: string) => {
     console.log(`[shutdown] ${signal} empfangen — fahre runter`);
-    // Reihenfolge: erst Bridge-Streams (kein neuer Inbound), dann MCP-Subprocesses
-    // disposen (kein neuer Outbound an Tools), dann Fastify schließen.
+    // Reihenfolge: erst Bridge-Streams + Telegram-Bots (kein neuer Inbound),
+    // dann MCP-Subprocesses disposen (kein neuer Outbound an Tools), dann
+    // Fastify schließen.
     await registry.shutdown();
+    telegramBotRegistry.shutdown();
     await registry.disposeAll();
     try {
       await app.close();

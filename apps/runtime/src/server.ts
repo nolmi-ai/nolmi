@@ -73,6 +73,9 @@ import {
   type MergedMessage,
 } from "./audit/conversation-merge.js";
 import { BridgeClient } from "./bridge/client.js";
+import type { TelegramConfigsRepo } from "./telegram/configs-repo.js";
+import type { TelegramBotRegistry } from "./telegram/bot-registry.js";
+import { registerTelegramWebhookRoutes } from "./telegram/webhook-routes.js";
 
 // ─── HTTP SERVER ─────────────────────────────────────────────────────────────
 //
@@ -126,6 +129,10 @@ export interface ServerDeps {
    * Quelle: `RuntimeConfig.examplesDir`.
    */
   examplesDir: string;
+  /** #130 Phase 2 — geteilte Instanz mit Boot + BotRegistry. */
+  telegramConfigsRepo: TelegramConfigsRepo;
+  /** #130 Phase 2 — geteilte Instanz mit Boot für Webhook-Dispatch. */
+  telegramBotRegistry: TelegramBotRegistry;
 }
 
 export async function createServer(deps: ServerDeps) {
@@ -232,6 +239,15 @@ export async function createServer(deps: ServerDeps) {
 
   // ─── Onboarding ────────────────────────────────────────────────────────────
   registerOnboardingRoutes(app, deps);
+
+  // ─── Telegram-Webhook (#130 Phase 2) ──────────────────────────────────────
+  // Bewusst nicht hinter requireOwner: das Webhook-Secret IST die Auth.
+  // Telegram POSTet pro Update, der Header wird gegen telegram_configs.
+  // webhook_secret verifiziert.
+  registerTelegramWebhookRoutes(app, {
+    configsRepo: deps.telegramConfigsRepo,
+    botRegistry: deps.telegramBotRegistry,
+  });
 
   // ─── Profil ────────────────────────────────────────────────────────────────
   app.get<{ Params: { handle: string } }>(

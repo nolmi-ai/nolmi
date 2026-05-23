@@ -79,6 +79,55 @@ ANTHROPIC_MODEL=claude-opus-4-7
 Runtime neu starten. Kein Code-Change nötig — die Provider-Abstraktion macht
 das.
 
+## Telegram-Bot Local Development (#130, optional)
+
+Wenn du den Telegram-Adapter lokal testen willst:
+
+1. **Bot anlegen** über [@BotFather](https://t.me/botfather) auf Telegram
+   (`/newbot`, Anweisungen folgen, Token kopieren).
+2. **Bot-Token im Twin konfigurieren** über die Settings-UI (Phase 2.5 —
+   sobald die UI-Route da ist; bis dahin via direktem DB-Insert in
+   `telegram_configs`).
+3. **Modus wählen.** Default ist Webhook (Production-Pattern), Local-Dev
+   nutzt entweder Long-Polling (kein öffentliches Ingress nötig) oder
+   Webhook + ngrok.
+
+**Variante A — Long-Polling (einfach):**
+
+In `.env`:
+```
+TELEGRAM_USE_POLLING=true
+```
+
+Runtime startet beim Boot einen Long-Poll-Loop pro gepaartem Bot — keine
+öffentliche URL nötig. Skaliert nicht für viele Bots, perfekt für Dev.
+
+**Variante B — Webhook + ngrok (Production-Pattern lokal):**
+
+In `.env`:
+```
+TELEGRAM_USE_POLLING=false
+RUNTIME_PUBLIC_URL=https://<dein-ngrok-host>.ngrok.io
+```
+
+In einem zweiten Terminal:
+```bash
+ngrok http 4000
+```
+
+Beim Pairing-Abschluss registriert die Runtime das Webhook bei Telegram
+via `setWebhook`. Telegram POSTet Updates an
+`<RUNTIME_PUBLIC_URL>/webhooks/telegram/<twin-handle>` — Runtime
+verifiziert den Secret-Header und dispatcht ans Telegraf-Bot-Object.
+
+**Pairing-Flow:**
+
+1. In Settings-UI Code generieren (Phase 2.5; bis dahin via
+   `PairingService.generatePairingCode(twin_id)`).
+2. Auf Telegram an deinen Bot senden: `/start <code>`.
+3. Bot antwortet mit `✓ Paired successfully…` — danach ist der Telegram-
+   User als Owner gespeichert.
+
 ## Was Phase 1 nicht ist
 
 Wenn dir während des Bauens auffällt „aber das müsste auch noch...", schau
