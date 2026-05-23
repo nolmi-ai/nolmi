@@ -338,6 +338,17 @@ git log --oneline HEAD..origin/main
 
 #### 3.2.2 Pull + Rebuild
 
+> **Doku-Only-Drift-Fall:** Wenn `git log HEAD..origin/main` nur
+> Doku-Commits zeigt (`docs/`, `README.md`, `LICENSE`, `.github/`,
+> `package.json`-Metadaten ohne dependencies-Touch) und keine Änderungen
+> in `apps/`, `packages/`, `examples/skills/`, oder
+> `apps/runtime/migrations/`: reicht `git pull` allein. Kein Rebuild,
+> kein `--force-recreate`, kein Smoke nötig. Container-Restart-Risiko
+> übersteigt den Nutzen bei null Behavior-Change.
+>
+> Verifikation: `git diff --stat <alter-hash>..origin/main -- apps/ packages/`
+> ist leer.
+
 ```bash
 cd /docker/twin-lab-web/repo
 git pull origin main
