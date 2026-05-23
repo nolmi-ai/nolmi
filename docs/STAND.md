@@ -1,6 +1,6 @@
 # twin-lab — Stand
 
-**Letztes Update:** 23. Mai 2026, Samstag Abend (Tag 24 — #109 abgeschlossen)
+**Letztes Update:** 24. Mai 2026, Sonntag Abend (Tag 25 — #111 abgeschlossen, Block 4 = 3/3 ✅)
 
 ## Aktuell in Arbeit
 
@@ -28,6 +28,102 @@ A2A-Bridge**. Nicht Computer-Use.
 Inhalte (11 Items in drei Tranchen) unverändert, nur Build-Pfad
 leicht angepasst (#100/#101 vorgezogen, weil Vision-kritisch für
 die Differenzierungs-Story).
+
+## Tag 25 (24. Mai 2026, Sonntag) — Pre-Launch-Phase A Block 4 (#111 Closure + Block-4-Bilanz)
+
+**Stand Tag 25 Abend:** #111 Repo-Hygiene abgeschlossen über zwei Sub-Schritte (Schritt 6 LICENSE + Boilerplate, Schritt 7 README Demo-First). Block 4 = 3/3 ✅. Drei Commits gepusht plus Backlog-Item #129 emergent. origin/main = `217d299` (Stand vor Tag-25-Closure-Commit).
+
+### #111 Schritt 6 (LICENSE + Boilerplate, Commit `eef78f3`, ~1.5h)
+
+Sieben Files neu angelegt plus package.json-Patch:
+
+- **LICENSE** — Apache 2.0 Volltext + Copyright-Notice "Copyright 2026 Markus Baier" (Leerzeile statt `---`-Trenner, kanonisches Pattern)
+- **CONTRIBUTING.md** — EN, Pair-Programming-Pattern transparent gemacht ("External contributors don't need to follow this verbatim"), CoC-Absatz mit Email-Kontakt
+- **SECURITY.md** — 5-Zeilen-Variante, Email-Disclosure ohne SLA-Versprechen (Sole-Maintainer)
+- **`.github/ISSUE_TEMPLATE/`** — bug_report.yml + feature_request.yml + question.yml (GitHub-Forms-Format) + config.yml (blank disabled + 2 Contact-Links)
+- **package.json** — `license: Apache-2.0` + `author: { name, email }` Object-Form + `repository` + `bugs` + `homepage`
+
+Email konsistent: `markus.baier@harwayexperience.com` (Forward auf harway.de für GitHub-Verknüpfung).
+
+**Phase-1.1-Diagnose-Findings:**
+
+- `.github/`-Verzeichnis existierte gar nicht — Tabula rasa
+- package.json `license` + `author` waren beide unset
+- Kein `pnpm test`-Script vorhanden (keine zentrale Test-Infrastruktur) — CONTRIBUTING Code-Style-Bullet ehrlich ohne pnpm-test-Verweis
+
+### #111 Schritt 7 (README Demo-First, Commit `217d299`, ~2h)
+
+README komplett überschrieben (85 Z deutsch → 126 Z EN). 11 Sektionen Demo-First-Struktur:
+
+1. **Hero** — Tagline "Self-hosted AI twins that remember, have personality, and talk to each other." + 3 Badges (License Apache 2.0, Status pre-launch, Built with Claude in Anthropic-Brand-Color `#D97757`)
+2. **Hero-Visual** — Placeholder-Blockquote mit `[Demo video coming soon]`-Marker (HTML-Comment plus sichtbares Element, verhindert Render-Lücke vor #113-GIF)
+3. **What is Twin-Lab** — 3-Satz-Differenzierung gegen ChatGPT/Claude.ai
+4. **Why Twin-Lab** — 4 Bullets mit Emojis (Memory + Persona + A2A + Research-Beta)
+5. **Quick Start** — pnpm-native-Pfad (clone → install → .env-Edit Anthropic-Switch → db:init → dev) + Requirements-Zeile + DEPLOYMENT.md-Verweis für Production
+6. **Screenshots** — 2×2-Tabelle mit 4 PNG-Stubs in `docs/screenshots/` (echte PNGs folgen)
+7. **Status & Beta** — Works today / Beta / Coming in Phase B (#108-Footprint organisch)
+8. **Tech Stack** — mit Major-Versionen (Next.js 15 + React 19, Fastify 5, better-sqlite3 11, AI SDK v6, @ai-sdk/anthropic 3)
+9. **Roadmap** — 2-Zeilen-Hint + ROADMAP.md-Verweis
+10. **Contributing** — Verweis CONTRIBUTING.md + BACKLOG.md
+11. **License** — Verweis LICENSE
+
+**Phase-1.1-Diagnose-Findings (Schritt 7):**
+
+- Existing README war Markus-Internal-Framing ("Tag 1 Closed Twin"), komplett überschrieben
+- **Provider-Discrepanz entdeckt:** `.env.example` Default ist `ACTIVE_PROVIDER=openai`, aber Tech-Stack-Story sagt Claude Opus 4.7. Quick-Start im README zeigt 2-Zeilen-.env-Edit für Anthropic-Switch. Backlog-Item #129 angelegt: `.env.example`-Default auf Anthropic switchen (XS/should, vor Self-Hosting-Launch zu lösen)
+- **docker-compose ist Production-only:** Network `traefik-proxy` external + image-tag-only + hardcoded Markus-Domain. Local-Dev geht via pnpm, nicht via `docker compose up`. Quick-Start-Pfad entsprechend angepasst (pnpm-native).
+
+### Walkthrough-Befunde Schritt 7 (eingearbeitet)
+
+- Beta-Sektion „Conversational skill install" reformuliert (Jargon raus → „telling your twin 'install the calendar integration'")
+- Tech-Stack-Schluss-Zeile entfernt (Requirements-Duplikat zu Quick-Start)
+- Quick-Start `open http://localhost:3000` zu Kommentar gemacht (Cross-Platform: Linux/Windows haben kein `open`)
+- Screenshots-Tabelle GitHub-Render verifiziert (2×2 sauber, Captions korrekt)
+
+### Backlog-Updates
+
+- **#111 ✅** Closure-Notiz (Schritt 6 + 7)
+- **#109 + #110** ✅-Header retrofit + Closure-Notizen (Block-4-Closure-Standard etabliert)
+- **#129 neu:** `.env.example`-Default auf Anthropic switchen (XS/should, Phase-A)
+
+### Block-4-Closure-Bilanz
+
+| Item | Status | Commits |
+|---|---|---|
+| #110 Onboarding-Wizard | ✅ Tag 22 | 13 Commits (Phase 1 + 2A + 2B) |
+| #109 DEPLOYMENT.md | ✅ Tag 24 | Tag 23+24 (~1700 Zeilen) |
+| #111 Repo-Hygiene | ✅ Tag 25 | `eef78f3` + `217d299` + Closure |
+
+**Block 4 = 3/3 ✅.** Pre-Launch-Phase A jetzt bei **Block 5 (Launch-Vorbereitung)**.
+
+### Pre-Launch-Phase A Bilanz nach Tag 25
+
+- Block 1: ✅ 11/11 (Tag 18, deployed)
+- Block 2: ✅ 2/2 (Tag 19, deployed)
+- Block 3: ◐ 1/2 (#107 ✅, #108 organisch in #111 README §7 eingearbeitet — kein eigenes Closure nötig)
+- Block 4: ✅ 3/3 (Tag 22 + 24 + 25)
+- Block 5: 0/4 offen
+
+Bei 17 Tagen verfügbar (Tag 25 → Tag 42) und Block 5 ~5-7 Tage kalkuliert bleiben ~10-12 Tage Reserve.
+
+### Production-Deploy-Stand
+
+VPS auf `121950a` (Tag 23). Drift seit dann: Tag 24 (`cf2ccf6`) + #111 Schritt 6 (`eef78f3`) + #111 Schritt 7 (`217d299`) + Closure-Commit. Vier Commits, alle reine Doku, kein Runtime-Effekt.
+
+**Re-Deploy als Schritt 9 morgen Vormittag** als separate Aktivität mit eigener Smoke-Verifikation. Pattern aus Tag-23-Vormittag (compose-pull + force-recreate).
+
+### Was als nächstes ansteht
+
+**Schritt 9 — Production-Re-Deploy** (morgen Vormittag):
+- compose-pull aus origin/main
+- `--force-recreate web + runtime`
+- Smoke: Login + /chat + /settings + Onboarding-Wizard durchklicken
+
+**Block 5 Start — Strategy-Session vorab nötig.** BLOCK-4-STRATEGY enthält keine Setzungen für Block 5. Vier Items: #112 Landing / #113 Demo / #114 Launch-Posts / #115 Launch-Timing. Strategy-Fragen werden vermutlich sein:
+- #112 Landing-Page-Plattform (separates Repo, GitHub-Pages, Astro-Subdomain?)
+- #113 Demo-Format (Video vs schriftlicher Walkthrough vs Hybrid mit 60-s-GIF)
+- #114 Submission-Reihenfolge + Subreddit-Strategie
+- #115 Wochentag + Uhrzeit + Multi-Channel-Koordination
 
 ## Tag 24 (23. Mai 2026, Samstag) — Pre-Launch-Phase A Block 4 (#109 Closure)
 
@@ -972,6 +1068,20 @@ github.com/markusbaier/twin-lab — `origin/main` auf `1e57aec`
 **Tag-12-Commits:**
 - `9b4d5c5` 3.3.A bis `a3c868b` 3.3.G3 (9 Code-Commits)
 - `189acbc` Doku Tag 12
+
+## Lessons Tag 25
+
+**1. Phase-1.1-Diagnose hat sich zum achten Mal bewährt.** Bei Schritt 7 deckte Diagnose drei Briefing-Annahmen auf die nicht stimmten: existing-README war komplett zu überschreiben (kein Inhalt zu retten), `docker-compose.yml` ist Production-only (Quick-Start-Pfad muss `pnpm` sein, kein `docker compose up`), und `.env.example`-Default ist `openai` nicht `anthropic` (Provider-Discrepanz zur Tech-Stack-Story). Ohne Diagnose hätten wir einen Quick-Start gehabt der entweder Docker-Network-Error wirft oder API-Calls an OpenAI schickt — beides peinlich auf Public-Launch.
+
+Lehre: bei Repo-Hygiene-/Public-Surface-Items immer Phase-1.1 mit explizitem „verify quick-start commands work"-Schritt. Existing-Realität triumphiert über Briefing-Annahmen.
+
+**2. Sub-Schritte committen, nicht Block-Closure als ein Riesen-Commit.** Schritt 6 (`eef78f3`) und Schritt 7 (`217d299`) als separate Commits sind viel besser reviewbar als ein „#111 abgeschlossen"-Sammel-Commit gewesen wäre. Plus: jeder Sub-Schritt hat seinen eigenen Walkthrough-Loop mit Befunden — saubere Trennung von Decisions pro Sub-Schritt.
+
+Lehre: bei Items mit >1 Sub-Schritt jeden Sub-Schritt mit eigenem Commit + Walkthrough + Closure-Mini-Loop. Pattern hält auch für künftige multi-step Items (z.B. Block 5 wird mehrere Items mit Sub-Schritten haben).
+
+**3. Public-Surface-Files brauchen Cross-Platform-Check.** Quick-Start `open http://localhost:3000` ist macOS-spezifisch — Linux nutzt `xdg-open`, Windows `start`. Zu Kommentar machen verhindert Shell-Errors für 70%+ der Audience. Pattern: bei Bash-Snippets in Public-Doku immer „ist das command auf macOS + Linux + Windows verfügbar?"-Check.
+
+Lehre: jeder Befehl in Public-Bash-Snippets muss entweder cross-platform sein oder als Kommentar/Hinweis stehen, nicht als ausführbare Zeile.
 
 ## Lessons Tag 24
 

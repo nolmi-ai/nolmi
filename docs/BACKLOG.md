@@ -1493,7 +1493,7 @@ README-Quick-Start + Tech-Stack-Story sagen Claude Opus 4.7 als Primary-LLM. `.e
 
 Items aus dem Strategy-Pivot Tag 18. Block 4 macht das Repo für externe Tech-Affine deploybar. Spec: `docs/PRE-LAUNCH-A-STRATEGY.md`.
 
-### 109. DEPLOYMENT.md production-fest mit Self-Hoster-Smoke-Test
+### 109. DEPLOYMENT.md production-fest mit Self-Hoster-Smoke-Test ✅
 `docs/DEPLOYMENT.md` (#102, Tag 16) existiert, ist aber Markus' eigener Setup-Wegweiser. Für Public-Launch braucht es:
 
 1. **Externer Self-Hoster führt die Doku durch** (Florian punktuell oder externer Tech-Affine), Reibungspunkte werden dokumentiert und gefixt
@@ -1508,7 +1508,9 @@ Items aus dem Strategy-Pivot Tag 18. Block 4 macht das Repo für externe Tech-Af
 - Scope: Skelett-Vervollständigen + Cookbook für Plain Docker + Traefik (heutiges Pattern auf srv1046432)
 - Position in Block-4-Reihenfolge: 2 (nach #110)
 
-### 110. Onboarding-Wizard für ersten Login + Twin-Anlage
+**Abgeschlossen Tag 23+24** — siehe STAND.md für Bau-Details (Closure-Commit `cf2ccf6`). DEPLOYMENT.md von 540 → 1757 Zeilen, neun Sektionen voll-ausgebaut (§3 Deploy-Sequenz, §5 ENV-Reference, §6 Smoke, §7 Troubleshooting, §8 Backup+Recovery, §9 Plain-Docker+Traefik-Cookbook). Closure-Marker nachgetragen Tag 25 mit Block-4-Closure.
+
+### 110. Onboarding-Wizard für ersten Login + Twin-Anlage ✅
 Aktueller Erst-Login-Flow setzt voraus, dass User direkt zur Settings/Twin-Anlage navigiert und manuell Persona-YAML, MCP-Server etc. provisioniert. Für Self-Hosting-Launch zu hoch.
 
 Onboarding-Wizard nach Erst-Login:
@@ -1532,7 +1534,9 @@ Wizard ist überspringbar für Tech-Affine („Skip to dashboard"), aber Default
 - Mehrfach-Twins: Wiederholbar via Button neben Manual
 - Position in Block-4-Reihenfolge: 1 (zuerst)
 
-### 111. Public-Repo-Hygiene (README, LICENSE, CONTRIBUTING)
+**Abgeschlossen Tag 22** — siehe STAND.md für Bau-Details (Closure-Commit `b578ad1`). Onboarding-Wizard über drei Phasen gebaut (Phase 1 + 2A + 2B), 13 Commits. Wizard von 8 → 4 Steps, Settings-Page UI-editierbar für Persona/LLM/Presets. Closure-Marker nachgetragen Tag 25 mit Block-4-Closure.
+
+### 111. Public-Repo-Hygiene (README, LICENSE, CONTRIBUTING) ✅
 Repo wird als Open-Source-Self-Hosting-Distro öffentlich. Hygiene-Items:
 
 - **README.md** Hauptpitch: was ist Twin-Lab, Quick-Start, Differenzierungs-Story (Memory + Persona + A2A), Screenshots oder Mini-Demo, Verweis auf DEPLOYMENT.md für Self-Hosting
@@ -1548,6 +1552,15 @@ Repo wird als Open-Source-Self-Hosting-Distro öffentlich. Hygiene-Items:
 - README-Struktur: Demo-First mit Hero-GIF und Story-driven Pitch
 - CONTRIBUTING.md + Issue-Templates: Standard-Pattern
 - Position in Block-4-Reihenfolge: 3 (zuletzt)
+
+**Abgeschlossen 24. Mai 2026 (Tag 25)** — zwei Sub-Schritte:
+
+- **Schritt 6** (Commit `eef78f3`): Apache 2.0 LICENSE (Copyright 2026 Markus Baier), CONTRIBUTING.md, SECURITY.md (5-Zeilen-Variante), Issue-Templates (bug + feature + question + config.yml), package.json updated (license + author + repository + bugs + homepage)
+- **Schritt 7** (Commit `217d299`): README komplett überschrieben (85 Z deutsch → 126 Z EN), Demo-First-Struktur 11 Sektionen, 3 Badges (License + pre-launch + Built with Claude), Hero-GIF-Placeholder mit #113-Marker, Quick-Start pnpm-native + DEPLOYMENT.md-Verweis, Screenshots-Stubs in `docs/screenshots/`, Status-&-Beta mit #108-Footprint
+- **Emergent:** Backlog #129 (`.env.example`-Default auf Anthropic switchen) als Phase-1.1-Catch
+- **Production-Re-Deploy** als separater Schritt 9 morgen Vormittag
+
+Block 4 = 3/3 ✅.
 
 ## Pre-Launch-Phase A — Block 5: Launch-Vorbereitung
 
