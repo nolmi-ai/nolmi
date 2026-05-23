@@ -1,85 +1,123 @@
-# twin-lab
+# Twin-Lab
 
-Lab-Setup für die Entwicklung eines persönlichen AI-Twins mit A2A-Kommunikation.
-Phase 1: Closed Twin — rein privat, mit Persona, Mandates und Audit-Log.
+**Self-hosted AI twins that remember, have personality, and talk to each other.**
 
-## Was das hier ist
+![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)
+![Status](https://img.shields.io/badge/status-pre--launch-orange.svg)
+![Built with Claude](https://img.shields.io/badge/built_with-Claude-D97757.svg)
 
-Ein Monorepo mit zwei Apps:
+---
 
-- **`apps/runtime`** — Node/TypeScript-Backend, das den Twin als langlaufenden Prozess hält.
-  Spricht mit Modell-Providern, prüft Mandates, schreibt Audit-Log, hält Memory.
-- **`apps/web`** — Next.js-UI für Chat, Stream, Settings.
-  Spricht mit dem Runtime via HTTP/SSE.
+<!-- HERO-GIF PLACEHOLDER -->
+<!-- Hero-GIF: 60s end-to-end walkthrough — coming in #113 -->
+<!-- Will live at: docs/hero.gif (or similar) -->
 
-Geteilte Schemas und Types liegen in `packages/shared`.
+> **📹 Demo video coming soon** — a 60-second walkthrough showing twin creation, conversation, memory recall, and twin-to-twin handoff.
 
-Persistenz ist **SQLite** (lokale Datei, kein externer Service nötig).
-Realtime über **Server-Sent Events** vom Runtime an die UI.
+---
 
-## Architektur in einem Bild
+## What is Twin-Lab
 
-```
-┌─────────────────┐         ┌──────────────────┐
-│   apps/web      │  HTTP   │  apps/runtime    │
-│   Next.js UI    │ ◄────► │  Node Process    │
-│   Port 3000     │   SSE   │  Port 4000       │
-└─────────────────┘         └────────┬─────────┘
-                                     │
-                            ┌────────▼─────────┐
-                            │   SQLite File    │
-                            │   data/twin.db   │
-                            └──────────────────┘
-```
+Twin-Lab is a self-hosted platform for personal AI twins. Unlike chat assistants
+that forget you between sessions, each twin carries persistent memory, an
+individual persona, and the ability to communicate with other twins on the same
+instance — yours or someone else's.
 
-Der Runtime lebt unabhängig von der UI. Wenn die UI zu ist, läuft der Twin
-trotzdem weiter (Heartbeat, geplante Aktionen, Audit-Log).
+You run it on your own server. Your conversations, your API keys, your data
+stay with you.
 
-## Quickstart
+## Why Twin-Lab
+
+- **🧠 Memory depth** — twins remember conversations across sessions, surface
+  relevant context automatically, and reach a "maturity" the longer they're used
+- **🎭 Persona** — each twin has a defined identity, communication style, and
+  topical interests editable via UI or YAML
+- **🔗 Twin-to-twin communication** — twins can talk to each other directly via
+  the built-in A2A-Bridge, with owner approval for each interaction
+- **🔎 Research workflow (beta)** — twins can autonomously search and synthesize
+  web content via MCP-connected browser tools
+
+## Quick Start
 
 ```bash
-# Voraussetzungen: Node 20+, pnpm 9+
+# Clone
+git clone https://github.com/markusbaier/twin-lab.git
+cd twin-lab
+
+# Install dependencies
 pnpm install
 
-# .env aus Template kopieren und API-Key eintragen
+# Configure
 cp .env.example .env
-# OPENAI_API_KEY=sk-...
+# Edit .env:
+#   ACTIVE_PROVIDER=anthropic
+#   ANTHROPIC_API_KEY=sk-ant-...
 
-# Datenbank initialisieren (führt SQL-Migrations aus)
+# Initialize database
 pnpm db:init
 
-# Beides parallel starten (Runtime auf :4000, Web auf :3000)
+# Run
 pnpm dev
+
+# Open http://localhost:3000 and follow the onboarding wizard
 ```
 
-Dann: http://localhost:3000
+**Requirements:** Node ≥20, pnpm ≥9, and an Anthropic API key.
 
-## Repository-Struktur
+For production self-hosting with HTTPS, custom domain, and backups,
+see **[docs/DEPLOYMENT.md](docs/DEPLOYMENT.md)**.
 
-```
-twin-lab/
-├── apps/
-│   ├── web/                    Next.js Frontend
-│   └── runtime/                Twin-Runtime (langlaufender Prozess)
-├── packages/
-│   └── shared/                 Geteilte Types & Schemas
-└── docs/                       Persona, Mandates, Architektur-Notes
-```
+## Screenshots
 
-## Phase-1-Scope
+| | |
+|:---:|:---:|
+| ![Onboarding Wizard](docs/screenshots/onboarding-wizard.png) | ![Chat with Maturity Badge](docs/screenshots/chat-maturity.png) |
+| *Onboarding Wizard — first-time twin setup* | *Chat with maturity badge — twins develop over time* |
+| ![A2A Conversation](docs/screenshots/a2a-conversation.png) | ![Settings](docs/screenshots/settings.png) |
+| *A2A Conversation — twins talking to each other* | *Settings — persona, LLM, presets editable per twin* |
 
-Was funktioniert:
-- Chat mit dem Twin in deinem Stil (Persona aus `docs/persona.md`)
-- Drei initiale Mandates aus `docs/mandates.yaml` werden geprüft
-- Jede Aktion landet im Audit-Log
-- Live-Stream-Ansicht zeigt, was der Twin gerade tut
-- Provider-Abstraktion: heute OpenAI, morgen Anthropic, übermorgen lokal
+## Status & Beta
 
-Was bewusst nicht funktioniert (das ist Phase 2+):
-- Twin-zu-Twin-Kommunikation
-- Public-Profilseite
-- Identity / Reputation / Trust
+Twin-Lab is in **Pre-Launch Phase A** (self-hosting). It's stable enough to use
+daily but not yet hardened for public deployment.
 
-## Nächste Schritte
+**Works today**
+- Memory-rich conversations with persistent context
+- Per-twin persona definition (UI + YAML)
+- Twin-to-twin communication via A2A-Bridge
+- Onboarding wizard for first-time setup
+- Docker-based self-hosting
 
-Siehe `docs/ROADMAP.md`.
+**Beta**
+- Research workflow via Hyperbrowser MCP — works, but expect rough edges
+- Some computer-use patterns are intentionally out of scope for Phase A
+
+**Coming in Phase B**
+- SaaS-hosting (managed deployment)
+- Mobile integration (Telegram, WhatsApp)
+- Conversational skill and tool installation — telling your twin "install the calendar integration" instead of using a settings UI
+
+See [docs/ROADMAP.md](docs/ROADMAP.md) for the full roadmap.
+
+## Tech Stack
+
+- **Frontend** — Next.js 15 (App Router) + React 19
+- **Runtime** — Fastify 5 + Vercel AI SDK v6
+- **Database** — SQLite via better-sqlite3 11
+- **Model** — Claude Opus 4.7 via Anthropic API (`@ai-sdk/anthropic` 3)
+- **Deployment** — Docker Compose + Traefik
+
+## Roadmap
+
+Twin-Lab is currently in **Pre-Launch Phase A** — self-hosting launch.
+**Phase B** brings SaaS-hosting and mobile integration. See
+[docs/ROADMAP.md](docs/ROADMAP.md) for details.
+
+## Contributing
+
+Contributions welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines
+and [docs/BACKLOG.md](docs/BACKLOG.md) for what's planned.
+
+## License
+
+Apache 2.0 — see [LICENSE](LICENSE).

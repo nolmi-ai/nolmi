@@ -1482,6 +1482,13 @@ Runtime selbst ist Bridge-resilient (Reconnect-Loop ohne Crash für existing Twi
 **Größe:** M-L · **Priorität:** nice · **Aus:** Tag 24 Cookbook-Walkthrough (#109 §9)
 **Status:** offen, Phase-B-Kandidat
 
+### 129. .env.example-Default auf Anthropic switchen
+
+README-Quick-Start + Tech-Stack-Story sagen Claude Opus 4.7 als Primary-LLM. `.env.example`-Default ist heute `openai` (Legacy aus früher Multi-Provider-Phase). Switch auf `ACTIVE_PROVIDER=anthropic` + `ANTHROPIC_API_KEY=sk-ant-replace-me` macht Quick-Start friktionslos. OpenAI bleibt als auskommentierter Alternativ-Block in `.env.example`.
+
+**Größe:** XS · **Priorität:** should · **Aus:** #111 Schritt 7 Phase-1.1-Diagnose · **Spur:** Pre-Launch-Phase A (vor Self-Hosting-Launch)
+**Status:** offen
+
 ## Pre-Launch-Phase A — Block 4: Self-Hosting-Polish
 
 Items aus dem Strategy-Pivot Tag 18. Block 4 macht das Repo für externe Tech-Affine deploybar. Spec: `docs/PRE-LAUNCH-A-STRATEGY.md`.
