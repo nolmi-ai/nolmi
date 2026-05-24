@@ -98,6 +98,9 @@ export function TelegramChannelTab({ twinHandle }: Props) {
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [actionBusy, setActionBusy] = useState(false);
 
+  // Copy-Feedback (Polish-Fix Tag 26 Abend) — "Kopiert!"-Hint nach Click.
+  const [copied, setCopied] = useState(false);
+
   const fetchConfig = useCallback(async () => {
     try {
       setErrorMessage("");
@@ -127,6 +130,22 @@ export function TelegramChannelTab({ twinHandle }: Props) {
   useEffect(() => {
     void fetchConfig();
   }, [fetchConfig]);
+
+  // Polish-Fix Tag 26 Abend: User klickt Telegram-Deeplink → pairt extern
+  // via Bot → kommt zurück in den Browser. Ohne Auto-Refresh sieht User
+  // weiterhin Modus 2 mit Pairing-Code statt Modus 3. Window-Focus-Listener
+  // (nur in Modus „configured-unpaired" aktiv) ruft fetchConfig() bei
+  // Tab-Re-Focus — wenn Backend `isPaired=true` zurückgibt, schaltet der
+  // Render-Switch automatisch auf Modus 3 um. Initial-Mount-Focus fired
+  // nicht; das existing fetchConfig oben deckt den Boot-Pfad ab.
+  useEffect(() => {
+    if (mode !== "configured-unpaired") return;
+    const handleFocus = () => {
+      void fetchConfig();
+    };
+    window.addEventListener("focus", handleFocus);
+    return () => window.removeEventListener("focus", handleFocus);
+  }, [mode, fetchConfig]);
 
   async function saveConfig() {
     if (!tokenInput || !usernameInput) return;
@@ -244,6 +263,8 @@ export function TelegramChannelTab({ twinHandle }: Props) {
     if (!config?.pairing_code) return;
     try {
       await navigator.clipboard.writeText(config.pairing_code);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
     } catch {
       // Clipboard-API kann in unsicheren Kontexten verweigert werden — silent
     }
@@ -369,7 +390,7 @@ export function TelegramChannelTab({ twinHandle }: Props) {
                   onClick={() => void copyPairingCode()}
                   className={btnGhostClass()}
                 >
-                  Kopieren
+                  {copied ? "Kopiert!" : "Kopieren"}
                 </button>
               </div>
               <p className="text-xs text-muted mb-2">
