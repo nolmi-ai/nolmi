@@ -112,7 +112,7 @@ Response: 200 OK (Telegram verlangt schnelle 200, sonst Retry)
 3. Owner wechselt zu Web-UI, Conversation-View zeigt Telegram-Messages und neue Web-Messages in einem Thread
 4. Hero-GIF-Punch: „Same twin, web + Telegram, one continuous conversation."
 
-## Bau-Sequenz (5 Phasen, geschätzt ~4.5 Bautage)
+## Bau-Sequenz (5 Phasen, geschätzt ~5-5.5 Bautage)
 
 ### Phase 1 — Backend-Foundation (~1 Tag)
 
@@ -130,12 +130,23 @@ Response: 200 OK (Telegram verlangt schnelle 200, sonst Retry)
 - Polling-Modus über ENV-Switch
 - Smoke: Lokaler Bot über BotFather erstellt, Pairing-Flow End-to-End durchlaufen
 
-### Phase 3 — Message-Routing + LLM-Integration (~1 Tag)
+### Phase 3 — Message-Routing + LLM-Integration + API + setWebhook (~1.5-2 Tage)
 
-- Inbound-Message-Handler: Telegram-Update → Conversation-Insert → Twin-Service-Call → LLM-Response → Outbound-Send
-- Channel-Marker durchgängig setzen
-- Memory-Layer transparent integriert (existing Code unverändert)
-- Smoke: Multi-Turn-Konversation mit Memory-Recall über mehrere Sessions
+Tag-25-Abend-Scope-Anpassung: ursprünglich war zwischen Phase 2 und 3 noch eine „Phase 2.5" (Pairing-Code-API + setWebhook-Trigger) geplant. Wurde mit Phase 3 zusammengelegt, weil API-Layer + Lifecycle-Trigger semantisch zur Message-Routing-Phase gehören (alle „User-facing Routes" + alle Telegram-API-Side-Effects in einer Phase).
+
+- `TelegramMessageRouter` als dünner Service: re-uses `TwinService.chat()` Owner-Bypass → bekommt Conversation-Resolution + Memory-Recall + LLM + Audit + Bus-Events „for free"
+- Inbound + Outbound Persistence in `telegram_messages` (Channel-Marker, conversation_id verlinkt mit twin-übergreifender Conv)
+- Typing-Indicator via Telegraf-`ctx.persistentChatAction` (4s-Intervall, kein eigener Timer-Cleanup)
+- Message-Splitting auf 3500-Char-Paragraph-Boundary mit Satz-Fallback (Telegram-Limit 4096, 3500 als Safe-Buffer für Multi-Byte)
+- 5 API-Routes via `registerTelegramApiRoutes(app, deps, requireOwner)`:
+  - `GET    /twins/:handle/telegram/config` — Public-View ohne Secrets
+  - `POST   /twins/:handle/telegram/config` — Initial-Setup + Token-Validation via `getMe()` vor Persistence
+  - `PUT    /twins/:handle/telegram/config` — Token-Rotation + Webhook-Secret-Refresh
+  - `DELETE /twins/:handle/telegram/config` — Cleanup mit `deleteWebhook` + Stop
+  - `POST   /twins/:handle/telegram/pairing-code` — 6-stelliger Code mit Expiry
+- setWebhook-Lifecycle in API-Routes: nach Create + nach Token-Update; `deleteWebhook` vor Config-Delete. BotRegistry hält `registerWebhook` / `unregisterWebhook` als Helper-Methoden.
+- Memory-Layer transparent integriert (existing Code unverändert, Cross-Channel-Threading automatisch via Owner-Bypass-Conversation-Tripel)
+- Smoke: Multi-Turn-Konversation mit Memory-Recall über mehrere Sessions, Mock-TwinService für CI-tauglichen Smoke ohne LLM-Provider
 
 ### Phase 4 — Settings-UI (~0.5 Tag)
 
@@ -166,6 +177,12 @@ Response: 200 OK (Telegram verlangt schnelle 200, sonst Retry)
 - **Production-Webhook-Voraussetzung:** Runtime-Domain muss HTTPS haben (Telegram lehnt HTTP-Webhooks ab). Already-given durch existing Traefik+LetsEncrypt-Setup.
 
 - **Stufe-2-Vorbereitungen:** Diese Architektur ist Stufe-2-ready: External-Sender-Auth-Flow wäre Erweiterung von `paired_owner_telegram_user_id` zu `paired_telegram_users[]`-Liste mit Approval-State pro User. Kein Refactor, nur Erweiterung.
+
+- **Phase-2.5-Auflösung (Tag 25 Abend):** Ursprünglich vorgesehen für Pairing-Code-Generation-API + setWebhook-Trigger. Wurde mit Phase 3 zusammengelegt — der API-Layer macht beides aus einem Guss. Konsequenz: Phase 3 wuchs von ~1 Tag auf 1.5-2 Tage, Gesamt-Sequenz von 4.5 auf 5-5.5 Bautage.
+
+- **eagerLoadPairedBots → eagerLoadAllBots-Semantik-Korrektur (Tag 25 Phase 2 Bau):** Setzung „Eager für gepaarte, Lazy für ungepaarte" mischte Bot-Token-Validity (Infrastruktur) und Owner-Pairing (Authorization). Korrektur: alle Configs eager laden, Pairing-State nur im Text-Handler relevant. Sonst wäre First-Pairing-Flow unerreichbar (Bot muss live sein um `/start <code>` zu empfangen).
+
+- **MessageRouter-Reuse statt Parallel-Service (Tag 26 Phase 3 Phase-1.1):** Telegram-MessageRouter ruft `TwinService.chat()` mit Owner-Bypass — dadurch gibts Conversation-Resolution, Memory-Recall, LLM, Audit + Bus-Events „for free". Cross-Channel-Threading ergibt sich automatisch (gleiche Conversation-Tripel wie Web-Chat). Vermeidet parallele Conversation-Resolution-Logic im Telegram-Code.
 
 ## Verweise
 

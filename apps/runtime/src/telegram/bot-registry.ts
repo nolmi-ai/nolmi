@@ -2,6 +2,8 @@ import type { Telegraf } from "telegraf";
 import type { FastifyBaseLogger } from "fastify";
 import type { TelegramConfigsRepo } from "./configs-repo.js";
 import type { PairingService } from "./pairing-service.js";
+import type { TelegramMessageRouter } from "./message-router.js";
+import type { TwinProfilesRepo } from "../twin-profiles-repo.js";
 import { createTelegrafBot } from "./telegraf-setup.js";
 
 // ─── TELEGRAM BOT REGISTRY (#130 Phase 2) ───────────────────────────────────
@@ -35,7 +37,14 @@ export class TelegramBotRegistry {
   constructor(
     private configsRepo: TelegramConfigsRepo,
     private pairingService: PairingService,
+    private messageRouter: TelegramMessageRouter,
+    private profilesRepo: TwinProfilesRepo,
     private usePolling: boolean,
+    /**
+     * Public runtime URL ohne Trailing-Slash (z.B. `https://runtime.example.com`).
+     * Pflicht im Webhook-Mode, nur dort genutzt — Polling-Mode ignoriert.
+     */
+    private publicBaseUrl: string | null,
   ) {}
 
   /**
@@ -226,9 +235,55 @@ export class TelegramBotRegistry {
       token,
       this.pairingService,
       this.configsRepo,
+      this.messageRouter,
+      this.profilesRepo,
       this.logger ?? undefined,
     );
     this.bots.set(config.twin_id, bot);
     return bot;
+  }
+
+  /**
+   * setWebhook bei Telegram registrieren — wird von den API-Routes nach
+   * Config-Create + Token-Rotation aufgerufen. Bot muss vorher schon im
+   * Map sein (startBotForTwin). Im Polling-Mode No-Op.
+   *
+   * Handle wird aus twin_profiles geholt, damit die URL sprechend
+   * (`/webhooks/telegram/@markus`) statt twin_id-Hash bleibt.
+   */
+  async registerWebhook(twin_id: string): Promise<void> {
+    if (this.usePolling) return;
+    if (!this.publicBaseUrl) {
+      throw new Error(
+        "[bot-registry] registerWebhook: publicBaseUrl ist null — Webhook-Mode ohne RUNTIME_PUBLIC_URL?",
+      );
+    }
+    const bot = this.bots.get(twin_id);
+    const config = this.configsRepo.findByTwinId(twin_id);
+    const profile = this.profilesRepo.findById(twin_id);
+    if (!bot || !config || !profile) {
+      throw new Error(
+        `[bot-registry] registerWebhook: fehlende Voraussetzung für ${twin_id} ` +
+          `(bot=${!!bot}, config=${!!config}, profile=${!!profile})`,
+      );
+    }
+    const handle = profile.handle;
+    const url = `${this.publicBaseUrl.replace(/\/+$/, "")}/webhooks/telegram/${encodeURIComponent(handle)}`;
+    await bot.telegram.setWebhook(url, {
+      secret_token: config.webhook_secret,
+    });
+  }
+
+  /**
+   * deleteWebhook bei Telegram aufrufen — von der DELETE-API-Route VOR
+   * stopBotForTwin gerufen, damit Telegram keine Updates mehr ans Backend
+   * schickt, das gleich verschwindet. Idempotent: wenn kein Bot im Map ist
+   * (z.B. nach Stale-State), still durchwinken.
+   */
+  async unregisterWebhook(twin_id: string): Promise<void> {
+    if (this.usePolling) return;
+    const bot = this.bots.get(twin_id);
+    if (!bot) return;
+    await bot.telegram.deleteWebhook();
   }
 }

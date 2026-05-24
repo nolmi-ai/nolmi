@@ -2,6 +2,8 @@ import { Telegraf } from "telegraf";
 import type { FastifyBaseLogger } from "fastify";
 import type { TelegramConfigRow, TelegramConfigsRepo } from "./configs-repo.js";
 import type { PairingService } from "./pairing-service.js";
+import type { TelegramMessageRouter } from "./message-router.js";
+import type { TwinProfilesRepo } from "../twin-profiles-repo.js";
 
 // ─── TELEGRAF BOT INSTANCE BUILDER (#130 Phase 2) ───────────────────────────
 //
@@ -32,13 +34,16 @@ const PAIRING_FAIL_REPLY =
   "Pairing failed. The code is invalid or expired. " +
   "Generate a new one in Settings.";
 
-const PHASE_2_STUB_REPLY = "(Phase 2 stub — LLM integration in Phase 3)";
+const TWIN_PROFILE_GONE_REPLY =
+  "This bot's twin is no longer available. Please contact the owner.";
 
 export function createTelegrafBot(
   config: TelegramConfigRow,
   decryptedToken: string,
   pairingService: PairingService,
   configsRepo: TelegramConfigsRepo,
+  messageRouter: TelegramMessageRouter,
+  profilesRepo: TwinProfilesRepo,
   logger?: FastifyBaseLogger,
 ): Telegraf {
   const bot = new Telegraf(decryptedToken);
@@ -107,7 +112,25 @@ export function createTelegrafBot(
       return;
     }
 
-    await ctx.reply(PHASE_2_STUB_REPLY);
+    // State 4: Paired owner — route to LLM via TwinService.chat() Owner-
+    // Bypass. Twin-Profile-Lookup für Handle + Owner-User-ID, weil der
+    // MessageRouter beides für die Conversation-Tripel-Resolution braucht.
+    const profile = profilesRepo.findById(currentConfig.twin_id);
+    if (!profile || !profile.ownerUserId) {
+      await ctx.reply(TWIN_PROFILE_GONE_REPLY);
+      return;
+    }
+
+    await messageRouter.handleInboundOwnerMessage({
+      config: currentConfig,
+      twinHandle: profile.handle,
+      ownerUserId: profile.ownerUserId,
+      chatId: ctx.chat.id,
+      telegramMessageId: ctx.message.message_id,
+      text: ctx.message.text,
+      ctx,
+      logger,
+    });
   });
 
   // ─── Globaler Error-Catch ───────────────────────────────────────────────

@@ -15,8 +15,10 @@ import { EmbeddingsRepo } from "./episodic/embeddings-repo.js";
 import { TwinMaturityService } from "./twin-maturity/twin-maturity-service.js";
 import { EncryptionKeyMissingError, loadMasterKey } from "./crypto-utils.js";
 import { TelegramConfigsRepo } from "./telegram/configs-repo.js";
+import { TelegramMessagesRepo } from "./telegram/messages-repo.js";
 import { PairingService } from "./telegram/pairing-service.js";
 import { TelegramBotRegistry } from "./telegram/bot-registry.js";
+import { TelegramMessageRouter } from "./telegram/message-router.js";
 
 // ─── BOOTSTRAP ───────────────────────────────────────────────────────────────
 //
@@ -84,15 +86,26 @@ async function main() {
     factsRepo,
   });
 
-  // #130 Phase 2 — Telegram-Adapter-Services. Configs-Repo + PairingService
-  // sind dünn (kein Network), Eager-Load passiert weiter unten nach
-  // app.listen() ist nicht nötig — die Repos werden auch vom Server gebraucht.
+  // #130 Phase 2 + 3 — Telegram-Adapter-Services. Configs/Messages-Repo +
+  // PairingService + MessageRouter sind dünn (kein Network). BotRegistry
+  // hält die Telegraf-Instanzen, MessageRouter routet Inbound-Owner-Texts
+  // an TwinService.chat() (Owner-Bypass für cross-channel Memory).
   const telegramConfigsRepo = new TelegramConfigsRepo(repo.db, masterKey);
+  const telegramMessagesRepo = new TelegramMessagesRepo(repo.db);
   const pairingService = new PairingService(telegramConfigsRepo);
+  const telegramMessageRouter = new TelegramMessageRouter(
+    telegramConfigsRepo,
+    telegramMessagesRepo,
+    conversationsRepo,
+    registry,
+  );
   const telegramBotRegistry = new TelegramBotRegistry(
     telegramConfigsRepo,
     pairingService,
+    telegramMessageRouter,
+    profilesRepo,
     config.telegramUsePolling,
+    config.runtimePublicUrl,
   );
 
   const app = await createServer({
@@ -110,6 +123,7 @@ async function main() {
     examplesDir: config.examplesDir,
     telegramConfigsRepo,
     telegramBotRegistry,
+    telegramPairingService: pairingService,
   });
 
   // #130 Phase 2 — Eager-Load aller konfigurierten Bots (gepaart wie

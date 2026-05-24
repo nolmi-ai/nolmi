@@ -1597,6 +1597,30 @@ Claude-CLI-Reuse-Pattern (analog OpenClaw):
 
 **Status-Notiz Tag 25:** Pattern-Symmetrie zu #131. Anthropic-Stance weniger klar als OpenAI-Codex-OAuth-Stance — laut OpenClaw-Doku wieder erlaubt, aber nicht öffentlich publiziert. Bau erst sinnvoll wenn Anthropic offizielle Position publiziert.
 
+### 133. Cross-Channel-Mental-Model-Doku
+
+Wenn Owner Twin-Lab über Web-UI **und** Telegram nutzt, entsteht eine UX-Asymmetrie:
+
+- Web-UI zeigt alle Messages aus allen Channels (eine Conversation-View)
+- Telegram zeigt nur Telegram-Messages (Telegram-API-Constraint, lässt rückwirkendes Anzeigen nicht zu)
+- Memory + Persona funktionieren kanal-übergreifend (verifiziert in #130 Phase 3 Manual-Smoke Tag 26)
+
+Owner-Frage beim ersten Cross-Channel-Use: „Warum sehe ich's hier aber nicht dort?" Channel-Badge im Web-UI macht den Cross-Channel-Status pro Message sichtbar (gebaut in #130 Phase 3), aber für Onboarding + Demo-Story braucht's übergeordnete Erklärung.
+
+**Touch-Points:**
+
+- **Onboarding-Wizard (#110):** Telegram-Setup-Schritt sollte Asymmetrie erklären. Heute kein Telegram-Step im Wizard — Settings-UI für Bot-Konfiguration (Phase 4 von #130) ist der erste Touch-Point. Dort 1-Satz-Hinweis ergänzen.
+- **#113 Hero-GIF / Demo-Video:** Caption oder Voice-Over-Statement: „Same memory, two channels, two views — your twin remembers across, each channel shows its own thread." Macht Mental-Model in <10 Sek klar.
+- **#112 Landing:** Section über Telegram-Integration sollte explicit machen: „Telegram zeigt deine Telegram-Konversation, Web-UI ist die Zentrale mit Cross-Channel-View."
+
+**Architektur-Hintergrund:**
+
+Telegram-API erlaubt nur Bot-↔-User-Messages, keine Drittquelle-Injection. Eine technische Lösung „Web-Messages an Telegram nachsenden als Bot-Sayer-Echo" wurde Tag 26 verworfen (semantisch falsch: User-Voice würde als Bot-Voice erscheinen, Notification-Storm bei jeder Web-Message). Asymmetrie als Feature akzeptiert.
+
+**Größe:** XS (3 Touch-Points, je 1-2 Sätze Doku-Edit) · **Priorität:** should · **Aus:** #130 Phase 3 Manual-Smoke Tag 26 UX-Befund · **Spur:** Pre-Launch-Phase A (Block 5)
+
+**Status-Notiz Tag 26:** Channel-Badge im Web-UI gebaut in #130 Phase 3 (Commit folgt). Doku-Erweiterung für drei Touch-Points kommt im Rahmen #110-Wizard-Erweiterung (Phase 4 von #130) + #112 Landing + #113 Hero-GIF.
+
 ## Pre-Launch-Phase A — Block 4: Self-Hosting-Polish
 
 Items aus dem Strategy-Pivot Tag 18. Block 4 macht das Repo für externe Tech-Affine deploybar. Spec: `docs/PRE-LAUNCH-A-STRATEGY.md`.

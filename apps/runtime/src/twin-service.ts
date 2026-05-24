@@ -196,6 +196,13 @@ export interface ChatRequestContext {
    * Default-Auto bleibt für reguläre Chats.
    */
   forcedToolChoice?: ForcedToolChoice;
+  /**
+   * #130 Phase 3: Channel-Marker für Cross-Channel-UX im Web-UI. Web-Form-
+   * Calls lassen das Feld leer (Default = web). Telegram-MessageRouter setzt
+   * `'telegram'`. Künftige Discord-/WhatsApp-Adapter erweitern den Union-Type.
+   * Wird im audit.start-input als opt-in Feld weitergegeben.
+   */
+  channel?: "telegram" | "discord" | "whatsapp";
 }
 
 export class TwinService {
@@ -404,6 +411,7 @@ export class TwinService {
     if (ownerBypass) {
       return this.runOwnerDirect(detection.capability, messages, lastUser, {
         forcedToolChoice: ctx.forcedToolChoice,
+        channel: ctx.channel,
       });
     }
 
@@ -487,7 +495,11 @@ export class TwinService {
     originalCapability: string,
     messages: ChatMessage[],
     lastUser: string,
-    options: { forcedToolChoice?: ForcedToolChoice } = {},
+    options: {
+      forcedToolChoice?: ForcedToolChoice;
+      /** #130 Phase 3: weitergereicht in audit.input.channel für Web-UI-Badge. */
+      channel?: "telegram" | "discord" | "whatsapp";
+    } = {},
   ): Promise<{
     message: ChatMessage;
     auditId: string;
@@ -647,6 +659,10 @@ export class TwinService {
           messages,
           lastMessage: lastUser,
           originalCapability,
+          // #130 Phase 3: Channel-Marker für Cross-Channel-UX im Web-UI.
+          // Nur gesetzt wenn der Caller ihn explizit liefert (Telegram-
+          // MessageRouter); Web-Form-Calls lassen ihn undefined.
+          ...(options.channel ? { channel: options.channel } : {}),
         },
         initialStatus: "executed",
         conversationId,

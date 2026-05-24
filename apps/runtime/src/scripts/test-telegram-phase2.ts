@@ -15,8 +15,12 @@ import {
   loadMasterKey,
 } from "../crypto-utils.js";
 import { TelegramConfigsRepo } from "../telegram/configs-repo.js";
+import { TelegramMessagesRepo } from "../telegram/messages-repo.js";
 import { PairingService } from "../telegram/pairing-service.js";
 import { TelegramBotRegistry } from "../telegram/bot-registry.js";
+import { TelegramMessageRouter } from "../telegram/message-router.js";
+import { ConversationsRepo } from "../conversations/repo.js";
+import { TwinServiceRegistry } from "../twin-service-registry.js";
 
 // ─── TEST: TELEGRAM PHASE 2 (PairingService + BotRegistry) ───────────────────
 //
@@ -263,7 +267,26 @@ async function main(): Promise<void> {
   ).run(TEST_TELEGRAM_USER_ID, profile.twinId);
 
   // Webhook-Mode: start() ist No-Op, kein Network-Call. Wichtig für Smoke.
-  const registry = new TelegramBotRegistry(configsRepo, pairingService, false);
+  // Phase-3-Constructor braucht messageRouter + profilesRepo + publicBaseUrl;
+  // wir bauen schlanke Real-Instanzen (statt Mocks), weil keine davon im
+  // STEP-8-Pfad aktiv aufgerufen wird.
+  const phase3MessagesRepo = new TelegramMessagesRepo(db);
+  const phase3ConversationsRepo = new ConversationsRepo(db);
+  const phase3RegistryDummy = new TwinServiceRegistry();
+  const phase3MessageRouter = new TelegramMessageRouter(
+    configsRepo,
+    phase3MessagesRepo,
+    phase3ConversationsRepo,
+    phase3RegistryDummy,
+  );
+  const registry = new TelegramBotRegistry(
+    configsRepo,
+    pairingService,
+    phase3MessageRouter,
+    profilesRepo,
+    false,
+    null,
+  );
   registry.eagerLoadAllBots();
   const activeIds = registry.listActiveTwinIds();
   if (!activeIds.includes(profile.twinId)) {
@@ -278,7 +301,14 @@ async function main(): Promise<void> {
   // Egg beim First-Pairing). Das ist der semantische Kern der Korrektur ggü
   // dem ursprünglichen eagerLoadPairedBots-Filter.
   pairingService.unpair(profile.twinId);
-  const registry2 = new TelegramBotRegistry(configsRepo, pairingService, false);
+  const registry2 = new TelegramBotRegistry(
+    configsRepo,
+    pairingService,
+    phase3MessageRouter,
+    profilesRepo,
+    false,
+    null,
+  );
   registry2.eagerLoadAllBots();
   const activeIds2 = registry2.listActiveTwinIds();
   if (!activeIds2.includes(profile.twinId)) {

@@ -75,7 +75,9 @@ import {
 import { BridgeClient } from "./bridge/client.js";
 import type { TelegramConfigsRepo } from "./telegram/configs-repo.js";
 import type { TelegramBotRegistry } from "./telegram/bot-registry.js";
+import type { PairingService } from "./telegram/pairing-service.js";
 import { registerTelegramWebhookRoutes } from "./telegram/webhook-routes.js";
+import { registerTelegramApiRoutes } from "./telegram/api-routes.js";
 
 // ─── HTTP SERVER ─────────────────────────────────────────────────────────────
 //
@@ -133,6 +135,8 @@ export interface ServerDeps {
   telegramConfigsRepo: TelegramConfigsRepo;
   /** #130 Phase 2 — geteilte Instanz mit Boot für Webhook-Dispatch. */
   telegramBotRegistry: TelegramBotRegistry;
+  /** #130 Phase 3 — geteilte Instanz mit Boot für Pairing-Code-API. */
+  telegramPairingService: PairingService;
 }
 
 export async function createServer(deps: ServerDeps) {
@@ -248,6 +252,19 @@ export async function createServer(deps: ServerDeps) {
     configsRepo: deps.telegramConfigsRepo,
     botRegistry: deps.telegramBotRegistry,
   });
+
+  // ─── Telegram-API (#130 Phase 3) ──────────────────────────────────────────
+  // Owner-gated CRUD für Bot-Config + Pairing-Code-Generation. Pattern wie
+  // andere register*Routes-Module, requireOwner via Closure.
+  registerTelegramApiRoutes(
+    app,
+    {
+      configsRepo: deps.telegramConfigsRepo,
+      pairingService: deps.telegramPairingService,
+      botRegistry: deps.telegramBotRegistry,
+    },
+    requireOwner,
+  );
 
   // ─── Profil ────────────────────────────────────────────────────────────────
   app.get<{ Params: { handle: string } }>(

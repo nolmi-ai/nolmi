@@ -25,6 +25,9 @@ import { resolveToolDisplay } from "../../../lib/tool-display";
 import { estimateToolCost, formatEstimate } from "../../../lib/tool-cost";
 import { MemoryHitBadge } from "../../../components/MemoryHitBadge";
 import { MaturityBadge } from "../../../components/MaturityBadge";
+import { MessageChannelBadge } from "../../../components/MessageChannelBadge";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import { ResearchLiveProgress } from "../../../components/ResearchLiveProgress";
 import { ResearchFirstUseModal } from "../../../components/ResearchFirstUseModal";
 import { useToolCallStream } from "../../../lib/use-tool-call-stream";
@@ -784,12 +787,21 @@ function Sidebar({
 // `auditId` auf den Bubbles ist der Audit, aus dem sie stammen — bei mcp-
 // tool-use teilen sich User-Bubble, Pending-Reply, Tool-Call-Box und finale
 // Reply dieselbe ID.
+/**
+ * #130 Phase 3: Channel-Marker für Cross-Channel-Bubble-Badge.
+ * Audit-Input setzt das Feld bei nicht-Web-Pfaden (heute nur Telegram).
+ * Default-Pfad (Web-Form) lässt es undefined → MessageChannelBadge rendert
+ * dann null.
+ */
+type MessageChannel = "web" | "telegram" | "discord" | "whatsapp";
+
 type ChatBlock =
   | {
       kind: "user";
       content: string;
       conversationId: string | null;
       auditId: string | null;
+      channel?: MessageChannel;
     }
   | {
       kind: "assistant";
@@ -798,6 +810,7 @@ type ChatBlock =
       auditId: string | null;
       /** #100: Memory-Hits aus dem Audit-Output, falls vorhanden. */
       memoryHits?: MemoryHit[];
+      channel?: MessageChannel;
     }
   | {
       kind: "mcp-tool-call";
@@ -818,10 +831,25 @@ interface AuditMcpToolUseShape {
     mcpToolName: string;
     args: Record<string, unknown>;
   };
+  /** #130 Phase 3: optionaler Channel-Marker. */
+  channel?: MessageChannel;
 }
 
 interface AuditOwnerDirectShape {
   lastMessage?: string;
+  /** #130 Phase 3: optionaler Channel-Marker. */
+  channel?: MessageChannel;
+}
+
+/**
+ * Engt einen unbekannten audit.input.channel auf den MessageChannel-Union
+ * ein. Verhindert dass ein Garbage-Wert aus DB als Channel durchläuft.
+ */
+function normalizeChannel(raw: unknown): MessageChannel | undefined {
+  if (raw === "telegram" || raw === "discord" || raw === "whatsapp" || raw === "web") {
+    return raw;
+  }
+  return undefined;
 }
 
 interface AuditExecutedOutputShape {
@@ -863,12 +891,20 @@ function buildChatBlocksFromAudits(entries: AuditEntry[]): {
       const pendingReply =
         typeof input.pendingReply === "string" ? input.pendingReply : null;
       if (!userText || !pendingReply) continue;
-      blocks.push({ kind: "user", content: userText, conversationId: cid, auditId: entry.id });
+      const channel = normalizeChannel(input.channel);
+      blocks.push({
+        kind: "user",
+        content: userText,
+        conversationId: cid,
+        auditId: entry.id,
+        channel,
+      });
       blocks.push({
         kind: "assistant",
         content: pendingReply,
         conversationId: cid,
         auditId: entry.id,
+        channel,
       });
       const status: "pending" | "executed" | "rejected" =
         entry.status === "executed"
@@ -893,6 +929,7 @@ function buildChatBlocksFromAudits(entries: AuditEntry[]): {
           content: output.reply,
           conversationId: cid,
           auditId: entry.id,
+          channel,
         });
       }
       newestConvId = cid;
@@ -906,7 +943,14 @@ function buildChatBlocksFromAudits(entries: AuditEntry[]): {
     const userText = typeof input.lastMessage === "string" ? input.lastMessage : null;
     const replyText = output && typeof output.reply === "string" ? output.reply : null;
     if (!userText || !replyText) continue;
-    blocks.push({ kind: "user", content: userText, conversationId: cid, auditId: entry.id });
+    const channel = normalizeChannel(input.channel);
+    blocks.push({
+      kind: "user",
+      content: userText,
+      conversationId: cid,
+      auditId: entry.id,
+      channel,
+    });
     blocks.push({
       kind: "assistant",
       content: replyText,
@@ -919,6 +963,7 @@ function buildChatBlocksFromAudits(entries: AuditEntry[]): {
         output?.memoryHits && output.memoryHits.length > 0
           ? output.memoryHits
           : undefined,
+      channel,
     });
     newestConvId = cid;
   }
@@ -1327,8 +1372,14 @@ function DirectChat({
                     // #100: Bubble + optionaler Memory-Hit-Badge darunter.
                     // Beide sind links-eingerückt (max-w-3xl-Wrapper), Badge
                     // erbt die Bubble-Indent über das gleiche Flex-Layout.
+                    // #130 Phase 3 v2: Channel-Badge wandert vom externen
+                    // Wrapper-Slot in den Bubble-Header (channel-Prop).
                     <div className="space-y-1.5">
-                      <Bubble role={block.kind} content={block.content} />
+                      <Bubble
+                        role={block.kind}
+                        content={block.content}
+                        channel={block.channel}
+                      />
                       {block.memoryHits && block.memoryHits.length > 0 && (
                         <div className="px-3">
                           <MemoryHitBadge hits={block.memoryHits} />
@@ -1336,7 +1387,13 @@ function DirectChat({
                       )}
                     </div>
                   ) : (
-                    <Bubble role={block.kind} content={block.content} />
+                    // #130 Phase 3 v2: User-Bubble bekommt Channel-Icon
+                    // direkt im Bubble-Header, kein externer Subline-Slot.
+                    <Bubble
+                      role={block.kind}
+                      content={block.content}
+                      channel={block.channel}
+                    />
                   )}
                 </Fragment>
               );
@@ -1745,26 +1802,143 @@ function NewConversationModal({
 
 // ─── Bubbles ────────────────────────────────────────────────────────────────
 
-function Bubble({ role, content }: { role: ChatMessage["role"]; content: string }) {
+function Bubble({
+  role,
+  content,
+  channel,
+}: {
+  role: ChatMessage["role"];
+  content: string;
+  /** #130 Phase 3 v2: Channel-Icon im Bubble-Header rechts. Undefined/`web` → kein Icon. */
+  channel?: MessageChannel;
+}) {
   const isUser = role === "user";
   // ml-auto / mr-auto positioniert die Bubble innerhalb des max-w-3xl-
   // Wrappers — User rechts, Twin-Antwort links. max-w-[70%] verhindert,
   // dass eine kurze Message die volle Wrapper-Breite einnimmt.
+  //
+  // #130 Phase 3 Markdown: assistant-Bubble rendert Markdown via
+  // react-markdown + remark-gfm (Bold/Italic/Listen/Code/Tabellen/Links).
+  // whitespace-pre-wrap entfällt dort, weil der Markdown-Renderer eine
+  // eigene Whitespace-Struktur baut (Paragraph-Abstand via <p>, Listen
+  // via <ul>/<ol>). User-Bubble bleibt Plain-Text mit whitespace-pre-wrap,
+  // damit getippte Newlines sichtbar bleiben und User-Input nicht
+  // versehentlich als Markdown interpretiert wird.
+  //
+  // #130 Phase 3 v2 Channel-Badge: Header wird Flex-Container,
+  // MessageChannelBadge rechts neben dem Rollen-Label. v1-Subline unter
+  // der Bubble verworfen wegen Discoverability + Heavy-User-Visual-Noise.
   return (
     <div
-      className={`max-w-[70%] px-3 py-2 rounded text-sm leading-relaxed whitespace-pre-wrap ${
+      className={`max-w-[70%] px-3 py-2 rounded text-sm leading-relaxed ${
         isUser
-          ? "ml-auto bg-bg border border-border text-text"
+          ? "ml-auto bg-bg border border-border text-text whitespace-pre-wrap"
           : "mr-auto bg-surface border border-accent/40 text-text"
       }`}
     >
-      <div className="text-[10px] text-muted uppercase tracking-wider mb-1">
-        {isUser ? "du" : "twin"}
+      <div className="flex items-center justify-between gap-2 mb-1">
+        <div className="text-[10px] text-muted uppercase tracking-wider">
+          {isUser ? "du" : "twin"}
+        </div>
+        <MessageChannelBadge channel={channel} />
       </div>
-      {content}
+      {isUser ? (
+        content
+      ) : (
+        <ReactMarkdown remarkPlugins={[remarkGfm]} components={MARKDOWN_COMPONENTS}>
+          {content}
+        </ReactMarkdown>
+      )}
     </div>
   );
 }
+
+// #130 Phase 3 Markdown: Twin-Lab nutzt kein @tailwindcss/typography. Wir
+// styleen die Markdown-Tags hier inline, damit react-markdown-Output zur
+// Bubble-Aesthetik (mono/accent, kompakt) passt. Reduzierte Margins ggü.
+// Browser-Defaults, weil eine Chat-Bubble keine Artikel-Lesefläche ist.
+const MARKDOWN_COMPONENTS = {
+  p: ({ children }: { children?: React.ReactNode }) => (
+    <p className="mb-2 last:mb-0">{children}</p>
+  ),
+  ul: ({ children }: { children?: React.ReactNode }) => (
+    <ul className="list-disc list-outside pl-5 mb-2 last:mb-0 space-y-0.5">
+      {children}
+    </ul>
+  ),
+  ol: ({ children }: { children?: React.ReactNode }) => (
+    <ol className="list-decimal list-outside pl-5 mb-2 last:mb-0 space-y-0.5">
+      {children}
+    </ol>
+  ),
+  li: ({ children }: { children?: React.ReactNode }) => (
+    <li className="leading-snug">{children}</li>
+  ),
+  h1: ({ children }: { children?: React.ReactNode }) => (
+    <h1 className="text-base font-semibold mb-2 mt-1">{children}</h1>
+  ),
+  h2: ({ children }: { children?: React.ReactNode }) => (
+    <h2 className="text-sm font-semibold mb-2 mt-1">{children}</h2>
+  ),
+  h3: ({ children }: { children?: React.ReactNode }) => (
+    <h3 className="text-sm font-semibold mb-1.5 mt-1">{children}</h3>
+  ),
+  h4: ({ children }: { children?: React.ReactNode }) => (
+    <h4 className="text-sm font-semibold mb-1 mt-1">{children}</h4>
+  ),
+  h5: ({ children }: { children?: React.ReactNode }) => (
+    <h5 className="text-sm font-semibold mb-1 mt-1">{children}</h5>
+  ),
+  h6: ({ children }: { children?: React.ReactNode }) => (
+    <h6 className="text-sm font-semibold mb-1 mt-1">{children}</h6>
+  ),
+  code: ({ children, className }: { children?: React.ReactNode; className?: string }) => {
+    // ReactMarkdown nutzt <code class="language-X"> innerhalb von <pre>; das
+    // ist der Block-Code-Pfad. Standalone <code> (kein className) ist Inline.
+    const isInline = !className;
+    if (isInline) {
+      return (
+        <code className="font-mono text-[0.85em] bg-bg border border-border rounded px-1 py-0.5">
+          {children}
+        </code>
+      );
+    }
+    return <code className={className}>{children}</code>;
+  },
+  pre: ({ children }: { children?: React.ReactNode }) => (
+    <pre className="font-mono text-xs bg-bg border border-border rounded p-2 mb-2 last:mb-0 overflow-x-auto whitespace-pre">
+      {children}
+    </pre>
+  ),
+  a: ({ children, href }: { children?: React.ReactNode; href?: string }) => (
+    <a
+      href={href}
+      target="_blank"
+      rel="noopener noreferrer"
+      className="text-accent underline hover:no-underline"
+    >
+      {children}
+    </a>
+  ),
+  blockquote: ({ children }: { children?: React.ReactNode }) => (
+    <blockquote className="border-l-2 border-border pl-3 mb-2 last:mb-0 text-muted">
+      {children}
+    </blockquote>
+  ),
+  table: ({ children }: { children?: React.ReactNode }) => (
+    <div className="overflow-x-auto mb-2 last:mb-0">
+      <table className="text-xs border-collapse">{children}</table>
+    </div>
+  ),
+  th: ({ children }: { children?: React.ReactNode }) => (
+    <th className="border border-border px-2 py-1 text-left font-semibold">
+      {children}
+    </th>
+  ),
+  td: ({ children }: { children?: React.ReactNode }) => (
+    <td className="border border-border px-2 py-1">{children}</td>
+  ),
+};
 
 // 3.2.G: Strukturierter Block für mcp-tool-use-Audits. Drei States:
 //   - pending: Tool-Name + Args + Approve/Reject-Buttons (mit Loading)

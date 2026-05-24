@@ -62,6 +62,7 @@
     "eventsource": "^2.0.2",
     "fastify": "^5.0.0",
     "iron-session": "^8.0.0",
+    "marked": "^18.0.4",
     "nanoid": "^5.0.0",
     "ollama-ai-provider-v2": "^1.2.0",
     "sqlite-vec": "^0.1.9",
