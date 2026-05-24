@@ -93,6 +93,29 @@ Implementation-Skizze und Smoke-Tests siehe BACKLOG #130.
 
 **Erwartete Größe:** XS-S (0.5 Bautag).
 
+**Tag-26-Update: Launch-Window angepasst.**
+
+- **Vorher (Tag 25):** KW 29-30 (~13.-20. Juli 2026), 5-6 Tage Buffer nach Phase 3
+- **Nachher (Tag 26):** KW 31-32 (~27. Juli - 10. August 2026), 1-2 Tage Buffer nach #131
+
+**Grund:** #131 OpenAI-OAuth vorgezogen mit +4-5 Bautagen Bau-Aufwand. Launch-Toleranz Tag 26 explicit akzeptiert (siehe BACKLOG #131 Status-Notiz).
+
+**Buffer-Berechnung Tag 26:**
+
+| Block | Bautage | Stand |
+|---|---|---|
+| #130 Telegram-Adapter Phase 1-5 | 4-5 (3 durch, Phase 4-5 Tag 27-28) | 60% |
+| #131 OpenAI-OAuth (neu in Block 5) | 4-5 | 0% |
+| #113 Hero-GIF | 1-2 | 0% |
+| #112 Landing | 2-3 | 0% |
+| #114 Launch-Posts | 1-2 | 0% |
+| #115 Launch-Timing | 0.5-1 | 0% |
+| **Block-5-Summe** | **13-18** | |
+
+Mit aktuellem Stand (Tag 26 nach Phase 3) bleiben 12-15 Bautage Reserve bis KW 31-32. Buffer von 1-2 Tagen ist eng aber realistisch.
+
+**Wenn Buffer aufbraucht:** Launch-Window auf KW 33 verschiebbar ohne Story-Verlust. Anti-Goal: Launch nicht nach KW 35 (Mitte August) — danach ist Sommer-Ferien-Tail vorbei, HN-Engagement sinkt.
+
 ## Bau-Reihenfolge Block 5
 
 **#130 → #113 → #112 → #114 → #115**
@@ -104,6 +127,16 @@ Begründung:
 - **#112 Landing dann** — braucht Hero-GIF + Screenshots als visuelle Assets
 - **#114 Launch-Posts dann** — braucht Landing-URL als Verweis-Ziel
 - **#115 Launch-Timing zuletzt** — alle vorherigen Artefakte als bekannte Größen
+
+**Tag-26-Update: #131 OpenAI-OAuth vorgezogen.** Bau-Reihenfolge angepasst:
+
+`#130 (Telegram) → #131 (OpenAI-OAuth) → #113 (Hero-GIF) → #112 (Landing) → #114 (Launch-Posts) → #115 (Launch-Timing)`
+
+**Begründung:** Owner-Persona-Validierung (Power-User mit OpenAI/Claude-Subscription), Wettbewerbs-Positionierung (OpenClaw + Hermes haben OAuth, „BYOK-only" wäre HN-Feedback-Schwäche), OpenAI dokumentiert + supported 3rd-Party-OAuth offiziell.
+
+#131 ist ein **technisches Item vor Marketing-Items** — Bau-Reihenfolge folgt Logik „Substanz vor Story". Das Marketing-Material (#113 Hero-GIF, #112 Landing) zeigt dann OAuth als Feature.
+
+Details siehe Backlog #131 Status-Notiz Tag 26 (Commit `4bd8de8`).
 
 ## Tag-Schätzungen
 
