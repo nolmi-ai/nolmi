@@ -277,6 +277,16 @@ Production-Build-Fehler beim Web-Image: Test-Page nutzt useSearchParams() ohne S
 
 **Lesson Tag 26 #11: Production-Build-Test fehlt im Workflow** — lokal pnpm dev übersieht Static-Generation-Issues. Hätte den Bug in Phase 4.2 sofort gezeigt.
 
+### Phase 5 — Compose-Yaml-ENV-Forwarding-Detour (~20:45)
+
+Production-Deploy-Stop: Container startete nicht trotz korrekt gesetzter .env-Vars. Root cause: docker-compose.yml listet Runtime-ENVs explizit, TELEGRAM_USE_POLLING und RUNTIME_PUBLIC_URL fehlten im environment:-Block. .env wird nur für `${VAR}`-Substitution genutzt, nicht für volle Forwarding.
+
+Fix: Compose-Yaml ergänzt + .env.example ergänzt + DEPLOYMENT-§10.1 Hinweis. Single-Commit-Fix, Production-Deploy fortsetzbar.
+
+**Lesson Tag 26 #12: docker-compose explicit-env-listing-Pattern** — Self-Hoster-Doku muss klar machen wo Vars gelistet sein müssen (`.env` UND `compose.yml`). Sonst nicht-debugbar für externe User.
+
+Phase-1.1-Diagnose 12. Mal bestätigt: Compose-Yaml früher lesen hätte den Stop vermieden.
+
 ### Plan Tag 27
 
 **Vormittag (frisch nach Schlafen):**
