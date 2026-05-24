@@ -1556,9 +1556,21 @@ OAuth-Flow analog OpenClaw (PKCE):
 - OpenAI offizielle Codex-Auth-Doku: https://developers.openai.com/codex/auth
 - OpenClaw OAuth-Doku (PKCE-Flow-Details): https://docs.openclaw.ai/concepts/oauth
 
-**Größe:** L (4-5 Bautage — PKCE-Client + Refresh-Service + Settings-UI + ToS-Disclaimer-Flow + Smoke). **Priorität:** later. **Spur:** Pre-Launch-Phase B.
+**Größe:** L (4-5 Bautage — PKCE-Client + Refresh-Service + Settings-UI + ToS-Disclaimer-Flow + Smoke). **Priorität:** should. **Spur:** Pre-Launch-Phase A Block 5.
 
 **Status-Notiz Tag 25:** Recherche-Session zu Subscription-Auth-Patterns. OpenClaw nutzt diesen Pattern produktiv, dokumentiert PKCE-Flow präzise. Implementations-Pfad konkret skizziert, aber Pattern hat ToS-Grauzone-Charakter. Bau nicht launch-kritisch, Wartemodus bis Phase B + Nutzer-Demand.
+
+**Status-Notiz Tag 26 (25. Mai 2026):** Vorgezogen von Phase B nach Phase A Block 5. Bau-Reihenfolge `#130 → #131 → #113 → #112 → #114 → #115`. Launch-Window von KW 29-30 auf KW 31-32 angepasst (1-2 Wochen Verschiebung).
+
+**Begründung Vorziehung:**
+- Owner-Persona-Validierung: Power-User mit OpenAI + Claude beide via Subscription (Max-Plan, ChatGPT Plus). OAuth ist Kern-UX-Verbesserung, nicht Convenience (1000+ Messages/Monat via API-Key kosten substantiell mehr als Subscription)
+- Wettbewerbs-Positionierung: OpenClaw + Hermes haben OAuth, "BYOK-only" wäre HN-Feedback-Schwäche im Launch-Day
+- OpenAI dokumentiert + supported 3rd-Party-OAuth offiziell (developers.openai.com/codex/auth), nicht Reverse-Engineering wie befürchtet
+- Launch-Toleranz akzeptiert: KW 31-32 ist immer noch innerhalb sinnvollem Launch-Fenster
+
+**Twin-Lab-Default bleibt BYOK** (API-Key). OAuth ist Opt-in mit ToS-Disclaimer: "OpenAI hat das nicht explicit für 3rd-Party-Apps dokumentiert, kann gekappt werden."
+
+**Phase-A-Status:** `should`-Item, neue Spur Pre-Launch-Phase A Block 5.
 
 ### 132. Anthropic Subscription-Auth (Claude-CLI-Reuse-Pattern)
 
@@ -1596,6 +1608,16 @@ Claude-CLI-Reuse-Pattern (analog OpenClaw):
 **Größe:** M (2-3 Bautage — CLI-Detection + Credential-Mirror + Settings-UI + Status-Monitoring). **Priorität:** later. **Spur:** Pre-Launch-Phase B.
 
 **Status-Notiz Tag 25:** Pattern-Symmetrie zu #131. Anthropic-Stance weniger klar als OpenAI-Codex-OAuth-Stance — laut OpenClaw-Doku wieder erlaubt, aber nicht öffentlich publiziert. Bau erst sinnvoll wenn Anthropic offizielle Position publiziert.
+
+**Status-Notiz Tag 26 (25. Mai 2026):** Anthropic-Stance hat sich Tag 25-26 geklärt: kein 3rd-Party-OAuth mehr, nur Token-Kauf-Pattern. CLI-Reuse-Pattern (Claude Code via lokale CLI-Authentifizierung wiederverwenden) ist damit obsolet.
+
+**Konzept-Update-Pflicht vor Bau:** Item bleibt Phase B, aber Implementation-Pfad muss neu konzipiert werden:
+- Alt: Claude-CLI-Subscription-Reuse via lokales Auth-File
+- Neu: Token-Buying-Surface — Twin-Lab vermittelt API-Token-Käufe direkt über Anthropic-API, Owner zahlt nicht für Subscription separat
+
+**Recherche-Session vor Phase-B-Bau Pflicht:** Anthropic-aktuellen Stance verifizieren (Tag-25-Mai-26-Snapshot kann morgen schon anders sein), Token-Buying-API-Surface dokumentieren, Pricing-Modell verstehen (Markup oder pass-through).
+
+**Bleibt:** Größe M, Priorität `later`, Spur Pre-Launch-Phase B.
 
 ### 133. Cross-Channel-Mental-Model-Doku
 
