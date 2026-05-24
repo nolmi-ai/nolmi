@@ -15,7 +15,7 @@ Strategischer Rahmen:
 - **Bau-Position in Block 5** — zuerst, vor #112-#115. Hero-GIF in #113 muss Telegram zeigen, deshalb Code-First-Reihenfolge.
 - **Stufe-1-Scope** — Owner-Only-Bridge: Owner verbindet eigenen Telegram-Account via `/start <pairing-code>` zum eigenen Twin. Twin antwortet mit voller Memory-Tiefe und Persona. Single-User pro Twin, kein External-Sender-Auth-Flow. Stufe 2 (External Senders mit Pre-Approval) und Stufe 3 (Voll-Multi-Twin-Router) bleiben Phase B (ROADMAP Phase 4.1 Vollausbau).
 
-## Setzungen (sieben Achsen)
+## Setzungen (acht Achsen)
 
 ### a) Bot-API-Library: Telegraf
 
@@ -111,6 +111,66 @@ Response: 200 OK (Telegram verlangt schnelle 200, sonst Retry)
 2. Twin antwortet mit Detail aus Memory (das ursprünglich aus Web-Chat stammte)
 3. Owner wechselt zu Web-UI, Conversation-View zeigt Telegram-Messages und neue Web-Messages in einem Thread
 4. Hero-GIF-Punch: „Same twin, web + Telegram, one continuous conversation."
+
+### h) Persistent-Pairing-Prinzip (für alle Channel-Adapter)
+
+**Setzung Tag 26 (25. Mai 2026):** Owner-Pairing zwischen Twin und Channel-Bot ist **dauerhaft persistent bis explicit Disconnect**.
+
+#### Begründung
+
+Pairing ist Owner-Trust-Statement, nicht Session-State. Container-Restart, Token-Rotation, oder Re-Konfiguration sollte den Trust nicht versehentlich invalidieren. Nur expliziter Owner-Aktion (Unpair-Button) oder Config-Delete (cascadiert) sollte Pairing brechen.
+
+#### Drei Implementations-Konsequenzen für Phase 4 Settings-UI
+
+**1. PUT /config preserve-paired**
+
+API-Schema lehnt `paired_owner_*`-Felder im Update explicit ab. Nur Token + Username + ähnliche nicht-Pairing-Felder sind mutable via PUT-Endpoint.
+
+```typescript
+// Schema-Pattern (im Bau-Briefing für Phase 4 detailliert)
+const UpdateConfigSchema = z.object({
+  bot_token: z.string().optional(),
+  bot_username: z.string().optional(),
+  // paired_owner_telegram_user_id NICHT in Schema → wird im Body ignoriert
+});
+```
+
+**2. Token-Rotation triggert setWebhook neu, bewahrt Pairing**
+
+Owner kann Bot-Token rotieren (z.B. nach BotFather-Compromise) ohne Re-Pairing. Helper `rotateWebhook()` updated Token + Webhook-Secret in Telegram, behält `paired_owner_telegram_user_id` unverändert.
+
+Ablauf:
+1. PUT /config mit neuem Token
+2. Backend updated `bot_token_encrypted` + generiert neuen `webhook_secret`
+3. `bot.telegram.setWebhook(url, { secret_token: newSecret })` triggert Telegram-API-Update
+4. `paired_owner_telegram_user_id` bleibt unangetastet
+5. Owner kann ohne Re-Pairing weiter chatten
+
+**3. Explicit Unpair-Button in Settings-UI + neuer Endpoint**
+
+Dedizierter `POST /twins/:handle/telegram/unpair`-Endpoint. Setzt `paired_owner_telegram_user_id` auf NULL, behält Bot-Config + Pairing-Code-Generation-Capability für Re-Pair. UI-Button mit Bestätigungs-Dialog separat von „Delete Config".
+
+Use-Case: Owner verliert Zugang zu seinem Telegram-Account (Phone-Verlust, Hack, etc.) und will Pairing zurücksetzen ohne Bot-Token + Webhook-Setup neu zu machen.
+
+#### Architektur-Prinzip für künftige Adapter
+
+**Gilt für alle Channel-Adapter** (Telegram heute, WhatsApp #4.2, Discord, Slack, Matrix). Drei Items im jeweiligen Adapter-Bau müssen verifiziert werden:
+
+- PUT /config preserve-paired (Schema-Validation lehnt paired-Felder ab)
+- Token/Credential-Rotation behält Pairing
+- Explicit Unpair-Endpoint + UI-Surface mit Bestätigungs-Dialog
+
+Das ist nicht nur Convenience — Owner-Trust-Model bei Twin-Lab steht und fällt mit Pairing-Stabilität. Ein User, der nach Token-Rotation plötzlich „neu pairen" muss, würde Pairing nicht als „dauerhaft" wahrnehmen.
+
+#### Status-Notiz Tag 26
+
+Heute schon korrekt implementiert in Phase-1-Code (siehe `apps/runtime/src/telegram/configs-repo.ts` `updateToken()`-Helper + `eagerLoadAllBots()` in Boot-Hook). Phase 4 Settings-UI muss die drei Konsequenzen oben explicit umsetzen — Briefing folgt.
+
+**Pending für Phase 4:**
+- Schema-Validation `UpdateConfigSchema` ohne paired-Felder
+- Helper `rotateWebhook()` in `bot-registry.ts`
+- API-Route `POST /twins/:handle/telegram/unpair`
+- UI: Settings-UI Unpair-Button mit Bestätigungs-Dialog
 
 ## Bau-Sequenz (5 Phasen, geschätzt ~5-5.5 Bautage)
 
