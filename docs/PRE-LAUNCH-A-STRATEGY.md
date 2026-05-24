@@ -156,19 +156,25 @@ BACKLOG.md; Items mit `(neu)` werden im Folge-Briefing dort angelegt.
 - **Public-Repo-Hygiene:** README mit klarer Pitch + Quick-Start,
   LICENSE (MIT? Apache 2.0?), CONTRIBUTING.md, Issue-Templates.
 
-### Block 5 — Launch-Vorbereitung (~11–12 Tage)
+### Block 5 — Launch-Vorbereitung (~15–17 Tage, Stand Tag 26)
 
-**Neue Items, im Folge-Briefing anzulegen:**
+**Items, in Bau-Reihenfolge `#130 → #131 → #113 → #112 → #114 → #115`:**
 
 - **#130 Telegram-Adapter Stufe 1** (Owner-Only-Bridge) — Wettbewerbs-Pivot
-  Tag 25, vorgezogen aus ROADMAP Phase 4.1. Siehe `docs/BLOCK-5-STRATEGY.md`.
-- **Landing-Page** (minimal, README-style ok): What is Twin-Lab,
-  Differenzierungs-Pitch, Quick-Start-Demo.
-- **Demo-Video oder schriftlicher Walkthrough** (5–10 Min).
-- **Launch-Post-Drafts** (Twitter-Thread, Hacker-News-Submission).
-- **Launch-Timing-Plan** (Wochentag, Uhrzeit, Reichweiten-Strategie).
+  Tag 25, vorgezogen aus ROADMAP Phase 4.1. Phase 3 von 5 durch Tag 26 (Commit `7c74a33`). Phase 4 (Settings-UI) + Phase 5 (Production-Deploy) folgen. Siehe `docs/BLOCK-5-STRATEGY.md` + `docs/130-TELEGRAM-STRATEGY.md`.
+- **#131 OpenAI Subscription-OAuth** (Beta, Codex-Pattern) — Vorgezogen
+  Tag 26 von Phase B (Begründung: Owner-Persona-Validierung, Wettbewerbs-Parität, OpenAI dokumentiert + supported 3rd-Party-OAuth offiziell). 4-5 Bautage. Twin-Lab-Default bleibt BYOK, OAuth ist Opt-in mit ToS-Disclaimer.
+- **#112 Landing-Page** (minimal, README-style ok): What is Twin-Lab,
+  Differenzierungs-Pitch, Quick-Start-Demo. Section zu Telegram-Integration + OAuth-Pattern.
+- **#113 Demo-Video oder schriftlicher Walkthrough** (5–10 Min). Hero-GIF
+  zeigt Multi-Twin + Memory + Persona, plus Cross-Channel (Telegram ↔ Web) + OAuth-Setup als Differenzierungs-Punkte.
+- **#114 Launch-Post-Drafts** (Twitter-Thread, Hacker-News-Submission).
+- **#115 Launch-Timing-Plan** (Wochentag, Uhrzeit, Reichweiten-Strategie).
+  Launch-Window angepasst Tag 26 von KW 29-30 auf KW 31-32 (4-5 Bautage extra für #131 Vorziehung).
 
 ## Pflicht-Aufwand-Summe
+
+**Stand Tag 26 nach #131-Vorziehung:**
 
 | Block | Tage |
 |---|---|
@@ -176,12 +182,16 @@ BACKLOG.md; Items mit `(neu)` werden im Folge-Briefing dort angelegt.
 | Block 2 — Architektur-Follow-ups | 5–8 |
 | Block 3 — Schmaler Computer-Use-Hook | 2–3 |
 | Block 4 — Self-Hosting-Polish | 5–7 |
-| Block 5 — Launch-Vorbereitung | 11–12 |
-| **Total** | **43–55 Tage Pflicht** |
+| Block 5 — Launch-Vorbereitung | 15–17 |
+| **Total** | **47–60 Tage Pflicht** |
 
-Bei **56 Tagen verfügbar** (8 Wochen × 7 Tage; in der Praxis mit
-Wochenenden-Mix-Use realistisch, nach Tag-25-Pivot von 6 auf 8 Wochen)
-ist das **knapp, aber machbar bei strikter Scope-Disziplin**.
+Bei **70 Tagen verfügbar** (10 Wochen × 7 Tage, Tag-26-Update: Launch-Window von KW 29-30 auf KW 31-32 verschoben für #131 Vorziehung) ist das **mit 10-23 Tagen Buffer machbar bei realistischer Scope-Disziplin**.
+
+**Tag-26-Änderung gegenüber Tag-25-Setzung:**
+- Block 5: 11–12 → 15–17 Tage (+4-5 für #131 OpenAI-OAuth)
+- Total: 43-55 → 47-60 Tage
+- Verfügbare Zeit: 56 → 70 Tage (Launch-Window-Verschiebung)
+- Buffer: 1-13 → 10-23 Tage
 
 ## Anti-Goals für Pre-Launch-Phase A
 
@@ -193,6 +203,8 @@ ist das **knapp, aber machbar bei strikter Scope-Disziplin**.
   Voll-Multi-Twin-Router) — Phase B (ROADMAP Phase 4.1 Vollausbau).
   Anmerkung: Stufe 1 (Owner-Only-Bridge) ist als #130 in Phase A
   vorgezogen (Wettbewerbs-Pivot Tag 25).
+- **OpenAI Subscription-OAuth (#131)** — Tag-26-Update: Vorgezogen aus Phase B nach Phase A Block 5 (siehe `docs/BACKLOG.md` Status-Notiz Tag 26). Owner-Persona-Validierung + Wettbewerbs-Positionierung + OpenAI-Doku-Stand triangulierten Vorziehung. Twin-Lab-Default bleibt BYOK, OAuth ist Opt-in mit ToS-Disclaimer.
+- **Anthropic Subscription-Auth (#132)** — Bleibt Phase B (Tag-26-Stance-Update: kein 3rd-Party-OAuth mehr, nur Token-Kauf-Pattern. Konzept-Update-Pflicht vor Phase-B-Bau, siehe `docs/BACKLOG.md` Status-Notiz Tag 26).
 - **Phase 3.6 formell** mit `claude_computer_use_agent` — Phase B
   oder später
 - **Mobile-App** — langfristig, UX-Stufe 3
