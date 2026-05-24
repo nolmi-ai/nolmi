@@ -123,6 +123,12 @@ Diese drei wären in Production unschönes Verhalten geworden (Code-Blocks ohne 
 
 **7. STAND.md ab Tag 26 doppelt: Project Knowledge + `docs/STAND.md` im Repo:** Stand-Recovery bei Chat-Window-Wechsel + git-History für Stand-Verläufe. Doppel-Edit-Disziplin: bei Tag-Closure beide updaten, bei Konflikt gewinnt Repo (authoritative).
 
+**8. Telegram-Long-Polling-Backlog-Replay.** Bei Manual-Smoke Phase 4.1 wurde der Bot zunächst ohne `TELEGRAM_USE_POLLING=true` gestartet — Pairing-Code-`/start`-Messages kamen nicht an. Nach Polling-Aktivierung wurden die Updates retroaktiv aus dem Telegram-Server-Backlog nachgeliefert. Update-Acknowledgement passiert beim ersten Polling-Roundtrip nach Aktivierung, nicht zum Zeitpunkt des `/start`-Sends. Praktische Konsequenz: Smoke-Manual ohne explizite Polling-Mode-Check produzierte 5 Minuten Confusion, dann „magic working" Effekt.
+
+**9. Keyboard-Nav ohne Ref-Map via DOM-API.** Tabs-Component (Phase 4.2) nutzt `closest('[role="tablist"]').querySelectorAll('[role="tab"]:not([disabled])')` statt expliziter Ref-Map für Tab-Reihenfolge. Vorteil: keine useRef-Map, keine Tab-Registry, kein Cleanup auf Unmount, plus Sub-Tabs verschachtelt funktionieren automatisch ohne Bleed (jeder TabList scoped sich selbst via closest()). Pattern-Win für Compound-Components mit Keyboard-Navigation.
+
+**10. Phase-1.1-Diagnose-Wert 11. Mal bestätigt.** Vier Phase-1.1-Sessions in Phase 4 (4.1, 4.2-Initial, 4.2-Refactor, 4.3, 4.4), jede mit substantiellen Realitäts-Korrekturen gegen Briefing-Annahmen: Backend-§h-Items 3/4 schon konform, text-text statt text-foreground, full-border statt border-l-2, Components schon extrahiert, paired_at-Schema fehlt, Modal-Pattern-Verifikation. Ohne Diagnose-Disziplin wären die Phase-4-Sub-Phasen alle 50-100% länger gewesen. Phase 4 Net-Aufwand ~3.5h statt geschätzter 7-9h.
+
 ### Persistent-Pairing-Setzung für Phase 4
 
 Owner-Pairing zwischen Twin und Channel-Adapter (Telegram, künftig WhatsApp/Discord) ist **dauerhaft persistent bis explicit Disconnect**. Drei Implementations-Konsequenzen für Phase 4 Settings-UI:
@@ -189,6 +195,95 @@ Diese vier Doku-Updates folgen Tag 26 nach STAND-Closure als separate Doku-Texte
 Phase 3 ist die substantiellste Phase von #130 mit 2725 Insertions in einem Commit — größer als Phase 1 (858) + Phase 2 (1403) zusammen. Drei Scope-Erweiterungen (Channel-Badge + Markdown + Persistent-Pairing-Setzung als Architektur-Add) verdoppelten den ursprünglich geplanten Phase-3-Scope. Manual-Smoke deckte zwei substantielle UX-Korrekturen auf (Channel-Badge v1→v2, Markdown-Rendering fehlte komplett). Ohne diese Manual-Smoke-Catches wäre Production-Deploy in Phase 5 unprofessionell geworden.
 
 OpenAI-OAuth-Vorziehung ist die wichtigste Roadmap-Entscheidung Tag 26 — verschiebt Launch-Window um 1-2 Wochen, aber positioniert Twin-Lab wettbewerbs-stark und matched Owner-Persona-Realität.
+
+### Nachmittag/Abend — Phase 4 komplett zu (~14:00-19:30)
+
+Phase 4 von #130 wurde an einem Nachmittag/Abend durchgezogen — vier Sub-Phasen, sechs Commits. Initial-Schätzung war 7-9 Stunden ab 14:30, Realität war ~3.5h dank Phase-1.1-Diagnose-Disziplin (Components schon extrahiert, Backend-Erweiterungen 3 von 4 schon konform).
+
+**Phase 4 Sub-Phasen:**
+
+| Phase | Was | Stand |
+|---|---|---|
+| 4.1 Backend §h | POST /unpair + .strict() Schema + rotateWebhook-Alias | ✅ Commit `1c91f04`, Smoke 12/12 + Manual 4/4 grün |
+| 4.2 Tabs-Component | Compound-API Shared Component für Web-UI | ✅ Commit `d4c231f`, Test-Page `37d0a27` |
+| Sidebar-Pivot | Tabs von Horizontal-Top zu Vertical-Sidebar | ✅ Commit `ef8be75` |
+| 4.3 Settings-Restructuring | 8 Bereiche in 7 Tabs + Channels-Sub-Sidebar | ✅ Commit `402a1ae` |
+| 4.4 Telegram-Settings-UI | TelegramChannelTab 5 Modi (557 Z) | ✅ Commit `97b2ce7`, Manual-Smoke 5/5 Pflicht |
+| Backlog | #134/#135/#136 angelegt | ✅ Commit `13d34ea` |
+
+**Tag-26-Bilanz aktualisiert — 12 Commits:**
+
+Vormittag-Welle (Tag-26-Strategie + Doku-Welle):
+- `7c74a33` #130 Phase 3 Sammel-Commit (17 Files, 2725 Insertions)
+- `d3c921f` STAND.md Tag-26-Vormittag-Closure
+- `4bd8de8` BACKLOG: #131 vorgezogen + #132 + #133
+- `4e538a0` BLOCK-5-STRATEGY: Bau-Reihenfolge + Launch-Window
+- `a25f41d` PRE-LAUNCH-A-STRATEGY: Block-5-Scope + Anti-Goals
+- `9d282a5` 130-TELEGRAM-STRATEGY: §h Persistent-Pairing-Prinzip
+
+Nachmittag/Abend-Welle (Phase 4):
+- `1c91f04` Phase 4.1 Backend §h
+- `d4c231f` Phase 4.2 Tabs-Component
+- `37d0a27` Tabs Manual-Render-Test-Page
+- `ef8be75` Tabs Sidebar-Refactor
+- `402a1ae` Phase 4.3 Settings-Restructuring
+- `97b2ce7` Phase 4.4 Telegram-Settings-UI
+- `13d34ea` Backlog #134/#135/#136
+
+**Sidebar-Pivot Phase 4.2:**
+
+Phase 4.2 initial mit Horizontal-Top-Tabs gebaut, Test-Page-Verifikation grün. Aber während Closure-Phase: Vorschlag, Tabs als Sidebar-Layout matched Twin-Lab Chat-UI besser. Begründung:
+- 7 Top-Level-Tabs + verschachtelte Sub-Tabs (Channels) — Horizontal wird unübersichtlich
+- Mental-Model-Konsistenz mit existing Chat-Page-Layout (linke Sidebar)
+- Wettbewerbs-Aesthetik-Match (Self-Hosted-Apps nutzen Sidebar-Layout)
+
+Refactor: 33 Insertions / 17 Deletions, Component-API stabil. Test-Page rendert automatisch mit neuem Layout.
+
+Phase-1.1-Diagnose-Catch beim Refactor: Briefing-Setzung war `border-l-2 border-accent` (Material-Design-Style). Chat-Sidebar nutzt aber full `border-accent` + `bg-bg`. Pattern-Konsistenz zu existing Twin-Lab-Aesthetik schlägt naive shadcn-Convention.
+
+**Konfig-Tab Atomic-Submit-Coupling (Phase 4.3):**
+
+Settings-Page hatte 8 Bereiche, davon Persona/LLM/Presets als gekoppeltes Trio mit shared dirty-State + atomic Submit (PUT /full-config). Strategy-Entscheidung: Konfig-Tab aggregiert die drei mit existing Coupling-Pattern, kein Refactor jetzt. Per-Tab-Submit-Refactor als #134 Backlog-Item für später.
+
+**Phase-1.1-Diagnose-Catch Phase 4.3:** Persona/LLM/Presets sind bereits in eigene Components extrahiert (`<PersonaEditSection>`, `<LlmEditSection>`, `<PresetsEditSection>`) — Migration trivial. Vorab-Schätzung war M (Refactor), Realität war S (Migration ohne Code-Refactor).
+
+**Phase 4.4 — TelegramChannelTab 5 Modi:**
+
+`apps/web/components/TelegramChannelTab.tsx` (557 Z, neu): Empty / Configured-Unpaired / Configured-Paired / Loading / Error State-Switch. Auto-Chain Empty → Unpaired (POST /config → POST /pairing-code → fetch). Token-Inline-Edit statt drittes Modal. Zwei Confirmation-Modals (Unpair + Delete).
+
+**Phase-1.1-Diagnose-Catch Phase 4.4:** paired_at + last_message_at-Schema-Felder fehlen im Backend. paired_at braucht Migration → Out-of-Scope. Status-Felder weggelassen, #136 Backlog-Item für Polish-Welle. Pragmatic-Win.
+
+**Backlog-Items aus Phase 4:**
+
+| # | Titel | Größe | Priorität | Spur |
+|---|---|---|---|---|
+| #134 | Settings Per-Tab-Submit-Refactor | S-M | could | Phase B / Polish |
+| #135 | Account-Settings UI (Email/Password) | S | should | Phase A Block 4 / Phase B |
+| #136 | Telegram-Config Status-Felder (paired_at + last_message_at) | S | could | Polish nach Phase 5 |
+
+**Status #130 (final Tag 26):**
+
+- Phase 1 ✅ Backend-Foundation
+- Phase 2 ✅ Telegraf-Service + Pairing
+- Phase 3 ✅ Message-Routing + LLM + API + Channel-Badge + Markdown
+- Phase 4 ✅ Settings-UI komplett (4 Sub-Phasen + Sidebar-Pivot)
+- Phase 5 ⏳ Production-Deploy + Documentation
+
+#130 ist 80% durch. Phase 5 ist isolierter Deploy-Bau, vermutlich 2-3h.
+
+### Plan Tag 27
+
+**Vormittag (frisch nach Schlafen):**
+1. Polish-Pfade Phase 4.4 (~30 Min): Copy-Button-Test, Token-Inline-Edit-§h-Test, Unpair-Roundtrip, Refresh-Code, Telegram-Deeplink-Click
+2. Phase 5 Strategy-Session (~30-45 Min): #130 Production-Deploy (Webhook-Mode auf srv1046432, DEPLOYMENT.md-Ergänzung)
+3. Phase 5 Bau (~2-3h): Production-Deploy mit Webhook-URL-Setup, Manual-Smoke gegen Production
+
+**Falls Zeit:**
+- #131 OpenAI-OAuth-Strategy-Session (vorgezogen aus Phase B, siehe BLOCK-5-STRATEGY)
+- DEPLOYMENT.md Tag-26-Lessons-Welle (Telegram-Polling-Backlog-Replay als Production-Smoke-Hinweis)
+- Phase 5 STAND-Update Tag 27
+
+**Token-Rotation-Reminder:** Bot-Token + Session-Cookie aus Tag-26-Manual-Smoke sind im Chat-Verlauf sichtbar geworden. Vor Production-Deploy: BotFather `/revoke` + neuer Token, Twin-Lab-Session-Rotation via Re-Login.
 
 ---
 
