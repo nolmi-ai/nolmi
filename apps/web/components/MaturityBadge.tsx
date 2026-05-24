@@ -53,7 +53,11 @@ export function MaturityBadge({ twinHandle }: Props) {
   if (error || !data) return null;
 
   const progress = data.progressToNext;
-  const settingsHref = `/settings?twin=${encodeURIComponent(twinHandle)}#twin-reife`;
+  // #130 Phase 4.3: Settings-Page nutzt jetzt Tab-URLs (`?tab=reife`)
+  // statt Anchor-Scroll (`#twin-reife`). Settings-Mount-Hook übersetzt
+  // den alten Anchor als Bookmark-Backward-Compat, neue Links benutzen
+  // direkt das Tab-Param.
+  const settingsHref = `/settings?twin=${encodeURIComponent(twinHandle)}&tab=reife`;
   const tooltip =
     progress === null
       ? `Stufe ${data.currentLabel} (höchste Stufe). Detail in Settings.`

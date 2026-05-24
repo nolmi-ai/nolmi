@@ -13,6 +13,7 @@ import { PageContainer } from "../../components/PageContainer";
 import { MaturityDetail } from "../../components/MaturityDetail";
 import { SkillEditorModal } from "../../components/SkillEditorModal";
 import { McpServerAddModal } from "../../components/McpServerAddModal";
+import { Tabs, TabList, Tab, TabPanel } from "../../components/Tabs";
 import { toast } from "../../lib/toast";
 
 const RUNTIME_URL = process.env.NEXT_PUBLIC_RUNTIME_URL ?? "http://localhost:4000";
@@ -673,9 +674,25 @@ function SettingsInner() {
     }
   }
 
+  // #130 Phase 4.3: Bookmark-Backward-Compat für #twin-reife-Anchor.
+  // Vor 4.3 verlinkte MaturityBadge auf `/settings?twin=…#twin-reife`,
+  // der ScrollMargin im Section-Wrapper machte das funktional. Mit
+  // Tab-Sidebar ist der Anchor visuell tot — wir migrieren beim Mount
+  // zu `?tab=reife`. Nur greifen, wenn `tab` nicht explicit gesetzt
+  // ist (User-Intent „direkt zu Tab X" gewinnt).
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    if (window.location.hash !== "#twin-reife") return;
+    if (searchParams.get("tab")) return;
+    const params = new URLSearchParams(searchParams.toString());
+    params.set("tab", "reife");
+    router.replace(`/settings?${params.toString()}`);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   return (
-    <PageContainer className="space-y-8">
-      <div className="flex items-baseline gap-3">
+    <PageContainer>
+      <div className="flex items-baseline gap-3 mb-6">
         <h1 className="text-xl font-semibold text-text">Settings</h1>
         {selectedHandle && (
           <span className="text-xs text-muted font-mono">{selectedHandle}</span>
@@ -683,12 +700,29 @@ function SettingsInner() {
       </div>
 
       {error && (
-        <div className="text-xs text-warn border border-warn rounded px-3 py-2">
+        <div className="text-xs text-warn border border-warn rounded px-3 py-2 mb-6">
           {error}
         </div>
       )}
 
-      <Section title="Twin-Profil">
+      {/* #130 Phase 4.3: Tab-Sidebar-Layout statt long-scroll Section-Stack.
+          State-Management bleibt zentral in SettingsInner — Tabs sind nur
+          Visual-Layer für die existing Bereiche. Konfig-Tab aggregiert
+          Persona+LLM+Presets mit atomic-Submit (Per-Tab-Submit-Refactor
+          als #134 Backlog). */}
+      <Tabs defaultTab="profil" persistInUrl paramName="tab">
+        <TabList>
+          <Tab id="profil">Profil</Tab>
+          <Tab id="reife">Reife</Tab>
+          <Tab id="vertraute">Vertraute</Tab>
+          <Tab id="mcp-servers">MCP-Server</Tab>
+          <Tab id="skills">Skills</Tab>
+          <Tab id="konfiguration">Konfiguration</Tab>
+          <Tab id="channels">Channels</Tab>
+        </TabList>
+
+        <TabPanel id="profil">
+          <Section title="Twin-Profil">
         {profileLoading ? (
           <div className="text-sm text-muted">Lade Twin-Profil…</div>
         ) : profileError ? (
@@ -707,7 +741,9 @@ function SettingsInner() {
           <ProfileBody profile={profile} />
         ) : null}
       </Section>
+        </TabPanel>
 
+        <TabPanel id="reife">
       <Section id="twin-reife" title="Twin-Reife">
         {selectedHandle ? (
           <MaturityDetail twinHandle={selectedHandle} />
@@ -715,7 +751,9 @@ function SettingsInner() {
           <div className="text-sm text-muted">Kein Twin ausgewählt.</div>
         )}
       </Section>
+        </TabPanel>
 
+        <TabPanel id="vertraute">
       <Section title={`Vertraute Twins (${trusts.length})`}>
         <p className="text-sm text-muted leading-relaxed mb-4">
           Twins die du in dieser Liste hast können dir direkt anfragen, ohne dass Approval nötig ist. Owner-Direkt-Chats laufen ohnehin ohne Approval.
@@ -803,7 +841,9 @@ function SettingsInner() {
           )}
         </form>
       </Section>
+        </TabPanel>
 
+        <TabPanel id="mcp-servers">
       <Section title={`MCP-Server (${mcpServers.length})`}>
         <div className="flex items-start justify-between gap-3 mb-4">
           <p className="text-sm text-muted leading-relaxed flex-1">
@@ -914,7 +954,9 @@ function SettingsInner() {
           </ul>
         )}
       </Section>
+        </TabPanel>
 
+        <TabPanel id="skills">
       <Section title={`Skills (${skills.length})`}>
         <div className="flex items-start justify-between gap-3 mb-4">
           <p className="text-sm text-muted leading-relaxed flex-1">
@@ -1010,13 +1052,18 @@ function SettingsInner() {
           </div>
         )}
       </Section>
+        </TabPanel>
 
+        <TabPanel id="konfiguration">
       {/* #110 Phase 2B Commit 11B: Persona / LLM / Presets als Edit-Sections.
        * Daten kommen aus GET /twins/:handle/settings-data, Submit geht
        * atomar an PATCH /twins/:handle/full-config (alle drei Blocks in
        * einem Call). Form-Code self-contained (β-Approach) — Wizard-
        * Components leben in /onboarding/page.tsx, hier nicht importiert,
-       * Re-Use ist als #124 Phase-2C-Kandidat im Backlog. */}
+       * Re-Use ist als #124 Phase-2C-Kandidat im Backlog.
+       *
+       * #130 Phase 4.3: gemeinsam in TabPanel id="konfiguration", atomic-
+       * Submit unverändert. Per-Tab-Submit-Refactor als #134 Backlog. */}
       <PersonaEditSection
         settingsData={settingsData}
         personaForm={personaForm}
@@ -1064,6 +1111,42 @@ function SettingsInner() {
           </button>
         </div>
       )}
+        </TabPanel>
+
+        <TabPanel id="channels">
+          {/* #130 Phase 4.3: Channels-Sub-Tab-Skelett. Phase 4.4 füllt
+              den Telegram-Sub-Tab mit echtem Bot-Config-UI (Empty/
+              Configured-Unpaired/Paired-State-Modi). WhatsApp + Discord
+              bleiben disabled bis ROADMAP Phase 4.2 / 4.3. */}
+          <Tabs defaultTab="telegram" persistInUrl paramName="channel">
+            <TabList>
+              <Tab id="telegram">Telegram</Tab>
+              <Tab id="whatsapp" disabled>WhatsApp (folgt)</Tab>
+              <Tab id="discord" disabled>Discord (folgt)</Tab>
+            </TabList>
+
+            <TabPanel id="telegram">
+              <Section title="Telegram-Bot">
+                <p className="text-muted text-sm">
+                  Telegram-Setup folgt in Phase 4.4.
+                </p>
+              </Section>
+            </TabPanel>
+
+            <TabPanel id="whatsapp">
+              <Section title="WhatsApp">
+                <p className="text-muted text-sm">Coming soon.</p>
+              </Section>
+            </TabPanel>
+
+            <TabPanel id="discord">
+              <Section title="Discord">
+                <p className="text-muted text-sm">Coming soon.</p>
+              </Section>
+            </TabPanel>
+          </Tabs>
+        </TabPanel>
+      </Tabs>
 
       {selectedHandle && (
         <>
