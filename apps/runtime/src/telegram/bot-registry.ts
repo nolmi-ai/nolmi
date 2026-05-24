@@ -275,6 +275,19 @@ export class TelegramBotRegistry {
   }
 
   /**
+   * Alias für `registerWebhook`, der den §h-Token-Rotation-Flow im Caller-
+   * Code explicit macht. Nach `configsRepo.updateToken` (das einen neuen
+   * `webhook_secret` generiert) refresht ein `rotateWebhook`-Call die
+   * Registrierung bei Telegram mit dem neuen Secret. `paired_owner_*`
+   * bleibt unangetastet — Pairing-State gehört nicht zur Token-Rotation.
+   *
+   * Siehe `docs/130-TELEGRAM-STRATEGY.md` §h.
+   */
+  async rotateWebhook(twin_id: string): Promise<void> {
+    return this.registerWebhook(twin_id);
+  }
+
+  /**
    * deleteWebhook bei Telegram aufrufen — von der DELETE-API-Route VOR
    * stopBotForTwin gerufen, damit Telegram keine Updates mehr ans Backend
    * schickt, das gleich verschwindet. Idempotent: wenn kein Bot im Map ist

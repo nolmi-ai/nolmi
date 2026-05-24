@@ -41,13 +41,21 @@ export interface TelegramApiRoutesDeps {
   botRegistry: TelegramBotRegistry;
 }
 
-const TelegramConfigBodySchema = z.object({
-  bot_token: z.string().min(20, "bot_token zu kurz"),
-  bot_username: z
-    .string()
-    .min(3, "bot_username zu kurz")
-    .max(64, "bot_username zu lang"),
-});
+// .strict() = Defense-in-depth gegen §h Persistent-Pairing-Verletzungen.
+// Extra-Felder im Body (z.B. ein versehentlich mitgesendetes
+// `paired_owner_telegram_user_id`) werden als 400 abgelehnt, statt still
+// ignoriert zu werden. Schützt vor UI-Bugs, die das Pairing-State
+// modifizieren wollen — Pairing-Lifecycle gehört ausschließlich
+// PairingService + POST /unpair, nicht der Config-PUT-Pfad.
+const TelegramConfigBodySchema = z
+  .object({
+    bot_token: z.string().min(20, "bot_token zu kurz"),
+    bot_username: z
+      .string()
+      .min(3, "bot_username zu kurz")
+      .max(64, "bot_username zu lang"),
+  })
+  .strict();
 
 /**
  * Verifiziert dass der Token bei Telegram gültig ist und liefert das Bot-
@@ -261,6 +269,48 @@ export function registerTelegramApiRoutes(
       // greift nur bei Twin-Delete in twin_profiles). deleteByTwinId
       // entfernt nur die telegram_configs-Row.
       deps.configsRepo.deleteByTwinId(ctx.entry.twinId);
+
+      return reply.status(204).send();
+    },
+  );
+
+  // ─── POST /unpair — Persistent-Pairing-Prinzip §h (Phase 4) ─────────────
+  //
+  // Setzt `paired_owner_telegram_user_id` auf NULL, behält Bot-Config +
+  // Webhook + Pairing-Code-Generation-Capability. Use-Case: Owner verliert
+  // Zugang zu seinem Telegram-Account und will Pairing zurücksetzen ohne
+  // Bot-Token + Webhook-Setup neu zu machen.
+  //
+  // Im Gegensatz zu DELETE /config: keine Webhook-Deregistrierung, keine
+  // Bot-Stop — der Bot bleibt empfangsbereit für einen frischen `/start
+  // <code>` (eagerLoadAllBots ist channel-, nicht pair-state-gated).
+  app.post<{ Params: { handle: string } }>(
+    "/twins/:handle/telegram/unpair",
+    async (request, reply) => {
+      const ctx = await requireOwner(request, reply, request.params.handle);
+      if (!ctx) return;
+
+      const row = deps.configsRepo.findByTwinId(ctx.entry.twinId);
+      if (!row) {
+        return reply.status(404).send({ error: "Kein Telegram-Bot konfiguriert" });
+      }
+      if (row.paired_owner_telegram_user_id === null) {
+        // Idempotent: schon ungepaired → 204 (kein 409, weil das Ziel-State
+        // erreicht ist). Vereinfacht die UI-Logik (Unpair-Button bleibt
+        // klickbar auch wenn er versehentlich doppelt gedrückt wird).
+        return reply.status(204).send();
+      }
+
+      try {
+        deps.configsRepo.unpair(ctx.entry.twinId);
+      } catch (err) {
+        if (err instanceof TelegramConfigNotFoundError) {
+          return reply.status(404).send({
+            error: "Kein Telegram-Bot konfiguriert",
+          });
+        }
+        throw err;
+      }
 
       return reply.status(204).send();
     },

@@ -603,6 +603,89 @@ async function main(): Promise<void> {
     log(`  ✓ Persistierter Text bleibt Markdown-Original (channel-agnostisch)`);
   }
 
+  // ─── STEP 11: POST /unpair Roundtrip (§h Persistent-Pairing) ────────────
+  // Pre-Condition: STEP 6 hat den Twin mit TEST_TELEGRAM_USER_ID gepaired,
+  // STEPs 7-10 haben den State nicht angefasst. Wir prüfen jetzt, dass
+  // POST /unpair den Pair-State auf NULL setzt, OHNE die Config selbst zu
+  // löschen — Bot-Config bleibt für Re-Pair erhalten.
+  banner("STEP 11 — POST /unpair Roundtrip");
+  const beforeUnpair = configsRepo.findByTwinId(profile.twinId);
+  if (beforeUnpair?.paired_owner_telegram_user_id !== TEST_TELEGRAM_USER_ID) {
+    issues++;
+    log(`  ⚠ Pre-Condition: erwartet gepaired, bekam ${beforeUnpair?.paired_owner_telegram_user_id}`);
+  } else {
+    log(`  ✓ Pre-Condition: gepaired mit user_id=${TEST_TELEGRAM_USER_ID}`);
+  }
+
+  const unpairResp = await app.inject({
+    method: "POST",
+    url: `/twins/${encodeURIComponent(profile.handle)}/telegram/unpair`,
+  });
+  if (unpairResp.statusCode !== 204) {
+    issues++;
+    log(`  ⚠ erwartet 204, bekam ${unpairResp.statusCode} (body: ${unpairResp.body})`);
+  } else {
+    log(`  ✓ POST /unpair → 204 No Content`);
+  }
+
+  const afterUnpair = configsRepo.findByTwinId(profile.twinId);
+  if (!afterUnpair) {
+    issues++;
+    log(`  ⚠ Config nach Unpair gelöscht — sollte erhalten bleiben (§h)`);
+  } else if (afterUnpair.paired_owner_telegram_user_id !== null) {
+    issues++;
+    log(
+      `  ⚠ paired_owner_telegram_user_id nach Unpair: ${afterUnpair.paired_owner_telegram_user_id}`,
+    );
+  } else {
+    log(`  ✓ Config erhalten (Bot-Token + Webhook-Secret intakt), Pair-State auf NULL`);
+  }
+
+  // Idempotenz: zweiter Unpair-Call auf bereits ungepaired-Twin → 204 (kein 409)
+  const unpairAgain = await app.inject({
+    method: "POST",
+    url: `/twins/${encodeURIComponent(profile.handle)}/telegram/unpair`,
+  });
+  if (unpairAgain.statusCode !== 204) {
+    issues++;
+    log(`  ⚠ Idempotenter zweiter Unpair: erwartet 204, bekam ${unpairAgain.statusCode}`);
+  } else {
+    log(`  ✓ Idempotent: zweiter Unpair-Call → 204`);
+  }
+
+  // ─── STEP 12: TelegramConfigBodySchema .strict() rejects Extra-Felder ────
+  // §h-Defense-in-depth: PUT /config darf KEINE paired_owner_*-Felder
+  // akzeptieren. Mit .strict() im Schema lehnt safeParse Extra-Felder vor
+  // dem Token-Validation-Call ab (400 ohne Telegram-API-Touch).
+  banner("STEP 12 — .strict() rejects paired_owner_* im PUT-Body");
+  const putExtra = await app.inject({
+    method: "PUT",
+    url: `/twins/${encodeURIComponent(profile.handle)}/telegram/config`,
+    payload: {
+      bot_token: TEST_BOT_TOKEN,
+      bot_username: TEST_BOT_USERNAME,
+      paired_owner_telegram_user_id: 99999,
+    },
+    headers: { "content-type": "application/json" },
+  });
+  if (putExtra.statusCode !== 400) {
+    issues++;
+    log(`  ⚠ erwartet 400 (Schema-Reject), bekam ${putExtra.statusCode} (body: ${putExtra.body})`);
+  } else {
+    log(`  ✓ PUT mit paired_owner_telegram_user_id → 400 (Schema-Reject)`);
+  }
+
+  // Verify: Config nach Reject unverändert (Defense-in-depth verifizieren)
+  const afterStrict = configsRepo.findByTwinId(profile.twinId);
+  if (afterStrict?.paired_owner_telegram_user_id !== null) {
+    issues++;
+    log(
+      `  ⚠ Config-State nach 400-Reject mutiert: paired=${afterStrict?.paired_owner_telegram_user_id}`,
+    );
+  } else {
+    log(`  ✓ Config-State unverändert nach 400-Reject`);
+  }
+
   // ─── Cleanup ────────────────────────────────────────────────────────────
   banner("Cleanup");
   cleanup(db, profile.twinId);
