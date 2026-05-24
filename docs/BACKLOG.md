@@ -1643,6 +1643,62 @@ Telegram-API erlaubt nur Bot-↔-User-Messages, keine Drittquelle-Injection. Ein
 
 **Status-Notiz Tag 26:** Channel-Badge im Web-UI gebaut in #130 Phase 3 (Commit folgt). Doku-Erweiterung für drei Touch-Points kommt im Rahmen #110-Wizard-Erweiterung (Phase 4 von #130) + #112 Landing + #113 Hero-GIF.
 
+### 134. Settings Per-Tab-Submit-Refactor (Persona/LLM/Presets)
+
+Heute teilen sich Persona + LLM + Presets im „Konfiguration"-Tab einen atomic-Submit-Endpoint (`PATCH /twins/:handle/full-config`). Der gemeinsame `isDirty`-State + Submit-Button bedeutet: bei jedem Tab-Wechsel verliert User die Änderungen in den anderen zwei Sub-Sections (oder muss sie alle drei gleichzeitig speichern).
+
+Per-Tab-Submit wäre saubere Architektur:
+- Drei separate Endpoints (`PATCH /twins/:h/persona`, `PATCH /twins/:h/llm-config`, `PATCH /twins/:h/presets`) — explicit Routes pro Bereich
+- ODER ein PATCH-Subset-Endpoint mit Body-Schema das Partial-Updates erlaubt — pragmatischer, ein Endpoint
+- UI-Konsequenz: jeder Sub-Section eigener Submit-Button, eigener Dirty-State
+
+Phase-4-Scope war zu eng für den Refactor, deshalb in Phase 4.3 pragmatisch das existing Coupling-Pattern beibehalten.
+
+**Größe:** S-M (0.5-1 Bautag, abhängig von Endpoint-Strategy — drei separate Routes vs Partial-PATCH). **Priorität:** could. **Spur:** Pre-Launch-Phase B oder Polish-Welle.
+
+**Status-Notiz Tag 26:** Angelegt aus Phase 4.3 Tag-26-Closure (Commit `402a1ae`). Heutiges Coupling funktional, aber UX-suboptimal — Tab-Switch innerhalb Konfiguration ist nicht "kosten-frei".
+
+### 135. Account-Settings UI (Email/Password-Edit-Surface)
+
+Heute existiert kein UI für Email- oder Password-Edit. Logout läuft über ProfileMenu/TopNav, aber Account-Self-Service (Password ändern, Email aktualisieren) ist nicht möglich.
+
+Für Self-Hosting-Launch potentiell relevant:
+- User vergisst Password → Self-Service-Reset (siehe auch #44 Self-Service-Password-Reset, anderer Aspekt)
+- Email-Wechsel falls User den initial-Email-Account verliert
+- Admin-Pattern wo User die eigenen Account-Settings sehen darf
+
+UI-Verortung:
+- **Option A:** Neuer „Account"-Tab im Settings-Page (Top-Level neben Profil/Reife/...). Pro-Twin-Scoping irrelevant — Account ist user-global, nicht twin-scoped. Tab-Mapping inkonsistent.
+- **Option B:** Eigene Page `/account` als separate User-Settings-Route. Sauberer scope-mäßig (Account = User, nicht Twin).
+
+**Empfehlung Phase-4-Backlog-Anlage:** Option B (eigene Route) wegen scope-Konsistenz.
+
+**Größe:** S (~0.5 Bautag — Page + Form + 1-2 Backend-Endpoints für Email-Change + Password-Change). **Priorität:** should. **Spur:** Pre-Launch-Phase A Block 4 (Self-Hosting-Polish, falls vor Launch nötig) oder Phase B.
+
+**Status-Notiz Tag 26:** Angelegt aus Phase 4 Tag-26-Strategy-Session. Out-of-Scope für #130 Phase 4 (Tab-Restructuring war Channel-Adapter-Fokussiert).
+
+### 136. Telegram-Config Status-Felder (paired_at + last_message_at)
+
+`TelegramChannelTab` Modus „Configured-Paired" zeigt heute nur Bot-Username + ✓-Hint, kein Datum. Wünschenswerter Status:
+
+- **Verbunden seit:** Pairing-Datum (`paired_at`)
+- **Letzte Nachricht:** Datum der jüngsten Inbound-/Outbound-Telegram-Message (`last_message_at`)
+
+Backend-Aufwand:
+- `paired_at` braucht Schema-Migration (neue Spalte `paired_at TEXT NULL` in `telegram_configs`, gesetzt in `consumePairingCode`, gecleart in `unpair`)
+- `last_message_at` via Query auf `telegram_messages.sent_at DESC LIMIT 1 WHERE twin_id=?`. Kein Schema-Add.
+- Beide in `toPublic()` ergänzen, GET /config liefert sie
+
+UI-Aufwand:
+- 2 Zeilen im Configured-Paired-Render in `TelegramChannelTab.tsx`
+- `formatDate()` + `formatRelative()` Helper (existing patterns oder neu)
+
+Pro-Tipp: konsistent zu künftigen Channel-Adaptern (WhatsApp/Discord) — Field-Set sollte Channel-agnostisch sein, falls Phase 4.2 WhatsApp kommt.
+
+**Größe:** S (~0.5 Bautag — Migration + Repo-Add + UI-Render + Manual-Smoke). **Priorität:** could. **Spur:** Polish-Welle nach Phase 5 Production-Deploy.
+
+**Status-Notiz Tag 26:** Angelegt aus Phase 4.4 Phase-1.1-Diagnose (Commit `97b2ce7`). Pragmatisch weggelassen aus Phase 4.4 wegen Müdigkeitslevel + Schema-Migration-Scope-Drift.
+
 ## Pre-Launch-Phase A — Block 4: Self-Hosting-Polish
 
 Items aus dem Strategy-Pivot Tag 18. Block 4 macht das Repo für externe Tech-Affine deploybar. Spec: `docs/PRE-LAUNCH-A-STRATEGY.md`.
