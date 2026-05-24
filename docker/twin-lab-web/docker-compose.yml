@@ -22,6 +22,8 @@ services:
       - TWIN_LAB_DEFAULT_BRIDGE_URL=${TWIN_LAB_DEFAULT_BRIDGE_URL}
       - BRIDGE_REGISTER_TOKEN=${BRIDGE_REGISTER_TOKEN}
       - ACTIVE_PROVIDER=${ACTIVE_PROVIDER:-anthropic}
+      - TELEGRAM_USE_POLLING=${TELEGRAM_USE_POLLING:-false}
+      - RUNTIME_PUBLIC_URL=${RUNTIME_PUBLIC_URL:-}
     labels:
       - "traefik.enable=true"
       - "traefik.docker.network=traefik-proxy"

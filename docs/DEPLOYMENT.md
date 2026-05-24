@@ -1783,6 +1783,8 @@ RUNTIME_PUBLIC_URL=https://runtime.your-domain.com
 
 `RUNTIME_PUBLIC_URL` must be HTTPS — Telegram rejects HTTP webhooks. This is the public URL Telegram will call to deliver bot updates.
 
+**Note about ENV variable forwarding:** `docker-compose.yml` explicitly lists which environment variables get forwarded to the runtime container. `TELEGRAM_USE_POLLING` and `RUNTIME_PUBLIC_URL` are listed in the compose-yaml from the repo, so setting them in `.env` propagates them automatically. If you fork the compose-yaml or maintain your own overlay, ensure both variables remain in the runtime service's `environment:` block — otherwise the runtime fails to boot in webhook mode with `RUNTIME_PUBLIC_URL ist Pflicht`.
+
 **3. Pair the bot to a twin:**
 
 (Settings UI for bot configuration arrives in Phase 4 of #130. Until then, manual setup via runtime CLI — see future Phase-2.5/Phase-3 docs.)
