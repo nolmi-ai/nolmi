@@ -14,6 +14,7 @@ import { MaturityDetail } from "../../components/MaturityDetail";
 import { SkillEditorModal } from "../../components/SkillEditorModal";
 import { McpServerAddModal } from "../../components/McpServerAddModal";
 import { Tabs, TabList, Tab, TabPanel } from "../../components/Tabs";
+import { TelegramChannelTab } from "../../components/TelegramChannelTab";
 import { toast } from "../../lib/toast";
 
 const RUNTIME_URL = process.env.NEXT_PUBLIC_RUNTIME_URL ?? "http://localhost:4000";
@@ -1126,11 +1127,15 @@ function SettingsInner() {
             </TabList>
 
             <TabPanel id="telegram">
-              <Section title="Telegram-Bot">
-                <p className="text-muted text-sm">
-                  Telegram-Setup folgt in Phase 4.4.
-                </p>
-              </Section>
+              {selectedHandle ? (
+                <TelegramChannelTab twinHandle={selectedHandle} />
+              ) : (
+                <div className="bg-surface border border-border rounded p-5">
+                  <p className="text-sm text-muted">
+                    Kein Twin ausgewählt.
+                  </p>
+                </div>
+              )}
             </TabPanel>
 
             <TabPanel id="whatsapp">
