@@ -271,6 +271,12 @@ Settings-Page hatte 8 Bereiche, davon Persona/LLM/Presets als gekoppeltes Trio m
 
 #130 ist 80% durch. Phase 5 ist isolierter Deploy-Bau, vermutlich 2-3h.
 
+### Phase 5 — Build-Bug-Detour (~20:15)
+
+Production-Build-Fehler beim Web-Image: Test-Page nutzt useSearchParams() ohne Suspense-Wrapper. Production-Static-Generation strenger als local pnpm dev. Test-Page entfernt (Tag-26-Phase-4.2-Zweck erfüllt durch Settings-Page Phase 4.3). Plus #137 Backlog für Pre-Push-Build-Hook.
+
+**Lesson Tag 26 #11: Production-Build-Test fehlt im Workflow** — lokal pnpm dev übersieht Static-Generation-Issues. Hätte den Bug in Phase 4.2 sofort gezeigt.
+
 ### Plan Tag 27
 
 **Vormittag (frisch nach Schlafen):**
