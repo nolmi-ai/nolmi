@@ -29,6 +29,169 @@ Inhalte (11 Items in drei Tranchen) unverändert, nur Build-Pfad
 leicht angepasst (#100/#101 vorgezogen, weil Vision-kritisch für
 die Differenzierungs-Story).
 
+## Tag 26 — Sonntag, 25. Mai 2026
+
+### Status
+
+**Phase 3 von #130 final zu — Sammel-Commit `7c74a33`.** 17 Files, 2725 Insertions, 24 Deletions. #130 ist jetzt 60% durch (3/5 Phasen).
+
+**Strategy-Setzungen Tag 26:**
+- Persistent-Pairing-Prinzip für alle Channel-Adapter festgeschrieben (drei Aktionen für Phase 4)
+- OpenAI-OAuth-Vorziehung von Phase B nach Phase A Block 5 (#131)
+- Anthropic-OAuth-Item (#132) bleibt Phase B mit Konzept-Update-Pflicht (Stance hat sich geändert: kein 3rd-Party-OAuth mehr, nur Token-Kauf)
+- STAND.md ab heute doppelt: Project Knowledge + `docs/STAND.md` im Repo
+
+**Launch-Window-Anpassung:** KW 29-30 → wahrscheinlich KW 31-32 (4-5 Bautage extra für #131 Vorziehung).
+
+### Tag-26-Bilanz — 1 Commit
+
+| Hash | Files | Z | Was |
+|---|---|---|---|
+| `7c74a33` | 17 | +2725 / -24 | #130 Phase 3: Message-Routing + LLM + API + setWebhook + Channel-Badge + Markdown |
+
+### Was in Phase 3 reinging
+
+**Backend (3 neue Files, 6 modified):**
+- `apps/runtime/src/telegram/message-router.ts` (250 Z) — TelegramMessageRouter mit Owner-Bypass-Reuse-Pattern aus Phase-1.1-Diagnose
+- `apps/runtime/src/telegram/api-routes.ts` (291 Z) — 5 API-Routes (`:handle`-Pattern) für Config-CRUD + Pairing-Code-Generation
+- `apps/runtime/src/telegram/markdown-to-telegram-html.ts` (138 Z) — Pure-Function `markdownToTelegramHtml` via marked + Sanitize-Layer auf Telegram-HTML-Subset
+- `twin-service.ts` Channel-Pass-Through (`ChatRequestContext.channel?: 'telegram' | 'discord' | 'whatsapp'`)
+- `bot-registry.ts`, `telegraf-setup.ts`, `server.ts`, `index.ts` — Wiring + setWebhook-Lifecycle
+- `test-telegram-phase3.ts` (~580 Z, 10/10 grün)
+
+**Frontend (1 neue Component, 1 modified):**
+- `MessageChannelBadge.tsx` (55 Z) — Inline-SVG Lucide-Send-Icon oben rechts im Bubble-Header mit SVG-`<title>`-Tooltip
+- `chat/[handle]/page.tsx` — Bubble dual-branch (User-Pfad whitespace-pre-wrap Plain, Assistant-Pfad react-markdown + remark-gfm), Channel-Prop-Durchreichung, MARKDOWN_COMPONENTS-Map für Tailwind-Twin-Lab-Aesthetik, normalizeChannel-Helper
+
+**Dependencies:**
+- Backend: marked ^18.0.4
+- Frontend: react-markdown ^10.1.0 + remark-gfm ^4.0.1
+
+**Docs:**
+- `130-TELEGRAM-STRATEGY.md` — Phase-3-Scope-Korrektur (Phase 2.5 entfiel, in Phase 3 konsolidiert; Scope-Erweiterungen Channel-Badge + Markdown dokumentiert)
+- `BACKLOG.md` — #133 Cross-Channel-Mental-Model-Doku angelegt (XS, should, Block 5)
+
+### Manual-Smoke
+
+Drei separate Smoke-Runden während Bau:
+
+| Smoke | Coverage |
+|---|---|
+| Phase-3-Core (5/5 Pflicht-Tests grün) | Config-Create + Pairing + LLM-Antwort + Cross-Channel-Memory + Cleanup |
+| Channel-Badge v1 (3/3 Pflicht, mit UX-Befund) | Daten-Pfad ok, aber Heavy-User-Visual-Noise + Tooltip-Discoverability schwach → v1 verworfen |
+| Markdown + Channel-Badge v2 (3/3 Pflicht + 3/3 Polish grün) | Markdown sauber in beiden Surfaces, Icon-only Channel-Badge mit SVG-`<title>`-Tooltip |
+
+Plus Phase-2-Regression-Smoke 8/8 grün (kein Bruch durch Phase-3-Erweiterungen).
+
+### Scope-Erweiterungen Tag 26
+
+Drei während Bau eingefügt (nicht ursprünglich Phase-3-Scope):
+
+**1. Channel-Badge** — von Manual-Smoke Test 5 entdeckt: Web-UI zeigt alle Cross-Channel-Messages, aber ohne Channel-Marker. Heavy-User-UX-Problem.
+- v1 gebaut: dezente „über Telegram"-Subline unter Bubble mit native `title=`-Tooltip
+- v1 verworfen nach Manual-Smoke: Heavy-User-Visual-Noise (90%-Telegram-User sieht überall „über Telegram"-Text), Tooltip-Discoverability schwach, räumliche Entkopplung vom Read-Flow
+- v2 gebaut: Inline-SVG Lucide-Send-Icon oben rechts im Bubble-Header mit SVG-`<title>` als first-child (100-200ms Hover-Latenz statt 500ms)
+
+**2. Markdown-Rendering beide Surfaces** — von Manual-Smoke entdeckt: LLM-Output ist Markdown, aber Web-UI zeigt Rohtext mit `**`-Sternchen + Telegram zeigt `<b>`-Tags als sichtbaren Text.
+- Web-UI: react-markdown + remark-gfm, Bubble-Component dual-branch (User Plain, Assistant Markdown)
+- Telegram: marked → Sanitize-Layer auf Telegram-HTML-Subset, `parse_mode: 'HTML'` mit Plain-Fallback bei Parse-Error
+- Persistenz bleibt Markdown-Original (channel-agnostisch)
+
+**3. Backlog #133 Cross-Channel-Mental-Model-Doku** — Asymmetrie zwischen Web-UI (zeigt alle Channels) vs Telegram (zeigt nur Telegram) ist Onboarding-Friction. Touch-Points: #110 Onboarding-Wizard, #112 Landing, #113 Hero-GIF.
+
+### Lessons Tag 26
+
+**1. Channel-Badge v1 → v2 Discoverability-Lesson:** Native-Tooltip funktioniert technisch — Discoverability ist die eigentliche UX-Frage. v1-`title=`-Attribut war technisch korrekt; das Problem war räumliche Entkopplung vom Read-Flow + diffuser Italic-Text statt scharfer Icon-Affordance. Lesson für künftige UX-Setzungen: bei „dezente Marker"-Design mit Heavy-User-Persona-Frage durchgehen („was wenn User das zu 90% sieht?").
+
+**2. Smoke-Driven-Development findet latente Bugs:** Drei während-Smoke entdeckte Edge-Case-Bugs während Markdown-Konversion:
+- `<p[^>]*>` matched `<pre>` als Prefix → Code-Blocks verloren Wrapper. Fix: `<p(?=\s|>)[^>]*>` Word-Boundary-Lookahead
+- `() => ${counter++}. $1\n` — `$1` in Callback-Returns nicht substituiert. Fix: Callback-Argument `(_match, item) => ...${item}...`
+- `at(-1)` vs `at(0)` auf DESC-Order-Result (Sortier-Reihenfolge-Annahme falsch)
+
+Diese drei wären in Production unschönes Verhalten geworden (Code-Blocks ohne Format, Listen mit `$1` als Rohtext, Smoke-Test gibt False-Positive).
+
+**3. SVG-`<title>` first-child schlägt HTML-`title=`-Attribut:** 100-200ms Hover-Latenz vs ~500ms-2000ms (Browser-Default). Plus ist die korrekte Methode für `<svg>`-Elemente.
+
+**4. Type-Future-Proofing zur niedrigsten Kosten:** `channel?: 'telegram' | 'discord' | 'whatsapp'`-Union statt nur `'telegram'` erspart Refactor bei Phase 4.1 (WhatsApp) / Discord. Konsequenz: drei Stellen brauchen Erweiterung statt invasive Refactor.
+
+**5. Phase-1.1-Diagnose-Wert 10. Mal bestätigt:** Drei kritische Realitäts-Korrekturen gegen Briefing-Annahmen:
+- AuditEntry.input als `z.record(z.string(), z.unknown())` ist schon flexibler JSON-Bag → kein Schema-Migration nötig für channel-Marker
+- `:handle`-Pattern-Drift gegen vermutetes `:twin_id`
+- `ctx.persistentChatAction`-Telegraf-Builtin statt manuelles setInterval-mit-Cleanup
+
+**6. Manual-Smoke deckt UX-Realität auf, die Strategy-Session nicht antizipiert:** Channel-Badge v1 wurde durch Heavy-User-Use-Case während Manual-Smoke verworfen (nicht durch Strategy-Frage). Lesson: Strategy-Setzungen mit „was wenn User 90% via Channel X?"-Frage durchgehen.
+
+**7. STAND.md ab Tag 26 doppelt: Project Knowledge + `docs/STAND.md` im Repo:** Stand-Recovery bei Chat-Window-Wechsel + git-History für Stand-Verläufe. Doppel-Edit-Disziplin: bei Tag-Closure beide updaten, bei Konflikt gewinnt Repo (authoritative).
+
+### Persistent-Pairing-Setzung für Phase 4
+
+Owner-Pairing zwischen Twin und Channel-Adapter (Telegram, künftig WhatsApp/Discord) ist **dauerhaft persistent bis explicit Disconnect**. Drei Implementations-Konsequenzen für Phase 4 Settings-UI:
+
+**1. PUT /config preserve-paired:** API-Schema lehnt `paired_owner_*`-Felder im Update explicit ab. Nur Token + Username + ähnliche nicht-Pairing-Felder sind mutable.
+
+**2. Token-Rotation triggert setWebhook neu:** Owner kann Bot-Token rotieren (z.B. nach BotFather-Compromise) ohne Re-Pairing. Helper `rotateWebhook()` updated Token + Secret in Telegram, behält paired_user_id unverändert.
+
+**3. Explicit Unpair-Button in Settings-UI + neuer Endpoint:** dedizierter `POST /twins/:handle/telegram/unpair`-Endpoint. Setzt paired_user_id auf NULL, behält Bot-Config + Pairing-Code-Generation-Capability. UI-Button mit Bestätigungs-Dialog separat von „Delete Config".
+
+**Architektur-Prinzip §h** in `130-TELEGRAM-STRATEGY.md` festgeschrieben — Begründung: Pairing ist Owner-Trust-Statement, nicht Session-State. Container-Restart / Token-Rotation / Re-Konfiguration sollte den Trust nicht versehentlich invalidieren.
+
+### OpenAI-OAuth-Vorziehung
+
+**#131 verschoben von Phase B nach Phase A Block 5.** Bau-Reihenfolge: `#130 → #131 → #113 → #112 → #114 → #115`.
+
+**Begründung Tag 26:**
+- Owner-Persona-Validierung: Power-User mit OpenAI + Claude beide via Subscription
+- Wettbewerbs-Positionierung: OpenClaw + Hermes haben OAuth, „BYOK-only" wäre HN-Feedback-Schwäche
+- OpenAI dokumentiert + supported 3rd-Party-OAuth offiziell (developers.openai.com/codex/auth), nicht Reverse-Engineering
+- Launch-Toleranz akzeptiert (KW 29-30 → KW 31-32, 1-2 Wochen Verschiebung)
+
+**#132 Anthropic-OAuth bleibt Phase B mit Konzept-Update-Pflicht:** Anthropic-Stance hat sich Tag 25-26 geklärt: kein 3rd-Party-OAuth mehr, nur Token-Kauf. Item bleibt im Backlog, aber Konzept braucht Update vor Phase-B-Bau — Token-Buying-Surface statt CLI-Reuse-Pattern.
+
+**Twin-Lab-Default bleibt BYOK** (API-Key). OAuth ist Opt-in mit ToS-Disclaimer („OpenAI hat das nicht für 3rd-Party-Apps dokumentiert, kann gekappt werden").
+
+### Stand pro Strategy-Doc
+
+Diese vier Doku-Updates folgen Tag 26 nach STAND-Closure als separate Doku-Texte (pending Bau):
+
+- `docs/130-TELEGRAM-STRATEGY.md` — §h Persistent-Pairing-Prinzip als Architektur-Section add
+- `docs/BACKLOG.md` — #131 Phase-A-Markierung + Status-Notiz, #132 Stance-Update-Notiz
+- `docs/BLOCK-5-STRATEGY.md` — Bau-Reihenfolge erweitert, Launch-Window adjusted
+- `docs/PRE-LAUNCH-A-STRATEGY.md` — Pflicht-Aufwand-Tabellen + Anti-Goals updated
+
+### Plan ab Tag 26 Nachmittag
+
+- **Doku-Updates** für die vier obigen Files (45-60 Min, Tag-26-Nachmittag)
+- **Phase 4 — Telegram Settings-UI** Strategy + Phase-1.1 + Bau-Start (1.5-2h, Rest Tag 27 Vormittag)
+
+### Plan Tag 27-32
+
+- Phase 4 Settings-UI Frontend + Smoke + Manual-Smoke (Tag 27 Vormittag)
+- Phase 5 #130 Production-Deploy Phase 1+2+3 zusammen + Phase 4 wenn bereit (Tag 27 Nachmittag oder Tag 28)
+- #131 OpenAI-OAuth Strategy + Phase 1.1 + Bau (Tag 28-32, 4-5 Bautage)
+- Block 5 Marketing-Items #112-115 + Launch
+
+### Pending vor Launch
+
+- #59 `/messages/:id/sender`-Endpoint securen (offen seit vor #130, Auth + Owner-Scope-Check)
+- Wettbewerbs-Verifikations-Zwischen-Tag (Stars + Stances vor Block-5-Marketing-Items)
+- Closed-Beta-Externe-User-Onboarding-Konzept (Strategie 2.5.5 Notifications hängt davon ab)
+
+### Wichtige Pfade (für Stand-Recovery bei Chat-Wechsel)
+
+- Repo lokal: `/Users/mjb/Visual Studio/twin-lab`
+- Repo remote: `github.com/markusbaier/twin-lab` (privat)
+- Production-VPS: `srv1046432`, Stand `bb50b14` (Tag-25-Closure, vor Phase 3)
+- BotFather-Bot: `@twin_lab_markus_test_bot`
+- Strategy-Docs: `docs/{PRE-LAUNCH-A-STRATEGY,BLOCK-5-STRATEGY,130-TELEGRAM-STRATEGY,BACKLOG,ROADMAP,ARCHITECTURE,STAND}.md`
+
+### Tag-26-Closure-Erkenntnis
+
+Phase 3 ist die substantiellste Phase von #130 mit 2725 Insertions in einem Commit — größer als Phase 1 (858) + Phase 2 (1403) zusammen. Drei Scope-Erweiterungen (Channel-Badge + Markdown + Persistent-Pairing-Setzung als Architektur-Add) verdoppelten den ursprünglich geplanten Phase-3-Scope. Manual-Smoke deckte zwei substantielle UX-Korrekturen auf (Channel-Badge v1→v2, Markdown-Rendering fehlte komplett). Ohne diese Manual-Smoke-Catches wäre Production-Deploy in Phase 5 unprofessionell geworden.
+
+OpenAI-OAuth-Vorziehung ist die wichtigste Roadmap-Entscheidung Tag 26 — verschiebt Launch-Window um 1-2 Wochen, aber positioniert Twin-Lab wettbewerbs-stark und matched Owner-Persona-Realität.
+
+---
+
 ## Tag 25 (24. Mai 2026, Sonntag) — Pre-Launch-Phase A Block 4 (#111 Closure + Block-4-Bilanz)
 
 **Stand Tag 25 Abend:** #111 Repo-Hygiene abgeschlossen über zwei Sub-Schritte (Schritt 6 LICENSE + Boilerplate, Schritt 7 README Demo-First). Block 4 = 3/3 ✅. Drei Commits gepusht plus Backlog-Item #129 emergent. origin/main = `217d299` (Stand vor Tag-25-Closure-Commit).
