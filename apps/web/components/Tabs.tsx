@@ -18,6 +18,12 @@ import { usePathname, useRouter, useSearchParams } from "next/navigation";
 // Reusable Compound-Component für Tab-Navigation. Erstmals genutzt in
 // Settings-Page-Restructuring (Phase 4.3) + Channels-Sub-Tab (Phase 4.4).
 //
+// Layout: Vertical-Sidebar (w-72 links) + Content-Area (flex-1 rechts).
+// Matched die Chat-Page-Konversations-Sidebar visuell und mental — Twin-Lab
+// nutzt diese Aesthetik durchgehend, neue Tab-Pattern fügt sich konsistent
+// ein. Auto-Container in <Tabs> (flex gap-6) macht das Layout transparent —
+// User schreibt nur <TabList> + <TabPanel>, kein Flex-Wrapper-Aufwand.
+//
 // API:
 //
 //   <Tabs defaultTab="profil" persistInUrl paramName="tab">
@@ -48,8 +54,11 @@ import { usePathname, useRouter, useSearchParams } from "next/navigation";
 //
 // Accessibility:
 //   - role=tablist / tab / tabpanel
+//   - aria-orientation="vertical" auf TabList (Sidebar-Layout)
 //   - aria-selected, aria-controls, aria-labelledby
-//   - Keyboard: ArrowLeft/Right/Home/End wandern durch enabled Tabs
+//   - Keyboard: ArrowUp/Down/Home/End wandern durch enabled Tabs.
+//     ArrowLeft/Right werden NICHT abgefangen → Text-Cursor in eventuellen
+//     Eingabefeldern bleibt Browser-Default.
 //   - Disabled Tabs: tabIndex=-1, von Keyboard-Nav übersprungen
 
 interface TabsContextValue {
@@ -112,21 +121,24 @@ export function Tabs(props: TabsProps) {
 
   return (
     <TabsContext.Provider value={{ activeId, setActiveId }}>
-      {children}
+      {/* Auto-Layout: Sidebar links (w-72 aus TabList) + flex-1 Content
+          rechts (aus aktivem TabPanel). Hidden Panels nehmen via
+          `hidden`-Attribut keinen Flex-Space ein. */}
+      <div className="flex gap-6">{children}</div>
     </TabsContext.Provider>
   );
 }
 
-// ─── TabList ────────────────────────────────────────────────────────────────
+// ─── TabList — Vertical-Sidebar ─────────────────────────────────────────────
 
 export function TabList({ children }: { children: ReactNode }) {
   return (
     <div
       role="tablist"
-      aria-orientation="horizontal"
-      className="flex border-b border-border"
+      aria-orientation="vertical"
+      className="w-72 flex-shrink-0 border-r border-border"
     >
-      {children}
+      <div className="p-2 space-y-1">{children}</div>
     </div>
   );
 }
@@ -177,10 +189,13 @@ export function Tab({
   const isActive = activeId === id;
 
   const handleKeyDown = (event: KeyboardEvent<HTMLButtonElement>) => {
+    // Vertikales Layout: Up/Down statt Left/Right. ArrowLeft/Right werden
+    // NICHT abgefangen, damit Text-Cursor in eingebetteten Eingabefeldern
+    // Browser-Default behält.
     let nextEl: HTMLButtonElement | null = null;
-    if (event.key === "ArrowRight") {
+    if (event.key === "ArrowDown") {
       nextEl = moveFocus(event.currentTarget, "next");
-    } else if (event.key === "ArrowLeft") {
+    } else if (event.key === "ArrowUp") {
       nextEl = moveFocus(event.currentTarget, "prev");
     } else if (event.key === "Home") {
       nextEl = moveFocus(event.currentTarget, "first");
@@ -210,12 +225,12 @@ export function Tab({
       }}
       onKeyDown={handleKeyDown}
       className={[
-        "px-3 py-2 text-sm border-b-2 transition-colors -mb-px",
+        "w-full text-left px-3 py-2 text-sm rounded border transition-colors",
         disabled
-          ? "text-muted opacity-50 cursor-not-allowed border-transparent"
+          ? "opacity-50 cursor-not-allowed border-transparent text-muted"
           : isActive
-            ? "text-text border-accent"
-            : "text-muted hover:text-text border-transparent",
+            ? "border-accent bg-bg text-text"
+            : "border-transparent hover:border-accent/40 hover:bg-bg/40 text-muted hover:text-text",
       ].join(" ")}
     >
       {children}
@@ -225,10 +240,11 @@ export function Tab({
 
 // ─── TabPanel ───────────────────────────────────────────────────────────────
 //
-// `hidden`-Attribut statt `display:none` matched ARIA-Pattern und ist
-// gleichzeitig ein CSS-Builtin für „visually + a11y-tree hidden". Vorteil:
-// `tabIndex={0}` macht das Panel fokussierbar wenn aktiv, was Screen-Reader
-// die richtige Reihenfolge gibt.
+// `flex-1` füllt den Content-Bereich rechts neben der TabList-Sidebar.
+// `hidden`-Attribut nimmt inactive Panels aus dem Flex-Flow (display:none
+// via Browser-Default), nur das active Panel partizipiert am Flex-Sizing.
+// Vorteil: kein conditional-Render-Overhead, alle TabPanels bleiben im
+// DOM und behalten internen State (Form-Inputs etc.).
 
 export function TabPanel({
   id,
@@ -246,7 +262,7 @@ export function TabPanel({
       aria-labelledby={`tab-${id}`}
       hidden={!isActive}
       tabIndex={isActive ? 0 : -1}
-      className="pt-4 focus:outline-none"
+      className="flex-1 focus:outline-none"
     >
       {children}
     </div>
