@@ -1787,7 +1787,19 @@ RUNTIME_PUBLIC_URL=https://runtime.your-domain.com
 
 **3. Pair the bot to a twin:**
 
-(Settings UI for bot configuration arrives in Phase 4 of #130. Until then, manual setup via runtime CLI — see future Phase-2.5/Phase-3 docs.)
+In the Twin-Lab web UI, go to **Settings → Channels → Telegram**. The sub-tab starts in "Empty" mode if no bot is configured.
+
+Paste the bot token and the bot username (without `@`), then click **Save**. The runtime validates the token via Telegram's `getMe` API. On success:
+
+- The token is stored encrypted in the runtime DB
+- A webhook is registered with Telegram (`setWebhook` with a per-twin secret)
+- A 6-digit pairing code is generated and displayed in the UI ("Configured-Unpaired" mode)
+
+To complete pairing, click the **"Telegram öffnen"** deeplink — Telegram opens with an auto-`/start <pairing-code>` command. The bot replies `✓ Paired successfully` once the code is consumed and your Telegram user ID is bound to the twin's owner field.
+
+When you switch back to the browser tab, the Settings UI automatically transitions to "Configured-Paired" mode (window-focus listener triggers a config-refresh — no manual reload needed).
+
+From this point, messages sent to the bot in Telegram are routed through the runtime to the twin's LLM with memory + persona intact. The web chat and Telegram chat share the same conversation context: facts mentioned in Telegram can be recalled in the web UI and vice versa (cross-channel threading via channel-agnostic memory layer).
 
 ### 10.2 Reverse proxy considerations
 

@@ -267,9 +267,9 @@ Settings-Page hatte 8 Bereiche, davon Persona/LLM/Presets als gekoppeltes Trio m
 - Phase 2 ✅ Telegraf-Service + Pairing
 - Phase 3 ✅ Message-Routing + LLM + API + Channel-Badge + Markdown
 - Phase 4 ✅ Settings-UI komplett (4 Sub-Phasen + Sidebar-Pivot)
-- Phase 5 ⏳ Production-Deploy + Documentation
+- Phase 5 ✅ Production-Deploy + Documentation
 
-#130 ist 80% durch. Phase 5 ist isolierter Deploy-Bau, vermutlich 2-3h.
+#130 ist 100% durch — 5 von 5 Phasen ✅. Phase 5 effektiv ~2.5h statt geplanter 1.5h wegen vier Detours, alle als Lessons dokumentiert.
 
 ### Phase 5 — Build-Bug-Detour (~20:15)
 
@@ -286,6 +286,29 @@ Fix: Compose-Yaml ergänzt + .env.example ergänzt + DEPLOYMENT-§10.1 Hinweis. 
 **Lesson Tag 26 #12: docker-compose explicit-env-listing-Pattern** — Self-Hoster-Doku muss klar machen wo Vars gelistet sein müssen (`.env` UND `compose.yml`). Sonst nicht-debugbar für externe User.
 
 Phase-1.1-Diagnose 12. Mal bestätigt: Compose-Yaml früher lesen hätte den Stop vermieden.
+
+### Phase 5 — Production-Deploy Closure (~21:30)
+
+#130 Phase 5 abgeschlossen. Production-Bot `@twin_lab_markus_bot` (separat vom lokalen Test-Bot `@twin_lab_markus_test_bot`) auf srv1046432 konfiguriert und gepaart.
+
+**Manual-Smoke 3/3 Pflicht-Pfade grün:**
+
+- Send-Receive-Roundtrip mit Twin-Persona (Latenz ~5-15 Sek)
+- Cross-Channel-Memory-Recall (Telegram-Fact über Avocado-Toast in Web-UI korrekt rekalliert mit allen 3 Komponenten — Channel-agnostische Memory-Layer-Architektur verifiziert)
+- Webhook-Roundtrip-Logs (POST /webhooks/telegram/@markus, 200, responseTime 3219ms inkl. LLM-Roundtrip, kein 401)
+
+**Phase-5-Detours (Lessons Tag 26 #11-#13):**
+
+- Service-Name-Mismatch (compose-Service `runtime`/`web` vs Container `twin-lab-runtime`/`twin-lab-web`)
+- Image-Build-Workflow nicht via `docker compose build`, sondern via manuellem `docker build -t ... -f apps/*/Dockerfile .` aus Repo-Root
+- Build-Bug #137 (Test-Page useSearchParams ohne Suspense-Wrapper, Production-Static-Generation strenger als pnpm dev)
+- ENV-Forwarding-Lücke (Compose-Yaml `environment:`-Block listet Vars explizit, `.env` ist nur Substitutions-Quelle)
+
+**DEPLOYMENT.md §10.1** von Phase-4-Placeholder zu konkretem Channels-Tab-Workflow aktualisiert.
+
+**#130 100% durch — 5 von 5 Phasen ✅.**
+
+Net-Aufwand Tag 26: ~5.5h (geschätzt 4-5h). Plus erweiterte Lessons-Bibliothek (3 neue Lessons aus Phase-5-Detours).
 
 ### Plan Tag 27
 
