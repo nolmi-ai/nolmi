@@ -1699,6 +1699,20 @@ Pro-Tipp: konsistent zu künftigen Channel-Adaptern (WhatsApp/Discord) — Field
 
 **Status-Notiz Tag 26:** Angelegt aus Phase 4.4 Phase-1.1-Diagnose (Commit `97b2ce7`). Pragmatisch weggelassen aus Phase 4.4 wegen Müdigkeitslevel + Schema-Migration-Scope-Drift.
 
+### 137. Production-Build-Test im Pre-Push-Workflow
+
+Aus Tag-26-Phase-5-Deploy-Diagnose. Test-Page (`apps/web/app/test-tabs/page.tsx`) hatte useSearchParams() ohne Suspense-Wrapper — lokal lief durch (pnpm dev), Production-Build brach ab.
+
+CI-Hook oder Pre-Push-Script:
+
+```bash
+pnpm --filter @twin-lab/runtime build && pnpm --filter @twin-lab/web build
+```
+
+Sollte als Pre-Push-Hook (Husky) oder GitHub-Action laufen. Vermeidet Wiederholung des Phase-5-Deploy-Stops.
+
+**Größe:** S · **Priorität:** should · **Aus:** Tag 26 Phase 5 Build-Bug · **Spur:** Polish nach Phase 5
+
 ## Pre-Launch-Phase A — Block 4: Self-Hosting-Polish
 
 Items aus dem Strategy-Pivot Tag 18. Block 4 macht das Repo für externe Tech-Affine deploybar. Spec: `docs/PRE-LAUNCH-A-STRATEGY.md`.
