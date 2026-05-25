@@ -3,7 +3,8 @@ import "dotenv/config";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { generateText } from "ai";
+import { generateText, stepCountIs, tool } from "ai";
+import { z } from "zod";
 
 import { loadMasterKey } from "../crypto-utils.js";
 import { createSqliteRepository } from "../repository/index.js";
@@ -136,12 +137,135 @@ async function main(): Promise<void> {
   }
 
   if (!allPass) {
-    console.error("\n❌ Smoke fehlgeschlagen — siehe Verifikation");
+    console.error("\n❌ Test 1 fehlgeschlagen — siehe Verifikation");
     process.exit(1);
   }
-  console.log("\n✅ Phase 3.4.1 Smoke grün — Provider-Basis funktional.");
-  console.log("   Out of Scope: Tool-Roundtrip (3.4.2), Approval (3.4.3),");
-  console.log("                 Reasoning-Mapping (3.4.4), TwinService-Integration (3.4.5)");
+  console.log("\n✅ Test 1 grün — Simple-Text-Mapping funktional.");
+
+  // ─── TEST 2 (Phase 3.4.2) — Tool-Roundtrip via Vercel-Multi-Step ────────
+  //
+  // Verify §l-Pattern transparent via Vercel-SDK: Provider macht eine
+  // Iteration, Vercel-SDK orchestriert function_call → execute → tool-Role-
+  // Message → nächste Iteration. Phase-3.4.0-Spike hatte das in 2.5s
+  // verifiziert; jetzt Production-Provider unter identischem Pattern.
+  console.log("\n═══ TEST 2 (Phase 3.4.2) — Tool-Roundtrip via Vercel-Multi-Step ═══");
+  console.log('Prompt: "Was ist 17 plus 25? Nutze das get_sum Tool."');
+
+  const startMs2 = Date.now();
+  const result2 = await generateText({
+    model: codex.languageModel("gpt-5.5"),
+    system:
+      "You are a helpful assistant. Use the get_sum tool when asked to add numbers. Answer in German.",
+    prompt: "Was ist 17 plus 25? Nutze das get_sum Tool.",
+    tools: {
+      get_sum: tool({
+        description: "Returns the sum of two numbers a and b",
+        inputSchema: z.object({
+          a: z.number().describe("First number"),
+          b: z.number().describe("Second number"),
+        }),
+        execute: async ({ a, b }: { a: number; b: number }) => ({
+          sum: a + b,
+        }),
+      }),
+    },
+    stopWhen: stepCountIs(5),
+  });
+  const latencyMs2 = Date.now() - startMs2;
+
+  console.log(`\n✓ ${latencyMs2}ms`);
+  console.log(`  text: "${result2.text.slice(0, 200)}"`);
+  console.log(`  finishReason: ${result2.finishReason}`);
+  console.log(`  steps: ${result2.steps.length}`);
+  // Note: top-level toolCalls=0 ist erwartet (Step-Walk-Pattern wie Phase 3.2.E),
+  // die echten Tool-Calls leben in steps[i].toolCalls. Dokumentiert für Phase 3.4.5.
+  console.log(
+    `  top-level toolCalls: ${result2.toolCalls.length} (step-walk erwartet 0)`,
+  );
+  for (let i = 0; i < result2.steps.length; i++) {
+    const s = result2.steps[i];
+    if (!s) continue;
+    console.log(
+      `  step[${i}]: text="${s.text.slice(0, 60)}", toolCalls=${s.toolCalls.length}, toolResults=${s.toolResults.length}, finishReason=${s.finishReason}`,
+    );
+    for (const tc of s.toolCalls) {
+      console.log(
+        `    - tool-call: ${tc.toolName}(${JSON.stringify(tc.input)}) callId=${tc.toolCallId}`,
+      );
+    }
+    for (const tr of s.toolResults) {
+      console.log(
+        `    - tool-result: ${tr.toolName} → ${JSON.stringify(tr.output)}`,
+      );
+    }
+  }
+
+  // Step-walken-Verifikation (matched Spike + Phase 3.2.E)
+  const checks2: Array<{ name: string; pass: boolean; detail?: string }> = [];
+
+  checks2.push({
+    name: "result.steps.length === 2",
+    pass: result2.steps.length === 2,
+    detail: `actual=${result2.steps.length}`,
+  });
+
+  const step0 = result2.steps[0];
+  const step1 = result2.steps[1];
+  checks2.push({
+    name: "step[0].toolCalls.length === 1",
+    pass: !!step0 && step0.toolCalls.length === 1,
+    detail: `actual=${step0?.toolCalls.length ?? "<missing>"}`,
+  });
+
+  const step0Tc = step0?.toolCalls[0];
+  checks2.push({
+    name: "step[0].toolCalls[0].toolName === 'get_sum'",
+    pass: step0Tc?.toolName === "get_sum",
+    detail: `actual=${step0Tc?.toolName ?? "<missing>"}`,
+  });
+
+  const tcInput = step0Tc?.input as { a?: number; b?: number } | undefined;
+  checks2.push({
+    name: "step[0] Args parsed: {a:17, b:25}",
+    pass: tcInput?.a === 17 && tcInput?.b === 25,
+    detail: `actual=${JSON.stringify(tcInput ?? "<missing>")}`,
+  });
+
+  checks2.push({
+    name: "step[1].text contains '42'",
+    pass: !!step1 && step1.text.includes("42"),
+    detail: `actual="${step1?.text.slice(0, 80) ?? "<missing>"}"`,
+  });
+
+  checks2.push({
+    name: "result.finishReason === 'stop' (final iteration)",
+    pass: result2.finishReason === "stop",
+    detail: `actual=${result2.finishReason}`,
+  });
+
+  console.log("\n═══ Verifikation Test 2 ═══");
+  let allPass2 = true;
+  for (const c of checks2) {
+    const symbol = c.pass ? "✅" : "❌";
+    console.log(`  ${symbol} ${c.name}${c.detail ? `  (${c.detail})` : ""}`);
+    if (!c.pass) allPass2 = false;
+  }
+
+  if (!allPass2) {
+    console.error("\n❌ Test 2 fehlgeschlagen — siehe Verifikation");
+    process.exit(1);
+  }
+
+  console.log(
+    "\n✅ Test 2 grün — Tool-Roundtrip via Vercel-Multi-Step funktional.",
+  );
+
+  // ─── Final ─────────────────────────────────────────────────────────────
+  console.log("\n✅ Phase 3.4.1 + 3.4.2 Smoke vollständig grün.");
+  console.log("   Out of Scope (next sub-phases):");
+  console.log("     - Approval-Pipeline (3.4.3, ~3-4h)");
+  console.log("     - Reasoning-Mapping-Smoke (3.4.4, ~10 Min)");
+  console.log("     - TwinService-Integration (3.4.5, ~2h)");
 }
 
 main().catch((err) => {
