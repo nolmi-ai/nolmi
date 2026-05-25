@@ -577,6 +577,24 @@ export type PresetActivationResult = z.infer<typeof PresetActivationResultSchema
  * `activePresets` ist die Liste der Skill-Namen, die source=`example`
  * haben — entspricht 1:1 den Preset-IDs aus `examples/skills/`.
  */
+// #131 Phase 5.1 — Auth-Status für Settings-UI. `mode` matched
+// twin_profiles.auth_mode in runtime. `oauth` ist Owner-Safe-View aus
+// oauth_tokens (kein access_token / refresh_token).
+export const AuthModeSchema = z.enum(["api_key", "oauth"]);
+export type AuthMode = z.infer<typeof AuthModeSchema>;
+
+export const OAuthTokenPublicSchema = z.object({
+  twinId: z.string(),
+  provider: z.literal("openai"),
+  expiresAt: z.string(),
+  accountId: z.string().nullable(),
+  isExpired: z.boolean(),
+  isExpiringSoon: z.boolean(),
+  createdAt: z.string(),
+  updatedAt: z.string(),
+});
+export type OAuthTokenPublic = z.infer<typeof OAuthTokenPublicSchema>;
+
 export const SettingsDataResponseSchema = z.object({
   persona: PersonaInputSchema.nullable(),
   personaSource: z.enum(["structured", "legacy_markdown"]),
@@ -584,6 +602,10 @@ export const SettingsDataResponseSchema = z.object({
     provider: z.string(),
     model: z.string(),
     apiKeyMasked: z.string(),
+  }),
+  auth: z.object({
+    mode: AuthModeSchema,
+    oauth: OAuthTokenPublicSchema.nullable(),
   }),
   activePresets: z.array(z.string()),
 });

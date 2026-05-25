@@ -13,6 +13,7 @@ import { PageContainer } from "../../components/PageContainer";
 import { MaturityDetail } from "../../components/MaturityDetail";
 import { SkillEditorModal } from "../../components/SkillEditorModal";
 import { McpServerAddModal } from "../../components/McpServerAddModal";
+import { OAuthActivationModal } from "../../components/OAuthActivationModal";
 import { Tabs, TabList, Tab, TabPanel } from "../../components/Tabs";
 import { TelegramChannelTab } from "../../components/TelegramChannelTab";
 import { toast } from "../../lib/toast";
@@ -117,6 +118,10 @@ function SettingsInner() {
   const [mcpDeleteConfirmId, setMcpDeleteConfirmId] = useState<string | null>(
     null,
   );
+
+  // #131 Phase 5.2: OAuth-Activation-Modal. Öffnet sich aus der Auth-Row
+  // in der Profile-Übersicht, zeigt den Phase-4-CLI-Befehl mit Copy-Button.
+  const [oauthModalOpen, setOauthModalOpen] = useState(false);
 
   // #110 Phase 2B Commit 11B: Settings-Edit-Sections (Persona / LLM / Presets).
   // `settingsData` ist die Server-Snapshot, `personaForm` / `llmForm` /
@@ -739,7 +744,11 @@ function SettingsInner() {
             </button>
           </div>
         ) : profile ? (
-          <ProfileBody profile={profile} />
+          <ProfileBody
+            profile={profile}
+            auth={settingsData?.auth ?? null}
+            onActivateOAuth={() => setOauthModalOpen(true)}
+          />
         ) : null}
       </Section>
         </TabPanel>
@@ -1191,6 +1200,13 @@ function SettingsInner() {
               void loadSkills(selectedHandle);
             }}
           />
+          {oauthModalOpen && (
+            <OAuthActivationModal
+              handle={selectedHandle}
+              onRefresh={() => loadSettingsData(selectedHandle)}
+              onClose={() => setOauthModalOpen(false)}
+            />
+          )}
         </>
       )}
     </PageContainer>
@@ -1218,7 +1234,20 @@ function Section({
 
 // ─── TWIN-PROFIL SUB-COMPONENT ──────────────────────────────────────────────
 
-function ProfileBody({ profile }: { profile: TwinProfileResponse }) {
+function ProfileBody({
+  profile,
+  auth,
+  onActivateOAuth,
+}: {
+  profile: TwinProfileResponse;
+  /**
+   * #131 Phase 5.2: Auth-Status aus settings-data. `null` solange Settings-
+   * Data noch nicht geladen ist (Profile-Endpoint ist parallel, kann früher
+   * fertig sein) — Row rendert dann Loading-State.
+   */
+  auth: SettingsDataResponse["auth"] | null;
+  onActivateOAuth: () => void;
+}) {
   return (
     <dl className="space-y-4 text-sm">
       <Row label="Twin-ID">
@@ -1258,6 +1287,14 @@ function ProfileBody({ profile }: { profile: TwinProfileResponse }) {
             </span>
           </div>
         </div>
+      </Row>
+
+      <Row label="Auth">
+        {auth === null ? (
+          <span className="text-xs text-muted italic">lädt …</span>
+        ) : (
+          <AuthRowContent auth={auth} onActivate={onActivateOAuth} />
+        )}
       </Row>
 
       <Row label="Bridge">
@@ -1315,6 +1352,84 @@ function formatGermanDate(unixMs: number): string {
     hour: "2-digit",
     minute: "2-digit",
   });
+}
+
+// ─── #131 Phase 5.2: Auth-Row-Content ────────────────────────────────────────
+
+function AuthRowContent({
+  auth,
+  onActivate,
+}: {
+  auth: SettingsDataResponse["auth"];
+  onActivate: () => void;
+}) {
+  if (auth.mode === "api_key") {
+    return (
+      <div className="flex items-center gap-3">
+        <span className="text-text">API-Key</span>
+        <button
+          type="button"
+          onClick={onActivate}
+          className="text-xs text-accent hover:underline"
+        >
+          OAuth aktivieren
+        </button>
+      </div>
+    );
+  }
+
+  // mode === "oauth"
+  if (!auth.oauth) {
+    // Inkonsistenter DB-Stand: Mode='oauth' aber keine Token-Row.
+    // UI fällt auf Aktivieren-Button zurück mit Hinweis.
+    return (
+      <div className="flex items-center gap-3">
+        <span className="text-warn">OAuth (kein Token!)</span>
+        <button
+          type="button"
+          onClick={onActivate}
+          className="text-xs text-accent hover:underline"
+        >
+          Neu loggen
+        </button>
+      </div>
+    );
+  }
+
+  const oauth = auth.oauth;
+  const expiresLabel = formatGermanDate(Date.parse(oauth.expiresAt));
+  const buttonLabel = oauth.isExpired ? "Neu loggen" : "Re-Login";
+
+  return (
+    <div className="space-y-0.5">
+      <div className="flex items-center gap-2 text-text">
+        <span>OAuth (ChatGPT)</span>
+        {oauth.isExpired && (
+          <span className="text-[10px] uppercase tracking-wider text-warn">
+            ⚠ abgelaufen
+          </span>
+        )}
+        {oauth.isExpiringSoon && !oauth.isExpired && (
+          <span className="text-[10px] uppercase tracking-wider text-warn">
+            ⏰ läuft bald ab
+          </span>
+        )}
+      </div>
+      <div className="text-xs text-muted font-mono">
+        account: {oauth.accountId ?? "(unbekannt)"}
+      </div>
+      <div className="text-xs text-muted">läuft ab: {expiresLabel}</div>
+      <div className="pt-1">
+        <button
+          type="button"
+          onClick={onActivate}
+          className="text-xs text-accent hover:underline"
+        >
+          {buttonLabel}
+        </button>
+      </div>
+    </div>
+  );
 }
 
 // ─── #110 Phase 2B Commit 11B: Settings-Edit-Sections ────────────────────────
