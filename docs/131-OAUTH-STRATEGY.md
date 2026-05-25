@@ -2245,6 +2245,287 @@ Phase-A-Launch-Window-Impact: KW 33-34 (statt KW 31-32). Buffer 0-7 Tage
 - Auth-Mode-Switch via Settings → alter Modus gelöscht, Twin neu konfiguriert
 - Multi-Twin: zwei Twins mit verschiedenen OAuth-Accounts parallel funktional
 
+## §t — Phase 4.0 Diagnose: CLI-Login-Wrapper um `codex login` (Tag 28)
+
+**Scope:** Pure Diagnose vor Phase-4.1-Bau. Wrapper-Architektur (Setzung
+Tag 28) ersetzt die ursprünglich skizzierte Loopback-Listener-Variante
+aus dem Phase-4-Bullet oben — kein eigener PKCE, kein Port 1455, kein
+SSH-Tunnel-Smoke. Statt dessen: `codex login` als Subprocess + auth.json-
+Read + DB-Persist mit Handle-Resolution. Output: §t als Bau-Briefing-
+Grundlage für Phase 4.1.
+
+### §t.1 — codex-CLI-Mechanik
+
+**Substantieller Befund:** `codex` ist **nicht im PATH**. Es existiert
+ausschließlich als App-Bundle und Editor-Extension:
+
+| Quelle | Pfad |
+|--------|------|
+| Codex Desktop (macOS) | `/Applications/Codex.app/Contents/Resources/codex` |
+| Cursor-Extension | `~/.cursor/extensions/openai.chatgpt-*/bin/<platform>/codex` |
+| Pencil-App | `/Applications/Pencil.app/Contents/Resources/.../codex` |
+
+Version: `codex-cli 0.131.0-alpha.9` (Tag 28). Für Phase 4.1 ist
+`/Applications/Codex.app/Contents/Resources/codex` die einzige stabile
+Quelle — Cursor-Extension-Pfade rotieren mit jedem Extension-Update.
+
+**`codex login` Sub-Surface:**
+
+```
+Usage: codex login [OPTIONS] [COMMAND]
+
+Commands:
+  status                  Show login status
+Options:
+  --with-api-key          Read API key from stdin
+  --with-access-token     Read access token from stdin
+  --device-auth           Device-Code-Flow (headless)
+  -c, --config <key=val>  Config-Override
+```
+
+Default-Verhalten (ohne Subcommand + ohne Options) ist nicht in der Help
+dokumentiert. Empirisch (basierend auf `last_refresh: 2026-05-25` im
+existing auth.json) öffnet `codex login` einen Browser-PKCE-Flow,
+schreibt Token nach `~/.codex/auth.json` und exitet erst nach dem
+Browser-Roundtrip.
+
+**`codex login status` testbar ohne Side-Effect:** Output `Logged in
+using ChatGPT` bei aktivem Token. Kann Phase 4.1 als Pre-Check
+verwenden, um Re-Login-Confirmation zu triggern.
+
+### §t.2 — auth.json Format + Multi-Account
+
+```jsonc
+{
+  "auth_mode": "chatgpt",          // 'chatgpt' | 'api_key'
+  "OPENAI_API_KEY": null,
+  "tokens": {
+    "access_token": "eyJ...",      // OAuth-Access-Token
+    "refresh_token": "rt-...",     // OAuth-Refresh-Token
+    "id_token": "eyJ...",          // OIDC-ID-Token (account-id-Quelle)
+    "account_id": "acc-..."        // ChatGPT-Account-Identifier
+  },
+  "last_refresh": "2026-05-25T07:52:24Z"
+}
+```
+
+**File-Permissions:** `-rw-------` (mode 0600, owner-only). Phase 4.1
+darf den File nur lesen, nicht modifizieren — codex CLI ist Owner.
+
+**Multi-Account:** codex CLI hat **keinen** expliziten Multi-Account-
+Support. `~/.codex/auth.json` ist single-tenant — neuer `codex login`
+überschreibt die `tokens`-Felder vollständig (inkl. `account_id`).
+Konsequenz für twin-lab: jeder `pnpm twin:oauth-login @handle` ruft
+`codex login` neu und überschreibt den vorherigen ChatGPT-Account im
+auth.json. **Phase-A-Pragmatik (3 User):** dokumentieren statt voll-
+covern. Wenn User mehrere ChatGPT-Accounts hat, muss er pro Login den
+gewünschten Account im Browser auswählen.
+
+### §t.3 — Existing Code-Surface (Reuse-Inventar)
+
+| Helper | Quelle | Reuse für Phase 4.1 |
+|--------|--------|---------------------|
+| `loadCodexToken()` | `test-oauth-phase3-spike.ts:59-85` | 1:1 — File-Existence-Check + JSON-Parse + Felder-Extraktion |
+| `TwinProfilesRepo.findByHandle(handle)` | `twin-profiles-repo.ts` | 1:1 — Handle→TwinProfile, returns null bei Fehler |
+| `TwinProfilesRepo.setAuthMode(twinId, 'oauth')` | `twin-profiles-repo.ts` | 1:1 |
+| `OAuthTokensRepo.upsert({...})` | `oauth/oauth-tokens-repo.ts` | 1:1 — AES-256-GCM-Encrypt + UPSERT |
+| `loadMasterKey()` | `crypto-utils.ts` | 1:1 |
+| `createSqliteRepository(dbPath)` | `repository/index.ts` | 1:1 |
+
+**Effektiver Phase-4.1-Code:** ~80 LOC (Skelett + Subprocess-Spawn +
+Args-Parsing). Alles andere ist Reuse.
+
+### §t.4 — Twin-Handle-Resolution
+
+`TwinProfilesRepo.findByHandle(handle: string): TwinProfile | null`
+existiert bereits. SQL: `SELECT * FROM twin_profiles WHERE handle = ?`.
+
+**Normalization (CLI-Side):** `process.argv[2]` kommt als `@markus` oder
+`markus`. Phase 4.1 strippt führenden `@` und lowercased — analog zu
+`bootstrap-twin.ts:argv[2]`-Pattern. Wenn `findByHandle` `null` zurückgibt
+→ Error mit Hinweis auf `TwinProfilesRepo.list({ activeOnly: true })`-
+Output (verfügbare Handles).
+
+### §t.5 — Owner-Permission-Check
+
+`TwinProfile.ownerUserId: string | null` existiert. HTTP-Routes haben
+keinen Owner-Check, der für CLI relevant wäre — CLI läuft mit Direct-DB-
+Access, kein HTTP-Auth-Layer.
+
+**Phase-A-Setzung:** CLI macht **keinen** Owner-Check. Begründung:
+- CLI läuft lokal (oder per SSH am VPS) mit Filesystem-Zugriff auf DB.
+- Wer CLI starten kann, hat eh Vollzugriff (DB-File + Master-Key-Env).
+- Drei bekannte User (Markus, Florian, Heiko) — manuell verifizierbar.
+
+**Phase B (sobald >1 Owner pro DB):** optional Owner-Check über CLI-
+Args (`--as-user=<email>`) oder Skip mit `--force`. Vorerst kein Need.
+
+### §t.6 — Subprocess-Mechanik
+
+**Codebase-State:** twin-lab hat **keinen** existierenden
+`child_process.spawn`-Pattern. MCP-Server-Spawn läuft über
+`@modelcontextprotocol/sdk` (anderes Abstraktions-Level).
+
+**Phase-4.1-Pattern (neu):**
+
+```ts
+import { spawn } from "node:child_process";
+
+const codexPath = process.env.CODEX_BIN
+  ?? "/Applications/Codex.app/Contents/Resources/codex";
+
+if (!fs.existsSync(codexPath)) {
+  throw new Error(`codex-Binary nicht gefunden: ${codexPath}. ...`);
+}
+
+const child = spawn(codexPath, ["login"], { stdio: "inherit" });
+await new Promise<void>((resolve, reject) => {
+  child.on("close", (code) => {
+    if (code === 0) resolve();
+    else reject(new Error(`codex login exit-code ${code}`));
+  });
+  child.on("error", reject);
+});
+```
+
+**Key-Design-Entscheidungen:**
+- `stdio: 'inherit'` — User sieht Browser-URL + `codex login` Prompts
+  direkt im Terminal. Kein eigenes Output-Parsing nötig.
+- **Kein File-Watcher** auf `~/.codex/auth.json`. `codex login` exitet
+  erst nach Browser-Roundtrip-Completion — Process-Exit ist der Done-
+  Signal. (Vermutung basierend auf Help-Output und Single-Process-Design;
+  Phase 4.2 Smoke validiert empirisch.)
+- **Plattform-Lookup:** `process.env.CODEX_BIN` Override → macOS-Default
+  `/Applications/Codex.app/...`. Linux-VPS-Path = offener Punkt (siehe
+  §t.8).
+
+### §t.7 — CLI-UX-Pattern
+
+**Lib-Inventar:** keine `chalk`/`ora`/`prompts`/`inquirer`/`enquirer` in
+`runtime/package.json` oder root. → plain `console.log` + Emoji-Marker.
+
+**Style-Konvention** (aus Spike-Scripts):
+- `✅` Success
+- `❌` Failure
+- `🔧` Setup-Phase
+- `🧹` Cleanup
+- `⚠️` Warning
+
+**Confirmation-Prompts:** kein interaktiver Prompt für Phase A.
+Begründung: Re-Login-Fall ist selten (3 User, Re-Login = explicit User-
+Intent durch CLI-Call). Wenn nötig, später via `readline`-Builtin (kein
+neuer Dep).
+
+### §t.8 — Architektur-Skizze Phase 4.1
+
+**Datei:** `apps/runtime/src/scripts/twin-oauth-login.ts`
+
+**package.json (root + runtime):** `twin:oauth-login` → `tsx
+src/scripts/twin-oauth-login.ts`
+
+**Code-Flow (Pseudocode):**
+
+```ts
+// 1. Args parsen
+const rawHandle = process.argv[2]; // "@markus" oder "markus"
+if (!rawHandle) throw new Error("Usage: pnpm twin:oauth-login <@handle>");
+const handle = rawHandle.replace(/^@/, "").toLowerCase();
+
+// 2. DB + Repos verkabeln
+const masterKey = loadMasterKey();
+const repo = createSqliteRepository(DB_PATH);
+const profilesRepo = new TwinProfilesRepo(repo.db);
+const tokensRepo = new OAuthTokensRepo(repo.db, masterKey);
+
+// 3. Twin lookup
+const twin = profilesRepo.findByHandle(handle);
+if (!twin) throw new Error(`Twin @${handle} nicht gefunden. ...`);
+
+// 4. Optional: Re-Login-Check
+if (twin.authMode === "oauth") {
+  console.log(`⚠️  Twin @${handle} ist schon im OAuth-Mode. Re-Login startet.`);
+}
+
+// 5. codex login Subprocess
+console.log(`🔧 Starte 'codex login' für Twin @${handle} ...`);
+await runCodexLoginSubprocess(); // siehe §t.6
+
+// 6. Token aus auth.json laden
+const { accessToken, refreshToken, accountId } = loadCodexToken();
+console.log(`✅ Token geladen (account=${accountId ?? "?"})`);
+
+// 7. DB-Persist
+profilesRepo.setAuthMode(twin.twinId, "oauth");
+const expiresAt = new Date(Date.now() + 50 * 60 * 1000).toISOString();
+tokensRepo.upsert({
+  twinId: twin.twinId,
+  provider: "openai",
+  accessToken, refreshToken, expiresAt, accountId,
+});
+
+console.log(`✅ Twin @${handle} auf OAuth umgestellt (account=${accountId}).`);
+```
+
+**Edge-Cases (Phase-A-Handling):**
+
+| Fall | Handling |
+|------|----------|
+| codex-Binary nicht gefunden | Error mit Install-Hint: `/Applications/Codex.app/...` oder `CODEX_BIN`-Env |
+| codex login exit-code ≠ 0 | Error mit Hinweis auf manuelles `codex login` für Diagnose |
+| `~/.codex/auth.json` fehlt nach Login | Error: "Token-File nicht geschrieben — Login schlug fehl?" |
+| `tokens.access_token` fehlt | Error: "Kein access_token im auth.json — codex CLI inkompatibel?" |
+| Handle nicht gefunden | Error mit Liste verfügbarer Handles |
+| Twin schon auf oauth | Warning + Re-Login fortsetzen (Token wird upserted) |
+| Token expired bei späterem Chat | OAuthRefreshService catched das (Phase 1 implementiert) — CLI muss nichts tun |
+| Multi-Account-Switch | Implizit durch codex CLI; `account_id` im auth.json + DB getrennt — neuer Login = neuer account_id |
+
+**Offener Punkt — VPS/Linux-Path:** macOS-App-Bundle existiert nicht auf
+Linux-VPS. Optionen für Phase 4.x:
+- (a) codex-Linux-Binary separat installieren (`@openai/codex` npm-Package
+  liefert `linux-x86_64`-Variante laut find-Output)
+- (b) `codex login --device-auth` (Device-Code-Flow) — User loggt sich auf
+  Mac-Browser ein, gibt Code in VPS-Terminal ein
+- (c) Login lokal auf Mac, `~/.codex/auth.json` per scp auf VPS
+  übertragen + dort `pnpm twin:oauth-login` ohne Subprocess-Call
+
+Phase 4.1 baut zunächst nur den **lokalen macOS-Path** — VPS-Workflow
+ist Phase 4.3 / Phase 5 (DEPLOYMENT.md §11).
+
+### §t.9 — Aufwand-Estimate Phase 4.1 + 4.2 + 4.3
+
+| Phase | Sub-Phasen | Zeit |
+|-------|------------|------|
+| 4.1 Bau | A: Skelett + argv + Handle-Normalize | 15 Min |
+|  | B: codex-Binary-Lookup + Subprocess-Spawn | 20 Min |
+|  | C: Token-Read (Reuse loadCodexToken) | 10 Min |
+|  | D: DB-Persist (Reuse setAuthMode + upsert) | 10 Min |
+|  | E: Error-Messages + Edge-Case-Handling | 15 Min |
+|  | F: package.json-Script-Entries | 5 Min |
+| **4.1 Σ** | | **~75 Min** |
+| 4.2 Smoke | E2E-Roundtrip lokal: Login → DB-Check → Chat-Roundtrip | 30 Min |
+| 4.3 Doku | DEPLOYMENT.md §11 (VPS-Path + Tunnel-Alternative) + STAND | 30 Min |
+| **Σ Phase 4** | | **~2-2.5h** |
+
+Passt zur 1-Tag-Estimate aus dem ursprünglichen Bullet — die ~1400 LOC
+aus dem alten Loopback-Listener-Plan entfallen komplett, Wrapper-Pattern
+ist ~80 LOC plus Reuse.
+
+### §t.10 — Setzungen für Phase 4.1 (zu bestätigen vor Bau)
+
+1. **Codex-Binary-Lookup:** `CODEX_BIN`-Env-Override → macOS-Default
+   `/Applications/Codex.app/Contents/Resources/codex`. Linux-Path ist
+   Phase-4.x.
+2. **Handle-Args:** `pnpm twin:oauth-login @markus` (mit oder ohne `@`,
+   case-insensitive). Kein Flag-Parsing — positional.
+3. **Owner-Check:** keiner in Phase A. Phase B kann `--as-user` ergänzen.
+4. **Confirmation-Prompts:** keine — Re-Login = explicit User-Intent.
+5. **Subprocess-Detection:** Process-Exit (`child.on('close', code)`),
+   kein File-Watcher. Validierung im Phase-4.2-Smoke.
+6. **Token-Expiry-Default:** `Date.now() + 50min` (analog Spike).
+   Refresh-Service holt sich bei Bedarf neuen Token.
+
+---
+
 ## Verweise
 
 - OpenAI Codex Auth-Doku: https://developers.openai.com/codex/auth
