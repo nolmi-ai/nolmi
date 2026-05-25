@@ -33,7 +33,7 @@ import {
 } from "./skills/pre-pass.js";
 import { TwinProfilesRepo } from "./twin-profiles-repo.js";
 import type { OAuthRefreshService } from "./oauth/refresh-service.js";
-import { CodexAdapter } from "./oauth/codex-adapter.js";
+import { CodexAdapter, type CodexInputItem } from "./oauth/codex-adapter.js";
 import type { ConversationsRepo } from "./conversations/repo.js";
 import type {
   ConversationSummariesRepo,
@@ -1496,8 +1496,14 @@ export class TwinService {
    * laufen lassen wollen).
    */
   private async runModelViaCodex(
-    _persona: Persona,
+    persona: Persona,
     messages: ChatMessage[],
+    extraSystem?: string,
+    options: {
+      factsBlock?: string | null;
+      episodicBlock?: string | null;
+      summaryBlock?: string | null;
+    } = {},
   ): Promise<{ content: string; metadata: Record<string, unknown> }> {
     if (!this.deps.oauthRefreshService) {
       throw new Error(
@@ -1509,10 +1515,28 @@ export class TwinService {
     if (!this.codexAdapter) {
       this.codexAdapter = new CodexAdapter(this.deps.oauthRefreshService);
     }
-    const userMessage = messages.at(-1)?.content ?? "";
+
+    // System-Prompt via shared Helper. Phase 3.2 weglassen: skillsBlock +
+    // toolUseDirective — Tool-Use kommt in Phase 3.3 dazu (Mapping der
+    // Codex-Tool-Call-Events ist eigene Sub-Phase).
+    const instructions = composeOwnerSystemPrompt({
+      persona,
+      extraSystem,
+      factsBlock: options.factsBlock,
+      skillsBlock: null,
+      toolUseDirective: null,
+      summaryBlock: options.summaryBlock,
+      episodicBlock: options.episodicBlock,
+    });
+
+    // `messages` enthält bereits Conversation-History (vom Caller pre-built,
+    // siehe runOwnerDirect). Reines Format-Mapping reicht.
+    const input = mapChatMessagesToCodexInput(messages);
+
     const result = await this.codexAdapter.generateText({
       twinId: this.deps.twinId,
-      userMessage,
+      instructions,
+      input,
     });
     return {
       content: result.text,
@@ -1602,12 +1626,19 @@ export class TwinService {
   }> {
     // #131 Phase 3.0 Spike — OAuth-Branch VOR der ganzen Skill/Tool-Logik.
     // DB-fresh authMode-Lookup, damit Helper-Smoke live umschalten kann ohne
-    // Registry-Reload. Walking-Skeleton: Tools/Skills/Pre-Pass/Memory werden
-    // umgangen (Phase 3.1-3.3 ziehen das nach). Existing api_key-Twins
-    // erreichen diesen Branch nie, weil profile.authMode === 'api_key' bleibt.
+    // Registry-Reload. Phase 3.2: Persona + factsBlock + episodicBlock +
+    // summaryBlock + extraSystem werden durchgereicht (System-Prompt-Build
+    // via composeOwnerSystemPrompt-Helper, gleiche Schichten wie Vercel-SDK-
+    // Pfad — Schicht 3 skillsBlock + Schicht 4 TOOL_USE_DIRECTIVE folgen in
+    // Phase 3.3 mit Tool-Use-Mapping). Existing api_key-Twins erreichen
+    // diesen Branch nie, weil profile.authMode === 'api_key' bleibt.
     const profileNow = this.profilesRepo.findById(this.deps.twinId);
     if (profileNow?.authMode === "oauth") {
-      return this.runModelViaCodex(persona, messages);
+      return this.runModelViaCodex(persona, messages, extraSystem, {
+        factsBlock: options.factsBlock,
+        episodicBlock: options.episodicBlock,
+        summaryBlock: options.summaryBlock,
+      });
     }
 
     // Skills landen zwischen Persona und LANGUAGE_DIRECTIVE: sie ergänzen die
@@ -1673,32 +1704,18 @@ REGEL 5: Behaupte nicht, dass ein Tool nicht funktioniert, ohne es tatsächlich 
 REGEL 6: Wenn der User dich explizit bittet, ein Tool zu nutzen ("rufe das X-Tool auf", "nutze Y"), MUSST du es rufen. Verweigere nicht und ersetze nicht durch eigene Antworten.`
       : null;
 
-    // Sieben Schichten, Reihenfolge bewusst:
-    //   1. extraSystem (situativer Bridge-Kontext, optional)
-    //   2. persona.systemPrompt + factsBlock (combined) — Facts sind Persona-
-    //      konstitutiv und profitieren von der Attention-Position am
-    //      Prompt-Anfang. 3.3.E
-    //   3. skillsBlock (Skill-Erweiterungen, ergänzen Persona — nur Manual-Skills)
-    //   4. TOOL_USE_DIRECTIVE (nur wenn Tools übergeben werden)
-    //   5. LANGUAGE_DIRECTIVE (Anti-"weiss"-statt-"weiß", gilt für alle Twins)
-    //   6. summaryBlock (3.3.C — verdichtete Vorgeschichte der LAUFENDEN Konv,
-    //      nur wenn Summaries existieren; sonst null und via filter rausgenommen)
-    //   7. episodicBlock (3.4.E — Top-K Erinnerungen aus VERGANGENEN Konv +
-    //      Diary, semantisch nah an der aktuellen User-Message)
-    const personaWithFacts = options.factsBlock
-      ? `${persona.systemPrompt}\n\n${options.factsBlock}`
-      : persona.systemPrompt;
-    const system = [
+    // System-Prompt-Composition via composeOwnerSystemPrompt-Helper (siehe
+    // dort für Schichten-Doku). runModelViaCodex nutzt denselben Helper —
+    // Drift-Prevention zwischen Vercel-SDK- und Codex-Pfad.
+    const system = composeOwnerSystemPrompt({
+      persona,
       extraSystem,
-      personaWithFacts,
+      factsBlock: options.factsBlock,
       skillsBlock,
-      TOOL_USE_DIRECTIVE,
-      LANGUAGE_DIRECTIVE,
-      options.summaryBlock ?? null,
-      options.episodicBlock ?? null,
-    ]
-      .filter(Boolean)
-      .join("\n\n");
+      toolUseDirective: TOOL_USE_DIRECTIVE,
+      summaryBlock: options.summaryBlock,
+      episodicBlock: options.episodicBlock,
+    });
 
     // stopWhen: stepCountIs(5) limitiert Tool-Use-Iterationen pro User-Send.
     // Default in AI-SDK-6 ist stepCountIs(1) — also genau ein LLM-Call.
@@ -1988,6 +2005,82 @@ Niemals "ae", "oe", "ue" oder "ss" als Ersatz verwenden.
 Auch nicht "ae" für Eigennamen wie "Bär" oder Begriffe wie
 "beschäftigt", "Größe", "schön".
 `.trim();
+
+/**
+ * Composition des Owner-Direct-System-Prompts.
+ *
+ * Sieben Schichten, Reihenfolge bewusst:
+ *   1. extraSystem (situativer Bridge-Kontext, optional)
+ *   2. persona.systemPrompt + factsBlock (combined — Facts sind Persona-
+ *      konstitutiv und profitieren von der Attention-Position am
+ *      Prompt-Anfang, 3.3.E)
+ *   3. skillsBlock (Skill-Erweiterungen, ergänzen Persona — nur Manual-Skills,
+ *      `null` im Codex-Pfad bis Phase 3.3 Tool-Use nachzieht)
+ *   4. toolUseDirective (Anti-Halluzination-Regeln, nur bei aktivem Tool-Set,
+ *      `null` im Codex-Pfad bis Phase 3.3)
+ *   5. LANGUAGE_DIRECTIVE (Anti-„weiss"-statt-„weiß", gilt für alle Twins)
+ *   6. summaryBlock (3.3.C — verdichtete Vorgeschichte der LAUFENDEN Konv)
+ *   7. episodicBlock (3.4.E — Top-K Erinnerungen aus VERGANGENEN Konv + Diary)
+ *
+ * `null`-Schichten werden via `.filter(Boolean)` rausgeworfen. Konsumenten:
+ * `runModel` (Vercel-AI-SDK-Pfad mit allen 7 Schichten) und
+ * `runModelViaCodex` (OAuth-Codex-Pfad ohne Schicht 3+4 in Phase 3.2).
+ *
+ * #131 Phase 3.2: extrahiert aus runModel, damit beide Pfade strukturell
+ * dieselbe Composition haben und neue Schichten nicht nur in einem Pfad
+ * eingebaut werden (Drift-Prevention).
+ */
+function composeOwnerSystemPrompt(parts: {
+  persona: Persona;
+  extraSystem: string | null | undefined;
+  factsBlock: string | null | undefined;
+  skillsBlock: string | null | undefined;
+  toolUseDirective: string | null | undefined;
+  summaryBlock: string | null | undefined;
+  episodicBlock: string | null | undefined;
+}): string {
+  const personaWithFacts = parts.factsBlock
+    ? `${parts.persona.systemPrompt}\n\n${parts.factsBlock}`
+    : parts.persona.systemPrompt;
+  return [
+    parts.extraSystem,
+    personaWithFacts,
+    parts.skillsBlock,
+    parts.toolUseDirective,
+    LANGUAGE_DIRECTIVE,
+    parts.summaryBlock,
+    parts.episodicBlock,
+  ]
+    .filter(Boolean)
+    .join("\n\n");
+}
+
+/**
+ * Mappt Twin-Lab `ChatMessage[]` auf Codex-Input-Items. user → `input_text`,
+ * assistant → `output_text` (matched Codex-Response-Format). System-Messages
+ * werden übersprungen — System-Prompt geht via `instructions`-Field, nicht
+ * via `input`-Array.
+ *
+ * #131 Phase 3.2: dieselbe `messages`-Liste die `runModel` an das Vercel-AI-
+ * SDK übergibt enthält bereits Conversation-History (vom Caller pre-built);
+ * für den Codex-Pfad reicht reines Format-Mapping, kein separates
+ * History-Loading.
+ */
+function mapChatMessagesToCodexInput(
+  messages: ChatMessage[],
+): CodexInputItem[] {
+  const items: CodexInputItem[] = [];
+  for (const msg of messages) {
+    if (msg.role !== "user" && msg.role !== "assistant") continue;
+    const partType = msg.role === "user" ? "input_text" : "output_text";
+    items.push({
+      type: "message",
+      role: msg.role,
+      content: [{ type: partType, text: msg.content }],
+    });
+  }
+  return items;
+}
 
 // 3.2.F: Shape des Pending-Audit-Input für mcp-tool-use. Lokal als Type-
 // Alias, damit der Cast in approveMcpToolUse / reject-Branch lesbar bleibt.

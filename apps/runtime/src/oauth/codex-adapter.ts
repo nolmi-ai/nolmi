@@ -3,15 +3,17 @@ import { CodexSSEParser } from "./codex-sse-parser.js";
 import { withRetry } from "./codex-retry.js";
 import type { OAuthRefreshService } from "./refresh-service.js";
 
-// ─── CODEX-ADAPTER (#131 PHASE 3.1.2) ────────────────────────────────────────
+// ─── CODEX-ADAPTER (#131 PHASE 3.2) ──────────────────────────────────────────
 //
 // Direct-fetch gegen das Codex-Backend von ChatGPT. Phase 3.0 war Walking-
 // Skeleton; Phase 3.1 hat den SSE-Parser standalone gebaut (3.1.1) und ihn
-// hier integriert plus Retry-Wrapper drumherum gelegt (3.1.2).
+// hier integriert plus Retry-Wrapper drumherum gelegt (3.1.2). Phase 3.2
+// macht den Adapter zum reinen HTTP-Client — `instructions` (System-Prompt)
+// und `input` (Codex-Input-Items inkl. History) kommen pre-built vom Caller
+// (`runModelViaCodex` in twin-service.ts).
 //
-// Out-of-Scope (kommt in 3.2-3.4):
+// Out-of-Scope (kommt in 3.3-3.4):
 //   - Tool-Calls (tools=[] hardcoded)
-//   - Persona-/Mandate-Mapping (Minimal-Instructions, siehe SPIKE_INSTRUCTIONS)
 //   - SSE-Streaming bis zum Web-Client (collect-to-string-Pattern)
 //   - Reasoning-Traces, Audit-Mapping
 //   - Vercel-AI-SDK-Custom-Provider (3.4, optional)
@@ -22,16 +24,27 @@ import type { OAuthRefreshService } from "./refresh-service.js";
 
 const CODEX_ENDPOINT = "https://chatgpt.com/backend-api/codex/responses";
 
-// Pre-Flight-verifizierter Minimal-Codex-Prefix. Phase 3.2 ersetzt das mit
-// echtem Codex-CLI-Reverse-Engineering plus Twin-Persona-Mapping als
-// developer-Role-Message.
-const SPIKE_INSTRUCTIONS = "You are a helpful coding assistant.";
-
 const DEFAULT_MODEL = "gpt-5.5";
+
+/**
+ * Codex-Input-Item-Schema (Subset für Phase 3.2 — Text-Messages, kein
+ * Tool-Call-Format). Mapped von `ChatMessage[]` durch den Caller:
+ *   user → `input_text`, assistant → `output_text` (matched Codex-Response-
+ *   Format und ist die naheliegende Symmetrie).
+ */
+export interface CodexInputItem {
+  type: "message";
+  role: "user" | "assistant";
+  content: Array<{ type: "input_text" | "output_text"; text: string }>;
+}
 
 export interface CodexAdapterInput {
   twinId: string;
-  userMessage: string;
+  /** Pre-built System-Prompt-String — Caller komponiert Persona + Facts +
+   *  Memory + Language-Direktive. */
+  instructions: string;
+  /** Pre-built Input-Items — Caller mappt History + aktuelle User-Message. */
+  input: CodexInputItem[];
   model?: string;
 }
 
@@ -80,14 +93,8 @@ export class CodexAdapter {
 
     const body = {
       model: input.model ?? DEFAULT_MODEL,
-      instructions: SPIKE_INSTRUCTIONS,
-      input: [
-        {
-          type: "message",
-          role: "user",
-          content: [{ type: "input_text", text: input.userMessage }],
-        },
-      ],
+      instructions: input.instructions,
+      input: input.input,
       tools: [],
       tool_choice: "auto",
       parallel_tool_calls: false,

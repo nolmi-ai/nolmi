@@ -150,9 +150,22 @@ async function main(): Promise<void> {
     const adapter = new CodexAdapter(refreshService);
 
     console.log("\n→ Codex-Endpoint-Call läuft …");
+    // Phase 3.2: Adapter ist jetzt reiner HTTP-Client — Caller liefert
+    // pre-built instructions + input. Smoke nutzt Minimal-Variante (kein
+    // Persona/Facts/Memory — das verifiziert der End-to-End-Smoke gegen
+    // /twins/:handle/chat).
     const result = await adapter.generateText({
       twinId: testTwin.twinId,
-      userMessage: "Say hello in exactly three words.",
+      instructions: "You are a helpful coding assistant.",
+      input: [
+        {
+          type: "message",
+          role: "user",
+          content: [
+            { type: "input_text", text: "Say hello in exactly three words." },
+          ],
+        },
+      ],
     });
 
     console.log(`\n✅ HTTP 200 in ${result.latencyMs}ms`);
