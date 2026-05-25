@@ -1,6 +1,6 @@
 # #131 OpenAI Subscription-OAuth — Strategy
 
-**Status:** Phase 1 + 2 + 3.0 Spike + 3.1 (3.1.1 + 3.1.2) + 3.2 ✅ Tag 27. Phase 3.3 nächster Schritt (Tag 28-29) — Tool-Calls + Reasoning-Traces auf Basis der 5 captured Event-Types.
+**Status:** Phase 1 + 2 + 3.0 Spike + 3.1 (3.1.1 + 3.1.2) + 3.2 + 3.3.0 Spike ✅ Tag 27. Phase 3.3.1 nächster Schritt (Tag 28) — Parser-Erweiterung + MCP-Pipeline-Mapping auf Basis verifizierter §k-Findings.
 
 Pre-Launch-Phase A Block 5 Item. Vorgezogen von Phase B in Tag 26.
 
@@ -176,7 +176,9 @@ initial geschätzt. Re-Estimate: XL → XXL. Bau in Sub-Phasen:
 | **3.1.1 SSE-Parser standalone** (Tag 27 Nachmittag) | CodexSSEParser mit Hybrid-Approach (Discriminated-Union + generic Fallback), 8/8 Smoke | 1-1.5h | ✅ Commit `75d166d` |
 | **3.1.2 SSE-Integration + Retry** (Tag 27 Nachmittag) | CodexHttpError + isRetryableError + withRetry (3 Retries, Backoff 1s/2s/4s, Full-Restart), 11/11 Retry-Smoke + End-to-End-Smoke | 2-3h | ✅ Commit `707f941` |
 | **3.2 Codex-System-Prompt + Persona-Mapping** (Tag 27 Nachmittag) | `composeOwnerSystemPrompt`-Helper extrahiert (Drift-Prevention zwischen Vercel-SDK- und Codex-Pfad), runModelViaCodex erweitert (persona + factsBlock + episodicBlock + summaryBlock + extraSystem), CodexAdapter wird reiner HTTP-Client (pre-built instructions + input), CodexInputItem-Type exportiert, Smoke 3 End-to-End grün mit klarer Markus-Persona | ~2h | ✅ Commit `a949b7e` |
-| **3.3 Tool-Calls + Reasoning-Traces** (Tag 29) | Codex-Response-Format → Twin-Lab AuditEntry-Mapping, Tool-Call-Round-Trips. **Eingangsdaten:** 5 zusätzliche Event-Types aus Phase-3.1.2-Smoke entdeckt, dokumentiert in STAND Tag 27 — Reverse-Engineering-Daten für Tool-Call-Mapping (siehe unten) | 1-2 Tage | offen |
+| **3.3.0 Spike Tool-Call-Discovery** (Tag 27 Abend) | Raw-fetch + Mock-Function-Tool, alle SSE-Events captured → §k dokumentiert Event-Format vollständig (7 distinct types, 14 Events, 2 IDs pro Tool-Call) | ~1h | ✅ Commit `<pending>` |
+| **3.3.1 Parser-Erweiterung + MCP-Pipeline-Mapping** (Tag 28) | CodexSSEParser um function_call-Events erweitern, runModelViaCodex Tools durchreichen (skillsBlock + toolUseDirective), Mapping auf AuditMcpToolUseInputSchema, Multi-Step-Round-Trip-Spike | 1-2 Tage | offen |
+| **3.3.2 Reasoning-Traces** (Tag 29, optional) | reasoning-Item-Type handlen, Audit-Persistenz | 0.5 Tag | offen |
 | **3.4 Vercel-Provider-Refactor** (optional, Tag 29-30) | Direct-fetch zu sauberem Vercel-AI-SDK-Custom-Provider migrieren | 1 Tag | offen |
 
 **Stop-Punkte:** jede Sub-Phase mit eigenem Commit + Smoke. Wenn 3.0 Spike fails:
@@ -232,6 +234,185 @@ sind affected, Twin-Lab müsste nachziehen.
 **Mitigation:**
 - Monitoring auf neue Codex-CLI-Releases (changelog watch)
 - Sub-Phase 3.4 Custom-Vercel-Provider isoliert das Format-Mapping
+
+## §k — Codex-Tool-Call-Event-Format (Phase 3.3.0 Spike-Discovery, Tag 27)
+
+Phase 3.3.0 Spike-Script (`apps/runtime/src/scripts/test-oauth-phase3-3-spike.ts`)
+hat einen Codex-Tool-Call mit einer Mock-Function-Definition
+(`get_current_time`) provoziert und alle SSE-Events captured. Token kommt
+direkt aus `~/.codex/auth.json` (Memory-Setzung „Discovery-Spikes lesen
+Token direkt, Production-Tests gehen über DB"). Ergebnis: HTTP 200 in
+1641ms, 14 SSE-Event-Blöcke, 7 distinct Event-Types — Tool-Call vollständig
+in 1 Roundtrip.
+
+### Event-Type-Histogram (1 Tool-Call)
+
+```
+  8× response.function_call_arguments.delta
+  1× response.created
+  1× response.in_progress
+  1× response.output_item.added
+  1× response.function_call_arguments.done
+  1× response.output_item.done
+  1× response.completed
+```
+
+**Drei neue Event-Types** gegenüber Phase 3.1/3.2 Text-Response-Smokes:
+
+| Event-Type | Rolle |
+|---|---|
+| `response.output_item.added` mit `item.type === "function_call"` | Tool-Call-Item beginnt — liefert `item.id`, `call_id`, `name`, leere `arguments` |
+| `response.function_call_arguments.delta` | Streaming-Chunks der Argument-JSON (analog `response.output_text.delta` für Text) |
+| `response.function_call_arguments.done` | Vollständige `arguments` JSON-Strings — Sanity-Check + endgültige Verarbeitung |
+
+Plus zwei bereits-bekannte Events aus Phase-3.1.2-Bonus-Discovery werden
+hier auch genutzt: `response.in_progress` (Status-Marker nach `created`)
+und `response.output_item.done` (Tool-Call-Item-Termination).
+
+### Tool-Call-Item-Schema
+
+```jsonc
+// response.output_item.added (Tool-Call beginnt):
+{
+  "type": "response.output_item.added",
+  "item": {
+    "id": "fc_0197bf7b85ec9e8a016a14290556248191b24052b4b1d981b8",
+    "type": "function_call",
+    "status": "in_progress",
+    "arguments": "",
+    "call_id": "call_RsYWsp6Sy4tDGgMvkppxtpgY",
+    "name": "get_current_time"
+  },
+  "output_index": 0,
+  "sequence_number": 2
+}
+
+// response.function_call_arguments.delta (Streaming):
+{
+  "type": "response.function_call_arguments.delta",
+  "delta": "{\"",
+  "item_id": "fc_0197bf7b85ec9e8a016a14290556248191b24052b4b1d981b8",
+  "obfuscation": "wYxgfYE2hCGmVn",
+  "output_index": 0,
+  "sequence_number": 3
+}
+
+// response.function_call_arguments.done (Vollständig):
+{
+  "type": "response.function_call_arguments.done",
+  "arguments": "{\"timezone\":\"Europe/Berlin\"}",
+  "item_id": "fc_0197bf7b85ec9e8a016a14290556248191b24052b4b1d981b8",
+  "output_index": 0,
+  "sequence_number": 11
+}
+
+// response.output_item.done (Tool-Call abgeschlossen):
+{
+  "type": "response.output_item.done",
+  "item": {
+    "id": "fc_0197bf7b85ec9e8a016a14290556248191b24052b4b1d981b8",
+    "type": "function_call",
+    "status": "completed",
+    "arguments": "{\"timezone\":\"Europe/Berlin\"}",
+    "call_id": "call_RsYWsp6Sy4tDGgMvkppxtpgY",
+    "name": "get_current_time"
+  },
+  "output_index": 0,
+  "sequence_number": 12
+}
+```
+
+### Substantielle Findings für Phase 3.3.1
+
+1. **Zwei IDs pro Tool-Call:** `item.id` (Codex-internes Item-Tracking,
+   Format `fc_...`) vs. `call_id` (Tool-Call-Referenz, Format `call_...`).
+   `call_id` wird vermutlich beim Tool-Result-Return als Reference benötigt
+   (Codex-Multi-Step-Pattern wie OpenAI Responses API Standard).
+2. **Arguments sind JSON-String, nicht Object** — Phase 3.3.1 muss
+   `JSON.parse(item.arguments)` vor Mapping auf
+   `AuditMcpToolUseInputSchema.toolCall.args` (das ist
+   `Record<string, unknown>`).
+3. **`strict: true` wurde Codex auto-ergänzt** zum Tool-Schema (siehe
+   `response.created.tools[0].strict`). Phase 3.3.1 muss prüfen ob das
+   die Strict-Mode-Konvention triggern könnte (zusätzliche Validation
+   server-side).
+4. **`obfuscation`-Field** auf jedem `function_call_arguments.delta` —
+   vermutlich Cloudflare-Bot-Management-Counterpart zu `__cf_bm`. Kein
+   Decoding nötig, einfach ignorieren.
+5. **`output_index: 0`** auf allen Tool-Call-Events — bei
+   `parallel_tool_calls: true` würden mehrere Tool-Calls mit verschiedenen
+   `output_index`-Werten parallel streamen. Phase 3.3 hat parallel=false
+   gesetzt, kein Multi-Index-Handling nötig (kann später nachgezogen
+   werden).
+6. **Keine Reasoning-Traces in diesem Smoke** trotz
+   `reasoning.effort: "medium"` im response.created-Body. Wenn Reasoning
+   getriggert wird, kommt es vermutlich als eigenes `output_item.added`
+   mit `item.type === "reasoning"`. Phase 3.3 ignoriert Reasoning bewusst
+   (Spike-Disziplin) — falls Reasoning-Events auftauchen, in
+   `unknownEventTypes` capturen wie Phase 3.1.2.
+7. **`usage`-Field** in `response.completed`: `input_tokens: 194`,
+   `output_tokens: 22`, `total_tokens: 216`. Wäre wertvoll für
+   Audit-Persistenz (Cost-Tracking) — Sub-Phase 3.4 (Vercel-Provider)
+   oder eigene Phase 3.5 könnte das nachziehen.
+
+### Phase-3.3.1-Mapping-Hypothese auf existing MCP-Pipeline
+
+Ziel: Codex-Tool-Call auf existing `AuditMcpToolUseInputSchema` mappen
+(siehe `packages/shared/src/index.ts:383`), damit die Approval-Pipeline
+(`/audit/:id/approve`) und MCP-Tool-Execution unverändert greifen.
+
+```typescript
+// Mapping-Skizze für Phase 3.3.1:
+const codexCall = {
+  itemId: "fc_...",        // aus response.output_item.added/done
+  callId: "call_...",      // aus item.call_id
+  toolName: "get_current_time",  // aus item.name
+  argumentsJson: "{...}",  // aus item.arguments (oder done-Event)
+};
+const args = JSON.parse(codexCall.argumentsJson);
+
+// Skills-Repo-Lookup: toolName ist der human-readable Skill-Name —
+// braucht Reverse-Lookup auf {mcpServerId, mcpToolName}-Tupel via
+// Skills-Tabelle.
+const skill = skillsRepo.findByDisplayName(twinId, codexCall.toolName);
+// → mcpServerId, mcpToolName extrahieren
+
+// AuditMcpToolUseInputSchema bauen:
+const auditInput: AuditMcpToolUseInput = {
+  messages: [...],
+  toolCall: {
+    mcpServerId: skill.mcpServerId,
+    mcpToolName: skill.mcpToolName,
+    args,
+  },
+  conversationId,
+  pendingReply: "...",
+};
+```
+
+**Offene Frage Phase 3.3.1:** Multi-Step-Round-Trip. Nach Tool-Result
+muss ein neuer Codex-Request mit dem Result als `input`-Item vom Type
+`function_call_output` gesendet werden — Schema dafür ist noch nicht
+verifiziert (Spike 3.3.0 stoppt nach erstem Tool-Call). Bau-Briefing
+Phase 3.3.1 muss das als eigenen Sub-Spike adressieren oder via
+OpenAI-Responses-API-Doku-Recherche klären.
+
+### Parser-Erweiterungs-Plan Phase 3.3.1
+
+CodexSSEParser bekommt:
+- Discriminated-Union erweitern: `response.output_item.added` mit
+  `item: { type: "function_call" | "message" | ... }`-Refinement
+- 2 neue Cases: `response.function_call_arguments.delta` + `.done`
+- 1 erweiterter Case: `response.output_item.done` (heute No-op)
+- Neuer State: `toolCallsInProgress: Map<itemId, { name, callId,
+  argumentsBuffer }>` für Streaming-Akkumulation
+- Neues Result-Field: `toolCalls: Array<{ itemId, callId, name, arguments
+  }>` (arguments als parsed Object, nicht JSON-String — Caller-Convenience)
+
+Plus Schicht 3+4 im Codex-Pfad nachziehen (`composeOwnerSystemPrompt`
+unterstützt `skillsBlock` + `toolUseDirective` bereits — `runModelViaCodex`
+muss sie aus dem Call-Site (`runModel` Z. 1610) durchreichen, plus
+Mock-Skill-Set aus TwinService an CodexAdapter geben).
 
 ## Re-Estimate Tag 27 Nachmittag
 
