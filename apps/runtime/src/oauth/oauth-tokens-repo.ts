@@ -150,6 +150,26 @@ export class OAuthTokensRepo {
       .run(twinId, provider);
   }
 
+  /**
+   * Background-Scan für RefreshService: liefert twin_ids deren Token
+   * innerhalb `thresholdMinutes` expired oder bereits expired ist.
+   * Bewusst thin (kein Decrypt) — der Loop iteriert nur und ruft
+   * `ensureFresh(twinId)`, der intern das Decrypt macht.
+   */
+  findTwinIdsExpiringSoon(thresholdMinutes: number): string[] {
+    const cutoff = new Date(
+      Date.now() + thresholdMinutes * 60 * 1000,
+    ).toISOString();
+    const rows = this.db
+      .prepare(
+        `SELECT twin_id FROM oauth_tokens
+         WHERE provider = 'openai' AND expires_at < ?
+         ORDER BY expires_at ASC`,
+      )
+      .all(cutoff) as Array<{ twin_id: string }>;
+    return rows.map((r) => r.twin_id);
+  }
+
   /** Owner-Safe-Projection ohne Token-Klartext. Sicher für API-Responses. */
   toPublic(row: OAuthTokenDecrypted): OAuthTokenPublic {
     const expiresAtMs = new Date(row.expiresAt).getTime();

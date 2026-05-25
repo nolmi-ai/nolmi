@@ -19,6 +19,8 @@ import { TelegramMessagesRepo } from "./telegram/messages-repo.js";
 import { PairingService } from "./telegram/pairing-service.js";
 import { TelegramBotRegistry } from "./telegram/bot-registry.js";
 import { TelegramMessageRouter } from "./telegram/message-router.js";
+import { OAuthTokensRepo } from "./oauth/oauth-tokens-repo.js";
+import { OAuthRefreshService } from "./oauth/refresh-service.js";
 
 // ─── BOOTSTRAP ───────────────────────────────────────────────────────────────
 //
@@ -108,6 +110,16 @@ async function main() {
     config.runtimePublicUrl,
   );
 
+  // #131 Phase 2 — OAuth-Refresh-Service. Singleton, hält Background-Poll-
+  // Loop + Mutex-Map für Lazy-Refresh. Construction hier, start() unten
+  // nach app.listen (analog telegramBotRegistry). Phase 3 wired den
+  // Service in den Provider-Layer (Lazy-Refresh vor jedem LLM-Call).
+  const oauthTokensRepo = new OAuthTokensRepo(repo.db, masterKey);
+  const oauthRefreshService = new OAuthRefreshService(
+    oauthTokensRepo,
+    repo.audit,
+  );
+
   const app = await createServer({
     audit: repo.audit,
     registry,
@@ -173,14 +185,20 @@ async function main() {
   // verfügbar erst nach app.listen; analog startBridges-Reihenfolge.
   telegramBotRegistry.start(app.log);
 
+  // #131 Phase 2 — OAuth-Refresh-Background-Loop starten. Pollt alle 60s
+  // expiring Tokens und refresht sie proaktiv. Lazy-Refresh-API ist sofort
+  // verfügbar (kein Boot-Wait), aber Background-Tick erst ab jetzt.
+  oauthRefreshService.start(app.log);
+
   // 9. Graceful Shutdown
   const shutdown = async (signal: string) => {
     console.log(`[shutdown] ${signal} empfangen — fahre runter`);
-    // Reihenfolge: erst Bridge-Streams + Telegram-Bots (kein neuer Inbound),
-    // dann MCP-Subprocesses disposen (kein neuer Outbound an Tools), dann
-    // Fastify schließen.
+    // Reihenfolge: erst Bridge-Streams + Telegram-Bots + OAuth-Polling
+    // (kein neuer Inbound + kein neuer Refresh-Tick), dann MCP-Subprocesses
+    // disposen (kein neuer Outbound an Tools), dann Fastify schließen.
     await registry.shutdown();
     telegramBotRegistry.shutdown();
+    oauthRefreshService.stop();
     await registry.disposeAll();
     try {
       await app.close();
