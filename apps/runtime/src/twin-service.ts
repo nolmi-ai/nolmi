@@ -40,6 +40,10 @@ import {
   type CodexResumeContext,
 } from "./oauth/codex-adapter.js";
 import { mapSkillsToCodexTools } from "./oauth/codex-tool-mapper.js";
+import {
+  createCodexProvider,
+  type CodexProvider,
+} from "./oauth/codex-vercel-provider.js";
 import type { ConversationsRepo } from "./conversations/repo.js";
 import type {
   ConversationSummariesRepo,
@@ -305,6 +309,10 @@ export class TwinService {
    * (z.B. Tests ohne Refresh-Service) keine Adapter-Construction.
    */
   private codexAdapter: CodexAdapter | null = null;
+  /** #131 Phase 3.4.3.1 Big-Bang: Lazy-Singleton für den Codex-Vercel-Provider.
+   *  Wird im runModel-oauth-Branch statt runModelViaCodex genutzt — beide
+   *  Auth-Modi laufen jetzt durch dieselbe Vercel-generateText-Pipeline. */
+  private codexProvider: CodexProvider | null = null;
 
   constructor(private deps: TwinServiceDeps) {
     this.mcp = new McpClientManager(
@@ -2283,24 +2291,31 @@ export class TwinService {
      */
     prePassSkillName?: string;
   }> {
-    // #131 Phase 3.0/3.2/3.3.1.2 — OAuth-Branch VOR der ganzen
-    // Skill/Tool-Logik. DB-fresh authMode-Lookup, damit Helper-Smoke live
-    // umschalten kann ohne Registry-Reload. Phase 3.3.1.2 reicht jetzt die
-    // aktiven Skills durch — runModelViaCodex baut daraus codex-tools-Field
-    // + Reverse-Map, fährt Multi-Step-Loop mit Auto-Execute via McpClient.
-    // Existing api_key-Twins erreichen diesen Branch nie, weil
-    // profile.authMode === 'api_key' bleibt.
+    // #131 Phase 3.4.3.1 Big-Bang: oauth-Branch ist nicht mehr ein separater
+    // Codex-Pfad (runModelViaCodex), sondern entscheidet nur welches `model`
+    // an Vercel `generateText` geht. Provider via Lazy-Singleton, Tools +
+    // System-Prompt + Multi-Step-Loop + needsApproval-Handling sind alle
+    // identisch zwischen api_key und oauth.
     const profileNow = this.profilesRepo.findById(this.deps.twinId);
-    if (profileNow?.authMode === "oauth") {
-      const oauthSkills = this.deps.skills.list(this.deps.twinId, {
-        activeOnly: true,
-      });
-      return this.runModelViaCodex(persona, messages, extraSystem, {
-        factsBlock: options.factsBlock,
-        episodicBlock: options.episodicBlock,
-        summaryBlock: options.summaryBlock,
-        skills: oauthSkills,
-      });
+    const isOAuth = profileNow?.authMode === "oauth";
+    let activeModel = this.deps.model;
+    let activeModelLabel = this.deps.modelLabel;
+    if (isOAuth) {
+      if (!this.deps.oauthRefreshService) {
+        throw new Error(
+          "[twin-service] runModel: twin.authMode='oauth' aber " +
+            "OAuthRefreshService nicht injiziert — Boot-Pfad muss " +
+            "registry.loadAll({ oauthRefreshService }) übergeben.",
+        );
+      }
+      if (!this.codexProvider) {
+        this.codexProvider = createCodexProvider({
+          refreshService: this.deps.oauthRefreshService,
+          twinId: this.deps.twinId,
+        });
+      }
+      activeModel = this.codexProvider.languageModel("gpt-5.5");
+      activeModelLabel = "openai-codex/gpt-5.5";
     }
 
     // Skills landen zwischen Persona und LANGUAGE_DIRECTIVE: sie ergänzen die
@@ -2432,7 +2447,7 @@ REGEL 6: Wenn der User dich explizit bittet, ein Tool zu nutzen ("rufe das X-Too
       );
     }
     const result = await generateText({
-      model: this.deps.model,
+      model: activeModel,
       system,
       messages: toModelMessages(messages),
       ...(hasTools
@@ -2494,7 +2509,7 @@ REGEL 6: Wenn der User dich explizit bittet, ein Tool zu nutzen ("rufe das X-Too
         `[mcp:tools] forcedToolChoice + finishReason=tool-calls — running followup for final text (twin=${this.deps.twinId})`,
       );
       followupResult = await generateText({
-        model: this.deps.model,
+        model: activeModel,
         system,
         // response.messages enthält die assistant-Tool-Call- und
         // tool-Result-Messages aus dem ersten Step — direkt anhängen, dann
@@ -2548,7 +2563,7 @@ REGEL 6: Wenn der User dich explizit bittet, ein Tool zu nutzen ("rufe das X-Too
     return {
       content: finalText,
       metadata: {
-        provider: this.deps.modelLabel,
+        provider: activeModelLabel,
         usage: mergedUsage,
         finishReason: finalFinishReason,
         ...(toolCallsForAudit.length > 0
