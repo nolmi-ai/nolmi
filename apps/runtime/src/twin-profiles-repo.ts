@@ -11,6 +11,15 @@ import type { StoredLlmConfig } from "./llm-config.js";
 //
 // Soft-Delete: kein `delete()`. Stattdessen `setActive(twinId, false)`.
 
+/**
+ * #131 Phase 1: Exklusiv-Switch pro Twin (Strategy §b).
+ * - `api_key`: existing BYOK-Pfad via `llmConfig.apiKeyEncrypted`
+ * - `oauth`: OpenAI-Subscription-Token in `oauth_tokens`-Tabelle, Codex-Adapter
+ *
+ * DB-CHECK-Constraint hält beide Werte; DEFAULT `api_key` für Backward-Compat.
+ */
+export type AuthMode = "api_key" | "oauth";
+
 export interface TwinProfile {
   twinId: string;
   handle: string;
@@ -38,6 +47,12 @@ export interface TwinProfile {
    * der Flag VOR dem Send noch 0 war.
    */
   researchFirstUseSeen: boolean;
+  /**
+   * #131 Phase 1: Auth-Mode-Switch (Migration 025). DB-Default `api_key`, also
+   * existing Twins bleiben unverändert. `oauth` triggert den Codex-Adapter-
+   * Branch in TwinService statt des Vercel-SDK-Aufrufs.
+   */
+  authMode: AuthMode;
 }
 
 interface TwinProfileRow {
@@ -55,6 +70,7 @@ interface TwinProfileRow {
   updated_at: number;
   is_active: number;
   research_first_use_seen: number;
+  auth_mode: AuthMode;
 }
 
 export interface ListFilter {
@@ -71,10 +87,16 @@ export interface ListFilter {
  */
 type InsertInput = Omit<
   TwinProfile,
-  "createdAt" | "updatedAt" | "researchFirstUseSeen" | "personaInputJson"
+  | "createdAt"
+  | "updatedAt"
+  | "researchFirstUseSeen"
+  | "personaInputJson"
+  | "authMode"
 > & {
   researchFirstUseSeen?: boolean;
   personaInputJson?: PersonaInput | null;
+  /** #131: Default `api_key` für Bootstrap/Onboarding — OAuth-Switch via `setAuthMode`. */
+  authMode?: AuthMode;
 };
 
 export class TwinProfilesRepo {
@@ -100,17 +122,18 @@ export class TwinProfilesRepo {
       updated_at: now,
       is_active: profile.isActive ? 1 : 0,
       research_first_use_seen: profile.researchFirstUseSeen ? 1 : 0,
+      auth_mode: profile.authMode ?? "api_key",
     };
     this.db
       .prepare(
         `INSERT INTO twin_profiles
            (twin_id, handle, display_name, persona_md, persona_input_json,
             mandates_json, llm_config, bridge_url, bridge_token, owner_user_id,
-            created_at, updated_at, is_active)
+            created_at, updated_at, is_active, auth_mode)
          VALUES
            (@twin_id, @handle, @display_name, @persona_md, @persona_input_json,
             @mandates_json, @llm_config, @bridge_url, @bridge_token, @owner_user_id,
-            @created_at, @updated_at, @is_active)`,
+            @created_at, @updated_at, @is_active, @auth_mode)`,
       )
       .run(row);
     return rowToProfile(row);
@@ -178,7 +201,8 @@ export class TwinProfilesRepo {
            bridge_token       = @bridge_token,
            owner_user_id      = @owner_user_id,
            updated_at         = @updated_at,
-           is_active          = @is_active
+           is_active          = @is_active,
+           auth_mode          = @auth_mode
          WHERE twin_id = @twin_id`,
       )
       .run({
@@ -197,6 +221,7 @@ export class TwinProfilesRepo {
         owner_user_id: merged.ownerUserId,
         updated_at: merged.updatedAt,
         is_active: merged.isActive ? 1 : 0,
+        auth_mode: merged.authMode,
       });
     return merged;
   }
@@ -227,6 +252,24 @@ export class TwinProfilesRepo {
       throw new Error(`TwinProfile ${twinId} nicht gefunden`);
     }
   }
+
+  /**
+   * #131 Phase 3.0: gezielter Single-Column-Switch zwischen `api_key` und
+   * `oauth`. Analog `setActive`/`markResearchFirstUseSeen` — kein update()
+   * weil das die ganze Profile-Spalte überschreibt und Registry-Boot-Pfad
+   * keine konsistente in-memory Profile-Kopie hat (Spike-Smoke setzt Mode
+   * via dieser Methode direkt im DB-Pfad).
+   */
+  setAuthMode(twinId: string, authMode: AuthMode): void {
+    const result = this.db
+      .prepare(
+        "UPDATE twin_profiles SET auth_mode = ?, updated_at = ? WHERE twin_id = ?",
+      )
+      .run(authMode, Date.now(), twinId);
+    if (result.changes === 0) {
+      throw new Error(`TwinProfile ${twinId} nicht gefunden`);
+    }
+  }
 }
 
 function rowToProfile(row: TwinProfileRow): TwinProfile {
@@ -250,6 +293,9 @@ function rowToProfile(row: TwinProfileRow): TwinProfile {
     // #107: SQLite-DEFAULT 0 deckt brand-new Rows ab; defensive `?? 0`-Cast
     // schützt Tests, die das Feld in Mock-Rows nicht setzen.
     researchFirstUseSeen: (row.research_first_use_seen ?? 0) === 1,
+    // #131 Migration 025 setzt DEFAULT 'api_key'; `??`-Fallback schützt
+    // Mock-Rows in Tests, die die Spalte nicht setzen.
+    authMode: (row.auth_mode ?? "api_key") as AuthMode,
   };
 }
 

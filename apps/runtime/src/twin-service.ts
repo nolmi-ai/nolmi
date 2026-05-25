@@ -32,6 +32,8 @@ import {
   selectForcedCandidates,
 } from "./skills/pre-pass.js";
 import { TwinProfilesRepo } from "./twin-profiles-repo.js";
+import type { OAuthRefreshService } from "./oauth/refresh-service.js";
+import { CodexAdapter } from "./oauth/codex-adapter.js";
 import type { ConversationsRepo } from "./conversations/repo.js";
 import type {
   ConversationSummariesRepo,
@@ -177,6 +179,14 @@ export interface TwinServiceDeps {
    * gespawnt werden.
    */
   mcpClientFactory: McpClientFactory;
+  /**
+   * #131 Phase 3.0 Spike: Refresh-Service-Singleton aus dem Boot-Pfad. Im
+   * Send-Path NUR bei `twin.authMode === 'oauth'` konsultiert (Lazy-Refresh
+   * vor Codex-Adapter-Call). Optional, damit Tests + api_key-Bootstraps das
+   * Feld nicht setzen müssen — der Branch wirft mit klarer Diagnose, falls
+   * ein OAuth-Twin den Service nicht zur Hand hat.
+   */
+  oauthRefreshService?: OAuthRefreshService;
 }
 
 export interface ApproveResult {
@@ -266,8 +276,20 @@ export class TwinService {
    * erster Recherche). Eigenes Repo statt deps-Plumbing, weil Service nur
    * zwei Methoden braucht (findById + markResearchFirstUseSeen) und
    * Construction zustandslos ist.
+   *
+   * #131 Phase 3.0: wird zusätzlich im Send-Path konsultiert (authMode-Lookup
+   * frisch aus DB pro chat-Call), damit der Helper-Smoke live zwischen
+   * api_key und oauth umschalten kann ohne Registry-Reload.
    */
   private readonly profilesRepo: TwinProfilesRepo;
+
+  /**
+   * #131 Phase 3.0 Spike: lazy initialisiert beim ersten OAuth-Twin-Send.
+   * Nur konstruiert, wenn `deps.oauthRefreshService` gesetzt ist und der
+   * Send-Path tatsächlich oauth-Mode erreicht — so zahlen api_key-Bootstraps
+   * (z.B. Tests ohne Refresh-Service) keine Adapter-Construction.
+   */
+  private codexAdapter: CodexAdapter | null = null;
 
   constructor(private deps: TwinServiceDeps) {
     this.mcp = new McpClientManager(
@@ -1464,6 +1486,47 @@ export class TwinService {
   // ─── private helpers ─────────────────────────────────────────────────────
 
   /**
+   * #131 Phase 3.0 Spike: OAuth-Pfad parallel zu {@link runModel}. Walking-
+   * Skeleton — letzte User-Message → Codex-Endpoint via direct-fetch, Response-
+   * Text zurück. Tools/Skills/Pre-Pass/Persona-Mapping sind hier bewusst raus
+   * (Phase 3.1-3.3 ziehen das nach).
+   *
+   * Wirft mit klarer Diagnose, wenn der Refresh-Service nicht injiziert wurde
+   * (z.B. Tests, die einen oauth-Twin gegen einen Bootstrap ohne Service
+   * laufen lassen wollen).
+   */
+  private async runModelViaCodex(
+    _persona: Persona,
+    messages: ChatMessage[],
+  ): Promise<{ content: string; metadata: Record<string, unknown> }> {
+    if (!this.deps.oauthRefreshService) {
+      throw new Error(
+        "[twin-service] runModelViaCodex: twin.authMode='oauth' aber " +
+          "OAuthRefreshService nicht injiziert — Boot-Pfad muss " +
+          "registry.loadAll({ oauthRefreshService }) übergeben.",
+      );
+    }
+    if (!this.codexAdapter) {
+      this.codexAdapter = new CodexAdapter(this.deps.oauthRefreshService);
+    }
+    const userMessage = messages.at(-1)?.content ?? "";
+    const result = await this.codexAdapter.generateText({
+      twinId: this.deps.twinId,
+      userMessage,
+    });
+    return {
+      content: result.text,
+      metadata: {
+        provider: "openai-codex",
+        authMode: "oauth",
+        planType: result.planType ?? undefined,
+        cfRay: result.cfRay ?? undefined,
+        latencyMs: result.latencyMs,
+      },
+    };
+  }
+
+  /**
    * Ein Modell-Call über das Vercel AI SDK. Persona kommt als top-level
    * `system`-Parameter, der optionale `extraSystem`-Hinweis (z.B.
    * Bridge-Konversations-Kontext) wird vor die Persona gesetzt — gleicher
@@ -1530,6 +1593,16 @@ export class TwinService {
      */
     prePassSkillName?: string;
   }> {
+    // #131 Phase 3.0 Spike — OAuth-Branch VOR der ganzen Skill/Tool-Logik.
+    // DB-fresh authMode-Lookup, damit Helper-Smoke live umschalten kann ohne
+    // Registry-Reload. Walking-Skeleton: Tools/Skills/Pre-Pass/Memory werden
+    // umgangen (Phase 3.1-3.3 ziehen das nach). Existing api_key-Twins
+    // erreichen diesen Branch nie, weil profile.authMode === 'api_key' bleibt.
+    const profileNow = this.profilesRepo.findById(this.deps.twinId);
+    if (profileNow?.authMode === "oauth") {
+      return this.runModelViaCodex(persona, messages);
+    }
+
     // Skills landen zwischen Persona und LANGUAGE_DIRECTIVE: sie ergänzen die
     // Persona ("wer der Twin ist") um Wissen/Verhalten ("was er zusätzlich
     // kann"), sollen sie aber nicht überschreiben. Direktive bleibt am Ende

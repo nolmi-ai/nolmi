@@ -1613,6 +1613,21 @@ Strategy-Doc: [`docs/131-OAUTH-STRATEGY.md`](./131-OAUTH-STRATEGY.md).
 
 Strategy-Doc erweitert um §g (Codex-Endpoint-Architektur), §h (Cloudflare-TLS-Pre-Flight), §i (Sub-Phase-Sequenz), §j (Risiko-Assessment), Re-Estimate-Section.
 
+**Status-Notiz Tag 27 Abend (25. Mai 2026):** Phase 3.0 Spike Walking-Skeleton durch. Variante (c) — Branch in `TwinService.chat()` vor `generateText`, eigene `runModelViaCodex`-Helper-Methode bypassed Phase-3.1+-Schichten (Skills, Tools, Pre-Pass, Memory).
+
+Sub-Bau (~5 Schritte):
+1. `TwinProfile.authMode` exposen (Interface + Row + Queries + `setAuthMode`) — Phase-1-Audit-Repair, Migration 025 hatte das Feld nie über den Repo-Layer gehoben
+2. `OAuthRefreshService` in `RegistryDeps` + `TwinServiceDeps` (optional)
+3. `oauth/codex-adapter.ts` mit direct-fetch + SSE-Text-Collector
+4. `runModelViaCodex`-Branch in `runModel` (lazy CodexAdapter-Init)
+5. Helper-Script `test-oauth-phase3-spike.ts` mit `smoke`/`setup`/`cleanup`-Modes
+
+**Smoke 1 (Adapter-only) — grün:** HTTP 200 in 2.4s, plan-type=pro, cf-ray gesetzt, Response-Text korrekt geliefert. Echter Codex-Token aus `~/.codex/auth.json` → AES-256-GCM-DB-Persist → `ensureFresh` → Codex-Endpoint → SSE-Stream → Text-Collect. End-to-End-Architektur durchgehend bewiesen.
+
+**Smoke 2 (End-to-End via `/twins/@markus/chat`) — skipped:** `pnpm dev` lokal nicht erreichbar (Runtime auf :4000 nicht hochgekommen, vermutlich Telegram-Webhook-ENV-Friction → siehe #138). Server-Layer-Aufruf ist nur noch Wiring durch existing `requireOwner` + `entry.service.chat()` — der OAuth-Branch sitzt in `runModel` und wird von beiden Send-Pfaden erreicht. Phase 3.1 (Tag 28) zieht End-to-End-Smoke zusammen mit SSE-Parser-Robustness nach.
+
+**Lesson Tag 27 #4 (siehe STAND):** Migration ohne Repo-Update ist Anti-Pattern. Migration 025 hatte `auth_mode`-Column angelegt aber nicht durch `TwinProfile`-Read/Write-Pfad gehoben — Phase-3.0-Spike hat den Fehler beim ersten Konsum aufgedeckt. Repair in Schritt 1 mit erfasst.
+
 ### 132. Anthropic Subscription-Auth (Claude-CLI-Reuse-Pattern)
 
 Anthropic hat keine offizielle 3rd-Party-OAuth-Surface für Claude Pro/Max-Subscription-Nutzung in externen Apps. Stattdessen: Claude-CLI-Reuse-Pattern — wenn auf dem Host-System ein gültiger Claude-CLI-Login existiert, kann eine externe App diese Credentials wiederverwenden.
@@ -1753,6 +1768,20 @@ pnpm --filter @twin-lab/runtime build && pnpm --filter @twin-lab/web build
 Sollte als Pre-Push-Hook (Husky) oder GitHub-Action laufen. Vermeidet Wiederholung des Phase-5-Deploy-Stops.
 
 **Größe:** S · **Priorität:** should · **Aus:** Tag 26 Phase 5 Build-Bug · **Spur:** Polish nach Phase 5
+
+### 138. Local-Dev pnpm dev braucht dev-friendly Defaults für Telegram-Webhook
+
+Seit #130 Phase 5 (Telegram-Webhook-Mode) braucht `pnpm dev` entweder `RUNTIME_PUBLIC_URL` oder `TELEGRAM_USE_POLLING=true` damit die Runtime hochkommt — sonst Boot-Failure beim `telegramBotRegistry.eagerLoadAllBots()`-Schritt mit dem Hinweis "kein Public-URL für Webhook konfiguriert". Tag-27-Nachmittag-Erfahrung: nach `pnpm install` neu klonen / frischen Branch funktioniert das nicht out-of-the-box, weil die `.env` nicht gepflegt ist.
+
+Dev-friendly Defaults (eine der drei Optionen):
+
+1. **`TELEGRAM_USE_POLLING=true` als Compose-Default** für lokale `.env.example`-Vorlage
+2. **Telegram-Bot-Eager-Load bei fehlender Public-URL skippen** (Boot-Log: "Telegram-Bots disabled — set RUNTIME_PUBLIC_URL oder TELEGRAM_USE_POLLING=true")
+3. **Boot-Step machtoptional**: nur wenn aktive `telegram_configs`-Rows existieren wird der Eager-Load gemacht
+
+Phase-A-Self-Hosting-Doku (#109) braucht das auch — der Self-Hoster ohne Telegram will nicht erst die Variable verstehen.
+
+**Größe:** S (5-10 LoC + Doku) · **Priorität:** should · **Aus:** Tag-27-Nachmittag Smoke-2-Aufsetz-Friction · **Spur:** Pre-Launch-Phase A Polish
 
 ## Pre-Launch-Phase A — Block 4: Self-Hosting-Polish
 

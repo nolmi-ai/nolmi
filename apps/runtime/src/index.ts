@@ -156,6 +156,9 @@ async function main() {
     skillRepo,
     conversationsRepo,
     mcpServersRepo,
+    // #131 Phase 3.0: an TwinService weitergereicht; im Send-Path nur bei
+    // twin.authMode === 'oauth' konsultiert (Lazy-Refresh vor Codex-Call).
+    oauthRefreshService,
   });
   const summaries = registry.list();
 

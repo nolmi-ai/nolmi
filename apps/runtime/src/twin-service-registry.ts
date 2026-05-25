@@ -37,6 +37,7 @@ import { MemoryEmbeddingService } from "./episodic/memory-embedding-service.js";
 import { MemoryRetrievalService } from "./episodic/memory-retrieval-service.js";
 import { TwinDiaryService } from "./episodic/twin-diary-service.js";
 import { getEmbeddingProvider } from "./episodic/providers/index.js";
+import type { OAuthRefreshService } from "./oauth/refresh-service.js";
 
 // ─── TWIN SERVICE REGISTRY ──────────────────────────────────────────────────
 //
@@ -92,6 +93,13 @@ interface RegistryDeps {
    * unnötiges Boilerplate braucht. Tests injecten eine Mock-Factory.
    */
   mcpClientFactory?: McpClientFactory;
+  /**
+   * #131 Phase 3.0: Refresh-Service-Singleton aus dem Boot-Pfad. Wird im
+   * Send-Path bei `authMode === 'oauth'` via `ensureFresh(twinId)` vor jedem
+   * Codex-Call konsultiert (Lazy-Refresh + Mutex). Optional, weil Bootstrap-
+   * Smokes ohne OAuth-Twins existieren können — Tests setzen das Feld nicht.
+   */
+  oauthRefreshService?: OAuthRefreshService;
 }
 
 export class TwinServiceRegistry {
@@ -429,6 +437,9 @@ export class TwinServiceRegistry {
       memoryEmbeddingService,
       memoryRetrievalService,
       twinDiaryService,
+      // #131 Phase 3.0: optional, Send-Path liest deps.oauthRefreshService NUR
+      // bei authMode === 'oauth'. Existing api_key-Twins sind nicht betroffen.
+      oauthRefreshService: this.deps!.oauthRefreshService,
     });
 
     const bridgeStream = new BridgeStream(

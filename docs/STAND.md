@@ -137,6 +137,57 @@ Jede Sub-Phase mit eigenem Commit + Smoke. Wenn 3.0 fails: Diagnose statt blinde
 
 **Lesson Tag 27 #3: End-to-End-Validation vor Bau** — Pre-Flight-Test mit drei Stacks (Mac curl, VPS Production-Container, Node v22 native fetch) hat in ~45 Min Klarheit über TLS-Realität geschaffen. Ohne Pre-Flight wären 1-2 Tage in TLS-Bypass-Recherche gegangen („wir brauchen curl-FFI / Bun / undici-Workaround"). Verstärkt Lesson #1 (Recherche-Investment vor Bau-Planung) — generelles Prinzip: **bei Reverse-Engineering-Items immer mit echtem Request-Smoke verifizieren, nicht aus Quellen extrapolieren**. Externe Implementierungen können legacy Workarounds tragen, die für unseren Stack nicht nötig sind.
 
+### #131 Phase 3.0 Spike — Codex-Adapter Walking-Skeleton (~2h)
+
+**Variante (c) — Branch in TwinService.chat() vor `generateText`-Call.** Vor der ganzen Skill/Tool/Pre-Pass-Logik wird `profilesRepo.findById()` mit frischem `authMode`-Lookup konsultiert; bei `oauth` → `runModelViaCodex` (eigene Helper-Methode, bypassed alle Phase-3.1+-Schichten).
+
+**Sub-Bau:**
+
+| Schritt | Was | LoC |
+|---|---|---|
+| 1 | `TwinProfile.authMode` exposen (Interface + Row + INSERT/UPDATE + `setAuthMode`-Method + `rowToProfile`) | ~30 |
+| 2 | `OAuthRefreshService` in `RegistryDeps` + `TwinServiceDeps`, optional gehalten | ~15 |
+| 3 | `oauth/codex-adapter.ts` — direct-fetch + SSE-Text-Collector, Minimal-Codex-Instructions, planType/cfRay-Capture | ~140 |
+| 4 | `runModelViaCodex` Branch in `runModel`, Codex-Adapter lazy konstruiert | ~40 |
+| 5 | Helper-Script `test-oauth-phase3-spike.ts` mit `smoke`/`setup`/`cleanup`-Modes | ~150 |
+
+**Smoke 1 (Adapter-only) — grün:**
+
+```
+✅ Codex-Token geladen (account=07b2ba12-…-2b1fd220f775)
+✅ Test-Twin: @markus, authMode → oauth
+✅ HTTP 200 in 2401ms
+   plan-type: pro
+   cf-ray:    a0133fc1fba49276-MUC
+   text:      "Hello there, friend"
+🧹 Cleanup: @markus authMode zurück auf 'api_key'.
+```
+
+Bilanz Smoke 1: echter Codex-Token → DB-Persist + AES-256-GCM → Refresh-Service `ensureFresh` → Direct-fetch → SSE-Stream → Text-Collect. End-to-End-Architektur verifiziert.
+
+**Smoke 2 (End-to-End via `/twins/@markus/chat`) — skipped → Phase 3.1.** `pnpm dev` lokal nicht erreichbar (Runtime auf :4000 hochgekommen nicht), Tag-27-Zeit-Budget ausgeschöpft. Sub-Phase 3.1 (Tag 28) zieht den End-to-End-Smoke zusammen mit SSE-Parser-Robustness nach. Spike-Architektur ist durch Smoke 1 trotzdem voll bewiesen — Server-Layer-Aufruf ist nur noch Wiring (`requireOwner` + `entry.service.chat()` durch existing Pfade, der OAuth-Branch sitzt in `runModel` und ist von beiden Send-Pfaden erreichbar).
+
+**Lesson Tag 27 #4: Migration ohne Repo-Update ist Anti-Pattern** — Phase 1 (#131 Tag 27 Vormittag) hat Migration 025 mit `twin_profiles.auth_mode`-Spalte angelegt, aber das Feld nie in `TwinProfile`-Interface / Row-Mapping / `SELECT *`-Queries durchgezogen. Phase 3.0 hat den Fehler beim ersten echten Konsum aufgedeckt (`profile.authMode` undefined obwohl DB-Default `'api_key'`). Repair ~30 LoC, kein Production-Risiko, aber strukturell hätten Phase 1 + Tests-fehlen das fangen müssen. Generelles Prinzip: **eine Migration ist erst „durch", wenn die Spalte sowohl im Read- als auch Write-Pfad des zuständigen Repos lebt** — Migration alleine ist Schema-Modifikation, nicht Feature-Capability.
+
+**Phase 3.0-Outcome:** Walking-Skeleton steht. Phase 3.1-3.4 bauen darauf inkrementell mit eigenen Stop-Punkten weiter (siehe Strategy-Doc §i).
+
+### Tag-27-Closure-Bilanz
+
+**Sechs Bau-Blöcke an einem Tag:**
+
+| Block | Commit | Was |
+|---|---|---|
+| 1. Husky | `1a1f653` | #137 Husky Pre-Push-Build-Hook |
+| 2. Phase 1 | `cfe223c` | #131 Migration 025 + PKCE-Client + Tokens-Repo |
+| 3. Phase 2 | `638e200` | #131 Refresh-Service (Background-Poll + Lazy-Refresh + Mutex) |
+| 4. Strategy-Iteration | `6667b81` | #131 Strategy-Doc §g/§h/§i/§j + Re-Estimate XL→XXL |
+| 5. Pre-Flight | (kein Commit) | 3/3 HTTP 200 gegen Codex-Endpoint (Mac/VPS/Node v22) |
+| 6. Phase 3.0 Spike | folgt | #131 Codex-Adapter Walking-Skeleton |
+
+**Vier Lessons:** Recherche vor Bau (#1), STAND-Doppelpflege (#2), End-to-End-Validation vor Bau (#3), Migration ohne Repo-Update ist Anti-Pattern (#4).
+
+**Tag-27-Nachgang (neu im BACKLOG):** #138 — `pnpm dev` Boot-Friction durch fehlenden `RUNTIME_PUBLIC_URL` / `TELEGRAM_USE_POLLING` Default seit #130 Phase 5.
+
 ## Tag 26 — Sonntag, 25. Mai 2026
 
 ### Status
