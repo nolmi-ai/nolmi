@@ -1159,7 +1159,9 @@ export class TwinService {
       ...baseMessages,
       {
         role: "assistant",
-        content: input.assistantContent,
+        // #131 Phase 3.4.3.1 Sub-Phase G Fix: V3-Provider-Output → V4-
+        // ModelMessage-Format (input string→Object, providerMetadata weg).
+        content: mapAssistantContentForModelMessage(input.assistantContent),
       } as unknown as ChatMessage,
       {
         role: "tool",
@@ -1295,7 +1297,9 @@ export class TwinService {
       // bekannte Vercel-Shapes.
       {
         role: "assistant",
-        content: input.assistantContent,
+        // #131 Phase 3.4.3.1 Sub-Phase G Fix: V3-Provider-Output → V4-
+        // ModelMessage-Format (input string→Object, providerMetadata weg).
+        content: mapAssistantContentForModelMessage(input.assistantContent),
       } as unknown as ChatMessage,
       {
         role: "tool",
@@ -2413,6 +2417,69 @@ function toModelMessages(messages: ChatMessage[]): ModelMessage[] {
         content: m.content,
       } as unknown as ModelMessage;
     });
+}
+
+/**
+ * #131 Phase 3.4.3.1 Sub-Phase G Fix: assistantContent aus dem Provider-
+ * Output (LanguageModelV3-Spec) hat ein anderes Schema als die
+ * `AssistantContent`-Form, die Vercel `generateText` für History-Replay
+ * erwartet:
+ *
+ * - **tool-call.input**: V3 liefert `string` (JSON-stringified), V4 erwartet
+ *   `unknown` (Object). Wir parsen den JSON-String.
+ * - **tool-call.providerMetadata**: V3 hat das Feld, V4-AssistantContent
+ *   nicht. Weglassen.
+ * - **tool-approval-request.providerMetadata**: dito.
+ * - **Andere Parts (text, reasoning, file)**: pass-through, V3 + V4 sind
+ *   kompatibel.
+ *
+ * Defensive Filter — unbekannte Part-Types werden verworfen statt
+ * durchgereicht, damit Vercel-SDK-Validation nicht bricht.
+ */
+function mapAssistantContentForModelMessage(
+  raw: unknown,
+): Array<Record<string, unknown>> {
+  if (!Array.isArray(raw)) return [];
+  const out: Array<Record<string, unknown>> = [];
+  for (const part of raw) {
+    if (!part || typeof part !== "object") continue;
+    const p = part as Record<string, unknown>;
+    const type = p.type;
+    if (type === "text") {
+      out.push({ type: "text", text: typeof p.text === "string" ? p.text : "" });
+    } else if (type === "tool-call") {
+      // V3 input ist JSON-String, V4 will Object — parse defensive
+      let parsedInput: unknown = p.input;
+      if (typeof p.input === "string") {
+        try {
+          parsedInput = JSON.parse(p.input);
+        } catch {
+          parsedInput = p.input; // fallback: roher String
+        }
+      }
+      out.push({
+        type: "tool-call",
+        toolCallId: typeof p.toolCallId === "string" ? p.toolCallId : "",
+        toolName: typeof p.toolName === "string" ? p.toolName : "",
+        input: parsedInput,
+      });
+    } else if (type === "tool-approval-request") {
+      out.push({
+        type: "tool-approval-request",
+        approvalId: typeof p.approvalId === "string" ? p.approvalId : "",
+        toolCallId:
+          typeof p.toolCallId === "string"
+            ? p.toolCallId
+            : ((p.toolCall as { toolCallId?: string } | undefined)?.toolCallId ??
+              ""),
+      });
+    } else if (type === "reasoning") {
+      out.push({ type: "reasoning", text: typeof p.text === "string" ? p.text : "" });
+    }
+    // Unbekannte Parts (file, source, ...) verworfen — Approval-Flow braucht
+    // sie nicht.
+  }
+  return out;
 }
 
 // ─── CAPABILITY DETECTION ────────────────────────────────────────────────────
