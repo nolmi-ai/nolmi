@@ -56,6 +56,35 @@ Strategy-Setzungen Vormittag:
 
 Phase-5-Bug-Pattern strukturell prevented für future commits.
 
+### #131 OpenAI-OAuth Strategy-Session (~2h)
+
+Vormittag-Block 2 nach #137-Closure. Substantielle Strategy-Klärung mit Tag-26-Annahmen-Korrektur.
+
+**Recherche-Investment (~30-45 Min):**
+
+Web-Recherche zu OpenAI-OAuth-Constraints + Hermes-Pattern + Server-App-Realität. Drei wesentliche Befunde:
+
+1. **OpenAI Codex OAuth hat hardcoded `localhost:1455`-Redirect** — kein Custom-Redirect möglich, Token-Paste-Flow ist Tag-26-Annahme die nicht funktioniert
+2. **Headless-OAuth ist offiziell nicht supported** (Codex Issue #2798 offen seit August 2025)
+3. **SSH-Tunnel-Pattern ist Branchen-Standard** für VPS-Setups (Hermes, Codex offizielle Doku, RooCode, OpenCode alle dokumentiert)
+
+Tag-26-Annahme „Loopback-Pattern wie OpenClaw funktioniert" war falsch für Server-App-Architektur. **Vor dem Bau hätten 1-2 Tage in falsche Richtung gegangen** (Web-UI-Trigger mit Cross-Origin-Loopback-Problem).
+
+**Strategy-Setzungen:**
+
+- CLI-First: `pnpm twin:oauth-login` Primary-Trigger, Web-UI zeigt nur Status (Hermes-Pattern, matches `hermes auth`)
+- Exklusiver Auth-Mode pro Twin: `api_key` XOR `oauth`, kein simultaner Multi-Auth
+- Storage: Migration 025 dedizierte `oauth_tokens`-Tabelle + `twins.auth_mode`-Spalte
+- OAuth + OpenRouter-Fallback dokumentieren (Hermes-Pattern), BYOK als dritte Schicht
+- Re-Estimate: L → XL (5-7 Bautage)
+- 5-Phasen-Bau mit Stop-Punkten (analog #130-Pattern)
+
+Strategy-Doc: [`docs/131-OAUTH-STRATEGY.md`](./131-OAUTH-STRATEGY.md), 6 §-Sections (CLI-First, Exklusiv-AuthMode, Storage-Schema, Refresh-Service, OpenRouter-Fallback, Owner-Trust-Persistenz).
+
+**Lesson Tag 27 #1: Recherche-Investment vor Bau-Planung zahlt sich aus** — 30-45 Min Recherche-Aufwand hat substantielle Architektur-Korrektur ermöglicht. Tag 26 hatte Tag-25-Backlog-Skizze übernommen ohne Server-App-Pattern-Verifikation. Verstärkt Tag-26 Lesson #11 (Production-Build-Test fehlt im Workflow) — generelles Prinzip: **bei substantiellen Items immer Verifikations-Schicht vor Strategie-Setzung**.
+
+**Phase-A-Launch-Window-Update:** Buffer 5-15 Tage (von 10-23 Tage vorher) — XL akzeptiert für Power-User-Feature-Sorgfalt, KW 32-33 als realistisches Launch-Window.
+
 ## Tag 26 — Sonntag, 25. Mai 2026
 
 ### Status

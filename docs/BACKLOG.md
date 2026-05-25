@@ -1556,7 +1556,7 @@ OAuth-Flow analog OpenClaw (PKCE):
 - OpenAI offizielle Codex-Auth-Doku: https://developers.openai.com/codex/auth
 - OpenClaw OAuth-Doku (PKCE-Flow-Details): https://docs.openclaw.ai/concepts/oauth
 
-**Größe:** L (4-5 Bautage — PKCE-Client + Refresh-Service + Settings-UI + ToS-Disclaimer-Flow + Smoke). **Priorität:** should. **Spur:** Pre-Launch-Phase A Block 5.
+**Größe:** XL (5-7 Bautage — PKCE-Client + Refresh-Service + Provider-Switch + CLI-Login + Settings-UI + SSH-Tunnel-Doku + Smoke). **Priorität:** should. **Spur:** Pre-Launch-Phase A Block 5.
 
 **Status-Notiz Tag 25:** Recherche-Session zu Subscription-Auth-Patterns. OpenClaw nutzt diesen Pattern produktiv, dokumentiert PKCE-Flow präzise. Implementations-Pfad konkret skizziert, aber Pattern hat ToS-Grauzone-Charakter. Bau nicht launch-kritisch, Wartemodus bis Phase B + Nutzer-Demand.
 
@@ -1571,6 +1571,17 @@ OAuth-Flow analog OpenClaw (PKCE):
 **Twin-Lab-Default bleibt BYOK** (API-Key). OAuth ist Opt-in mit ToS-Disclaimer: "OpenAI hat das nicht explicit für 3rd-Party-Apps dokumentiert, kann gekappt werden."
 
 **Phase-A-Status:** `should`-Item, neue Spur Pre-Launch-Phase A Block 5.
+
+**Status-Notiz Tag 27 (25. Mai 2026):** Strategy-Session abgeschlossen. Re-Estimate auf XL (5-7 Bautage) nach Recherche-Findings: OpenAI Codex OAuth hat hardcoded localhost:1455-Redirect, headless-OAuth nicht supported (Issue #2798 offen). SSH-Tunnel-Pattern ist Branchen-Standard (Hermes, RooCode, OpenCode).
+
+Strategy-Setzungen:
+- CLI-First (`pnpm twin:oauth-login`), Web-UI zeigt nur Status
+- Exklusiver Auth-Mode pro Twin (api_key XOR oauth)
+- Migration 025: dedizierte `oauth_tokens`-Tabelle
+- OpenRouter als dokumentierter Fallback (Hermes-Pattern)
+- 5-Phasen-Bau mit Stop-Punkten
+
+Strategy-Doc: [`docs/131-OAUTH-STRATEGY.md`](./131-OAUTH-STRATEGY.md).
 
 ### 132. Anthropic Subscription-Auth (Claude-CLI-Reuse-Pattern)
 
