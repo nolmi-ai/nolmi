@@ -40,6 +40,24 @@ Twin-Lab is built in a tight pair-programming loop:
 External contributors don't need to follow this verbatim, but PRs that come
 with diagnosis notes and small commits are easier to review.
 
+## Pre-push build check
+
+Twin-Lab runs `pnpm build` as a pre-push hook (via Husky) to catch
+production-build issues that don't show up during `pnpm dev`. Common
+examples: Next.js static-generation errors like `useSearchParams()`
+outside a Suspense boundary.
+
+The hook runs automatically on `git push`. If the build fails, fix the
+issue or skip the hook with:
+
+```bash
+git push --no-verify
+```
+
+Use `--no-verify` for WIP/backup pushes and documentation-only commits
+where the build won't be affected. For code changes touching `apps/`,
+don't skip.
+
 ## Pull Request Guidelines
 
 - Reference the related issue in the PR body

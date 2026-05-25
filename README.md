@@ -44,7 +44,7 @@ stay with you.
 git clone https://github.com/markusbaier/twin-lab.git
 cd twin-lab
 
-# Install dependencies
+# Install dependencies (also sets up git hooks via Husky)
 pnpm install
 
 # Configure

@@ -1,0 +1,16 @@
+#!/usr/bin/env sh
+# Twin-Lab Pre-Push Build-Verifikation (#137)
+# Hintergrund: Production-Static-Generation strenger als pnpm dev
+# (useSearchParams ohne Suspense etc.). Tag 26 Phase 5 Bug verhindern.
+# Skip mit: git push --no-verify
+
+echo "→ Pre-push: pnpm build (runtime + web) ..."
+pnpm build
+
+if [ $? -ne 0 ]; then
+  echo ""
+  echo "❌ Pre-push build failed. Fix the build or skip with: git push --no-verify"
+  exit 1
+fi
+
+echo "✅ Build green — proceeding with push."
