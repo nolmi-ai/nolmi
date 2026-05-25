@@ -590,6 +590,360 @@ Resume-Branch zwei Pfade unterstützen lassen:
 - `provider: openai-codex` → neuer CodexAdapter-Call mit
   `function_call_output`-Item im input-Array
 
+## §m — Approval-Pipeline-Reverse-Engineering (Phase 3.3.1.3.0 Diagnose, Tag 28)
+
+**Scope:** PURE DIAGNOSE, kein Code. Vorarbeit für Phase 3.3.1.3.1
+(Approval-Wait für Codex-Pfad). Klärt: wie macht der reguläre Vercel-SDK-Pfad
+heute Pending-State + User-UI-Wait + Resume?
+
+### Finding A — Approval-Trigger via Marker-Pattern (kein Throw)
+
+AI SDK 6 **schluckt** `execute()`-Throws aus `tool({...})`-Definitions
+und reicht sie als `output:null` tool-result an den LLM weiter
+(`apps/runtime/src/mcp/tool-bridge.ts:9-17`). Throw-Pfad würde nie nach oben
+propagieren — Smoke-Test Tag-10 hat das verifiziert.
+
+**Stattdessen:** Marker-Pattern. `tool-bridge.ts:134-148` returnt für
+`requiresApproval=true`-Skills einen strukturierten Marker:
+
+```ts
+return {
+  content: [{ type: "text", text: MCP_PENDING_APPROVAL_MARKER }],
+  isError: false,
+};
+```
+
+`MCP_PENDING_APPROVAL_MARKER = "__MCP_PENDING_APPROVAL__"`. Twin-Service
+detected den Marker post-`generateText` mit `detectPendingToolCall`
+(`twin-service.ts:2314-2350`), wirft lokal `McpToolApprovalRequiredError`
+und der existierende Catch in `runOwnerDirect` (`twin-service.ts:728-759`)
+baut den Pending-Audit.
+
+**Defense-in-Depth:** `stopOnPendingApprovalMarker`-StopCondition
+(`twin-service.ts:2296-2312`) bricht den Multi-Step-Loop ab, sobald ein
+Tool-Result im gerade fertiggestellten Step den Marker enthält — sonst
+würde AI SDK aus dem Marker eine Synthese-Antwort generieren.
+
+**AuditStatus-State-Machine** (`packages/shared/src/index.ts` + Audit-
+Service `apps/runtime/src/audit/service.ts:13-14`):
+```
+pending → approved → executed
+       ↘ rejected
+       ↘ failed
+       ↘ blocked
+```
+`start({initialStatus: "pending"})` legt einen Pending-Audit ohne LLM-Call
+an; `complete()`/`fail()`/`reject()` transitionieren weiter.
+
+### Finding B — Pending-Persistence: vollständiger Resume-Context in audit.input
+
+Live-Inspektion eines mcp-tool-use-Audits (`audit_xNCqkfwJGjLO`):
+
+```jsonc
+{
+  "capability": "mcp-tool-use",
+  "status": "executed",      // war "pending" bis User-Approve
+  "input": {
+    "messages": [...],         // komplette History bis Tool-Call (Resume-Context)
+    "lastMessage": "...",
+    "toolCall": {              // Re-Play-Datum
+      "mcpServerId": "mcp_5gdVaHNu2CA4RvLF",
+      "mcpToolName": "scrape_webpage",
+      "args": {...}
+    },
+    "conversationId": "conv_gpWMtoeSM4ryHRJZ",
+    "pendingReply": "Ich möchte das Tool ... brauche aber deine Genehmigung. Bitte schau in der Inbox.",
+    "originalCapability": "respond_to_chat"
+  },
+  "output": {                  // nach Approve+Execute befüllt
+    "reply": "...",            // finale LLM-Antwort
+    "toolCall": {...},
+    "toolResult": [{"type": "text", "text": "..."}],
+    "toolIsError": false,
+    "providerMetadata": {...}
+  }
+}
+```
+
+**Wichtig:** Pending-Audit-Insert passiert **nach** dem Marker-Detect,
+nicht vor `runModel`. Begründung `twin-service.ts:614-618`:
+> audit.start() vor runModel würde bei Approval-Pending einen
+> executed-then-failed-Zwischenstate hinterlassen. Stattdessen erst
+> runModel versuchen — wenn Approval-Pending, dann mcp-tool-use-Audit;
+> sonst owner-direct-Audit. Konsistente Audit-Trail-Reihenfolge.
+
+**State ist Server-Restart-stabil** — alles was Resume braucht
+(`messages` als komplette LLM-Konversation, `toolCall` als Re-Play-Datum)
+liegt im DB-`data`-Feld.
+
+### Finding C — Resume-API: synchroner LLM-Call nach Approve
+
+**Endpoint:** `POST /twins/:handle/audit/:id/approve` (twin-namespaced,
+`apps/runtime/src/server.ts:370-388`) plus Legacy-Variante `POST
+/audit/:id/approve` (`server.ts:531-543`). Reject-Endpoints analog.
+
+**Capability-Switch in `approvePending`** (`twin-service.ts:1001-1022`):
+```
+respond_to_twin_message → approveTwinResponse
+send_to_twin            → approveTwinSend
+mcp-tool-use            → approveMcpToolUse  ← relevant für Codex-Pfad
+semantic-fact-write     → approveSemanticFactWrite
+default                 → approveDefault
+```
+
+**`approveMcpToolUse`** (`twin-service.ts:1119-1179`) in 3 Schritten,
+**synchron** im HTTP-Request:
+
+1. **Tool-Execution via `mcpManager.callTool`** — kein Approval-Recheck
+   (User hat durch Approve genehmigt).
+2. **Resume-LLM-Call** mit Original-History plus angehängter User-Message:
+   ```
+   [System] Tool 'X' wurde ausgeführt. Ergebnis: <stringified>.
+   Bitte gib jetzt die finale Antwort an den User basierend auf diesem Ergebnis.
+   ```
+   `runModel` läuft mit **enableMcpTools: false** (Default) — wir wollen
+   keine zweite Tool-Use-Iteration im Resume; LLM antwortet nur mit Text.
+3. **`audit.complete`** mit `{reply, toolCall, toolResult, toolIsError,
+   providerMetadata}` → Status `executed`.
+
+**Reject-Pfad** (`twin-service.ts:1068-1102`) macht analog Resume-Call mit
+"Tool wurde abgelehnt. Begründung: {reason}. Bitte antworte direkt." →
+`output.reply + rejected:true`, Status bleibt `rejected`.
+
+**Race-Sicherheit:** `approvePending` prüft `entry.status !== "pending"`
+und wirft sonst (`twin-service.ts:1004-1006`) — Double-Approve klickt
+keine Doppel-Execution.
+
+### Finding D — Frontend: SSE-getriebenes Audit-Stream-SSoT (kein Polling)
+
+**Audit-Stream als SSoT für Chat-View** (`apps/web/app/chat/[handle]/
+page.tsx:1184-1186`):
+> 3.2.G: in beiden Fällen (pending oder direct reply) reload — der
+> Audit-Stream ist Single-Source-of-Truth fürs Rendering.
+
+Render-Mapping (`page.tsx:868-870`):
+- `mcp-tool-use/pending`  → user + assistant(pendingReply) + tool-call(pending)
+- `mcp-tool-use/executed` → user + assistant(pendingReply) + tool-call(executed) + assistant(finalReply)
+- `mcp-tool-use/rejected` → user + assistant(pendingReply) + tool-call(rejected) + assistant(rejectReply)
+
+**SSE-Updates** (`page.tsx` + `TopNav.tsx:111-112`): `pending-added` /
+`pending-resolved`-Events triggern `loadAudits()`-Reload. Inbox + Facts +
+TopNav-Badges hängen am selben Stream — kein Polling, sondern SSE-Push.
+
+**Approve-Button-Logic** (`page.tsx:1210-1228`): `POST /twins/.../audit/
+:id/approve`, dann `loadAudits()` für State-Reset.
+
+### Finding E — End-to-End-Flow (Vercel-SDK-Pfad)
+
+```
+1. User → POST /twins/:handle/chat: "scrape anthropic.com"
+2. TwinService.runOwnerDirect:
+   - history + lastUser → llmMessages
+   - audit NICHT vorab geöffnet (nur bei Erfolg/Failure)
+   - runModel(persona, llmMessages, {enableMcpTools: true})
+       ↓
+3. runModel: generateText({tools: mcpTools, stopWhen: [stepCountIs(5),
+                                                       stopOnPendingApprovalMarker]})
+   - LLM ruft scrape_webpage (requiresApproval=true)
+   - tool-bridge.execute() returnt MCP_PENDING_APPROVAL_MARKER
+   - stopOnPendingApprovalMarker bricht Loop ab (Schritt 0+1)
+   - detectPendingToolCall scannt result.steps[*] → findet Marker
+   - wirft McpToolApprovalRequiredError
+       ↓
+4. runOwnerDirect Catch:
+   - composeToolApprovalRequest → pendingReply
+   - audit.start({capability: "mcp-tool-use", initialStatus: "pending",
+                   input: {messages, lastMessage, toolCall, conversationId,
+                           pendingReply, originalCapability}})
+   - EventBus: pending-added → SSE
+   - return {message: {assistant, pendingReply}, auditId, pending: true}
+       ↓
+5. Frontend: SSE pending-added → loadAudits() → Render mit Approve/Reject-Buttons
+       ↓
+6. User klickt Approve → POST /twins/:handle/audit/:id/approve
+       ↓
+7. TwinService.approveMcpToolUse:
+   - mcpManager.callTool(serverId, toolName, args) → toolResult
+   - resumeMessages = [...input.messages, {role:"user", content:"[System]
+                                            Tool 'X' wurde ausgeführt. ..."}]
+   - runModel(persona, resumeMessages, {enableMcpTools: false})
+   - audit.complete({reply, toolCall, toolResult, toolIsError, providerMetadata})
+   - EventBus: pending-resolved → SSE
+       ↓
+8. Frontend: SSE pending-resolved → loadAudits() → Render final reply
+```
+
+### Finding F — Codex-Pfad-Stand heute (Phase 3.3.1.2)
+
+`runModelViaCodex` (`twin-service.ts:1499-1684`) hat **keinen Approval-
+Pfad**. Substantielle Hinweise:
+
+- `mapSkillsToCodexTools` (`codex-tool-mapper.ts:80-106`) filtert
+  `source !== "mcp" || !isActive || !mcpServerId || !mcpToolName` —
+  **filtert NICHT auf `requiresApproval`**. Comment in `twin-service.ts:
+  1608-1611`:
+  > requires_approval-Skills landen ohnehin nicht im Codex-tools-Field,
+  > weil mapSkillsToCodexTools sie nicht zusätzlich filtert (TODO Phase
+  > 3.3.1.3) — heute akzeptable Vereinfachung, weil der Smoke mit
+  > no-approval-Tool läuft.
+
+  Heisst: heute könnte Codex theoretisch ein `requires_approval=true`-Tool
+  rufen → `mcpManager.callTool` würde direkt ausführen, ohne Approval.
+  **Sicherheitslücke auf Pilot-Level, harmlos im Smoke-Setup.**
+
+- Multi-Step-Pattern (`§l`): `function_call` + `function_call_output`
+  werden ans `input`-Array für die nächste Iteration appended. Der
+  input-Array lebt **nur im Loop**, kein DB-Persist.
+
+### Hypothesen — Codex-Pfad-Approval-Integration
+
+#### Hypothese 1: Async-Pending wie Vercel-SDK-Pfad (Architektur-Konsistenz)
+
+**Idee:** runModelViaCodex bricht den Multi-Step-Loop ab, sobald Codex
+ein `requires_approval=true`-Skill rufen will. Twin-Service legt
+Pending-Audit (`mcp-tool-use`) an, exakt wie heute. `approveMcpToolUse`
+verzweigt auf `twin.authMode`: bei `oauth` → Codex-Resume statt
+AI-SDK-Resume.
+
+**Pros:**
+- Frontend-Surface (SSE, Audit-Stream, Approve-Button) erbt 1:1
+- Server-Restart-Stabilität — Resume-Context in `audit.input` persistiert
+- Konsistente UX für Multi-Twin-Setups mit gemischten Auth-Modi
+- Pending-Audit-Insert-Logik in runOwnerDirect-Catch fast unverändert
+  brauchbar (nur Catch-Quelle ändert sich: lokaler Pre-Check statt
+  detectPendingToolCall)
+
+**Cons:**
+- `approveMcpToolUse` muss Switch auf `twin.authMode` →
+  Resume-Funktions-Dispatch
+- Codex-Resume-Context muss persistiert werden — siehe Schema-Notiz unten
+- Multi-Tool-Approval (Codex ruft 2 Tools in einer Iteration, beide
+  require approval) ist Edge-Case der heute schon im Vercel-Pfad als
+  "erster Marker gewinnt" akzeptiert ist (`twin-service.ts:2255-2259`).
+  Für Codex müssten wir entscheiden: alle pending → Multi-Audit oder
+  erster wins.
+
+#### Hypothese 2: Inline-Wait (HTTP-Long-Polling)
+
+**Idee:** runModelViaCodex pollt DB nach Approval-Status, HTTP-Request
+bleibt offen bis Approval.
+
+**Cons:**
+- Cloudflare-Edge ~100s Timeout (siehe §h) — Approval-Latency oft >100s
+  (User in Inbox, Mobile)
+- Long-Polling skaliert nicht
+- Server-Restart während Wait → Tool-Call-State lost
+- **Verworfen.**
+
+#### Hypothese 3: Trust-Bypass-Mode (Skill-Level)
+
+**Idee:** Owner-Trust-Setting pro Skill → skippt Approval für vertraute
+Tools, sonst Hypothese 1.
+
+**Pros:**
+- UX-Reibung reduziert für High-Frequency-Tools (Web-Scrape, Search)
+- Pattern-Parallele zu existierendem `trusted-bypass`-Capability für A2A
+  (`twin-service.ts:2041-2042`)
+
+**Cons:**
+- Zusätzliche Schema-Surface (`mcp_skills.userTrusted` o.ä.) +
+  UX-Komplexität (Skill-Toggle in Settings)
+- Nicht Phase-3.3.1.3-Scope — eher Phase 4 oder BACKLOG (parallel zu §f
+  Owner-Trust-Statement)
+
+### Empfehlung Phase 3.3.1.3.1
+
+**Hypothese 1 (Async-Pending wie Vercel-SDK-Pfad).** Code-Reuse ist
+substantiell — Pending-Audit-Schema + Frontend-Render + Approve-Endpoint
+sind 1:1 wiederverwendbar. Hauptaufwand sitzt in:
+
+1. `mapSkillsToCodexTools` Filter-Param für `requiresApproval=true`
+   (Pre-Filter raus aus tools-Field; alternative: Filter nicht-zwingend,
+   Pending-Detect läuft im Loop pre-`callTool`).
+2. **runModelViaCodex Pre-Call-Approval-Detect:** im Tool-Call-Loop vor
+   `mcpManager.callTool` prüfen ob `skill.manifestJson.requiresApproval`.
+   Falls true → break + throw `McpToolApprovalRequiredError` mit
+   Codex-Resume-Context.
+3. `approveMcpToolUse`-Dispatch auf `twin.authMode` →
+   `resumeMcpToolUseViaCodex`-Funktion mit `function_call_output`-Append-
+   Pattern aus §l und neuer `runModelViaCodex`-Iteration.
+
+Hypothese 3 als BACKLOG-Idee festhalten — sinnvoll für Phase 4 oder
+nach Pilot-Feedback.
+
+### Audit-Schema-Surface-Notiz
+
+`audit.input` für `mcp-tool-use`-Pending muss für Codex-Pfad zusätzlich
+persistieren:
+
+```jsonc
+{
+  // existing fields ...
+  "messages": [...],
+  "toolCall": {...},
+
+  // NEU für Codex-Resume:
+  "codexResumeContext": {
+    "input": [...],              // CodexInputItem[] bis zum Tool-Call
+                                  // (User-Message + ggf. function_call-Echos
+                                  //  + function_call_output von Auto-Approve-
+                                  //  Tools die VOR dem Approval-Tool kamen)
+    "codexCallId": "call_...",   // Codex' call_id für function_call_output-Match
+    "completedToolCalls": [...], // bisher in dieser Conversation erledigte
+                                  // Tool-Calls (für AuditToolCall-Aggregation)
+    "lastResponseId": "resp_...", // optional, falls Codex `previous_response_id`-
+                                   // Resume später als Multi-Step-Alternative
+                                   // genutzt wird (heute §l: input-Array reicht)
+    "planType": "...",            // Token-Plan-Tracking über Iterationen
+    "totalLatencyMs": ...         // Aggregat für Audit-Metadata
+  }
+}
+```
+
+`codexResumeContext` ist **rein additiv** — Vercel-SDK-Pfad ignoriert
+das Feld, kein Migration nötig (alles in `audit.data`-JSON-Blob).
+`approveMcpToolUse` liest das Feld nur wenn `twin.authMode === "oauth"`.
+
+**Multi-Tool-Open-Question:** Codex-Iteration kann mehrere
+`function_call`-Items pro Response liefern. Heute wird das pro Iteration
+sequenziell ausgeführt (`twin-service.ts:1580`). Wenn der **zweite**
+Tool-Call require approval und der **erste** nicht, dann:
+- Erster Tool-Call ist schon ausgeführt → muss in `completedToolCalls`
+- Resume nach Approval muss den Approval-Tool ausführen und dann mit
+  beiden Outputs (auto-executed + approved) die nächste Codex-Iteration
+  starten.
+
+Vorschlag: **Erste Phase-3.3.1.3.1-Iteration auf Single-Tool-Pending
+beschränken** (analog Vercel-SDK-"erster Marker gewinnt"). Multi-Tool-
+Pending als Phase-3.3.1.3.2 / BACKLOG.
+
+### Aufwand-Estimate Phase 3.3.1.3.1
+
+**M (Medium): 1.5-2 Bautage**
+
+| Block | Schätzung | Notiz |
+|-------|-----------|-------|
+| `mapSkillsToCodexTools` Filter-Param `requiresApproval=false` | 1h | Test-File anpassen |
+| runModelViaCodex Pre-Call-Approval-Detect + Error-Throw | 2h | Single-Tool-Scope, Loop-Break |
+| `audit.input.codexResumeContext` Schema + Persist | 1h | Additiv, kein Migration |
+| `approveMcpToolUse` Switch auf authMode + `resumeMcpToolUseViaCodex` | 3h | §l-Pattern wiederverwenden |
+| Reject-Pfad für Codex (Resume mit "abgelehnt"-Message) | 1.5h | Codex-Iteration mit Reject-Kontext |
+| Smoke-Test: Approval-Roundtrip mit Codex-OAuth-Twin | 2h | Manuell via UI |
+| Edge-Case: Multi-Step mit Auto-Tool + Approval-Tool danach | 2h | Reihenfolge-Stabilität |
+| Doku §n + STAND + BACKLOG | 1h | Tag-28-Closure |
+
+**Risiko-Notiz:** Codex' `previous_response_id` als Multi-Step-Resume-
+Alternative wurde in §l-Spike nicht getestet (Hypothese A funktionierte
+direkt). Falls `input`-Array-Re-Submit nach längerem Approval-Gap
+Stability-Probleme zeigt, wäre `previous_response_id`-Resume Fallback —
+addiert ~3h Spike-Aufwand. Heute akzeptables Risiko, weil Tag-27-§l
+zeigt: `input`-Array-Re-Submit funktioniert robust (HTTP 200, 521ms).
+
+### Diagnose-Stop
+
+Phase 3.3.1.3.0 ist **abgeschlossen ohne Code-Bau**. Phase 3.3.1.3.1
+braucht User-Bestätigung für Empfehlung (Hypothese 1) bevor Bau startet.
+
 ## Re-Estimate Tag 27 Nachmittag
 
 Initial-Schätzung (Tag 25): L (3-5 Bautage)
