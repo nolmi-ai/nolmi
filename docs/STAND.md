@@ -1,6 +1,6 @@
 # twin-lab — Stand
 
-**Letztes Update:** 25. Mai 2026, Sonntag spät-Abend (Tag 27 — Phase 3.3.1.3.2 ✅ #131 substantiell-zu, 16 Blöcke an einem Tag)
+**Letztes Update:** 25. Mai 2026, Sonntag spät-Abend (Tag 27 — Phase 3.3.3.1 ✅ #131 Phase 3.3 vollständig zu, 18 Blöcke an einem Tag)
 
 ## Aktuell in Arbeit
 
@@ -622,9 +622,74 @@ Audit nach Verify gelöscht. Cleanup automatisch via `... cleanup` → @markus z
 
 §o in docs/131-OAUTH-STRATEGY.md dokumentiert: Architektur-Symmetrie, buildPendingMcpAuditFromError-Helper-Pattern, Re-Pause-Pfad-Architektur (gebaut, Smoke offen), Reject-Pattern mit function_call_output `[isError=true]`-Marker, Phase-3-Outcome-Tabelle (api_key vs oauth Capability-Parity).
 
+### #131 Spät-Nacht — Phase 3.3.3.0 Spike + Phase 3.3.3.1 Reasoning-Persistenz (Commits `0cf822e` + nächster, ~75min total)
+
+**Block 17 + 18** schließen #131 Phase 3.3 vollständig zu (vorher "substantiell-zu" nach Block 16). Reasoning-Traces + Reasoning-Token-Count sind jetzt im Audit, Codex-OAuth-Twins haben Capability-Parity zum api_key-Pfad inklusive Reasoning-Tracking.
+
+#### Phase 3.3.3.0 Spike — Reasoning-Trace-Discovery (Block 17, Commit `0cf822e`, ~45min)
+
+Discovery-Spike für Codex-Reasoning-Format. Spike-Script `apps/runtime/src/scripts/test-oauth-phase3-3-3-spike.ts` mit Token-Pre-Check (JWT-Decode + Heuristik-Fallback), Parser-Compare (raw vs CodexSSEParser), Conditional Multi-Trigger (Math → Code-Refactor).
+
+**Findings (§p in OAUTH-Strategy):**
+- Reasoning-Items SIND im Stream: `{id, type: "reasoning", summary: []}` — `summary` **leer** (Codex Anti-Distillation)
+- `reasoning_tokens=276 / total_tokens=894 (30.9%)` aus `usage.output_tokens_details`
+- Parser-Heuristik korrekt (de-duplicate via `.added`-Filter): raw=2 vs parser=1 ist Design, kein Bug
+- Hypothesen: A ✅ Math-Trigger produziert Reasoning, B ✅ `effort:"high"` vs Server-Default macht Unterschied, C halb-verifiziert (Items im Stream, aber Content leer)
+
+**Phase-3.3.3.1-Empfehlung aus Spike:** Reduziert-Weiterbauen (~30-45 Min), kein UI-Bau (leere summary macht Render uninteressant).
+
+#### Phase 3.3.3.1 Reasoning-Persistenz (Block 18, Commit nächster, ~45min)
+
+Pipeline-Erweiterung Parser → Adapter → TwinService → Audit. Plus Resume-Context-Erweiterung für Pause-Pfad-Konsistenz.
+
+**Substantielle Architektur-Findings aus Diagnose:**
+- Parser-Erweiterung **Pflicht, nicht optional** — `response.completed`-Handler ignoriert `usage` komplett heute
+- CodexResumeContext-Schema-Erweiterung **substantiell-nötig** (sonst Daten-Loss bei Pause+Approve)
+- Re-Pause-Catch-Polish nötig für Konsistenz mit toolCalls-Pattern
+
+**Bau:**
+- `CodexSSEParser`: `private reasoningTokens?: number` State, `response.completed`-Handler extrahiert `usage.output_tokens_details.reasoning_tokens` mit defensiven 3-Ebenen-Type-Guards, `finalize()` returnt es additiv
+- `CodexAdapterOutput`: `reasoningTraces: unknown[]` + `reasoningTokens?: number` ans Interface, Return-Block reicht beide aus parseResult durch
+- `CodexResumeContext`: `previousReasoningTraces?: unknown[]` + `previousReasoningTokens?: number` additiv
+- `runModelViaCodex`: `allReasoningTraces` + `totalReasoningTokens` Loop-State, Resume-Init-Branch ingestet `ctx.previousReasoning*`, Pro-Iteration-Aggregation analog `allToolCalls`/`totalLatencyMs`, Throw-Site snapshot ins `McpToolApprovalRequiredError.codexResumeContext` (conditional spread bei 0/leer), Loop-End-Metadata mit `...({reasoningTraces}/{reasoningTokens})` (matched existing toolCalls-Pattern)
+- `approveMcpToolUseViaCodex` + `rejectMcpToolUseViaCodex` Re-Pause-Catches: `ctx.previousReasoning*` ans Original-Audit-providerMetadata (konsistent mit toolCalls-Source = Pre-Original-Pause-Daten; Resume-Iteration-Reasoning lebt im neuen Pending-Audit weiter)
+
+Typecheck inkrementell nach jedem Schritt grün.
+
+**Smoke-Bilanz (audit `audit_PPi49pkeXA2-`):**
+- `POST /twins/@markus/chat` mit trivialer Math-Frage "Was ist 17 plus 25?"
+- Response: "17 plus 25 ergibt **42**."
+- Audit-Verify:
+  - `provider=openai-codex`, `authMode=oauth`
+  - `reasoningTraces=[{id:"rs_06868287...", type:"reasoning", summary:[]}]`
+  - `reasoningTokens=12` — **Server-Default-medium produziert Reasoning bei gpt-5.5**
+  - `hasReasoningTracesKey:true`, `hasReasoningTokensKey:true`
+  - `codexIterations=1`, `latencyMs=2330`, `planType="pro"`
+  - allMetaKeys: 10 Felder vollständig (authMode, cfRay, codexIterations, codexStatus, latencyMs, planType, provider, reasoningTokens, reasoningTraces, responseId)
+
+**Substantielle Bonus-Erkenntnis (korrigiert Spike-Hypothese):**
+Phase-3.3.3.0-Spike hatte aus Phase-3.3.0-Smoke (Tool-Call-Pfad, 0 Reasoning) geschlossen, dass Server-Default-medium "kein Reasoning für simple Requests" produziert. Phase-3.3.3.1-Smoke widerlegt: **trivialer Chat-Pfad mit Server-Default produziert 12 Reasoning-Tokens für "17+25"**. Korrektur: Tool-Call-Pfad ist Reasoning-frei (vermutlich Codex-Latenz-Optimierung), Chat-Pfad nicht — gpt-5.5 macht standardmäßig einen Reasoning-Pass. Implikation: jede oauth-Twin-Antwort hat ein paar Reasoning-Tokens, Token-Accounting muss das einrechnen.
+
+Audit nach Verify gelöscht. Cleanup automatisch via `pnpm twin:oauth-phase3-spike cleanup` → @markus zurück auf `api_key`.
+
+#### Plan Tag 28+ (revidiert nach Phase-3.3-Closure)
+
+**#131 Phase 3.3 vollständig zu.** Codex-OAuth-Twins haben jetzt:
+- Persona + Facts + Memory (Phase 3.2)
+- Multi-Step-Tool-Loop + Auto-Execute (Phase 3.3.1.2)
+- Approval-Pipeline mit Pause+Approve+Resume+Reject + Re-Pause (Phase 3.3.1.3.{0,1,2})
+- Reasoning-Traces + Token-Counts im Audit (Phase 3.3.3.{0,1})
+
+**Restliche #131-Sub-Phasen Tag 28+:**
+- Phase 3.4 Vercel-Provider-Refactor — optional, lohnt nur bei AI-SDK-Update
+- Phase 4 CLI-Login-Command — ~1 Tag
+- Phase 5 Web-UI Status + Smoke + Doku + #131-Closure — ~1-1.5 Tage
+
+§p in docs/131-OAUTH-STRATEGY.md ergänzt um Phase-3.3.3.1 Smoke-Bilanz + Server-Default-Behavior-Korrektur + Phase-3.3-Closure-Note.
+
 ### Tag-27-Closure-Bilanz
 
-**Sechzehn Blöcke an einem Tag — Husky-Hook bis Phase 3.3.1.3.2 Codex-Resume-Pfad komplett:**
+**Achtzehn Blöcke an einem Tag — Husky-Hook bis Phase 3.3.3.1 Reasoning-Persistenz komplett:**
 
 | Block | Commit | Was |
 |---|---|---|
@@ -643,7 +708,9 @@ Audit nach Verify gelöscht. Cleanup automatisch via `... cleanup` → @markus z
 | 13. Phase 3.3.1.1 | `d576c05` | #131 mapSkillsToCodexTools-Helper + CodexSSEParser Tool-Call-Support, 15/15 Smoke grün |
 | 14. Phase 3.3.1.2 | `797a464` | #131 Multi-Step-Loop + Auto-Execute Tool-Pipeline, Smoke 2 grün (get-sum a=89/b=134→223, codexIterations=2, codexCallId persistiert), 16/16 Smoke + BACKLOG #139 für Token-Refresh-Latenz |
 | 15. Phase 3.3.1.3.0 + 3.3.1.3.1 | `67dc9f3` + `87c62fd` | #131 Approval-Pipeline reverse-engineered (§m) + Codex-Pause-Pfad gebaut: McpToolApprovalRequiredError-Erweiterung um codexResumeContext, CodexInputItemAny-Union, Pre-Call-Detect im Multi-Step-Loop (Reihenfolge-treu), Vercel-Catch-Reuse via Throw, 12-Felder-Resume-Context persistiert. Smoke grün mit `audit_KgWbPjYW_BF4` (mcp:everything-approval:get-sum → pending). §n dokumentiert. |
-| 16. Phase 3.3.1.3.2 | (Resume-Pfad) | #131 Codex-Resume-Pfad nach Approval: approveMcpToolUse-Switch via codexResumeContext, approveMcpToolUseViaCodex (Tool-Execute + Resume-Iteration via runModelViaCodex mit options.resumeContext), rejectMcpToolUseViaCodex (function_call_output mit `[isError=true]`-Marker, audit.repo.update mit erhaltenem rejected-Status), buildPendingMcpAuditFromError-Helper extrahiert für Re-Pause-Pfad-Reuse, ApproveResult um pending?: boolean + priorAuditId optionales Feld. Smoke grün mit `audit_gSqqVwGGBY6O` (reply="17 plus 25 ergibt 42.", codexIterations=2, 5.4s). §o dokumentiert. **#131 Phase 3.3 substantiell-zu.** |
+| 16. Phase 3.3.1.3.2 | `0f1b7ce` | #131 Codex-Resume-Pfad nach Approval: approveMcpToolUse-Switch via codexResumeContext, approveMcpToolUseViaCodex (Tool-Execute + Resume-Iteration via runModelViaCodex mit options.resumeContext), rejectMcpToolUseViaCodex (function_call_output mit `[isError=true]`-Marker, audit.repo.update mit erhaltenem rejected-Status), buildPendingMcpAuditFromError-Helper extrahiert für Re-Pause-Pfad-Reuse, ApproveResult um pending?: boolean + priorAuditId optionales Feld. Smoke grün mit `audit_gSqqVwGGBY6O` (reply="17 plus 25 ergibt 42.", codexIterations=2, 5.4s). §o dokumentiert. **#131 Phase 3.3 substantiell-zu.** |
+| 17. Phase 3.3.3.0 Spike | `0cf822e` | #131 Codex-Reasoning-Trace-Discovery: Spike-Script mit Token-Pre-Check (JWT exp + Heuristik-Fallback), Parser-Compare via CodexSSEParser, Conditional Multi-Trigger (Math → Code-Refactor). Findings: Reasoning-Items IM Stream (`{id, type:"reasoning", summary:[]}`), `summary` LEER (Anti-Distillation), `reasoning_tokens=276/894 (30.9%)`, Hypothesen A+B verifiziert, C halb. Empfehlung: reduziert-weiterbauen (kein UI). §p dokumentiert. |
+| 18. Phase 3.3.3.1 | (Reasoning-Persistenz) | #131 Reasoning-Trace-Persistenz End-to-End: Parser usage-Erweiterung mit defensive Type-Guards, CodexAdapterOutput um reasoningTraces+reasoningTokens, runModelViaCodex Multi-Iteration-Aggregation (Loop-State + Init-Branch + Throw-Site + Loop-End-Metadata), CodexResumeContext additiv erweitert um previousReasoning*, Re-Pause-Catches in approve+rejectMcpToolUseViaCodex schreiben Reasoning ans Original-Audit. Smoke grün mit `audit_PPi49pkeXA2-`: provider=openai-codex, 1 reasoningTrace + 12 reasoningTokens (Server-Default-medium produziert Reasoning bei gpt-5.5 auch bei trivialer Math-Frage — korrigiert Spike-Hypothese). §p erweitert. **#131 Phase 3.3 vollständig zu.** |
 
 **Fünf Lessons:** Recherche vor Bau (#1), STAND-Doppelpflege (#2), End-to-End-Validation vor Bau (#3), Migration ohne Repo-Update ist Anti-Pattern (#4), Twin-Lab-eigene Setzungen schlagen Industry-Defaults (#5).
 
@@ -651,7 +718,7 @@ Audit nach Verify gelöscht. Cleanup automatisch via `... cleanup` → @markus z
 
 **Phase-3.2-Bonus-Lesson (Diagnose-Wert, kein neuer Lesson-Eintrag):** Briefing für Phase 3.2 hatte angenommen, `runModelViaCodex` müsse `conversationId` akzeptieren und History selbst laden. Phase-3.2.1-Diagnose hat gezeigt: History ist bereits in `messages` (Caller `runOwnerDirect` lädt sie OUTSIDE `runModel` via `loadConversationHistory`). Ohne Diagnose wäre Phase 3.2 mit doppeltem History-Loading + neuer Dep-Injection gebaut worden — Phase-1.1-Diagnose-Pattern bestätigt 13. Mal.
 
-**Tag-27-Outcome #131:** Phase 1 ✅ + Phase 2 ✅ + Strategy-Iteration ✅ + Phase 3.0 Spike ✅ + Phase 3.1 ✅ + Phase 3.2 ✅ + Phase 3.3.0 Spike ✅ + Phase 3.3.2 Spike ✅ + Phase 3.3.1.1 ✅ + Phase 3.3.1.2 ✅ + Phase 3.3.1.3.0 ✅ (Diagnose, §m) + Phase 3.3.1.3.1 ✅ (Pause-Pfad, `audit_KgWbPjYW_BF4`, §n) + Phase 3.3.1.3.2 ✅ (Resume-Pfad, `audit_gSqqVwGGBY6O`, §o). **#131 Phase 3.3 substantiell-zu.** Codex-OAuth-Twins sind für den Tool-Use-Pfad funktional gleichwertig zu api_key-Twins: Auto-Execute + Pause + Approve+Resume + Reject mit System-Message + Multi-Step-Loop, alles via direct-fetch-Adapter ohne Vercel-AI-SDK-Custom-Provider. Re-Pause-Pfad ist code-komplett (Helper-Reuse + priorAuditId-Link), Smoke offen (siehe BACKLOG). **Restliche Sub-Phasen Tag 28+:** Phase 3.3.3 Reasoning-Traces (optional, ~0.5 Tag) + Phase 3.4 Vercel-Provider-Refactor (optional, lohnt sich nur bei AI-SDK-Update) + Phase 4 CLI-Login-Command (~1 Tag) + Phase 5 Web-UI Status + Smoke + Doku + #131-Closure (~1-1.5 Tage).
+**Tag-27-Outcome #131:** Phase 1 ✅ + Phase 2 ✅ + Strategy-Iteration ✅ + Phase 3.0 Spike ✅ + Phase 3.1 ✅ + Phase 3.2 ✅ + Phase 3.3.0 Spike ✅ + Phase 3.3.2 Spike ✅ + Phase 3.3.1.1 ✅ + Phase 3.3.1.2 ✅ + Phase 3.3.1.3.{0,1,2} ✅ (Approval-Pipeline §m+§n+§o) + Phase 3.3.3.{0,1} ✅ (Reasoning-Discovery+Persistenz §p, `audit_PPi49pkeXA2-`). **#131 Phase 3.3 vollständig zu.** Codex-OAuth-Twins haben jetzt: Persona+Facts+Memory + Multi-Step-Tool-Loop + Auto-Execute + Approval-Pipeline (Pause+Approve+Resume+Reject+Re-Pause) + Reasoning-Traces+Token-Counts im Audit. Capability-Parity zu api_key + Reasoning-Extra. Re-Pause-Pfad code-komplett, Smoke offen (BACKLOG #140). **Substantielle Bonus-Erkenntnis Phase 3.3.3.1:** Server-Default-`effort:medium` produziert Reasoning bei gpt-5.5 auch bei trivialer Frage (12 Tokens für "17+25") — korrigiert Spike-Hypothese, Token-Accounting muss Reasoning einrechnen. **Restliche Sub-Phasen Tag 28+:** Phase 3.4 Vercel-Provider-Refactor (optional, lohnt nur bei AI-SDK-Update) + Phase 4 CLI-Login-Command (~1 Tag) + Phase 5 Web-UI Status + Smoke + Doku + #131-Closure (~1-1.5 Tage).
 
 **Tag-27-Outcome #138:** Local-Dev-Boot-Friction strukturell behoben, in der Praxis verifiziert beim Smoke-2-Setup.
 

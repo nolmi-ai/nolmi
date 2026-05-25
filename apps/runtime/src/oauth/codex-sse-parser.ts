@@ -111,10 +111,18 @@ export interface CodexParseResult {
   /** Tool-Calls aus `function_call`-Items, mit akkumulierten Arguments.
    *  Phase 3.3 nutzt das im TwinService-Branch (Phase 3.3.1.2). */
   toolCalls: CodexToolCall[];
-  /** Reasoning-Items captured aber unbenutzt (Phase 3.3.3 wird sie ggf.
-   *  für Audit-Display verwerten). Kommen heute selten — Codex hat in den
-   *  Phase-3.3.0/3.3.2-Smokes `reasoning_tokens: 0` zurückgeliefert. */
+  /** Reasoning-Items captured. Phase 3.3.3.0-Spike hat verifiziert:
+   *  `{id, type: "reasoning", summary: []}` — `summary` ist leer (Codex
+   *  Anti-Distillation), Item ist Metadata-only. Phase 3.3.3.1 reicht das
+   *  trotzdem durch für Audit-Trail-Vollständigkeit. */
   reasoningTraces: unknown[];
+  /** #131 Phase 3.3.3.1: `usage.output_tokens_details.reasoning_tokens` aus
+   *  `response.completed`. Optional weil Codex das Feld weglässt wenn kein
+   *  Reasoning getriggert wurde (0 Tokens = häufig bei Tool-Call-Pfaden mit
+   *  effort=medium). Phase-3.3.3.0-Spike mit effort=high + Math-Trigger:
+   *  276 von 894 Tokens (30.9%). Phase-B könnte `totalTokens` analog
+   *  miterfassen — heute Out of Scope. */
+  reasoningTokens?: number;
   /** Event-Type-Strings, die NICHT im Explicit-Set waren. Für Debug-Logging. */
   unknownEventTypes: string[];
 }
@@ -154,8 +162,12 @@ export class CodexSSEParser {
    *  Tracking — `function_call_arguments.delta/done` referenziert via
    *  `item_id`). */
   private readonly toolCallsByItemId = new Map<string, CodexToolCall>();
-  /** Reasoning-Items captured aus `output_item.added`. Phase 3.3 unused. */
+  /** Reasoning-Items captured aus `output_item.added`. Phase 3.3.3.1 reicht
+   *  sie ans Audit weiter, auch wenn `summary: []` heißt der Content ist
+   *  leer (Codex Anti-Distillation, siehe §p). */
   private readonly reasoningTraces: unknown[] = [];
+  /** #131 Phase 3.3.3.1: aus `response.completed`-Event-`usage.output_tokens_details`. */
+  private reasoningTokens: number | undefined = undefined;
 
   /**
    * Liest einen ReadableStream<Uint8Array> komplett aus und gibt das
@@ -213,6 +225,9 @@ export class CodexSSEParser {
       status: this.status,
       toolCalls: [...this.toolCallsByItemId.values()],
       reasoningTraces: this.reasoningTraces,
+      ...(this.reasoningTokens !== undefined
+        ? { reasoningTokens: this.reasoningTokens }
+        : {}),
       unknownEventTypes: [...this.unknownTypes],
     };
   }
@@ -392,6 +407,17 @@ export class CodexSSEParser {
         const response = event.response;
         if (isObject(response) && typeof response.status === "string") {
           this.status = response.status;
+        }
+        // #131 Phase 3.3.3.1: usage.output_tokens_details.reasoning_tokens
+        // extrahieren. Defensive Type-Guards weil alle 3 Ebenen optional sein
+        // können (Codex liefert das Feld nur wenn Reasoning getriggert wurde).
+        const usage = isObject(response) ? response.usage : undefined;
+        const details = isObject(usage)
+          ? usage.output_tokens_details
+          : undefined;
+        const tokens = isObject(details) ? details.reasoning_tokens : undefined;
+        if (typeof tokens === "number") {
+          this.reasoningTokens = tokens;
         }
         return;
       }

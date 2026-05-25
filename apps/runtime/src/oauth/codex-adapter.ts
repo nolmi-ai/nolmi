@@ -104,6 +104,14 @@ export interface CodexResumeContext {
   /** Bereits ausgeführte Tool-Calls — für Audit-Trail-Kontinuität im
    *  Resume (Phase 3.3.1.3.2 mergt die in den finalen audit.output). */
   previousToolCalls: AuditToolCallSnapshot[];
+  /** #131 Phase 3.3.3.1: Reasoning-Items aus den Pre-Pause-Iterations.
+   *  Optional weil Pause-Iteration ohne Reasoning (häufig bei Tool-Call-
+   *  Pfaden mit effort=medium) das Feld leer lässt. Resume akkumuliert das
+   *  ins finale audit.output.providerMetadata.reasoningTraces. */
+  previousReasoningTraces?: unknown[];
+  /** #131 Phase 3.3.3.1: Token-Count-Aggregat aus den Pre-Pause-Iterations.
+   *  Optional aus gleichem Grund wie previousReasoningTraces. */
+  previousReasoningTokens?: number;
   /** Codex-Response-Metadaten der letzten Iteration — informational, nicht
    *  funktional für Resume (Codex liest `input`-Array, nicht
    *  `previous_response_id`, siehe §l). */
@@ -159,6 +167,15 @@ export interface CodexAdapterOutput {
   /** Tool-Calls aus `function_call`-Items (§k/§l, Phase 3.3.1.1 Parser).
    *  Bei leerem Array hat Codex direkt geantwortet ohne Tool-Use. */
   toolCalls: CodexToolCall[];
+  /** #131 Phase 3.3.3.1: Reasoning-Items aus `output_item.added` mit
+   *  `item.type === "reasoning"`. Format `{id, type: "reasoning", summary: []}`
+   *  (Spike §p) — `summary` ist heute leer (Codex Anti-Distillation). Trotzdem
+   *  durchgereicht für Audit-Trail-Vollständigkeit + Multi-Iteration-Counts. */
+  reasoningTraces: unknown[];
+  /** #131 Phase 3.3.3.1: `usage.output_tokens_details.reasoning_tokens` aus
+   *  `response.completed`. Undefined wenn Codex das Feld weglässt (kein
+   *  Reasoning getriggert). */
+  reasoningTokens?: number;
   /** Unbekannte SSE-Event-Types, die der Parser-Hybrid-Fallback aufgesammelt
    *  hat. Phase 3.3 wird darauf reagieren, Phase 3.1.2 logged sie nur. */
   unknownEventTypes: string[];
@@ -239,6 +256,10 @@ export class CodexAdapter {
       responseId: parseResult.responseId ?? null,
       status: parseResult.status ?? null,
       toolCalls: parseResult.toolCalls,
+      reasoningTraces: parseResult.reasoningTraces,
+      ...(parseResult.reasoningTokens !== undefined
+        ? { reasoningTokens: parseResult.reasoningTokens }
+        : {}),
       unknownEventTypes: parseResult.unknownEventTypes,
     };
   }

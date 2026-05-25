@@ -1258,6 +1258,16 @@ export class TwinService {
                 })),
                 rejectedToolCall,
               ],
+              // #131 Phase 3.3.3.1: Pre-Pause-Reasoning erhalten. Reject hat
+              // keine Resume-Iteration ausgeführt, deshalb gibt's nur die
+              // Pre-Original-Pause-Reasoning aus ctx.
+              ...(ctx.previousReasoningTraces &&
+              ctx.previousReasoningTraces.length > 0
+                ? { reasoningTraces: ctx.previousReasoningTraces }
+                : {}),
+              ...(ctx.previousReasoningTokens
+                ? { reasoningTokens: ctx.previousReasoningTokens }
+                : {}),
             },
           };
           await this.deps.audit.repo.update(entry.id, updatedEntry);
@@ -1490,6 +1500,20 @@ export class TwinService {
               })),
               resumeToolCall,
             ],
+            // #131 Phase 3.3.3.1: Pre-Original-Pause-Reasoning erhalten,
+            // konsistent mit toolCalls-Source. Reasoning der Resume-Iteration
+            // (zwischen Pause und Re-Pause) lebt im neuen Pending-Audit weiter
+            // (err.codexResumeContext.previousReasoningTraces), kommt also
+            // beim nächsten Approve via runModelViaCodex-Init-Branch wieder ins
+            // Aggregat — kein echter Daten-Loss, nur Audit-Trail-Splitting
+            // entlang der Pause-Kette.
+            ...(ctx.previousReasoningTraces &&
+            ctx.previousReasoningTraces.length > 0
+              ? { reasoningTraces: ctx.previousReasoningTraces }
+              : {}),
+            ...(ctx.previousReasoningTokens
+              ? { reasoningTokens: ctx.previousReasoningTokens }
+              : {}),
           },
         });
         const pending = await this.buildPendingMcpAuditFromError(err, {
@@ -1934,6 +1958,11 @@ export class TwinService {
     const allToolCalls: AuditToolCall[] = [];
     const allUnknownEventTypes = new Set<string>();
     let iterations: number;
+    // #131 Phase 3.3.3.1: Reasoning-Aggregation analog allToolCalls/totalLatency.
+    // Resume-Pfad initialisiert mit ctx.previousReasoningTraces/Tokens damit
+    // Pre-Pause-Reasoning nicht verloren geht. Initial-Pfad startet leer.
+    const allReasoningTraces: unknown[] = [];
+    let totalReasoningTokens = 0;
 
     if (options.resumeContext) {
       const rc = options.resumeContext;
@@ -1973,6 +2002,16 @@ export class TwinService {
       }
       allToolCalls.push(rc.executedToolCall);
       for (const t of ctx.unknownEventTypes) allUnknownEventTypes.add(t);
+      // #131 Phase 3.3.3.1: Pre-Pause-Reasoning aus dem Snapshot. Spread weil
+      // unknown[] kein .push(...arr) ohne explizite Iteration zulässt.
+      if (ctx.previousReasoningTraces) {
+        for (const trace of ctx.previousReasoningTraces) {
+          allReasoningTraces.push(trace);
+        }
+      }
+      if (ctx.previousReasoningTokens) {
+        totalReasoningTokens = ctx.previousReasoningTokens;
+      }
     } else {
       // Initial-Path (existing Phase 3.3.1.2-Verhalten).
       input = mapChatMessagesToCodexInput(messages);
@@ -2001,6 +2040,15 @@ export class TwinService {
       if (result.cfRay) lastCfRay = result.cfRay;
       totalLatencyMs += result.latencyMs;
       for (const t of result.unknownEventTypes) allUnknownEventTypes.add(t);
+      // #131 Phase 3.3.3.1: Reasoning-Aggregation pro Iteration. Traces sind
+      // typisch leer (Tool-Call-Pfad + Server-Default-effort=medium). Tokens
+      // optional (Codex weglässt-Feld bei 0). Phase-3.3.3.0-Spike-Doku §p.
+      for (const trace of result.reasoningTraces) {
+        allReasoningTraces.push(trace);
+      }
+      if (result.reasoningTokens) {
+        totalReasoningTokens += result.reasoningTokens;
+      }
 
       // Keine Tool-Calls → finale Antwort, Loop fertig.
       if (result.toolCalls.length === 0) break;
@@ -2067,6 +2115,14 @@ export class TwinService {
               lastCfRay,
               totalLatencyMs,
               unknownEventTypes: Array.from(allUnknownEventTypes),
+              // #131 Phase 3.3.3.1: Pre-Pause-Reasoning ans Resume-Context
+              // damit Resume-Iteration sie fortführt (sonst Audit-Trail-Loss).
+              ...(allReasoningTraces.length > 0
+                ? { previousReasoningTraces: [...allReasoningTraces] }
+                : {}),
+              ...(totalReasoningTokens > 0
+                ? { previousReasoningTokens: totalReasoningTokens }
+                : {}),
             },
           );
         }
@@ -2146,6 +2202,15 @@ export class TwinService {
         codexIterations: iterations,
         ...(allToolCalls.length > 0
           ? { toolCalls: allToolCalls }
+          : {}),
+        // #131 Phase 3.3.3.1: Reasoning ans Audit-providerMetadata. Beide
+        // Felder bei 0/leer weglassen (matched toolCalls-Pattern) — Audit
+        // bleibt schmal wenn kein Reasoning getriggert wurde.
+        ...(allReasoningTraces.length > 0
+          ? { reasoningTraces: allReasoningTraces }
+          : {}),
+        ...(totalReasoningTokens > 0
+          ? { reasoningTokens: totalReasoningTokens }
           : {}),
       },
     };

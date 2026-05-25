@@ -1487,8 +1487,83 @@ Tokens displayed.
 
 Spike-Discovery abgeschlossen. Phase 3.3.3.1 Bau-Pfad ist klar, kann auf
 verifizierter Format-Basis (`{id, type: "reasoning", summary: []}` +
-`reasoning_tokens` aus usage) gebaut werden. **User-Entscheidung:** Phase
-3.3.3.1 jetzt anfangen oder priorisieren für Phase 4/5-Closure-Phase?
+`reasoning_tokens` aus usage) gebaut werden.
+
+### Phase-3.3.3.1 Smoke-Bilanz + Server-Default-Korrektur (Tag 27 Block 18)
+
+Phase 3.3.3.1 ist gebaut + verifiziert. End-to-End-Smoke gegen
+`/twins/@markus/chat` mit trivialer Math-Frage zeigt **substantielle
+Korrektur der Spike-Hypothese**:
+
+```jsonc
+// audit_PPi49pkeXA2- (executed)
+{
+  "capability": "owner-direct",
+  "reply": "17 plus 25 ergibt **42**.",
+  "providerMetadata": {
+    "provider": "openai-codex",
+    "authMode": "oauth",
+    "reasoningTraces": [
+      { "id": "rs_06868287...", "type": "reasoning", "summary": [] }
+    ],
+    "reasoningTokens": 12,
+    "codexIterations": 1,
+    "latencyMs": 2330,
+    "planType": "pro",
+    "allMetaKeys": [
+      "authMode", "cfRay", "codexIterations", "codexStatus",
+      "latencyMs", "planType", "provider",
+      "reasoningTokens", "reasoningTraces", "responseId"
+    ]
+  }
+}
+```
+
+**Server-Default-`effort: medium` produziert Reasoning bei gpt-5.5** —
+auch bei trivialer Frage „17 plus 25". 12 Reasoning-Tokens für eine
+Addition ist überraschend, aber konsistent: gpt-5.5 ist ein Reasoning-
+Modell und macht offenbar pro Request einen Reasoning-Pass.
+
+**Spike-Hypothese-Korrektur:** §p oben hatte aus Phase-3.3.0-Smoke
+geschlossen, dass Tool-Call-Pfade `reasoning_tokens=0` haben. Korrekter:
+**Tool-Call-Pfad ist Reasoning-frei, Chat-Pfad nicht.** Vermutlich
+optimiert Codex Tool-Call-Latenz indem es Reasoning skippt; freier
+Text-Output bekommt Reasoning auch ohne explizite `effort:"high"`-Anforderung.
+
+**Implikation für Production:** jeder oauth-Twin-Chat-Response hat ein
+paar Reasoning-Tokens (12 bei trivialer Frage, vermutlich mehr bei
+komplexen). Token-Accounting für Codex-Subscription muss das einrechnen
+(Token-Limit = Output + Reasoning + Input). Phase B / Production-
+Monitoring könnte hier ein "🧠 N reasoning"-Hint im Audit-Detail-View
+zeigen, ist aber kein Blocker — `summary: []` bleibt leer, also kein
+expanded Content-Render.
+
+**Bau-Bilanz Phase 3.3.3.1 (~45 Min):**
+- `CodexSSEParser.reasoningTokens?: number` aus `usage.output_tokens_details`
+  (defensive 3-Ebenen-Type-Guards)
+- `CodexAdapterOutput.reasoningTraces + reasoningTokens` durch parseResult
+- `runModelViaCodex`: `allReasoningTraces` + `totalReasoningTokens` Loop-
+  State, Pro-Iteration-Push+Add, Loop-End-Metadata (additiv mit
+  conditional-spread bei 0/leer — matched `toolCalls`-Pattern), Resume-
+  Init-Branch ingestet `ctx.previousReasoning*`, Throw-Site appendet
+  Snapshot ins `McpToolApprovalRequiredError.codexResumeContext`
+- `CodexResumeContext.previousReasoningTraces? + previousReasoningTokens?`
+  Schema additiv (kein Migration, JSON-Bag)
+- Re-Pause-Catches in `approveMcpToolUseViaCodex` + `rejectMcpToolUseViaCodex`
+  schreiben `ctx.previousReasoning*` ans Original-Audit-providerMetadata
+  (konsistent mit existing `toolCalls`-Source: Pre-Original-Pause-Daten;
+  Resume-Iteration-Reasoning lebt im neuen Pending-Audit weiter)
+
+**Phase 3.3 vollständig zu.** Codex-OAuth-Twins haben jetzt:
+- Persona + Facts + Memory (Phase 3.2)
+- Multi-Step-Tool-Loop mit Auto-Execute (Phase 3.3.1.2)
+- Approval-Pipeline mit Pause+Approve+Resume+Reject + Re-Pause (Phase 3.3.1.3.{0,1,2})
+- Reasoning-Traces + Token-Counts im Audit (Phase 3.3.3.{0,1})
+
+**Restliche #131-Sub-Phasen (Tag 28+):**
+- Phase 3.4 Vercel-Provider-Refactor — optional, lohnt nur bei AI-SDK-Update
+- Phase 4 CLI-Login-Command — ~1 Tag
+- Phase 5 Web-UI Status + Smoke + Doku + #131-Closure — ~1-1.5 Tage
 
 ## Re-Estimate Tag 27 Nachmittag
 
