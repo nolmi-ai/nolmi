@@ -1327,6 +1327,169 @@ Use mit Codex-Subscription. Phase 4 (CLI-Login-Command) + Phase 5
 (Web-UI Status + Doku + Smoke) sind die letzten Schritte vor #131-
 Closure.
 
+## §p — Codex-Reasoning-Trace-Format (Phase 3.3.3.0 Spike-Discovery, Tag 27 Block 17)
+
+**Scope:** Discovery-Spike für Codex-Reasoning-Format vor Phase-3.3.3.1-Bau.
+Trigger-Bedingungen klären + Item-Format dumpen + Parser-Compare gegen
+existing CodexSSEParser. Mock-Request gegen real Codex-Endpoint, kein
+TwinService-Touch, kein Code-Change.
+
+### Smoke-Setup
+
+Spike `apps/runtime/src/scripts/test-oauth-phase3-3-3-spike.ts` mit Token-
+Pre-Check (JWT-Decode + last_refresh-Fallback) und conditional Multi-Trigger:
+
+- **Step 1 — Math-Problem** (Two-Trains-Meet-Problem, 319 chars) mit
+  `reasoning: { effort: "high" }`, `tools: []`, model `gpt-5.5`
+- **Step 2 — Code-Refactor** (conditional, nur wenn Step 1 weder Items noch
+  Tokens triggert)
+
+Plus Parser-Compare: existing `CodexSSEParser` läuft parallel zum Raw-Capture
+via `parseChunk(chunk)` → `finalize()`, Counts werden verglichen.
+
+### Smoke-Result (Step 1 grün, Step 2 übersprungen)
+
+```
+HTTP 200 | 15444ms total | 521 events captured
+
+Event-Histogram:
+  511× response.output_text.delta
+    2× response.output_item.added
+    2× response.output_item.done
+    1× response.created
+    1× response.in_progress
+    1× response.content_part.added
+    1× response.output_text.done
+    1× response.content_part.done
+    1× response.completed
+
+reasoningItems raw=2  |  reasoningTraces parser=1
+reasoning_tokens=276  |  total_tokens=894 (=30.9% Reasoning-Anteil)
+```
+
+### Reasoning-Item-Format (verified)
+
+Zwei Events pro Reasoning-Block — `added` (Start) + `done` (End) — beide mit
+identischer `item.id`:
+
+```jsonc
+// Event 1 (sequence 2): output_item.added
+{
+  "type": "response.output_item.added",
+  "item": {
+    "id": "rs_0a4d9bbcdc4ef7d1016a146ecb6c8881919124caa9888cbc9d",
+    "type": "reasoning",
+    "summary": []         // ← LEER! kein Reasoning-Text exposed
+  },
+  "output_index": 0,
+  "sequence_number": 2
+}
+
+// Event 2 (sequence 3): output_item.done — gleiche id, identische Payload
+{
+  "type": "response.output_item.done",
+  "item": {
+    "id": "rs_0a4d9bbcdc4ef7d1016a146ecb6c8881919124caa9888cbc9d",
+    "type": "reasoning",
+    "summary": []
+  },
+  "output_index": 0,
+  "sequence_number": 3
+}
+```
+
+**Substantielle Beobachtung:** `summary: []` ist **leer**. Codex exposed nur
+die Reasoning-Item-Metadaten (id, type, output_index), **nicht den
+tatsächlichen Reasoning-Text**. Hypothese: Anti-Distillation-Stance — der
+OpenAI-Subscription-Plan macht Reasoning-Inhalt nicht zugänglich für
+Re-Training. Vergleich: o1/o3 in der API-Variante exposed `summary` mit
+strukturiertem Reasoning, Codex-OAuth-Pfad nicht.
+
+**`reasoning_tokens=276` in `usage.output_tokens_details`** ist verfügbar —
+quantitative Reasoning-Information geht durch, qualitative nicht.
+
+### Parser-Compare (raw=2 vs parser=1, kein Bug)
+
+Diskrepanz ist **kein Parser-Bug, sondern Design-Korrektur**: `codex-sse-
+parser.ts:331-337` enthält explizite Heuristik:
+
+```ts
+} else if (itemType === "reasoning") {
+  // Capture-only, Phase 3.3 unused. `.done`-Variante wird nicht
+  // doppelt erfasst (heuristic: reasoning kommt typischerweise nur
+  // einmal pro item.id, in den Smokes 3.3.0/3.3.2 garnicht).
+  if (type === "response.output_item.added") {
+    this.reasoningTraces.push(item);
+  }
+}
+```
+
+Parser de-dupliziert per `output_item.added`-Filter — der `.done`-Event
+hat identische Payload und würde sonst doppelt gezählt. **Korrekt für
+Phase 3.3.3.1** weil `reasoningTraces` semantisch "Anzahl Reasoning-
+Blocks" repräsentieren soll, nicht "Anzahl Stream-Events".
+
+Spike-Counter zählt beide Events (raw=2) zur Vollständigkeit der
+Discovery; produktiver Parser-Count (1) ist die richtige Größe für
+Persistenz.
+
+### Hypothesen-Verifikation (aus Diagnose-C)
+
+| Hypothese | Status |
+|-----------|--------|
+| **A** — Reasoning kommt nur bei non-trivial Prompts | ✅ Math-Trigger → 2 Items. (Phase-3.3.0-Smoke mit Tool-Call-Pfad hatte 0 Items — Trigger-Domain matters.) |
+| **B** — `effort: "high"` macht Unterschied | ✅ effort:"high" → Reasoning. Server-Default `medium` hatte beim Tool-Call-Pfad nichts produziert. Effort + Prompt-Komplexität zusammen entscheiden. |
+| **C** — Subscription-Plan exposed Items nicht | ❌ Items SIND im Stream. ABER: `summary: []` heißt der **Reasoning-Inhalt** ist nicht zugänglich — nur Metadaten + Token-Count. Halb-verifizierte C. |
+
+### Phase-3.3.3.1-Implications
+
+**Empfehlung: Reduziert-Weiterbauen.** Reasoning-Items im Stream sind
+verifiziert, aber Inhalt (`summary: []`) ist leer — UI-Render hat keinen
+substantiellen Mehrwert über "X Reasoning-Tokens verwendet" hinaus.
+
+**Bau-Schritte für Phase 3.3.3.1 (~30-45 Min, reduziert vom S-Estimate):**
+
+1. **`CodexAdapterOutput.reasoningTraces: unknown[]`** anbauen — heute
+   schon im `CodexParseResult` da, nur Adapter-Surface muss durchreichen.
+2. **`CodexAdapterOutput.reasoningTokens?: number`** aus
+   `usage.output_tokens_details.reasoning_tokens` extrahieren — Parser
+   liest `usage` aktuell teilweise (für `total_tokens`), Erweiterung
+   minimal.
+3. **`TwinService.runModelViaCodex.metadata`** appendet beide:
+   `metadata.reasoningTraces` (für audit-trail completeness) +
+   `metadata.reasoningTokens` (für UI-Display + Token-Cost-Analyse).
+4. **Multi-Iteration-Aggregation** im Loop: `allReasoningTraces` +
+   `totalReasoningTokens` analog zu `allToolCalls`/`totalLatencyMs`.
+5. **Kein UI-Bau in Phase 3.3.3.1** — `summary: []` macht das uninteressant.
+   Phase 5 könnte einen "🧠 N tokens"-Badge im Audit-Detail-View zeigen,
+   aber das ist Polish-Niveau.
+
+**Skip:** kein Stream-Display für Reasoning-Progress, kein Reasoning-
+Pre-Pause-Visualization. Der Tool-Call-Pre-Call-Detect-Pattern aus Phase
+3.3.1.3.1 ist die einzige Pre-Action-User-Surface die nötig ist.
+
+### Optionale Phase-3.3.3.1.X — Reasoning-Effort steuerbar
+
+Heute setzt `codex-adapter.ts:193-202` body OHNE `reasoning`-Field —
+Codex-Server-Default `effort: "medium"` greift. Phase 3.3.3.1.X (optional)
+könnte:
+
+- `CodexAdapterInput.reasoningEffort?: "low" | "medium" | "high"` anbauen
+- Default `"medium"` (Codex-Default-Match)
+- `runModelViaCodex` reicht es durch — Owner könnte Skill-spezifisch
+  high-effort triggern (z.B. für Recherche-Workflow)
+
+**Out of Scope für 3.3.3.1:** Effort-UI-Picker, Skill-Manifest-Effort-Field.
+Wäre Phase-4/5-Material und nur sinnvoll wenn UI tatsächlich Reasoning-
+Tokens displayed.
+
+### Phase-3.3.3.0-Stop
+
+Spike-Discovery abgeschlossen. Phase 3.3.3.1 Bau-Pfad ist klar, kann auf
+verifizierter Format-Basis (`{id, type: "reasoning", summary: []}` +
+`reasoning_tokens` aus usage) gebaut werden. **User-Entscheidung:** Phase
+3.3.3.1 jetzt anfangen oder priorisieren für Phase 4/5-Closure-Phase?
+
 ## Re-Estimate Tag 27 Nachmittag
 
 Initial-Schätzung (Tag 25): L (3-5 Bautage)
