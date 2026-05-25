@@ -63,6 +63,9 @@ importers:
       '@ai-sdk/openai':
         specifier: ^3.0.0
         version: 3.0.57(zod@3.25.76)
+      '@ai-sdk/provider':
+        specifier: ^3.0.0
+        version: 3.0.10
       '@fastify/cookie':
         specifier: ^11
         version: 11.0.2
@@ -121,9 +124,6 @@ importers:
         specifier: ^3.23.0
         version: 3.25.76
     devDependencies:
-      '@ai-sdk/provider':
-        specifier: 3.0.10
-        version: 3.0.10
       '@types/bcryptjs':
         specifier: ^2.4.6
         version: 2.4.6
