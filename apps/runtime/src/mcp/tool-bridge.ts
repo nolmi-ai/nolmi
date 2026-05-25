@@ -129,24 +129,14 @@ export function buildMcpToolsFromSkills(
       description:
         skill.manifestJson.description ?? `MCP tool: ${toolName}`,
       inputSchema: jsonSchema<Record<string, unknown>>(schemaJson),
+      // #131 Phase 3.4.3.1 Big-Bang: needsApproval ersetzt das Marker-Pattern
+      // aus 3.2.F. Vercel-SDK pausiert pre-execute bei needsApproval=true und
+      // emittiert tool-approval-request als Content-Part. execute() wird erst
+      // gerufen, nachdem der Caller eine tool-approval-response{approved:true}
+      // in die History injiziert hat (siehe TwinService.approveMcpToolUse).
+      needsApproval: requiresApproval,
       execute: async (args) => {
         const argRecord = args as Record<string, unknown>;
-        if (requiresApproval) {
-          // Marker-Pattern (3.2.F): kein Tool-Aufruf jetzt. AI SDK 6 schluckt
-          // execute()-Throws — wir kommunizieren stattdessen via
-          // strukturiertem Marker-Result. TwinService erkennt den Marker im
-          // result.toolCalls-Loop, wirft `McpToolApprovalRequiredError` (für
-          // den existierenden Catch-Pfad) und baut den Pending-Audit.
-          return {
-            content: [
-              {
-                type: "text" as const,
-                text: MCP_PENDING_APPROVAL_MARKER,
-              },
-            ],
-            isError: false,
-          };
-        }
         // #107: Live-Progress-Events für Auto-Approve-Pfad. Bus ist optional —
         // Tests ohne Bus laufen normal weiter. Failure-Pfad emittet die
         // Complete-Event mit status='failed' BEVOR wir den Error nach oben
