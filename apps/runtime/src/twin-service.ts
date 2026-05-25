@@ -34,13 +34,6 @@ import {
 import { TwinProfilesRepo } from "./twin-profiles-repo.js";
 import type { OAuthRefreshService } from "./oauth/refresh-service.js";
 import {
-  CodexAdapter,
-  type CodexInputItem,
-  type CodexInputItemAny,
-  type CodexResumeContext,
-} from "./oauth/codex-adapter.js";
-import { mapSkillsToCodexTools } from "./oauth/codex-tool-mapper.js";
-import {
   createCodexProvider,
   type CodexProvider,
 } from "./oauth/codex-vercel-provider.js";
@@ -73,14 +66,8 @@ import {
 } from "./facts/extraction-engine.js";
 import { McpClientManager } from "./mcp/client-manager.js";
 import { McpSkillSync } from "./mcp/skill-sync.js";
-import {
-  buildMcpToolsFromSkills,
-  MCP_PENDING_APPROVAL_MARKER,
-} from "./mcp/tool-bridge.js";
-import {
-  ApprovalRequestedError,
-  McpToolApprovalRequiredError,
-} from "./mcp/errors.js";
+import { buildMcpToolsFromSkills } from "./mcp/tool-bridge.js";
+import { ApprovalRequestedError } from "./mcp/errors.js";
 
 // ─── TWIN SERVICE ────────────────────────────────────────────────────────────
 //
@@ -305,15 +292,8 @@ export class TwinService {
    */
   private readonly profilesRepo: TwinProfilesRepo;
 
-  /**
-   * #131 Phase 3.0 Spike: lazy initialisiert beim ersten OAuth-Twin-Send.
-   * Nur konstruiert, wenn `deps.oauthRefreshService` gesetzt ist und der
-   * Send-Path tatsächlich oauth-Mode erreicht — so zahlen api_key-Bootstraps
-   * (z.B. Tests ohne Refresh-Service) keine Adapter-Construction.
-   */
-  private codexAdapter: CodexAdapter | null = null;
   /** #131 Phase 3.4.3.1 Big-Bang: Lazy-Singleton für den Codex-Vercel-Provider.
-   *  Wird im runModel-oauth-Branch statt runModelViaCodex genutzt — beide
+   *  Wird im runModel-oauth-Branch statt direct CodexAdapter genutzt — beide
    *  Auth-Modi laufen jetzt durch dieselbe Vercel-generateText-Pipeline. */
   private codexProvider: CodexProvider | null = null;
 
@@ -745,27 +725,11 @@ export class TwinService {
       // 3.2.F: zwei Wege ende hier in derselben Branch:
       //   1. Marker-Pfad (Standard): runModel detected den Marker im
       //      result.toolCalls, wirft McpToolApprovalRequiredError.
-      //   2. Throw-Pfad (Defense-in-Depth): hypothetischer direkter Throw
-      //      aus tool-bridge.execute() oder anderer interner Logik. AI SDK 6
-      //      schluckt das aktuell zwar (Smoke-Test bestätigt), aber wenn ein
-      //      zukünftiges SDK-Update das Verhalten ändert, ist der Catch hier
-      //      schon bereit. Beide Pfade haben identische Pending-Audit-Logik.
-      if (err instanceof McpToolApprovalRequiredError) {
-        // #131 Phase 3.3.1.3.2 (Legacy bis Sub-Phase F): Marker-Pattern-
-        // Catch. Wird mit Marker-Removal obsolet.
-        const pending = await this.buildPendingMcpAuditFromError(err, {
-          llmMessages,
-          lastUser,
-          conversationId,
-          originalCapability,
-        });
-        this.deps.bus.emit({ type: "twin.idle", payload: {} });
-        return {
-          message: pending.message,
-          auditId: pending.auditId,
-          pending: true,
-        };
-      }
+      //   2. Phase 3.4.3.1 Big-Bang: Native-V3-Approval — Caller throw aus
+      //      runModel.detectToolApprovalRequest. Pending-Audit-Build via
+      //      createPendingAuditFromApprovalRequest. Marker-Pattern-Catch
+      //      (Phase 3.2.F) und Codex-Resume-Context-Catch (Phase 3.3.1.3.2)
+      //      sind in Sub-Phase F entfernt — es gibt nur noch den V3-Pfad.
       if (err instanceof ApprovalRequestedError) {
         // #131 Phase 3.4.3.1 Big-Bang: native V3-Approval-Catch. Persistiert
         // approvalId + assistantContent für History-Replay-Approve.
@@ -1014,71 +978,13 @@ export class TwinService {
     });
   }
 
-  // ─── Pending-Audit-Helper (Phase 3.3.1.3.2) ──────────────────────────────
+  // ─── Pending-Audit-Helper (Phase 3.4.3.1 Big-Bang) ──────────────────────
   //
-  // #131 Phase 3.3.1.3.2: Pending-Audit-Build extrahiert aus dem
-  // runOwnerDirect-Catch. Wird von zwei Stellen gerufen:
-  //   1. runOwnerDirect-Catch (initial Pause beim Owner-Chat)
-  //   2. approveMcpToolUseViaCodex-Catch (Re-Pause während Resume-Iteration)
-  //
-  // Symmetrische Pipeline-Architektur: beide Pfade landen in derselben
-  // Pending-Audit-Struktur, Frontend rendert beide identisch. `priorAuditId`
-  // ist nur für Re-Pause gesetzt — verlinkt den neuen Pending mit dem
-  // vorher-pausierten Audit für Trace/UX (UI kann "Folgeaktion zu Audit X"
-  // anzeigen).
-  private async buildPendingMcpAuditFromError(
-    err: McpToolApprovalRequiredError,
-    context: {
-      llmMessages: ChatMessage[];
-      lastUser: string;
-      conversationId: string | null;
-      originalCapability: string;
-      priorAuditId?: string;
-    },
-  ): Promise<{
-    auditId: string;
-    pendingReply: string;
-    message: ChatMessage;
-  }> {
-    const pendingReply = composeToolApprovalRequest(
-      err.mcpToolName,
-      err.toolArgs,
-    );
-    const pendingAudit = await this.deps.audit.start({
-      capability: "mcp-tool-use",
-      mandateId: null,
-      input: {
-        // Persist die History des Resume — damit nach Approval der LLM
-        // mit dem Original-Kontext fortsetzen kann. Server-Restart-stabil.
-        messages: context.llmMessages,
-        lastMessage: context.lastUser,
-        toolCall: {
-          mcpServerId: err.mcpServerId,
-          mcpToolName: err.mcpToolName,
-          args: err.toolArgs,
-        },
-        conversationId: context.conversationId,
-        pendingReply,
-        originalCapability: context.originalCapability,
-        // Codex-Pfad trägt den Resume-Context, Vercel-Pfad nicht.
-        ...(err.codexResumeContext
-          ? { codexResumeContext: err.codexResumeContext }
-          : {}),
-        // Re-Pause-Link: Original-Audit das die Folge-Pause getriggert hat.
-        ...(context.priorAuditId
-          ? { priorAuditId: context.priorAuditId }
-          : {}),
-      },
-      initialStatus: "pending",
-      conversationId: context.conversationId,
-    });
-    return {
-      auditId: pendingAudit.id,
-      pendingReply,
-      message: { role: "assistant", content: pendingReply },
-    };
-  }
-
+  // Native-V3-Helper `createPendingAuditFromApprovalRequest` ist unten.
+  // Legacy-Helper `buildPendingMcpAuditFromError` (Phase 3.3.1.3.2) wurde
+  // mit Marker-Pattern + Codex-Resume-Context-Pfaden gemeinsam entfernt.
+  // Es gibt nur noch einen Pending-Audit-Build-Pfad (Native-V3) — kein
+  // capability-/auth-mode-Branching mehr.
   /**
    * #131 Phase 3.4.3.1 Big-Bang: Pending-Audit-Build aus `ApprovalRequestedError`
    * (native V3-Pattern). Symmetrie zu `buildPendingMcpAuditFromError`, aber
@@ -1221,181 +1127,14 @@ export class TwinService {
     // kann (gleicher Pfad wie executed-Audits mit reply).
     if (entry.capability === "mcp-tool-use") {
       const input = entry.input as AuditMcpToolUseInputShape;
-      // #131 Phase 3.4.3.1 Big-Bang: Native-V3-Pfad — History-Replay mit
-      // tool-approval-response{approved:false}. SDK skipped execute() und
-      // reicht reason in den Prompt durch.
+      // #131 Phase 3.4.3.1 Big-Bang: einziger Reject-Pfad ist Native-V3 via
+      // History-Replay. Legacy-Pfade (Marker + Codex-Resume-Context) sind in
+      // Sub-Phase F entfernt — Pending-Audits in DB sind alle approvalId-
+      // basiert (Closed-Beta-Migration-Strategy: keine Pre-3.4.3.1-Audits
+      // erwartet).
       if (input.approvalId && input.assistantContent) {
         await this.rejectMcpToolUseViaHistoryReplay(entry, reason);
-        return;
       }
-      // Legacy Phase 3.3.1.3.2: Codex-Reject via runModelViaCodex.
-      if (input.codexResumeContext) {
-        await this.rejectMcpToolUseViaCodex(entry, reason);
-        return;
-      }
-      // Legacy Phase 3.2.F: Marker-Pattern + System-Message-Resume.
-      if (!input.toolCall) return;
-      const resumeMessages: ChatMessage[] = [
-        ...(input.messages ?? []),
-        {
-          role: "user",
-          content:
-            `[System] Der Tool-Call '${input.toolCall.mcpToolName}' wurde abgelehnt. ` +
-            `Begründung: ${reason}. Bitte antworte direkt ohne das Tool zu nutzen.`,
-        },
-      ];
-      try {
-        const reply = await this.runModel(this.deps.persona, resumeMessages);
-        // Status wurde gerade auf 'rejected' gesetzt — wir nutzen update statt
-        // complete/fail, damit der Reject-Status erhalten bleibt aber output
-        // die finale Antwort enthält.
-        const updatedEntry = await this.deps.audit.repo.get(auditId);
-        if (updatedEntry) {
-          updatedEntry.output = {
-            reply: reply.content,
-            rejected: true,
-            rejectReason: reason,
-            providerMetadata: reply.metadata,
-          };
-          await this.deps.audit.repo.update(auditId, updatedEntry);
-          this.deps.bus.emit({ type: "audit.updated", payload: updatedEntry });
-        }
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err);
-        console.warn(
-          `[mcp-tool-use:reject] Resume-LLM-Call fehlgeschlagen: ${msg}`,
-        );
-      }
-    }
-  }
-
-  /**
-   * #131 Phase 3.3.1.3.2: Reject-Resume für Codex-OAuth-Pfad. Pendant zu
-   * `approveMcpToolUseViaCodex`, aber ohne Tool-Execute — statt Tool-Result
-   * kriegt Codex `function_call_output` mit `[isError=true]`-Marker plus
-   * Rejection-Text. Codex interpretiert das als Tool-Error und antwortet
-   * direkt ohne den Tool zu nutzen (matched Verhalten aus existing
-   * §l-Pattern bei Tool-Execution-Errors in Auto-Execute-Iterationen).
-   *
-   * Status bleibt `rejected` (audit.reject() lief schon vor dem Branch),
-   * wir nutzen `audit.repo.update` für die Output-Daten — exakt das gleiche
-   * Pattern wie der Vercel-SDK-Reject-Pfad.
-   *
-   * Re-Pause-Edge-Case: Codex könnte nach Rejection ein anderes Tool rufen
-   * das auch requires_approval=true ist. Pre-Call-Detect triggert dann
-   * erneut — wir bauen einen Folge-Pending-Audit via Helper (priorAuditId-
-   * Link), Original-Audit kriegt einen followUpPending-Marker.
-   */
-  private async rejectMcpToolUseViaCodex(
-    entry: AuditEntry,
-    reason: string,
-  ): Promise<void> {
-    const input = entry.input as AuditMcpToolUseInputShape;
-    if (!input.codexResumeContext) return;
-    if (!input.toolCall) return;
-    const ctx = input.codexResumeContext;
-    const { mcpServerId, mcpToolName, args } = input.toolCall;
-
-    const oauthSkills = this.deps.skills.list(this.deps.twinId, {
-      activeOnly: true,
-    });
-    const { skillByCodexName } = mapSkillsToCodexTools(oauthSkills);
-    const rejectedSkill = skillByCodexName.get(ctx.pendingToolCall.name);
-    const rejectedToolCall: AuditToolCall = {
-      toolName: rejectedSkill?.name ?? `${mcpServerId}/${mcpToolName}`,
-      input: args,
-      // Rejection als String-Output für Audit-Trail-Klarheit. Kein Codex-
-      // Tool-Result, weil wir nicht ausgeführt haben.
-      output: `[rejected by user] ${reason}`,
-      codexCallId: ctx.pendingToolCall.callId,
-    };
-    const rejectionOutput =
-      `[isError=true] User rejected the tool call. Reason: ${reason}. ` +
-      `Please respond directly without using that tool.`;
-
-    let finalResult: { content: string; metadata: Record<string, unknown> };
-    try {
-      finalResult = await this.runModelViaCodex(
-        this.deps.persona,
-        input.messages ?? [],
-        undefined,
-        {
-          skills: oauthSkills,
-          resumeContext: {
-            fromAudit: ctx,
-            toolOutput: rejectionOutput,
-            executedToolCall: rejectedToolCall,
-          },
-        },
-      );
-    } catch (err) {
-      // Re-Pause nach Reject: Codex hat trotz Rejection ein anderes requires-
-      // approval-Tool aufgerufen. Original-Audit bleibt rejected, kriegt
-      // followUpPending-Marker; neuer Pending-Audit mit priorAuditId-Link.
-      if (err instanceof McpToolApprovalRequiredError) {
-        const updatedEntry = await this.deps.audit.repo.get(entry.id);
-        if (updatedEntry) {
-          updatedEntry.output = {
-            reply: "",
-            rejected: true,
-            rejectReason: reason,
-            followUpPending: true,
-            providerMetadata: {
-              provider: "openai-codex",
-              authMode: "oauth",
-              toolCalls: [
-                ...ctx.previousToolCalls.map((tc) => ({
-                  toolName: tc.toolName,
-                  input: tc.input,
-                  output: tc.output ?? null,
-                  ...(tc.codexCallId ? { codexCallId: tc.codexCallId } : {}),
-                })),
-                rejectedToolCall,
-              ],
-              // #131 Phase 3.3.3.1: Pre-Pause-Reasoning erhalten. Reject hat
-              // keine Resume-Iteration ausgeführt, deshalb gibt's nur die
-              // Pre-Original-Pause-Reasoning aus ctx.
-              ...(ctx.previousReasoningTraces &&
-              ctx.previousReasoningTraces.length > 0
-                ? { reasoningTraces: ctx.previousReasoningTraces }
-                : {}),
-              ...(ctx.previousReasoningTokens
-                ? { reasoningTokens: ctx.previousReasoningTokens }
-                : {}),
-            },
-          };
-          await this.deps.audit.repo.update(entry.id, updatedEntry);
-          this.deps.bus.emit({ type: "audit.updated", payload: updatedEntry });
-        }
-        await this.buildPendingMcpAuditFromError(err, {
-          llmMessages: input.messages ?? [],
-          lastUser: input.lastMessage ?? "",
-          conversationId: input.conversationId ?? null,
-          originalCapability: input.originalCapability ?? "respond_to_chat",
-          priorAuditId: entry.id,
-        });
-        // Reject-Pfad returnt void — Endpoint antwortet mit {ok:true}, der
-        // neue Pending kommt automatisch via SSE (pending-added) am Frontend an.
-        return;
-      }
-      const msg = err instanceof Error ? err.message : String(err);
-      console.warn(
-        `[mcp-tool-use:reject-codex] Resume-Codex-Call fehlgeschlagen: ${msg}`,
-      );
-      return;
-    }
-
-    // Erfolgsfall — Reply ans Audit anhängen, Status bleibt rejected.
-    const updatedEntry = await this.deps.audit.repo.get(entry.id);
-    if (updatedEntry) {
-      updatedEntry.output = {
-        reply: finalResult.content,
-        rejected: true,
-        rejectReason: reason,
-        providerMetadata: finalResult.metadata,
-      };
-      await this.deps.audit.repo.update(entry.id, updatedEntry);
-      this.deps.bus.emit({ type: "audit.updated", payload: updatedEntry });
     }
   }
 
@@ -1508,74 +1247,15 @@ export class TwinService {
     persona: Persona,
   ): Promise<ApproveResult> {
     const input = entry.input as AuditMcpToolUseInputShape;
-    // #131 Phase 3.4.3.1 Big-Bang: Native-V3-Pfad — neuer Pending-Audit-
-    // Format hat `approvalId` + `assistantContent`. Resume via History-
-    // Replay durch denselben runModel-Pfad (oauth + api_key unified).
-    if (input.approvalId && input.assistantContent) {
-      return this.approveMcpToolUseViaHistoryReplay(entry, persona);
-    }
-    // Legacy Phase 3.3.1.3.2: Codex-Resume-Context-Pfad (bleibt bis Sub-
-    // Phase F als Backward-Compat für ältere Pending-Audits in DB).
-    if (input.codexResumeContext) {
-      return this.approveMcpToolUseViaCodex(entry, persona);
-    }
-    // Legacy Phase 3.2.F: Marker-Pattern Vercel-SDK-Pfad — braucht den
-    // Legacy-toolCall mit mcpServerId/mcpToolName/args.
-    if (!input.toolCall) {
+    // #131 Phase 3.4.3.1 Big-Bang: einziger Approve-Pfad ist Native-V3 via
+    // History-Replay. Legacy-Pfade (Marker, Codex-Resume-Context) sind in
+    // Sub-Phase F entfernt.
+    if (!input.approvalId || !input.assistantContent) {
       throw new Error(
-        `Audit ${entry.id} hat keinen toolCall, approvalId oder codexResumeContext — kann nicht approved werden`,
+        `Audit ${entry.id} hat keine V3-Approval-Felder (approvalId + assistantContent) — kann nicht approved werden`,
       );
     }
-    const { mcpServerId, mcpToolName, args } = input.toolCall;
-    const messages = input.messages ?? [];
-
-    this.deps.bus.emit({
-      type: "twin.thinking",
-      payload: { capability: "mcp-tool-use" },
-    });
-
-    let toolResult: { content: unknown; isError?: boolean };
-    try {
-      const raw = await this.mcp.callTool(mcpServerId, mcpToolName, args);
-      toolResult = { content: raw.content, isError: raw.isError };
-    } catch (err) {
-      await this.failWithReason(entry.id, err);
-      throw err;
-    }
-
-    const toolResultText = stringifyToolContent(toolResult.content);
-    const resumeMessages: ChatMessage[] = [
-      ...messages,
-      {
-        role: "user",
-        content:
-          `[System] Tool '${mcpToolName}' wurde ausgeführt. ` +
-          `Ergebnis: ${toolResultText}. ` +
-          `Bitte gib jetzt die finale Antwort an den User basierend auf diesem Ergebnis.`,
-      },
-    ];
-
-    try {
-      // enableMcpTools: false — wir wollen keine zweite Tool-Use-Iteration im
-      // Resume. LLM antwortet mit Text basierend auf dem Tool-Result.
-      const reply = await this.runModel(persona, resumeMessages);
-      await this.deps.audit.complete(entry.id, {
-        reply: reply.content,
-        toolCall: { mcpServerId, mcpToolName, args },
-        toolResult: toolResult.content,
-        toolIsError: toolResult.isError ?? false,
-        providerMetadata: reply.metadata,
-      });
-      this.deps.bus.emit({ type: "twin.idle", payload: {} });
-      return {
-        auditId: entry.id,
-        message: { role: "assistant", content: reply.content },
-        reply: reply.content,
-      };
-    } catch (err) {
-      await this.failWithReason(entry.id, err);
-      throw err;
-    }
+    return this.approveMcpToolUseViaHistoryReplay(entry, persona);
   }
 
   /**
@@ -1691,169 +1371,6 @@ export class TwinService {
     };
   }
 
-  /**
-   * #131 Phase 3.3.1.3.2 (LEGACY, bis Sub-Phase F): Approve-Resume für
-   * Codex-OAuth-Pfad. Symmetrie zum Vercel-Pfad in `approveMcpToolUse`,
-   * aber andere Resume-Mechanik:
-   *
-   *   1. Tool-Execute via `mcp.callTool` (kein Approval-Recheck — User hat
-   *      durch das Approve schon genehmigt).
-   *   2. Aktuelle Skills laden (Pre-Call-Detect respektiert User-Skill-
-   *      Toggle zwischen Pause+Approve).
-   *   3. `runModelViaCodex` mit `resumeContext`-Option — Loop startet mit
-   *      function_call+function_call_output im input-Array (§l), läuft mit
-   *      restauriertem State weiter.
-   *   4. Re-Pause-Handling: wenn Resume-Iteration erneut requires_approval
-   *      triggert, wirft Pre-Call-Detect `McpToolApprovalRequiredError`.
-   *      Wir catchen → markieren Original-Audit als `executed` (mit Tool-
-   *      Result + `followUpPending=true`-Marker) → bauen neuen Pending-
-   *      Audit via Helper (priorAuditId-Link).
-   *   5. Erfolgsfall: `audit.complete` mit kompletten toolCalls-Liste.
-   */
-  private async approveMcpToolUseViaCodex(
-    entry: AuditEntry,
-    persona: Persona,
-  ): Promise<ApproveResult> {
-    const input = entry.input as AuditMcpToolUseInputShape;
-    if (!input.codexResumeContext) {
-      throw new Error(
-        `Audit ${entry.id} hat keinen codexResumeContext — Codex-Resume nicht möglich`,
-      );
-    }
-    if (!input.toolCall) {
-      throw new Error(
-        `Audit ${entry.id} hat keinen toolCall — Codex-Resume nicht möglich`,
-      );
-    }
-    const ctx = input.codexResumeContext;
-    const { mcpServerId, mcpToolName, args } = input.toolCall;
-
-    this.deps.bus.emit({
-      type: "twin.thinking",
-      payload: { capability: "mcp-tool-use" },
-    });
-
-    // 1. Tool-Execute via existing McpClient
-    let toolResult: { content: unknown; isError?: boolean };
-    try {
-      const raw = await this.mcp.callTool(mcpServerId, mcpToolName, args);
-      toolResult = { content: raw.content, isError: raw.isError };
-    } catch (err) {
-      await this.failWithReason(entry.id, err);
-      throw err;
-    }
-    const toolResultText = stringifyToolContent(toolResult.content);
-    const isError = toolResult.isError ?? false;
-
-    // 2. Aktuelle Skills + Reverse-Map für Skill-Name-Auflösung. Map auch
-    // an runModelViaCodex weiter — Pre-Call-Detect in Resume-Iteration
-    // nutzt diese Map für Re-Pause-Detection.
-    const oauthSkills = this.deps.skills.list(this.deps.twinId, {
-      activeOnly: true,
-    });
-    const { skillByCodexName } = mapSkillsToCodexTools(oauthSkills);
-    const resumeSkill = skillByCodexName.get(ctx.pendingToolCall.name);
-    const resumeToolCall: AuditToolCall = {
-      toolName: resumeSkill?.name ?? `${mcpServerId}/${mcpToolName}`,
-      input: args,
-      output: toolResult.content ?? null,
-      codexCallId: ctx.pendingToolCall.callId,
-    };
-
-    // 3. Codex-Resume-Iteration
-    let finalResult: { content: string; metadata: Record<string, unknown> };
-    try {
-      finalResult = await this.runModelViaCodex(
-        persona,
-        input.messages ?? [],
-        undefined,
-        {
-          skills: oauthSkills,
-          resumeContext: {
-            fromAudit: ctx,
-            toolOutput: isError
-              ? `[isError=true] ${toolResultText}`
-              : toolResultText,
-            executedToolCall: resumeToolCall,
-          },
-        },
-      );
-    } catch (err) {
-      // 4. Re-Pause: Resume-Iteration hat erneut requires_approval-Tool
-      // getriggert. Original-Audit als executed markieren (mit Tool-Result
-      // + followUpPending-Marker), neuen Pending-Audit via Helper bauen.
-      if (err instanceof McpToolApprovalRequiredError) {
-        await this.deps.audit.complete(entry.id, {
-          reply: "",
-          toolCall: { mcpServerId, mcpToolName, args },
-          toolResult: toolResult.content,
-          toolIsError: isError,
-          followUpPending: true,
-          providerMetadata: {
-            provider: "openai-codex",
-            authMode: "oauth",
-            // toolCalls: previous + resume (vor Re-Pause)
-            toolCalls: [
-              ...ctx.previousToolCalls.map((tc) => ({
-                toolName: tc.toolName,
-                input: tc.input,
-                output: tc.output ?? null,
-                ...(tc.codexCallId ? { codexCallId: tc.codexCallId } : {}),
-              })),
-              resumeToolCall,
-            ],
-            // #131 Phase 3.3.3.1: Pre-Original-Pause-Reasoning erhalten,
-            // konsistent mit toolCalls-Source. Reasoning der Resume-Iteration
-            // (zwischen Pause und Re-Pause) lebt im neuen Pending-Audit weiter
-            // (err.codexResumeContext.previousReasoningTraces), kommt also
-            // beim nächsten Approve via runModelViaCodex-Init-Branch wieder ins
-            // Aggregat — kein echter Daten-Loss, nur Audit-Trail-Splitting
-            // entlang der Pause-Kette.
-            ...(ctx.previousReasoningTraces &&
-            ctx.previousReasoningTraces.length > 0
-              ? { reasoningTraces: ctx.previousReasoningTraces }
-              : {}),
-            ...(ctx.previousReasoningTokens
-              ? { reasoningTokens: ctx.previousReasoningTokens }
-              : {}),
-          },
-        });
-        const pending = await this.buildPendingMcpAuditFromError(err, {
-          llmMessages: input.messages ?? [],
-          lastUser: input.lastMessage ?? "",
-          conversationId: input.conversationId ?? null,
-          originalCapability: input.originalCapability ?? "respond_to_chat",
-          priorAuditId: entry.id,
-        });
-        this.deps.bus.emit({ type: "twin.idle", payload: {} });
-        return {
-          auditId: pending.auditId,
-          message: pending.message,
-          reply: pending.pendingReply,
-          pending: true,
-        };
-      }
-      await this.failWithReason(entry.id, err);
-      throw err;
-    }
-
-    // 5. Erfolgsfall: Audit auf executed mit kompletter Metadata. Loop hat
-    // previousToolCalls + executedToolCall + Resume-Iteration-Tools schon
-    // in metadata.toolCalls aggregiert (siehe Init-Branch in runModelViaCodex).
-    await this.deps.audit.complete(entry.id, {
-      reply: finalResult.content,
-      toolCall: { mcpServerId, mcpToolName, args },
-      toolResult: toolResult.content,
-      toolIsError: isError,
-      providerMetadata: finalResult.metadata,
-    });
-    this.deps.bus.emit({ type: "twin.idle", payload: {} });
-    return {
-      auditId: entry.id,
-      message: { role: "assistant", content: finalResult.content },
-      reply: finalResult.content,
-    };
-  }
 
   /**
    * 3.3.F: Approve eines `semantic-fact-write`-Pending. Twin hatte den Fact
@@ -2163,360 +1680,6 @@ export class TwinService {
 
   // ─── private helpers ─────────────────────────────────────────────────────
 
-  /**
-   * #131 Phase 3.0 Spike: OAuth-Pfad parallel zu {@link runModel}. Walking-
-   * Skeleton — letzte User-Message → Codex-Endpoint via direct-fetch, Response-
-   * Text zurück. Tools/Skills/Pre-Pass/Persona-Mapping sind hier bewusst raus
-   * (Phase 3.1-3.3 ziehen das nach).
-   *
-   * Wirft mit klarer Diagnose, wenn der Refresh-Service nicht injiziert wurde
-   * (z.B. Tests, die einen oauth-Twin gegen einen Bootstrap ohne Service
-   * laufen lassen wollen).
-   */
-  private async runModelViaCodex(
-    persona: Persona,
-    messages: ChatMessage[],
-    extraSystem?: string,
-    options: {
-      factsBlock?: string | null;
-      episodicBlock?: string | null;
-      summaryBlock?: string | null;
-      /** Aktive MCP-Skills (gefiltert) — Phase 3.3.1.2 für Tool-Use.
-       *  Wenn leer/undefined: kein tools-Field an Codex, kein Multi-Step. */
-      skills?: Skill[];
-      /** #131 Phase 3.3.1.3.2: Resume-Pfad nach User-Approval. Wenn gesetzt,
-       *  überspringt der Init-Block `mapChatMessagesToCodexInput` (messages
-       *  wird ignoriert) und startet mit `fromAudit.inputItems` plus
-       *  function_call + function_call_output. Loop-State wird aus
-       *  Resume-Context restauriert (aggregatedText, iterationCount, etc.).
-       *  Tool-Definitions kommen aus `fromAudit.toolDefinitions` (Codex
-       *  erwartet konsistentes Tool-Set zwischen Iterations, §l), aber die
-       *  Reverse-Lookup-Map nutzt `options.skills` (aktueller State —
-       *  Pre-Call-Detect respektiert User-Skill-Toggle zwischen Pause+Approve).
-       *  `executedToolCall` ist der Resume-Tool (außerhalb des Loops
-       *  ausgeführt), wird ans allToolCalls vorangestellt damit das finale
-       *  metadata.toolCalls die Reihenfolge [previous, resume, iter] hat. */
-      resumeContext?: {
-        fromAudit: CodexResumeContext;
-        toolOutput: string;
-        executedToolCall: AuditToolCall;
-      };
-    } = {},
-  ): Promise<{ content: string; metadata: Record<string, unknown> }> {
-    if (!this.deps.oauthRefreshService) {
-      throw new Error(
-        "[twin-service] runModelViaCodex: twin.authMode='oauth' aber " +
-          "OAuthRefreshService nicht injiziert — Boot-Pfad muss " +
-          "registry.loadAll({ oauthRefreshService }) übergeben.",
-      );
-    }
-    if (!this.codexAdapter) {
-      this.codexAdapter = new CodexAdapter(this.deps.oauthRefreshService);
-    }
-
-    // System-Prompt via shared Helper. Skills-/Tool-Use-Direktive sind aktuell
-    // null — Phase 3.3.3 würde TOOL_USE_DIRECTIVE nachziehen falls nötig;
-    // Codex' tool_choice='auto' macht Tool-Use heute zuverlässig ohne
-    // explizite Anti-Halluzinations-Direktive.
-    const instructions = composeOwnerSystemPrompt({
-      persona,
-      extraSystem,
-      factsBlock: options.factsBlock,
-      skillsBlock: null,
-      toolUseDirective: null,
-      summaryBlock: options.summaryBlock,
-      episodicBlock: options.episodicBlock,
-    });
-
-    // §l: tools-Field muss pro Iteration mitgeschickt werden, sonst weiß
-    // Codex nicht dass `function_call_output`-Items zu function-Tools gehören.
-    // mapSkillsToCodexTools filtert + baut Reverse-Map für Lookup.
-    // #131 Phase 3.3.1.3.2: Bei Resume nutzen wir die persistierten
-    // toolDefinitions aus dem Pause-Snapshot (Codex-Konsistenz, §l), aber die
-    // Reverse-Lookup-Map kommt aus den AKTUELLEN Skills — Pre-Call-Detect
-    // respektiert damit User-Skill-Toggles zwischen Pause und Approve. Wenn
-    // Codex in der Resume-Iteration ein Tool ruft das nicht mehr aktiv ist,
-    // bricht der Loop mit "unbekanntes Tool"-Error (akzeptable Race).
-    const skillMap = mapSkillsToCodexTools(options.skills ?? []);
-    const skillByCodexName = skillMap.skillByCodexName;
-    const codexTools = options.resumeContext
-      ? options.resumeContext.fromAudit.toolDefinitions
-      : skillMap.tools;
-
-    // #131 Phase 3.3.1.3.2: Init-Branch — Initial-Run vs Resume-nach-Approval.
-    // Initial: History+lastUser via mapChatMessagesToCodexInput, leerer Loop-
-    // State. Resume: inputItems aus Pause-Snapshot + function_call-Echo +
-    // function_call_output mit Tool-Result; Loop-State (aggregatedText,
-    // iterations, Trace-Felder) wird restauriert; previousToolCalls +
-    // Resume-Tool werden ans allToolCalls vorangestellt damit die finale
-    // Metadata die volle Reihenfolge [previous, resume, iter] hat.
-    let input: CodexInputItemAny[];
-    let aggregatedText: string;
-    let lastResponseId: string | undefined;
-    let lastStatus: string | undefined;
-    let lastPlanType: string | null;
-    let lastCfRay: string | null;
-    let totalLatencyMs: number;
-    const allToolCalls: AuditToolCall[] = [];
-    const allUnknownEventTypes = new Set<string>();
-    let iterations: number;
-    // #131 Phase 3.3.3.1: Reasoning-Aggregation analog allToolCalls/totalLatency.
-    // Resume-Pfad initialisiert mit ctx.previousReasoningTraces/Tokens damit
-    // Pre-Pause-Reasoning nicht verloren geht. Initial-Pfad startet leer.
-    const allReasoningTraces: unknown[] = [];
-    let totalReasoningTokens = 0;
-
-    if (options.resumeContext) {
-      const rc = options.resumeContext;
-      const ctx = rc.fromAudit;
-      input = [
-        ...ctx.inputItems,
-        {
-          type: "function_call",
-          call_id: ctx.pendingToolCall.callId,
-          name: ctx.pendingToolCall.name,
-          arguments: ctx.pendingToolCall.arguments,
-        },
-        {
-          type: "function_call_output",
-          call_id: ctx.pendingToolCall.callId,
-          output: rc.toolOutput,
-        },
-      ];
-      aggregatedText = ctx.aggregatedText;
-      iterations = ctx.iterationCount;
-      lastResponseId = ctx.lastResponseId;
-      lastStatus = ctx.lastStatus;
-      lastPlanType = ctx.lastPlanType;
-      lastCfRay = ctx.lastCfRay;
-      totalLatencyMs = ctx.totalLatencyMs;
-      // previousToolCalls vom Pause-Snapshot + Resume-Tool, BEVOR die Loop
-      // weitere appended. AuditToolCallSnapshot und AuditToolCall haben
-      // identische Felder (snapshot ist nur lokal in oauth/ wegen Layer-
-      // Trennung), Mapping ist trivial.
-      for (const tc of ctx.previousToolCalls) {
-        allToolCalls.push({
-          toolName: tc.toolName,
-          input: tc.input,
-          output: tc.output ?? null,
-          ...(tc.codexCallId ? { codexCallId: tc.codexCallId } : {}),
-        });
-      }
-      allToolCalls.push(rc.executedToolCall);
-      for (const t of ctx.unknownEventTypes) allUnknownEventTypes.add(t);
-      // #131 Phase 3.3.3.1: Pre-Pause-Reasoning aus dem Snapshot. Spread weil
-      // unknown[] kein .push(...arr) ohne explizite Iteration zulässt.
-      if (ctx.previousReasoningTraces) {
-        for (const trace of ctx.previousReasoningTraces) {
-          allReasoningTraces.push(trace);
-        }
-      }
-      if (ctx.previousReasoningTokens) {
-        totalReasoningTokens = ctx.previousReasoningTokens;
-      }
-    } else {
-      // Initial-Path (existing Phase 3.3.1.2-Verhalten).
-      input = mapChatMessagesToCodexInput(messages);
-      aggregatedText = "";
-      iterations = 0;
-      lastResponseId = undefined;
-      lastStatus = undefined;
-      lastPlanType = null;
-      lastCfRay = null;
-      totalLatencyMs = 0;
-    }
-
-    while (iterations < CODEX_MAX_TOOL_ITERATIONS) {
-      iterations++;
-      const result = await this.codexAdapter.generateText({
-        twinId: this.deps.twinId,
-        instructions,
-        input: input as CodexInputItem[],
-        tools: codexTools,
-      });
-
-      aggregatedText += result.text;
-      if (result.responseId) lastResponseId = result.responseId;
-      if (result.status) lastStatus = result.status;
-      if (result.planType) lastPlanType = result.planType;
-      if (result.cfRay) lastCfRay = result.cfRay;
-      totalLatencyMs += result.latencyMs;
-      for (const t of result.unknownEventTypes) allUnknownEventTypes.add(t);
-      // #131 Phase 3.3.3.1: Reasoning-Aggregation pro Iteration. Traces sind
-      // typisch leer (Tool-Call-Pfad + Server-Default-effort=medium). Tokens
-      // optional (Codex weglässt-Feld bei 0). Phase-3.3.3.0-Spike-Doku §p.
-      for (const trace of result.reasoningTraces) {
-        allReasoningTraces.push(trace);
-      }
-      if (result.reasoningTokens) {
-        totalReasoningTokens += result.reasoningTokens;
-      }
-
-      // Keine Tool-Calls → finale Antwort, Loop fertig.
-      if (result.toolCalls.length === 0) break;
-
-      // Tool-Calls auto-execute + ans input-Array per §l-Pattern appenden.
-      for (const toolCall of result.toolCalls) {
-        const skill = skillByCodexName.get(toolCall.name);
-        if (!skill || !skill.mcpServerId || !skill.mcpToolName) {
-          throw new Error(
-            `[twin-service] runModelViaCodex: Codex hat unbekanntes ` +
-              `Tool gerufen ('${toolCall.name}') — kein Skill im aktiven ` +
-              `Set. mapSkillsToCodexTools-Filter scheint ausgehebelt.`,
-          );
-        }
-
-        let parsedArgs: Record<string, unknown>;
-        try {
-          parsedArgs = JSON.parse(toolCall.arguments) as Record<
-            string,
-            unknown
-          >;
-        } catch (err) {
-          throw new Error(
-            `[twin-service] runModelViaCodex: Codex-Tool-Args sind kein ` +
-              `valides JSON (tool='${toolCall.name}', args=` +
-              `'${toolCall.arguments.slice(0, 200)}'): ${
-                err instanceof Error ? err.message : String(err)
-              }`,
-          );
-        }
-
-        // #131 Phase 3.3.1.3.1: Pre-Call-Detect für requires_approval-Tools.
-        // Strategie (i) Reihenfolge-treu — Auto-Tools FRÜHER in dieser
-        // Iteration wurden bereits ausgeführt und an `input` appended
-        // (siehe Push-Block unten); wir stoppen VOR dem function_call-Echo
-        // des Pending-Tools. Resterliche Tool-Calls dieser Iteration werden
-        // verworfen (matched existing Vercel-SDK "erster Marker gewinnt").
-        // Resume holt sich Codex bei der nächsten Iteration neu, kann Plan
-        // dort ändern.
-        if (skill.manifestJson.requiresApproval) {
-          throw new McpToolApprovalRequiredError(
-            skill.mcpServerId,
-            skill.mcpToolName,
-            parsedArgs,
-            {
-              pendingToolCall: {
-                name: toolCall.name,
-                callId: toolCall.callId,
-                arguments: toolCall.arguments,
-                itemId: toolCall.itemId,
-              },
-              // Snapshot des input-Arrays VOR Echo+Output des Pending-Tools.
-              // Strukturelles Clone via Spread reicht — die Inhalte sind
-              // JSON-serialisierbare Werte (kein Object-Identity-Risk beim
-              // späteren Persist).
-              inputItems: [...input],
-              toolDefinitions: codexTools,
-              iterationCount: iterations,
-              aggregatedText,
-              previousToolCalls: [...allToolCalls],
-              lastResponseId,
-              lastStatus,
-              lastPlanType,
-              lastCfRay,
-              totalLatencyMs,
-              unknownEventTypes: Array.from(allUnknownEventTypes),
-              // #131 Phase 3.3.3.1: Pre-Pause-Reasoning ans Resume-Context
-              // damit Resume-Iteration sie fortführt (sonst Audit-Trail-Loss).
-              ...(allReasoningTraces.length > 0
-                ? { previousReasoningTraces: [...allReasoningTraces] }
-                : {}),
-              ...(totalReasoningTokens > 0
-                ? { previousReasoningTokens: totalReasoningTokens }
-                : {}),
-            },
-          );
-        }
-
-        // Tool-Execution via existing McpClientManager — Auto-Execute für
-        // alle Skills ohne requires_approval=true.
-        let outputContent: unknown;
-        let isError = false;
-        try {
-          const raw = await this.mcp.callTool(
-            skill.mcpServerId,
-            skill.mcpToolName,
-            parsedArgs,
-          );
-          outputContent = raw.content;
-          isError = raw.isError ?? false;
-        } catch (err) {
-          // Tool-Execution-Failure: an Codex zurückreichen als output-Payload
-          // statt Loop crashen (sonst kann Codex den Error nicht
-          // selbst-recovern, z.B. mit anderem Tool-Call).
-          outputContent = `[tool-execution-error] ${
-            err instanceof Error ? err.message : String(err)
-          }`;
-          isError = true;
-        }
-
-        const outputText = stringifyToolContent(outputContent);
-
-        allToolCalls.push({
-          toolName: skill.name,
-          input: parsedArgs,
-          output: outputContent ?? null,
-          codexCallId: toolCall.callId,
-        });
-
-        // §l Multi-Step-Pattern: function_call-Echo + function_call_output
-        // ans input-Array für nächste Iteration. Phase 3.3.1.3.1: kein
-        // `unknown`-Cast mehr — `input` ist jetzt CodexInputItemAny[].
-        input.push({
-          type: "function_call",
-          call_id: toolCall.callId,
-          name: toolCall.name,
-          arguments: toolCall.arguments,
-        });
-        input.push({
-          type: "function_call_output",
-          call_id: toolCall.callId,
-          output: isError
-            ? `[isError=true] ${outputText}`
-            : outputText,
-        });
-      }
-    }
-
-    if (iterations >= CODEX_MAX_TOOL_ITERATIONS) {
-      throw new Error(
-        `[twin-service] runModelViaCodex: Multi-Step-Loop hat ` +
-          `MAX_ITERATIONS (${CODEX_MAX_TOOL_ITERATIONS}) erreicht ohne ` +
-          `finale Antwort. Mögliche Codex-Endlosschleife oder Skill-Bug.`,
-      );
-    }
-
-    return {
-      content: aggregatedText,
-      metadata: {
-        provider: "openai-codex",
-        authMode: "oauth",
-        planType: lastPlanType ?? undefined,
-        cfRay: lastCfRay ?? undefined,
-        latencyMs: totalLatencyMs,
-        responseId: lastResponseId,
-        codexStatus: lastStatus,
-        unknownEventTypes:
-          allUnknownEventTypes.size > 0
-            ? [...allUnknownEventTypes]
-            : undefined,
-        codexIterations: iterations,
-        ...(allToolCalls.length > 0
-          ? { toolCalls: allToolCalls }
-          : {}),
-        // #131 Phase 3.3.3.1: Reasoning ans Audit-providerMetadata. Beide
-        // Felder bei 0/leer weglassen (matched toolCalls-Pattern) — Audit
-        // bleibt schmal wenn kein Reasoning getriggert wurde.
-        ...(allReasoningTraces.length > 0
-          ? { reasoningTraces: allReasoningTraces }
-          : {}),
-        ...(totalReasoningTokens > 0
-          ? { reasoningTokens: totalReasoningTokens }
-          : {}),
-      },
-    };
-  }
 
   /**
    * Ein Modell-Call über das Vercel AI SDK. Persona kommt als top-level
@@ -2748,39 +1911,13 @@ REGEL 6: Wenn der User dich explizit bittet, ein Tool zu nutzen ("rufe das X-Too
         ? {
             tools: mcpTools,
             // 3.5.E.B: stopWhen-Array hat OR-Semantik — Multi-Step bricht ab,
-            // sobald entweder das Step-Limit (5) erreicht oder ein Marker-
-            // Tool-Result im letzten Step auftaucht. Der Marker-Stop ist
-            // Defense-in-Depth zum Step-Walk-Fix in detectPendingToolCall:
-            // verhindert dass AI SDK aus dem Marker eine Synthese-Antwort
-            // baut. detectPendingToolCall findet den Marker-Call dann sauber
-            // in steps[*] und wirft McpToolApprovalRequiredError.
-            stopWhen: [stepCountIs(5), stopOnPendingApprovalMarker],
+            // sobald das Step-Limit (5) erreicht ist. Marker-StopCondition
+            // (Phase 3.2.F) wurde mit Marker-Pattern in Sub-Phase F entfernt.
+            stopWhen: stepCountIs(5),
             ...(forcedTool ? { toolChoice: forcedTool } : {}),
           }
         : {}),
     });
-
-    // 3.2.F Marker-Pattern: AI SDK 6 propagiert execute()-Throws nicht nach
-    // oben — sie landen als output:null tool-result beim LLM. tool-bridge
-    // returnt deshalb bei requiresApproval=true einen Marker im content.
-    // Wir scannen result.toolCalls + result.toolResults nach dem Marker und
-    // werfen `McpToolApprovalRequiredError` lokal — der existierende Catch
-    // im runOwnerDirect übernimmt den Pending-Audit-Pfad.
-    //
-    // WICHTIG: muss VOR dem Multi-Step-Followup laufen. Bei Approval-Tools
-    // ist `text` zwar leer und `finishReason='tool-calls'` — würde die
-    // Followup-Bedingung treffen — aber wir wollen statt Followup einen
-    // Pending-Audit. Reihenfolge: erst Marker-Check (Throw), dann Followup.
-    if (hasTools) {
-      const pending = detectPendingToolCall(result, skillByToolKey);
-      if (pending) {
-        throw new McpToolApprovalRequiredError(
-          pending.mcpServerId,
-          pending.mcpToolName,
-          pending.input,
-        );
-      }
-    }
 
     // #131 Phase 3.4.3.1 Big-Bang: native V3-Approval-Detect. Vercel-SDK
     // emittiert `tool-approval-request` als Content-Part wenn ein Tool mit
@@ -2828,11 +1965,7 @@ REGEL 6: Wenn der User dich explizit bittet, ein Tool zu nutzen ("rufe das X-Too
           ...result.response.messages,
         ],
         tools: mcpTools,
-        // 3.5.E.B: gleicher Marker-Stop wie im ersten Call. Hier
-        // theoretisch redundant (Marker-Pfad geht durch den Catch oben und
-        // erreicht den Followup nie), aber kostenlos und schützt vor
-        // zukünftigen Forced-Followup-Pfaden mit Approval-Tools.
-        stopWhen: [stepCountIs(2), stopOnPendingApprovalMarker],
+        stopWhen: stepCountIs(2),
         // Kein toolChoice → Default 'auto'. LLM darf jetzt frei antworten.
       });
     }
@@ -3049,33 +2182,6 @@ function composeOwnerSystemPrompt(parts: {
     .join("\n\n");
 }
 
-/**
- * Mappt Twin-Lab `ChatMessage[]` auf Codex-Input-Items. user → `input_text`,
- * assistant → `output_text` (matched Codex-Response-Format). System-Messages
- * werden übersprungen — System-Prompt geht via `instructions`-Field, nicht
- * via `input`-Array.
- *
- * #131 Phase 3.2: dieselbe `messages`-Liste die `runModel` an das Vercel-AI-
- * SDK übergibt enthält bereits Conversation-History (vom Caller pre-built);
- * für den Codex-Pfad reicht reines Format-Mapping, kein separates
- * History-Loading.
- */
-function mapChatMessagesToCodexInput(
-  messages: ChatMessage[],
-): CodexInputItem[] {
-  const items: CodexInputItem[] = [];
-  for (const msg of messages) {
-    if (msg.role !== "user" && msg.role !== "assistant") continue;
-    const partType = msg.role === "user" ? "input_text" : "output_text";
-    items.push({
-      type: "message",
-      role: msg.role,
-      content: [{ type: partType, text: msg.content }],
-    });
-  }
-  return items;
-}
-
 // 3.2.F: Shape des Pending-Audit-Input für mcp-tool-use. Lokal als Type-
 // Alias, damit der Cast in approveMcpToolUse / reject-Branch lesbar bleibt.
 // Der Persistenz-Schema lebt zentral in `@twin-lab/shared`
@@ -3099,10 +2205,6 @@ interface AuditMcpToolUseInputShape {
   conversationId?: string | null;
   pendingReply?: string;
   originalCapability?: string;
-  /** #131 Phase 3.3.1.3.1 (Legacy): nur gesetzt für Codex-OAuth-Pending
-   *  aus Pre-3.4.3.1-Pause. Trägt den Loop-State-Snapshot. Wird mit
-   *  Sub-Phase F entfernt. */
-  codexResumeContext?: CodexResumeContext;
   /** #131 Phase 3.3.1.3.2: bei Re-Pause-Audit gesetzt — Link zum vorher-
    *  pausierten Audit der nach Approve eine neue Pause getriggert hat. */
   priorAuditId?: string;
@@ -3125,20 +2227,6 @@ interface AuditMcpToolUseInputShape {
   assistantContent?: unknown;
 }
 
-/**
- * 3.2.F Marker-Detect: scannt das `generateText`-Result auf Tool-Calls, deren
- * Result den `MCP_PENDING_APPROVAL_MARKER` enthält. Der LLM hat das Tool
- * aufgerufen, AI SDK hat den Marker als output an den LLM zurückgereicht
- * (statt unseren execute-Throw zu propagieren). Wir picken den ersten
- * Treffer und werfen lokal `McpToolApprovalRequiredError`, damit der
- * existierende Catch-Pfad in runOwnerDirect den Pending-Audit baut.
- *
- * Edge-Case bei mehreren parallelen Tool-Calls in einem Step: der erste
- * Marker gewinnt; andere Tool-Results werden verworfen. Approval-Tools sind
- * destruktiv (=schreibend), Read-only-Tools laufen mit
- * defaultRequiresApproval=false ohnehin direkt durch — die Mischung in einem
- * Step ist akzeptable Vereinfachung für Pilot.
- */
 type GenerateTextOutcome = Awaited<ReturnType<typeof generateText>>;
 
 // ─── 3.5.E.B: STEP-WALK FÜR TOOL-CALLS / TOOL-RESULTS ──────────────────────
@@ -3167,68 +2255,6 @@ export function collectAllToolResults(
     : (result.toolResults ?? []);
 }
 
-// 3.5.E.B Defense-in-Depth: bricht den Multi-Step-Loop ab, sobald ein Tool-
-// Result im *gerade fertiggestellten* Step den Pending-Approval-Marker
-// enthält. Ohne diesen Stop würde das AI SDK aus dem Marker-Result einen
-// Synthese-Text generieren (sieht wie User-freundliche Halluzination aus,
-// kostet außerdem ein zusätzlicher LLM-Roundtrip an Tokens und Latenz).
-// Der Marker-Tool-Call bleibt in `steps[*]` stehen — `detectPendingToolCall`
-// findet ihn weiter, der Pending-Audit kann sauber gebaut werden.
-const stopOnPendingApprovalMarker: StopCondition<ToolSet> = ({ steps }) => {
-  const lastStep = steps[steps.length - 1];
-  if (!lastStep) return false;
-  for (const tr of lastStep.toolResults ?? []) {
-    const output = tr.output as
-      | { content?: Array<{ type?: string; text?: string }> }
-      | undefined;
-    if (
-      output?.content?.some(
-        (c) => c?.type === "text" && c?.text === MCP_PENDING_APPROVAL_MARKER,
-      )
-    ) {
-      return true;
-    }
-  }
-  return false;
-};
-
-export function detectPendingToolCall(
-  result: GenerateTextOutcome,
-  skillByToolKey: Map<string, Skill>,
-): {
-  mcpServerId: string;
-  mcpToolName: string;
-  input: Record<string, unknown>;
-} | null {
-  // 3.5.E.B: Step-Walk statt top-level — siehe collectAllTool*. Vorher hat
-  // diese Funktion nur den letzten Step gesehen; bei Multi-Step lag der
-  // Marker-Call aber in step[0] und wurde übersehen → kein Pending-Audit
-  // → AI SDK synthetisierte einen Antwort-Text aus dem Marker-Result.
-  const toolCalls = collectAllToolCalls(result);
-  const toolResults = collectAllToolResults(result);
-  for (const toolCall of toolCalls) {
-    const matching = toolResults.find(
-      (r) => r.toolCallId === toolCall.toolCallId,
-    );
-    if (!matching) continue;
-    const output = matching.output as
-      | { content?: Array<{ type?: string; text?: string }> }
-      | undefined;
-    if (!output || !Array.isArray(output.content)) continue;
-    const hasMarker = output.content.some(
-      (c) => c?.type === "text" && c?.text === MCP_PENDING_APPROVAL_MARKER,
-    );
-    if (!hasMarker) continue;
-    const skill = skillByToolKey.get(toolCall.toolName);
-    if (!skill?.mcpServerId || !skill?.mcpToolName) continue;
-    return {
-      mcpServerId: skill.mcpServerId,
-      mcpToolName: skill.mcpToolName,
-      input: (toolCall.input ?? {}) as Record<string, unknown>,
-    };
-  }
-  return null;
-}
 
 /**
  * #131 Phase 3.4.3.1 Big-Bang: scannt das Vercel-`generateText`-Result auf

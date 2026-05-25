@@ -64,76 +64,10 @@ export type CodexInputItemAny =
   | CodexFunctionCallItem
   | CodexFunctionCallOutputItem;
 
-// #131 Phase 3.3.1.3.1: Resume-Context für Codex-OAuth-Approval-Pause.
-// Beim Pre-Call-Detect eines `requiresApproval=true`-Skills wirft
-// runModelViaCodex `McpToolApprovalRequiredError` mit diesem Snapshot als
-// `codexResumeContext`-Property. Der existierende Catch in
-// `runOwnerDirect` persistiert das additiv in `audit.input.codexResumeContext`,
-// damit Phase 3.3.1.3.2 die Loop ab dem Pending-Tool-Call fortsetzen kann.
-//
-// WICHTIG zur Reihenfolge-treuen Semantik: `inputItems` ist der Snapshot
-// VOR dem `function_call`-Echo des Pending-Tools — Auto-Tools davor in
-// derselben Iteration sind bereits ausgeführt und stehen als
-// `function_call`+`function_call_output`-Paar im Array; das Pending-Tool
-// selbst noch nicht. Resume hängt beim Approve den ausgeführten
-// Pending-Output an dieser Stelle ein und startet die nächste Iteration.
-export interface CodexResumeContext {
-  /** Tool-Call, der approved werden muss. `name` ist der Codex-Tool-Name
-   *  (z.B. `mcp_everything-approval_get-sum`), nicht der Twin-Lab-Skill-
-   *  Name — Resume muss den Reverse-Lookup über `skillByCodexName`
-   *  wiederholen. */
-  pendingToolCall: {
-    name: string;
-    callId: string;
-    arguments: string;
-    itemId: string;
-  };
-  /** Snapshot des input-Arrays bis kurz VOR dem Pending-Tool-Call.
-   *  Auto-Tool-Roundtrips früherer Iterations stehen als
-   *  function_call+function_call_output-Paare drin. */
-  inputItems: CodexInputItemAny[];
-  /** Tool-Definitionen die Codex in dieser Iteration hatte — Resume nutzt
-   *  die gleiche Liste, falls der User zwischen Pause und Resume Skills
-   *  toggelt (semantische Stabilität). */
-  toolDefinitions: CodexToolDefinition[];
-  /** Loop-Iteration in der die Pause ausgelöst wurde (1-indexed). */
-  iterationCount: number;
-  /** Akkumulierter Text aus früheren Iterations (meist leer, weil Tools
-   *  vor finalem Text laufen). */
-  aggregatedText: string;
-  /** Bereits ausgeführte Tool-Calls — für Audit-Trail-Kontinuität im
-   *  Resume (Phase 3.3.1.3.2 mergt die in den finalen audit.output). */
-  previousToolCalls: AuditToolCallSnapshot[];
-  /** #131 Phase 3.3.3.1: Reasoning-Items aus den Pre-Pause-Iterations.
-   *  Optional weil Pause-Iteration ohne Reasoning (häufig bei Tool-Call-
-   *  Pfaden mit effort=medium) das Feld leer lässt. Resume akkumuliert das
-   *  ins finale audit.output.providerMetadata.reasoningTraces. */
-  previousReasoningTraces?: unknown[];
-  /** #131 Phase 3.3.3.1: Token-Count-Aggregat aus den Pre-Pause-Iterations.
-   *  Optional aus gleichem Grund wie previousReasoningTraces. */
-  previousReasoningTokens?: number;
-  /** Codex-Response-Metadaten der letzten Iteration — informational, nicht
-   *  funktional für Resume (Codex liest `input`-Array, nicht
-   *  `previous_response_id`, siehe §l). */
-  lastResponseId: string | undefined;
-  lastStatus: string | undefined;
-  lastPlanType: string | null;
-  lastCfRay: string | null;
-  totalLatencyMs: number;
-  unknownEventTypes: string[];
-}
-
-/** Lokale Mini-Shape — wir wollen Resume-Context typesafe ohne harten Import
- *  des `AuditToolCall`-Shared-Types in den OAuth-Layer. Felder matched
- *  `AuditToolCall` aus `@twin-lab/shared` (input/output sind `z.unknown()` →
- *  TypeScript mapped das auf `unknown` mit implizitem undefined-Subset, also
- *  optional). */
-export interface AuditToolCallSnapshot {
-  toolName: string;
-  input?: unknown;
-  output?: unknown;
-  codexCallId?: string;
-}
+// CodexResumeContext + AuditToolCallSnapshot wurden in #131 Phase 3.4.3.1
+// (Big-Bang Approval-Refactor) entfernt — Resume-Mechanik läuft jetzt nativ
+// via Vercel-SDK History-Replay (tool-approval-request + tool-approval-
+// response), keine codex-spezifische Snapshot-Persistierung mehr nötig.
 
 export interface CodexAdapterInput {
   twinId: string;

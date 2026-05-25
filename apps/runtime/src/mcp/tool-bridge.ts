@@ -4,22 +4,6 @@ import type { Skill } from "@twin-lab/shared";
 import type { McpClientManager } from "./client-manager.js";
 import type { EventBus } from "../events/bus.js";
 
-// ─── PENDING-APPROVAL-MARKER (Phase 3.2.F) ──────────────────────────────────
-//
-// AI SDK 6 schluckt `execute()`-Throws und reicht sie als output:null tool-
-// result an den LLM weiter — der Throw-Pfad würde nie nach oben propagieren
-// (Smoke-Test Tag-10 hat das verifiziert). Stattdessen returnt `execute()`
-// ein eindeutiges Marker-Result; Twin-Service erkennt den Marker beim Loop
-// durch `result.toolCalls` und triggert den Pending-Audit-Pfad.
-//
-// Throw-Pfad bleibt parallel als Defense-in-Depth: `McpToolApprovalRequired-
-// Error` + Catch in TwinService greifen, falls jemals ein direkter Throw
-// aus interner Logik (oder zukünftiger AI-SDK-Update) propagiert.
-//
-// Der String ist bewusst kollisionssicher (Underscore-Präfix/Suffix), damit
-// reguläre Tool-Outputs ihn nicht versehentlich produzieren können.
-export const MCP_PENDING_APPROVAL_MARKER = "__MCP_PENDING_APPROVAL__";
-
 // `@ai-sdk/provider` re-exportiert `JSONSchema7` aus `json-schema`, ist aber
 // nur transitive Dep des AI-SDK. Wir leiten den Schema-Typ direkt aus der
 // `jsonSchema()`-Signatur ab — kein zusätzlicher Dependency-Drag und
