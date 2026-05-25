@@ -405,6 +405,11 @@ export const AuditToolCallSchema = z.object({
   toolName: z.string(),
   input: z.unknown(),
   output: z.unknown().nullable(),
+  // #131 Phase 3.3.1.2: Cross-Reference auf den Codex-call_id, damit der
+  // Multi-Step-Resume-Pfad das `function_call_output`-Item korrekt
+  // adressieren kann (§l). Nur gesetzt für Codex-OAuth-Pfad; AI-SDK-Pfad
+  // (Anthropic/OpenAI-API) hat keinen entsprechenden externen Identifier.
+  codexCallId: z.string().optional(),
 });
 export type AuditToolCall = z.infer<typeof AuditToolCallSchema>;
 

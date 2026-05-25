@@ -32,6 +32,22 @@ export interface CodexToolDefinition {
   parameters: object;
 }
 
+/**
+ * Result-Shape von `mapSkillsToCodexTools`. Reverse-Map (`skillByCodexName`)
+ * matched buildMcpToolsFromSkills.skillByToolKey (tool-bridge.ts:97) und
+ * ist substantiell wegen Edge-Case: existing Skills wie
+ * `mcp:hyperbrowser-approval:scrape_webpage` enthalten `_` im
+ * mcpToolName-Teil. Codex-Tool-Name `mcp_hyperbrowser-approval_scrape_webpage`
+ * lässt sich NICHT eindeutig per naivem `replaceAll("_", ":")` zurückmappen
+ * (würde 5 Segmente liefern statt 3). Die Map ist die einzige robuste
+ * Lookup-Strategie — Phase 3.3.1.2 runModelViaCodex nutzt sie für
+ * Tool-Execution-Dispatching.
+ */
+export interface MapSkillsToCodexToolsResult {
+  tools: CodexToolDefinition[];
+  skillByCodexName: Map<string, Skill>;
+}
+
 /** Fallback für Skills ohne `mcpInputSchema` (analog `EMPTY_INPUT_SCHEMA`
  *  in tool-bridge.ts:100-103). Codex akzeptiert parameterlose Tools. */
 const EMPTY_PARAMETERS = {
@@ -40,7 +56,8 @@ const EMPTY_PARAMETERS = {
 } as const;
 
 /**
- * Mappt Twin-Lab Skills auf Codex-API `tools`-Field-Items.
+ * Mappt Twin-Lab Skills auf Codex-API `tools`-Field-Items + baut Reverse-
+ * Lookup-Map für Tool-Execution-Dispatching.
  *
  * Filter (identisch zu tool-bridge.ts:112-114):
  *   - `source === "mcp"` (Manual-Skills sind System-Prompt-Markdown, keine
@@ -56,9 +73,15 @@ const EMPTY_PARAMETERS = {
  *   - `parameters`: `manifestJson.mcpInputSchema` als JSON-Schema-Object;
  *     fehlt das Feld (Manual-Skill ohne MCP-Hintergrund), fällt der Mapper
  *     auf `EMPTY_PARAMETERS` zurück
+ *
+ * Single-Pass: Tools-Array + Map werden im selben Loop gebaut (Single-
+ * Source-of-Truth für Filter-Logic).
  */
-export function mapSkillsToCodexTools(skills: Skill[]): CodexToolDefinition[] {
+export function mapSkillsToCodexTools(
+  skills: Skill[],
+): MapSkillsToCodexToolsResult {
   const tools: CodexToolDefinition[] = [];
+  const skillByCodexName = new Map<string, Skill>();
   for (const skill of skills) {
     if (skill.source !== "mcp") continue;
     if (!skill.isActive) continue;
@@ -70,12 +93,14 @@ export function mapSkillsToCodexTools(skills: Skill[]): CodexToolDefinition[] {
         ? (rawSchema as object)
         : EMPTY_PARAMETERS;
 
+    const codexName = skill.name.replaceAll(":", "_");
     tools.push({
       type: "function",
-      name: skill.name.replaceAll(":", "_"),
+      name: codexName,
       description: skill.manifestJson.description,
       parameters,
     });
+    skillByCodexName.set(codexName, skill);
   }
-  return tools;
+  return { tools, skillByCodexName };
 }

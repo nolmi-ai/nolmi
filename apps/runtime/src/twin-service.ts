@@ -34,6 +34,7 @@ import {
 import { TwinProfilesRepo } from "./twin-profiles-repo.js";
 import type { OAuthRefreshService } from "./oauth/refresh-service.js";
 import { CodexAdapter, type CodexInputItem } from "./oauth/codex-adapter.js";
+import { mapSkillsToCodexTools } from "./oauth/codex-tool-mapper.js";
 import type { ConversationsRepo } from "./conversations/repo.js";
 import type {
   ConversationSummariesRepo,
@@ -1503,6 +1504,9 @@ export class TwinService {
       factsBlock?: string | null;
       episodicBlock?: string | null;
       summaryBlock?: string | null;
+      /** Aktive MCP-Skills (gefiltert) — Phase 3.3.1.2 für Tool-Use.
+       *  Wenn leer/undefined: kein tools-Field an Codex, kein Multi-Step. */
+      skills?: Skill[];
     } = {},
   ): Promise<{ content: string; metadata: Record<string, unknown> }> {
     if (!this.deps.oauthRefreshService) {
@@ -1516,9 +1520,10 @@ export class TwinService {
       this.codexAdapter = new CodexAdapter(this.deps.oauthRefreshService);
     }
 
-    // System-Prompt via shared Helper. Phase 3.2 weglassen: skillsBlock +
-    // toolUseDirective — Tool-Use kommt in Phase 3.3 dazu (Mapping der
-    // Codex-Tool-Call-Events ist eigene Sub-Phase).
+    // System-Prompt via shared Helper. Skills-/Tool-Use-Direktive sind aktuell
+    // null — Phase 3.3.3 würde TOOL_USE_DIRECTIVE nachziehen falls nötig;
+    // Codex' tool_choice='auto' macht Tool-Use heute zuverlässig ohne
+    // explizite Anti-Halluzinations-Direktive.
     const instructions = composeOwnerSystemPrompt({
       persona,
       extraSystem,
@@ -1529,30 +1534,156 @@ export class TwinService {
       episodicBlock: options.episodicBlock,
     });
 
-    // `messages` enthält bereits Conversation-History (vom Caller pre-built,
-    // siehe runOwnerDirect). Reines Format-Mapping reicht.
+    // §l: tools-Field muss pro Iteration mitgeschickt werden, sonst weiß
+    // Codex nicht dass `function_call_output`-Items zu function-Tools gehören.
+    // mapSkillsToCodexTools filtert + baut Reverse-Map für Lookup.
+    const { tools: codexTools, skillByCodexName } = mapSkillsToCodexTools(
+      options.skills ?? [],
+    );
+
+    // Initial-Input: History + aktuelle User-Message (Caller-pre-built).
+    // Multi-Step-Resume appended `function_call` + `function_call_output`.
     const input = mapChatMessagesToCodexInput(messages);
 
-    const result = await this.codexAdapter.generateText({
-      twinId: this.deps.twinId,
-      instructions,
-      input,
-    });
+    // Akkumulation über die Loop-Iterationen.
+    let aggregatedText = "";
+    let lastResponseId: string | undefined;
+    let lastStatus: string | undefined;
+    let lastPlanType: string | null = null;
+    let lastCfRay: string | null = null;
+    let totalLatencyMs = 0;
+    const allToolCalls: AuditToolCall[] = [];
+    const allUnknownEventTypes = new Set<string>();
+    let iterations = 0;
+
+    while (iterations < CODEX_MAX_TOOL_ITERATIONS) {
+      iterations++;
+      const result = await this.codexAdapter.generateText({
+        twinId: this.deps.twinId,
+        instructions,
+        input,
+        tools: codexTools,
+      });
+
+      aggregatedText += result.text;
+      if (result.responseId) lastResponseId = result.responseId;
+      if (result.status) lastStatus = result.status;
+      if (result.planType) lastPlanType = result.planType;
+      if (result.cfRay) lastCfRay = result.cfRay;
+      totalLatencyMs += result.latencyMs;
+      for (const t of result.unknownEventTypes) allUnknownEventTypes.add(t);
+
+      // Keine Tool-Calls → finale Antwort, Loop fertig.
+      if (result.toolCalls.length === 0) break;
+
+      // Tool-Calls auto-execute + ans input-Array per §l-Pattern appenden.
+      for (const toolCall of result.toolCalls) {
+        const skill = skillByCodexName.get(toolCall.name);
+        if (!skill || !skill.mcpServerId || !skill.mcpToolName) {
+          throw new Error(
+            `[twin-service] runModelViaCodex: Codex hat unbekanntes ` +
+              `Tool gerufen ('${toolCall.name}') — kein Skill im aktiven ` +
+              `Set. mapSkillsToCodexTools-Filter scheint ausgehebelt.`,
+          );
+        }
+
+        let parsedArgs: Record<string, unknown>;
+        try {
+          parsedArgs = JSON.parse(toolCall.arguments) as Record<
+            string,
+            unknown
+          >;
+        } catch (err) {
+          throw new Error(
+            `[twin-service] runModelViaCodex: Codex-Tool-Args sind kein ` +
+              `valides JSON (tool='${toolCall.name}', args=` +
+              `'${toolCall.arguments.slice(0, 200)}'): ${
+                err instanceof Error ? err.message : String(err)
+              }`,
+          );
+        }
+
+        // Tool-Execution via existing McpClientManager — Auto-Execute
+        // (Phase 3.3.1.2 Scope: kein Approval-Wait, das kommt in 3.3.1.3).
+        // requires_approval-Skills landen ohnehin nicht im Codex-tools-Field,
+        // weil mapSkillsToCodexTools sie nicht zusätzlich filtert (TODO
+        // Phase 3.3.1.3) — heute akzeptable Vereinfachung, weil der Smoke
+        // mit no-approval-Tool läuft.
+        let outputContent: unknown;
+        let isError = false;
+        try {
+          const raw = await this.mcp.callTool(
+            skill.mcpServerId,
+            skill.mcpToolName,
+            parsedArgs,
+          );
+          outputContent = raw.content;
+          isError = raw.isError ?? false;
+        } catch (err) {
+          // Tool-Execution-Failure: an Codex zurückreichen als output-Payload
+          // statt Loop crashen (sonst kann Codex den Error nicht
+          // selbst-recovern, z.B. mit anderem Tool-Call).
+          outputContent = `[tool-execution-error] ${
+            err instanceof Error ? err.message : String(err)
+          }`;
+          isError = true;
+        }
+
+        const outputText = stringifyToolContent(outputContent);
+
+        allToolCalls.push({
+          toolName: skill.name,
+          input: parsedArgs,
+          output: outputContent ?? null,
+          codexCallId: toolCall.callId,
+        });
+
+        // §l Multi-Step-Pattern: function_call-Echo + function_call_output
+        // ans input-Array für nächste Iteration. Cast über `unknown` weil
+        // CodexInputItem (Phase 3.2) heute nur `message`-Items typisiert —
+        // Phase 3.4 könnte den Type erweitern; heute Pragmatik-Cast.
+        input.push({
+          type: "function_call",
+          call_id: toolCall.callId,
+          name: toolCall.name,
+          arguments: toolCall.arguments,
+        } as unknown as CodexInputItem);
+        input.push({
+          type: "function_call_output",
+          call_id: toolCall.callId,
+          output: isError
+            ? `[isError=true] ${outputText}`
+            : outputText,
+        } as unknown as CodexInputItem);
+      }
+    }
+
+    if (iterations >= CODEX_MAX_TOOL_ITERATIONS) {
+      throw new Error(
+        `[twin-service] runModelViaCodex: Multi-Step-Loop hat ` +
+          `MAX_ITERATIONS (${CODEX_MAX_TOOL_ITERATIONS}) erreicht ohne ` +
+          `finale Antwort. Mögliche Codex-Endlosschleife oder Skill-Bug.`,
+      );
+    }
+
     return {
-      content: result.text,
+      content: aggregatedText,
       metadata: {
         provider: "openai-codex",
         authMode: "oauth",
-        planType: result.planType ?? undefined,
-        cfRay: result.cfRay ?? undefined,
-        latencyMs: result.latencyMs,
-        // #131 Phase 3.1.2: jetzt aus CodexSSEParser geliefert.
-        responseId: result.responseId ?? undefined,
-        codexStatus: result.status ?? undefined,
+        planType: lastPlanType ?? undefined,
+        cfRay: lastCfRay ?? undefined,
+        latencyMs: totalLatencyMs,
+        responseId: lastResponseId,
+        codexStatus: lastStatus,
         unknownEventTypes:
-          result.unknownEventTypes.length > 0
-            ? result.unknownEventTypes
+          allUnknownEventTypes.size > 0
+            ? [...allUnknownEventTypes]
             : undefined,
+        codexIterations: iterations,
+        ...(allToolCalls.length > 0
+          ? { toolCalls: allToolCalls }
+          : {}),
       },
     };
   }
@@ -1624,20 +1755,23 @@ export class TwinService {
      */
     prePassSkillName?: string;
   }> {
-    // #131 Phase 3.0 Spike — OAuth-Branch VOR der ganzen Skill/Tool-Logik.
-    // DB-fresh authMode-Lookup, damit Helper-Smoke live umschalten kann ohne
-    // Registry-Reload. Phase 3.2: Persona + factsBlock + episodicBlock +
-    // summaryBlock + extraSystem werden durchgereicht (System-Prompt-Build
-    // via composeOwnerSystemPrompt-Helper, gleiche Schichten wie Vercel-SDK-
-    // Pfad — Schicht 3 skillsBlock + Schicht 4 TOOL_USE_DIRECTIVE folgen in
-    // Phase 3.3 mit Tool-Use-Mapping). Existing api_key-Twins erreichen
-    // diesen Branch nie, weil profile.authMode === 'api_key' bleibt.
+    // #131 Phase 3.0/3.2/3.3.1.2 — OAuth-Branch VOR der ganzen
+    // Skill/Tool-Logik. DB-fresh authMode-Lookup, damit Helper-Smoke live
+    // umschalten kann ohne Registry-Reload. Phase 3.3.1.2 reicht jetzt die
+    // aktiven Skills durch — runModelViaCodex baut daraus codex-tools-Field
+    // + Reverse-Map, fährt Multi-Step-Loop mit Auto-Execute via McpClient.
+    // Existing api_key-Twins erreichen diesen Branch nie, weil
+    // profile.authMode === 'api_key' bleibt.
     const profileNow = this.profilesRepo.findById(this.deps.twinId);
     if (profileNow?.authMode === "oauth") {
+      const oauthSkills = this.deps.skills.list(this.deps.twinId, {
+        activeOnly: true,
+      });
       return this.runModelViaCodex(persona, messages, extraSystem, {
         factsBlock: options.factsBlock,
         episodicBlock: options.episodicBlock,
         summaryBlock: options.summaryBlock,
+        skills: oauthSkills,
       });
     }
 
@@ -1991,6 +2125,14 @@ REGEL 6: Wenn der User dich explizit bittet, ein Tool zu nutzen ("rufe das X-Too
 // Config-Option exponieren — für jetzt fix.
 const HISTORY_MESSAGE_CAP = 40;
 const HISTORY_AUDIT_LIMIT = Math.ceil(HISTORY_MESSAGE_CAP / 2);
+
+/** #131 Phase 3.3.1.2: Safety-Cap für Codex-Multi-Step-Tool-Loop.
+ *  Default 5 matched `stepCountIs(5)` im Vercel-AI-SDK-Pfad
+ *  (twin-service.ts ~Z. 1707). Bei Erreichen: Throw, weil Codex sonst
+ *  potenziell endlos Tool-Calls anfordert (siehe Anti-Halluzinations-
+ *  Regeln im Vercel-SDK-TOOL_USE_DIRECTIVE — Codex hat heute keine
+ *  entsprechende Direktive). */
+const CODEX_MAX_TOOL_ITERATIONS = 5;
 
 // Globale Sprach-Direktive — wird an JEDE Persona-System-Prompt angehängt,
 // unabhängig von Twin oder Modell. Anlass: Anthropic-Modelle haben in mehreren

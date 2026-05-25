@@ -1,7 +1,8 @@
 import { CodexHttpError } from "./codex-http-error.js";
-import { CodexSSEParser } from "./codex-sse-parser.js";
+import { CodexSSEParser, type CodexToolCall } from "./codex-sse-parser.js";
 import { withRetry } from "./codex-retry.js";
 import type { OAuthRefreshService } from "./refresh-service.js";
+import type { CodexToolDefinition } from "./codex-tool-mapper.js";
 
 // ─── CODEX-ADAPTER (#131 PHASE 3.2) ──────────────────────────────────────────
 //
@@ -43,8 +44,15 @@ export interface CodexAdapterInput {
   /** Pre-built System-Prompt-String — Caller komponiert Persona + Facts +
    *  Memory + Language-Direktive. */
   instructions: string;
-  /** Pre-built Input-Items — Caller mappt History + aktuelle User-Message. */
+  /** Pre-built Input-Items — Caller mappt History + aktuelle User-Message,
+   *  bei Multi-Step-Resume zusätzlich `function_call` + `function_call_output`
+   *  per §l-Pattern. */
   input: CodexInputItem[];
+  /** Tool-Definitionen aus `mapSkillsToCodexTools`. Wenn leer/undefined,
+   *  schickt der Adapter `tools: []` und Codex antwortet ohne Tool-Use.
+   *  Bei Multi-Step muss der Caller die Tools PRO Iteration mitgeben
+   *  (§l: tools-Field muss wiederholt werden). */
+  tools?: CodexToolDefinition[];
   model?: string;
 }
 
@@ -60,6 +68,9 @@ export interface CodexAdapterOutput {
   responseId: string | null;
   /** Aus `response.completed`-Event geliefert (typisch `"completed"`). */
   status: string | null;
+  /** Tool-Calls aus `function_call`-Items (§k/§l, Phase 3.3.1.1 Parser).
+   *  Bei leerem Array hat Codex direkt geantwortet ohne Tool-Use. */
+  toolCalls: CodexToolCall[];
   /** Unbekannte SSE-Event-Types, die der Parser-Hybrid-Fallback aufgesammelt
    *  hat. Phase 3.3 wird darauf reagieren, Phase 3.1.2 logged sie nur. */
   unknownEventTypes: string[];
@@ -95,7 +106,7 @@ export class CodexAdapter {
       model: input.model ?? DEFAULT_MODEL,
       instructions: input.instructions,
       input: input.input,
-      tools: [],
+      tools: input.tools ?? [],
       tool_choice: "auto",
       parallel_tool_calls: false,
       store: false,
@@ -139,6 +150,7 @@ export class CodexAdapter {
       latencyMs,
       responseId: parseResult.responseId ?? null,
       status: parseResult.status ?? null,
+      toolCalls: parseResult.toolCalls,
       unknownEventTypes: parseResult.unknownEventTypes,
     };
   }

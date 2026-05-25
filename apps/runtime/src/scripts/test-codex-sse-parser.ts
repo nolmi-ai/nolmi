@@ -38,6 +38,10 @@ import type { Skill } from "@twin-lab/shared";
 //  15. mapSkillsToCodexTools: EMPTY-Schema-Fallback bei fehlendem
 //      mcpInputSchema
 //
+// Phase 3.3.1.2 Helper (1 Case — Reverse-Map):
+//  16. mapSkillsToCodexTools: skillByCodexName-Map löst Edge-Case mit
+//      Underscore-im-toolName eindeutig (mcp:hyperbrowser-approval:scrape_webpage)
+//
 // Aufruf:
 //   pnpm test-codex-sse-parser
 
@@ -312,13 +316,19 @@ async function main(): Promise<void> {
       createdAt: 0,
       updatedAt: 0,
     };
-    const result = mapSkillsToCodexTools([skill]);
-    assert.equal(result.length, 1);
-    assert.equal(result[0]!.type, "function");
+    const { tools, skillByCodexName } = mapSkillsToCodexTools([skill]);
+    assert.equal(tools.length, 1);
+    assert.equal(tools[0]!.type, "function");
     // `:` → `_` Tool-Key-Convention matched buildMcpToolsFromSkills
-    assert.equal(result[0]!.name, "mcp_everything-approval_get-sum");
-    assert.equal(result[0]!.description, "Get sum of two numbers");
-    assert.deepEqual(result[0]!.parameters, skill.manifestJson.mcpInputSchema);
+    assert.equal(tools[0]!.name, "mcp_everything-approval_get-sum");
+    assert.equal(tools[0]!.description, "Get sum of two numbers");
+    assert.deepEqual(tools[0]!.parameters, skill.manifestJson.mcpInputSchema);
+    // Reverse-Map: Codex-Name liefert dasselbe Skill-Object
+    assert.equal(skillByCodexName.size, 1);
+    assert.strictEqual(
+      skillByCodexName.get("mcp_everything-approval_get-sum"),
+      skill,
+    );
   });
 
   await test(
@@ -401,9 +411,15 @@ async function main(): Promise<void> {
           updatedAt: 0,
         },
       ];
-      const result = mapSkillsToCodexTools(skills);
-      assert.equal(result.length, 1);
-      assert.equal(result[0]!.name, "mcp_srv_active-tool");
+      const { tools, skillByCodexName } = mapSkillsToCodexTools(skills);
+      assert.equal(tools.length, 1);
+      assert.equal(tools[0]!.name, "mcp_srv_active-tool");
+      // Map matched Tools-Array exakt
+      assert.equal(skillByCodexName.size, 1);
+      assert.equal(
+        skillByCodexName.get("mcp_srv_active-tool")?.skillId,
+        "s1",
+      );
     },
   );
 
@@ -434,12 +450,72 @@ async function main(): Promise<void> {
         createdAt: 0,
         updatedAt: 0,
       };
-      const result = mapSkillsToCodexTools([skill]);
-      assert.equal(result.length, 1);
-      assert.deepEqual(result[0]!.parameters, {
+      const { tools, skillByCodexName } = mapSkillsToCodexTools([skill]);
+      assert.equal(tools.length, 1);
+      assert.deepEqual(tools[0]!.parameters, {
         type: "object",
         properties: {},
       });
+      assert.strictEqual(
+        skillByCodexName.get("mcp_srv_no-schema"),
+        skill,
+      );
+    },
+  );
+
+  await test(
+    "mapSkillsToCodexTools: skillByCodexName resolved Underscore-Edge-Case eindeutig",
+    () => {
+      // Existing Skill in DB: mcp:hyperbrowser-approval:scrape_webpage —
+      // mcpToolName "scrape_webpage" enthält Underscore. Codex-Tool-Name
+      // wird mcp_hyperbrowser-approval_scrape_webpage (3 Segmente). Naive
+      // String-Replace `_` → `:` würde 5 Segmente liefern und damit den
+      // Reverse-Lookup zerstören. Die Map ist eindeutig.
+      const skill: Skill = {
+        skillId: "s_hb_scrape",
+        twinId: "t1",
+        name: "mcp:hyperbrowser-approval:scrape_webpage",
+        description: "Scrape a webpage",
+        manifestJson: {
+          name: "scrape_webpage",
+          description: "Scrape a webpage with hyperbrowser",
+          capability: "mcp_tool",
+          requiresApproval: true,
+          mcpServerId: "mcp_hyperbrowser-approval",
+          mcpToolName: "scrape_webpage",
+          mcpInputSchema: {
+            type: "object",
+            properties: { url: { type: "string" } },
+            required: ["url"],
+          },
+        },
+        instructionsMd: "",
+        scriptTs: null,
+        source: "mcp",
+        sourceMetadata: null,
+        mcpServerId: "mcp_hyperbrowser-approval",
+        mcpToolName: "scrape_webpage",
+        isActive: true,
+        createdAt: 0,
+        updatedAt: 0,
+      };
+      const { tools, skillByCodexName } = mapSkillsToCodexTools([skill]);
+      assert.equal(tools.length, 1);
+      // Codex-Name hat 4 Underscores total (2 vom `:` + 2 vom existing `_`)
+      assert.equal(
+        tools[0]!.name,
+        "mcp_hyperbrowser-approval_scrape_webpage",
+      );
+      // Map liefert exakt diesen Skill zurück — KEIN Splitting nötig
+      assert.strictEqual(
+        skillByCodexName.get("mcp_hyperbrowser-approval_scrape_webpage"),
+        skill,
+      );
+      // Sanity-Check: naive String-Replace würde anders mappen
+      const naive =
+        "mcp_hyperbrowser-approval_scrape_webpage".replaceAll("_", ":");
+      assert.equal(naive, "mcp:hyperbrowser-approval:scrape:webpage");
+      assert.notEqual(naive, skill.name); // genau der Edge-Case
     },
   );
 
