@@ -1436,7 +1436,15 @@ export class TwinService {
     ];
 
     try {
-      const reply = await this.runModel(this.deps.persona, resumeMessages);
+      // enableMcpTools: true — Tools im SDK-Pipeline für approvalId-Lookup
+      // (SDK validiert approval-response gegen Tool-Set). Bei Reject ruft
+      // SDK execute() nicht (approved=false), Codex antwortet ohne Tool.
+      const reply = await this.runModel(
+        this.deps.persona,
+        resumeMessages,
+        undefined,
+        { enableMcpTools: true },
+      );
       const updatedEntry = await this.deps.audit.repo.get(entry.id);
       if (updatedEntry) {
         updatedEntry.output = {
@@ -1628,7 +1636,12 @@ export class TwinService {
 
     let reply: { content: string; metadata: Record<string, unknown> };
     try {
-      reply = await this.runModel(persona, resumeMessages);
+      // enableMcpTools: true — History-Replay braucht aktive Tools, damit
+      // SDK execute() für den approved Tool-Call findet. Re-Approval-Chain
+      // läuft über Pre-Generate-Skill-Set-Lookup analog Initial-Run.
+      reply = await this.runModel(persona, resumeMessages, undefined, {
+        enableMcpTools: true,
+      });
     } catch (err) {
       // Re-Approval: Resume-Iteration hat erneut needsApproval-Tool
       // getriggert. Original-Audit auf executed mit followUpPending-Marker,
@@ -3362,7 +3375,18 @@ function extractMessages(entry: { input: Record<string, unknown> }, key: string)
 function toModelMessages(messages: ChatMessage[]): ModelMessage[] {
   return messages
     .filter((m) => m.role !== "system")
-    .map((m) => ({ role: m.role as "user" | "assistant", content: m.content }));
+    .map((m) => {
+      // #131 Phase 3.4.3.1 Big-Bang: History-Replay-Messages haben role
+      // "tool" und content-Array (tool-approval-response). assistant-
+      // Messages aus V3-Pause haben auch content-Array (tool-call + tool-
+      // approval-request). Beide Shapes pass-throughed, weil Vercel-SDK
+      // sie native akzeptiert (V3-ModelMessage-Spec). Cast über unknown
+      // weil ChatMessage-Type (twin-lab-intern) nur String-content kennt.
+      return {
+        role: m.role,
+        content: m.content,
+      } as unknown as ModelMessage;
+    });
 }
 
 // ─── CAPABILITY DETECTION ────────────────────────────────────────────────────
