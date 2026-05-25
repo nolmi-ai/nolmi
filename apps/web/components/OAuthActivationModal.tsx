@@ -47,13 +47,17 @@ export function OAuthActivationModal({
     }
   };
 
-  const handleClose = async () => {
-    try {
-      await onRefresh();
-    } catch {
-      /* close darf an refresh-fail nicht hängenbleiben */
-    }
+  const handleClose = () => {
+    // Reihenfolge wichtig (Phase 5.2 Bug-Fix): erst onClose, dann onRefresh
+    // fire-and-forget. Wenn wir auf den Refresh awaiten BEVOR wir schließen,
+    // unmountet ModalWrapper bevor das Parent-Page-setState propagiert —
+    // Settings-Page sieht den frischen Auth-Status erst nach manuellem
+    // Reload. Mit dieser Reihenfolge bleibt das Parent gemounted, der
+    // Re-Fetch landet im Settings-State und triggert Re-Render.
     onClose();
+    onRefresh().catch(() => {
+      /* silent — User kann jederzeit explizit "Status aktualisieren" */
+    });
   };
 
   return (
@@ -68,7 +72,7 @@ export function OAuthActivationModal({
           </p>
         </div>
 
-        <ol className="space-y-1.5 text-sm text-text list-decimal list-inside">
+        <ol className="space-y-1.5 text-sm text-text list-decimal pl-5">
           <li>Terminal öffnen (Repository-Root)</li>
           <li>Befehl ausführen — Browser öffnet sich automatisch</li>
           <li>ChatGPT-OAuth-Approval durchklicken</li>

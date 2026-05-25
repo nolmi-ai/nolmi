@@ -235,10 +235,14 @@ function SettingsInner() {
   }, []);
 
   // #110 Phase 2B Commit 11B: Settings-Data + Preset-Katalog laden.
+  // #131 Phase 5.2 Bug-Fix: cache='no-store' — sonst liefert der Browser
+  // beim Modal-Close-Refresh den stale Cached-Response und der OAuth-
+  // Status springt nicht ohne manuellen Page-Reload.
   const loadSettingsData = useCallback(async (handle: string) => {
     try {
       const res = await fetch(`${RUNTIME_URL}/twins/${handle}/settings-data`, {
         credentials: "include",
+        cache: "no-store",
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = (await res.json()) as SettingsDataResponse;
@@ -1397,28 +1401,18 @@ function AuthRowContent({
   }
 
   const oauth = auth.oauth;
-  const expiresLabel = formatGermanDate(Date.parse(oauth.expiresAt));
+  // #131 Phase 5.2 Polish: expires_at + isExpired/isExpiringSoon-Badges
+  // raus — Token-Refresh ist Implementation-Detail. buttonLabel-Differenz
+  // (Re-Login vs Neu loggen) bleibt: bei isExpired signalisiert das Wort
+  // den Re-Login-Bedarf ohne dass ein Datum vor Augen geführt werden muss.
   const buttonLabel = oauth.isExpired ? "Neu loggen" : "Re-Login";
 
   return (
     <div className="space-y-0.5">
-      <div className="flex items-center gap-2 text-text">
-        <span>OAuth (ChatGPT)</span>
-        {oauth.isExpired && (
-          <span className="text-[10px] uppercase tracking-wider text-warn">
-            ⚠ abgelaufen
-          </span>
-        )}
-        {oauth.isExpiringSoon && !oauth.isExpired && (
-          <span className="text-[10px] uppercase tracking-wider text-warn">
-            ⏰ läuft bald ab
-          </span>
-        )}
-      </div>
+      <div className="text-text">OAuth (ChatGPT)</div>
       <div className="text-xs text-muted font-mono">
-        account: {oauth.accountId ?? "(unbekannt)"}
+        account: {oauth.accountId ? maskAccountId(oauth.accountId) : "(unbekannt)"}
       </div>
-      <div className="text-xs text-muted">läuft ab: {expiresLabel}</div>
       <div className="pt-1">
         <button
           type="button"
@@ -1430,6 +1424,14 @@ function AuthRowContent({
       </div>
     </div>
   );
+}
+
+// #131 Phase 5.2 Polish: Account-ID-Maske analog API-Key-Pattern
+// (ersten 4 + Ellipsis + letzten 4). Defensiv: wenn ID kürzer als 9
+// Chars, ungekürzt anzeigen — Mask wäre länger als Original.
+function maskAccountId(id: string): string {
+  if (id.length <= 8) return id;
+  return `${id.slice(0, 4)}…${id.slice(-4)}`;
 }
 
 // ─── #110 Phase 2B Commit 11B: Settings-Edit-Sections ────────────────────────
