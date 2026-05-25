@@ -1,6 +1,6 @@
 # twin-lab — Stand
 
-**Letztes Update:** 25. Mai 2026, Sonntag spät-Abend (Tag 27 — Phase 3.3.3.1 ✅ #131 Phase 3.3 vollständig zu, 18 Blöcke an einem Tag)
+**Letztes Update:** 25. Mai 2026, Sonntag (Tag 27 — Phase 3.4.3.1 ✅ Big-Bang Approval-Refactor, Marker-Pattern komplett raus, ~1260 LOC Net-Removal, 22 Blöcke an einem Tag)
 
 ## Aktuell in Arbeit
 
@@ -687,9 +687,74 @@ Audit nach Verify gelöscht. Cleanup automatisch via `pnpm twin:oauth-phase3-spi
 
 §p in docs/131-OAUTH-STRATEGY.md ergänzt um Phase-3.3.3.1 Smoke-Bilanz + Server-Default-Behavior-Korrektur + Phase-3.3-Closure-Note.
 
+### #131 Tag-27-Spätnacht — Phase 3.4 Vercel-Provider-Refactor (Blöcke 19-22, Commits `69bd303`/`d0b2aa9`/`3f21b3f`/`e5acb63` + 8× Phase-3.4.3.1)
+
+**Phase 3.4 substantiell-zu**. Codex-OAuth-Pfad ist jetzt ein normaler Vercel AI SDK V3 Provider — Twin-Service hat KEIN auth-mode-Branch mehr in `runModel`, beide Modi (api_key + oauth) durchlaufen identische Pipeline mit identischer Approval-Mechanik.
+
+#### Phase 3.4.0 Spike (Block 19, `69bd303`)
+
+Discovery-Spike Doku-Check + Mock-Provider mit Simple-Text + Tool-Roundtrip durch echten Codex-Pro. Findings: Vercel-SDK reproduziert §l-Pattern transparent, Mapping ~280 LoC trivial, native V3-Primitives für Approval+Reasoning.
+
+#### Phase 3.4.1 Provider-Basis (Block 20, `d0b2aa9`)
+
+`apps/runtime/src/oauth/codex-vercel-provider.ts` als Production-Code (~290 LOC): Hybrid-Factory `createCodexProvider({refreshService, twinId})` mit callable+`.languageModel()`-Method, `CodexLanguageModel` implements `LanguageModelV3`, 3 Mapping-Helper (`mapV3PromptToCodex`, `mapV3ToolsToCodex`, `mapCodexOutputToV3Result`). Standalone-Smoke 6/6 Verify-Checks ✅.
+
+#### Phase 3.4.2 Tool-Roundtrip-Smoke (Block 21, `3f21b3f`)
+
+Test 2 dazu im Standalone-Smoke: `get_sum`-Mock-Tool + `stopWhen(stepCountIs(5))`. Verify-Checks step-walken: 2 Steps, 1 Tool-Call, Args `{a:17,b:25}`, finale "42"-Antwort. 2790ms in Spike-Pattern. **Substantielle Diagnose-Korrektur:** `buildMcpToolsFromSkills` ist schon `Record<string, Tool>` — optional-Subschritt `codex-vercel-tools.ts` entfällt komplett (~50 LOC Architektur-Win).
+
+#### Phase 3.4.3.0 Spike — tool-approval-request Discovery (Block 21, `e5acb63`)
+
+Doku-Check (`needsApproval` ist Built-in Tool-Field in `provider-utils@4.0.26`) + 3-Test-Spike mit Production-Provider-Reuse. **Findings (§r):**
+
+- Test 1 ✅: `tool({needsApproval:true})` triggert `tool-approval-request`-Content-Part, `execute()` wird NICHT gerufen
+- Test 2 ✅ (Format-Discovery!): Resume erfordert `assistantContent` im History-Replay-Messages (mit `tool-call` + `tool-approval-request` Parts) — pure `tool-call` reicht nicht. `AI_InvalidToolApprovalError` ohne den Pending-Request-Part
+- Test 3 ✅: Reject via `approved:false` → SDK skipped execute(), Codex antwortet ohne Tool
+
+**Performance-Win vorhergesagt:** Resume in 2s vs heute 5.4s (Phase 3.3.1.3.2-Codex-Pattern) — 2.7× schneller wegen kein eigener Loop + keine Re-Persistierung.
+
+#### Phase 3.4.3.1 Big-Bang Approval-Refactor (Block 22, 8 Commits)
+
+**Marathon-Push Marker-Pattern komplett raus.** Beide Auth-Modi auf native V3 unified. Sub-Phase-disziplinierte Sequenz mit inkrementellen Sub-Commits:
+
+| Sub-Phase | Commit | Inhalt |
+|-----------|--------|--------|
+| A | `fe32a75` | `buildMcpToolsFromSkills.needsApproval`-Field, Marker-Return weg |
+| B | `f9efb82` | `runModel` oauth-Branch nutzt `codexProvider` (Lazy-Singleton) statt runModelViaCodex |
+| C | `a5d455b` | `ApprovalRequestedError` + `detectToolApprovalRequest`-Helper + `createPendingAuditFromApprovalRequest` |
+| D+E | `1d8007f` | `approveMcpToolUseViaHistoryReplay` + `rejectMcpToolUseViaHistoryReplay` |
+| D+E-Fix | `06322f4` | `toModelMessages` content-Array-Pass-through + `enableMcpTools: true` für History-Replay |
+| F | `13829be` | ~1400 LOC Legacy-Removal: runModelViaCodex, approveMcpToolUseViaCodex, McpToolApprovalRequiredError, Marker-Pattern, codexResumeContext, test-regression-89 etc. |
+| G-Smoke-Fix | `10f809b` | `mapAssistantContentForModelMessage` — V3-Provider-Output (`tool-call.input: string`) → V4-AssistantContent (`input: unknown` parsed) |
+
+**Sub-Phase G Bug-Discovery (Lesson):** Spike-Pattern testete Happy-Path mit manuell konstruiertem `{a, b}`-Object. Production-Code liest `assistantContent` aus Provider-Result, dort `tool-call.input` als `string` (JSON-stringified). `AI_InvalidPromptError` beim Vercel-SDK-Schema-Match. Fix via Mapper-Helper.
+
+**End-to-End-Smoke beide Auth-Modi nach Fix grün:**
+- api_key `audit_vO17sY8JXhUj`: provider=anthropic/claude-opus-4-7, reply="42.", status=executed
+- oauth `audit_0voltaVcvQaD`: provider=openai-codex/gpt-5.5, reply="17 plus 25 ergibt 42.", status=executed
+
+**Code-Bilanz:** ~1400 LOC raus, ~140 LOC dazu → **Net ~1260 LOC weg**. Plus substantielle Architektur-Vereinfachung — kein auth-mode-Branching mehr in approveMcpToolUse/rejectPending/runModel, eine einzige Pipeline für beide Provider-Klassen.
+
+§s in docs/131-OAUTH-STRATEGY.md dokumentiert: Sub-Phasen-Tabelle, Bug-Discovery, End-to-End-Smoke-Beweise, Code-Bilanz, Phase-3.4-Closure-Status, BACKLOG #141 für providerMetadata-Verlust (planType/cfRay null nach Refactor — nice-to-have).
+
+**Lessons:**
+
+1. **Sub-Smoke-Disziplin pro Sub-Phase ist Pflicht, nicht Empfehlung.** Sub-Phase G hat einen Bug aufgedeckt der in Sub-Phasen D+E entstanden ist — bei Sub-Smoke nach D+E vor F (Removal) hätte ich den Bug gefangen ohne ~1400 LOC Removal-Diff im Hintergrund. So musste ich erst denken "was passiert wenn ich revert".
+2. **Cast über `unknown` maskiert Type-Mismatches.** `as ChatMessage`-Cast hat den V3↔V4-Schema-Unterschied verschluckt — typecheck war grün, Runtime brach. Pattern: Mapping-Layer mit echtem Typ-Filter statt `unknown`-Cast vertrauen.
+3. **Spike-Pattern testet Happy-Path, Production andere Type-Boundary.** Spike hat assistantContent manuell konstruiert (Object), Production liest aus Provider-Output (string). Test-Coverage muss bewusst die Production-Datenflüsse durchspielen.
+
+#### Phase-3.4-Closure-Status
+
+- 3.4.0 Spike ✅, 3.4.1 ✅, 3.4.2 ✅, 3.4.3.0 ✅, 3.4.3.1 ✅
+- 3.4.4 Reasoning-Mapping-Smoke offen (~10 Min, mit Phase 4/5 mit-ziehen — Provider liefert schon `reasoning`-Content-Parts)
+- 3.4.5 TwinService-Integration ✅ (in 3.4.3.1 Sub-Phase B mit-gemacht)
+- 3.4.6 Marker-Cleanup api_key-Pfad ✅ (in 3.4.3.1 Sub-Phase F mit-gemacht)
+
+**#131 Restliche Sub-Phasen:** Phase 4 (CLI-Login, ~1 Tag) + Phase 5 (Web-UI + Smoke + Doku + Closure, ~1-1.5 Tage). Plus BACKLOG #140 (Re-Pause-Smoke, S nice) und #141 (providerMetadata pass-through, S nice).
+
 ### Tag-27-Closure-Bilanz
 
-**Achtzehn Blöcke an einem Tag — Husky-Hook bis Phase 3.3.3.1 Reasoning-Persistenz komplett:**
+**Zweiundzwanzig Blöcke an einem Tag — Husky-Hook bis Phase 3.4.3.1 Big-Bang Approval-Refactor komplett:**
 
 | Block | Commit | Was |
 |---|---|---|
@@ -711,6 +776,10 @@ Audit nach Verify gelöscht. Cleanup automatisch via `pnpm twin:oauth-phase3-spi
 | 16. Phase 3.3.1.3.2 | `0f1b7ce` | #131 Codex-Resume-Pfad nach Approval: approveMcpToolUse-Switch via codexResumeContext, approveMcpToolUseViaCodex (Tool-Execute + Resume-Iteration via runModelViaCodex mit options.resumeContext), rejectMcpToolUseViaCodex (function_call_output mit `[isError=true]`-Marker, audit.repo.update mit erhaltenem rejected-Status), buildPendingMcpAuditFromError-Helper extrahiert für Re-Pause-Pfad-Reuse, ApproveResult um pending?: boolean + priorAuditId optionales Feld. Smoke grün mit `audit_gSqqVwGGBY6O` (reply="17 plus 25 ergibt 42.", codexIterations=2, 5.4s). §o dokumentiert. **#131 Phase 3.3 substantiell-zu.** |
 | 17. Phase 3.3.3.0 Spike | `0cf822e` | #131 Codex-Reasoning-Trace-Discovery: Spike-Script mit Token-Pre-Check (JWT exp + Heuristik-Fallback), Parser-Compare via CodexSSEParser, Conditional Multi-Trigger (Math → Code-Refactor). Findings: Reasoning-Items IM Stream (`{id, type:"reasoning", summary:[]}`), `summary` LEER (Anti-Distillation), `reasoning_tokens=276/894 (30.9%)`, Hypothesen A+B verifiziert, C halb. Empfehlung: reduziert-weiterbauen (kein UI). §p dokumentiert. |
 | 18. Phase 3.3.3.1 | (Reasoning-Persistenz) | #131 Reasoning-Trace-Persistenz End-to-End: Parser usage-Erweiterung mit defensive Type-Guards, CodexAdapterOutput um reasoningTraces+reasoningTokens, runModelViaCodex Multi-Iteration-Aggregation (Loop-State + Init-Branch + Throw-Site + Loop-End-Metadata), CodexResumeContext additiv erweitert um previousReasoning*, Re-Pause-Catches in approve+rejectMcpToolUseViaCodex schreiben Reasoning ans Original-Audit. Smoke grün mit `audit_PPi49pkeXA2-`: provider=openai-codex, 1 reasoningTrace + 12 reasoningTokens (Server-Default-medium produziert Reasoning bei gpt-5.5 auch bei trivialer Math-Frage — korrigiert Spike-Hypothese). §p erweitert. **#131 Phase 3.3 vollständig zu.** |
+| 19. Phase 3.4.0 Spike | `69bd303` | #131 Vercel-Provider-Mapping-Verification: Doku-Check (LanguageModelV3 stable, native tool-approval-request + reasoning primitives) + Spike mit inline-Provider + Test 1 (Simple Text) + Test 2 (Tool-Roundtrip via Vercel-Multi-Step in 2.5s). §q dokumentiert: Vercel-SDK reproduziert §l transparent, Empfehlung "lohnt sich" für Phase 3.4-Vollbau. |
+| 20. Phase 3.4.1 Provider-Basis | `d0b2aa9` | #131 codex-vercel-provider.ts (~290 LOC Production-Code): createCodexProvider-Hybrid-Factory + CodexLanguageModel implements LanguageModelV3 + 3 Mapping-Helper (mapV3PromptToCodex/mapV3ToolsToCodex/mapCodexOutputToV3Result). Standalone-Smoke 6/6 Verify-Checks ✅ in 1.6s. @ai-sdk/provider devDep→production-dep. |
+| 21. Phase 3.4.2 + 3.4.3.0 | `3f21b3f` + `e5acb63` | #131 Tool-Roundtrip-Smoke (3.4.2): Test 2 dazu im Standalone-Smoke, 6/6 step-walk-Checks ✅ in 2.8s. Plus: substantieller Architektur-Win durch Diagnose (existing buildMcpToolsFromSkills ist 1:1 reuse-bar, codex-vercel-tools.ts-Helper entfällt). Plus 3.4.3.0 Spike (tool-approval-request Discovery): Doku-Check `needsApproval` Built-in Tool-Field + 3-Test-Smoke mit Production-Provider — Format-Discovery für History-Replay (assistantContent muss tool-call+tool-approval-request enthalten). §r dokumentiert. |
+| 22. Phase 3.4.3.1 Big-Bang | `fe32a75` + `f9efb82` + `a5d455b` + `1d8007f` + `06322f4` + `13829be` + `10f809b` (7 Sub-Commits) | #131 Marker-Pattern komplett raus. Beide Auth-Modi auf native V3 unified (needsApproval + tool-approval-request + History-Replay). ~1400 LOC Removal (runModelViaCodex, approveMcpToolUseViaCodex, McpToolApprovalRequiredError, codexResumeContext, Marker-Pattern, test-regression-89, ...). ~140 LOC Add (ApprovalRequestedError, detectToolApprovalRequest, approve+rejectMcpToolUseViaHistoryReplay, createPendingAuditFromApprovalRequest, mapAssistantContentForModelMessage). Net ~1260 LOC weg. Sub-Phase-disziplinierte Sequenz: A→B→C→D+E→F(Removal)→G(Smoke+Fix). End-to-End grün beide Auth-Modi (`audit_vO17sY8JXhUj` api_key + `audit_0voltaVcvQaD` oauth). **#131 Phase 3.4 substantiell-zu.** §s dokumentiert. |
 
 **Fünf Lessons:** Recherche vor Bau (#1), STAND-Doppelpflege (#2), End-to-End-Validation vor Bau (#3), Migration ohne Repo-Update ist Anti-Pattern (#4), Twin-Lab-eigene Setzungen schlagen Industry-Defaults (#5).
 
@@ -718,7 +787,7 @@ Audit nach Verify gelöscht. Cleanup automatisch via `pnpm twin:oauth-phase3-spi
 
 **Phase-3.2-Bonus-Lesson (Diagnose-Wert, kein neuer Lesson-Eintrag):** Briefing für Phase 3.2 hatte angenommen, `runModelViaCodex` müsse `conversationId` akzeptieren und History selbst laden. Phase-3.2.1-Diagnose hat gezeigt: History ist bereits in `messages` (Caller `runOwnerDirect` lädt sie OUTSIDE `runModel` via `loadConversationHistory`). Ohne Diagnose wäre Phase 3.2 mit doppeltem History-Loading + neuer Dep-Injection gebaut worden — Phase-1.1-Diagnose-Pattern bestätigt 13. Mal.
 
-**Tag-27-Outcome #131:** Phase 1 ✅ + Phase 2 ✅ + Strategy-Iteration ✅ + Phase 3.0 Spike ✅ + Phase 3.1 ✅ + Phase 3.2 ✅ + Phase 3.3.0 Spike ✅ + Phase 3.3.2 Spike ✅ + Phase 3.3.1.1 ✅ + Phase 3.3.1.2 ✅ + Phase 3.3.1.3.{0,1,2} ✅ (Approval-Pipeline §m+§n+§o) + Phase 3.3.3.{0,1} ✅ (Reasoning-Discovery+Persistenz §p, `audit_PPi49pkeXA2-`). **#131 Phase 3.3 vollständig zu.** Codex-OAuth-Twins haben jetzt: Persona+Facts+Memory + Multi-Step-Tool-Loop + Auto-Execute + Approval-Pipeline (Pause+Approve+Resume+Reject+Re-Pause) + Reasoning-Traces+Token-Counts im Audit. Capability-Parity zu api_key + Reasoning-Extra. Re-Pause-Pfad code-komplett, Smoke offen (BACKLOG #140). **Substantielle Bonus-Erkenntnis Phase 3.3.3.1:** Server-Default-`effort:medium` produziert Reasoning bei gpt-5.5 auch bei trivialer Frage (12 Tokens für "17+25") — korrigiert Spike-Hypothese, Token-Accounting muss Reasoning einrechnen. **Restliche Sub-Phasen Tag 28+:** Phase 3.4 Vercel-Provider-Refactor (optional, lohnt nur bei AI-SDK-Update) + Phase 4 CLI-Login-Command (~1 Tag) + Phase 5 Web-UI Status + Smoke + Doku + #131-Closure (~1-1.5 Tage).
+**Tag-27-Outcome #131:** Phase 1 ✅ + Phase 2 ✅ + Strategy-Iteration ✅ + Phase 3.0 Spike ✅ + Phase 3.1 ✅ + Phase 3.2 ✅ + Phase 3.3.0/3.3.2 Spikes ✅ + Phase 3.3.1.{1,2} ✅ + Phase 3.3.1.3.{0,1,2} ✅ (Approval-Pipeline §m+§n+§o) + Phase 3.3.3.{0,1} ✅ (Reasoning §p) + Phase 3.4.{0,1,2} ✅ (Vercel-Provider §q) + Phase 3.4.3.{0,1} ✅ (Big-Bang Approval-Refactor §r+§s, 7 Sub-Commits, ~1260 LOC Net-Removal). **#131 Phase 3.3 + 3.4 vollständig zu.** Codex-OAuth-Twins sind funktional gleichwertig zu api_key-Twins, beide Auth-Modi laufen durch identische Vercel-`generateText`-Pipeline mit nativer V3-Approval-Mechanik (`needsApproval` + `tool-approval-request` + History-Replay). Marker-Pattern aus Phase 3.2.F komplett raus. **Substantielle Architektur-Vereinfachung:** kein auth-mode-Branching mehr in `runModel`/`approveMcpToolUse`/`rejectPending`, kein eigener Codex-Loop, kein codex-spezifischer Resume-Snapshot. **Lessons Tag 27:** (1) Sub-Smoke-Disziplin pro Sub-Phase ist Pflicht — Sub-Phase G aufgedeckter V3↔V4-Schema-Bug wäre ohne ~1400 LOC Removal-Diff im Hintergrund leichter zu fixen gewesen; (2) Cast über `unknown` maskiert Type-Mismatches; (3) Spike-Pattern testet Happy-Path, Production hat andere Type-Boundary. **Restliche Sub-Phasen Tag 28+:** Phase 4 CLI-Login (~1 Tag) + Phase 5 Web-UI + Smoke + Doku + #131-Closure (~1-1.5 Tage). Plus BACKLOG #140 (Re-Pause-Smoke nice), #141 (providerMetadata pass-through nice).
 
 **Tag-27-Outcome #138:** Local-Dev-Boot-Friction strukturell behoben, in der Praxis verifiziert beim Smoke-2-Setup.
 

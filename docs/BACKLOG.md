@@ -2863,6 +2863,21 @@ Faktor 14× langsamer im Initial-Smoke deutet auf Token-Refresh-Block hin: `OAut
 
 **Priorität:** Nice. Pattern ist symmetrisch zum verifizierten Pause-Pfad — Bugs unwahrscheinlich, aber End-to-End-Verifikation für Phase-3-Closure-Confidence sinnvoll. Wird mit Phase 3.3.3 oder Phase 4 mitgezogen, wenn dort sowieso Smoke-Setups laufen.
 
+### #141 oauth-providerMetadata-Verlust nach Big-Bang-Refactor (S, nice)
+
+**Kontext (Tag 27 Block 22, Phase 3.4.3.1):** Nach Big-Bang Approval-Refactor läuft oauth-Pfad jetzt durch Vercel-`generateText` via `codexProvider`. End-to-End-Smoke `audit_0voltaVcvQaD` verifiziert: Tool-Roundtrip + History-Replay-Approve grün, finale Antwort "17 plus 25 ergibt 42.", `provider="openai-codex/gpt-5.5"`.
+
+**Beobachtung:** `audit.output.providerMetadata.planType` + `cfRay` sind `null`/`undefined` nach Refactor. Vor Phase 3.4.3.1 waren die im Codex-direct-fetch-Pfad populated (siehe §o + Phase-3.3.x-Smoke-Audits).
+
+**Hypothese:** `codex-vercel-provider.mapCodexOutputToV3Result` liefert die Felder eigentlich im `providerMetadata["openai-codex"]`-Block (Phase-3.4.1-Smoke-Output bestätigt das). Im TwinService-Audit-Pfad gehen sie irgendwo verloren — vermutlich beim `providerMetadata`-Pass-through im `runModel`-Return oder beim `audit.complete`-Schreiben.
+
+**Diagnose-Pfad:**
+1. `runModel`-Return-Statement nach `generateText` — wie wird `providerMetadata` an den Caller-Output gemapped? Eventuell flach kopiert, dabei verschachtelte `openai-codex`-Sub-Object verloren.
+2. `audit.complete`-Caller — was schreibt `providerMetadata` wo hin?
+3. Plus: gleicher Effekt auch im api_key-Pfad (Anthropic-Metadata)?
+
+**Priorität:** Nice. Information ist nice-to-have für Debugging/Token-Accounting, kein User-Visual-Blocker. Phase B / Phase 5-Polish.
+
 ### #131 Status nach Tag 27 (16 Blöcke)
 
 **Phase 3.3 substantiell-zu** mit Phase-3.3.1.3.2-Bau (Block 16). Capability-Parity zwischen api_key (Vercel-SDK) und oauth (Codex) Twins für den kompletten Tool-Use-Pfad: Auto-Execute + Pause + Approve+Resume + Reject + Multi-Step-Loop.

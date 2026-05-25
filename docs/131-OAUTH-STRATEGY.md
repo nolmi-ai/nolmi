@@ -2020,6 +2020,153 @@ Iteration ohne Reasoning → ~1.5-2s schneller.
 - **(C)** Phase 3.4.3.1 später, Phase 4 (CLI-Login) jetzt für Closure-
   Speed
 
+## §s — Big-Bang Approval-Refactor ✅ (Phase 3.4.3.1, Tag 27 Block 22)
+
+**Scope:** Marker-Pattern (Phase 3.2.F) + Codex-Pre-Call-Detect (Phase
+3.3.1.3.1) komplett raus. Beide Auth-Modi (api_key + oauth) nutzen native
+Vercel-V3 `needsApproval` + `tool-approval-request` + History-Replay-
+Approve. ~1400 LOC Removal, ~140 LOC Add — substantielle Code-Reduktion +
+Symmetrie zwischen Auth-Modi.
+
+### Sub-Phasen-Sequenz (8 Commits)
+
+| Sub-Phase | Commit | Inhalt |
+|-----------|--------|--------|
+| A | `fe32a75` | `buildMcpToolsFromSkills` + `needsApproval`-Field, Marker-Return raus |
+| B | `f9efb82` | `runModel.oauth-Branch` auf `codexProvider`-Lazy-Singleton |
+| C | `a5d455b` | `ApprovalRequestedError` + `detectToolApprovalRequest` + `createPendingAuditFromApprovalRequest` |
+| D+E | `1d8007f` | `approveMcpToolUseViaHistoryReplay` + `rejectMcpToolUseViaHistoryReplay` |
+| D+E-Fix | `06322f4` | `toModelMessages` pass-through + `enableMcpTools: true` für History-Replay |
+| F | `13829be` | Legacy-Removal (runModelViaCodex, approveMcpToolUseViaCodex, McpToolApprovalRequiredError, Marker-Pattern, ...) |
+| G-Fix | `10f809b` | `mapAssistantContentForModelMessage` — V3-Provider-Output → V4-AssistantContent |
+
+### Sub-Phase G Bug-Discovery: V3 ≠ V4 für History-Replay
+
+**Spike-Pattern hat den Bug nicht gefangen.** Im Spike haben wir `tool-
+call.input: {a: 17, b: 25}` als Object manuell konstruiert für die
+History-Replay-Messages — das funktionierte sofort. Production-Code-Pfad
+liest aber `assistantContent` aus dem Provider-Result (LanguageModelV3-
+Spec), und dort hat `tool-call.input` Format `string` (JSON-stringified).
+
+Bei Sub-Phase G Smoke api_key brachen die Asserts mit `AI_InvalidPromptError`
+weil Vercel-`generateText` das `messages[]`-Array via V4-AssistantContent-
+Schema validiert. V4 erwartet `input: unknown` (Object), V3 liefert
+`input: string`.
+
+**Plus ähnliche Differenzen:**
+- `tool-call.providerMetadata` in V3, fehlt in V4-AssistantContent
+- `tool-approval-request.providerMetadata` analog
+
+**Fix `mapAssistantContentForModelMessage` (~50 LOC):**
+- `input: string` → `JSON.parse(input)` mit Fallback auf rohen String
+- `providerMetadata` weglassen
+- Defensive Filter: nur `text`, `tool-call`, `tool-approval-request`,
+  `reasoning` durchreichen. Unbekannte Parts (file, source, ...) verworfen
+- Apply in beiden History-Replay-Methoden vor dem `as ChatMessage`-Cast
+
+### End-to-End-Smoke (beide Auth-Modi grün)
+
+**api_key (audit_vO17sY8JXhUj):**
+```jsonc
+{
+  "status": "executed",
+  "provider": "anthropic/claude-opus-4-7",
+  "reply": "42.",
+  "approvalId": "aitxt-..."
+}
+```
+
+**oauth (audit_0voltaVcvQaD):**
+```jsonc
+{
+  "status": "executed",
+  "provider": "openai-codex/gpt-5.5",
+  "reply": "17 plus 25 ergibt 42.",
+  "approvalId": "aitxt-..."
+}
+```
+
+Beide via identischer Code-Pipeline: Native-V3-needsApproval + tool-
+approval-request-Emission + History-Replay-Approve via tool-approval-
+response. Kein capability- oder authMode-spezifischer Branch mehr.
+
+### Code-Bilanz
+
+**~1400 LOC Removal:**
+- `runModelViaCodex` (~350) inkl. Multi-Step-Loop + Pre-Call-Detect +
+  Reasoning-Aggregation
+- `approveMcpToolUseViaCodex` (~145) + `rejectMcpToolUseViaCodex` (~130)
+- `buildPendingMcpAuditFromError` (~50)
+- `McpToolApprovalRequiredError` (komplett) + Catch-Branches
+- `MCP_PENDING_APPROVAL_MARKER` + Marker-Return-Block in `tool-bridge.execute()`
+- `detectPendingToolCall` (~30) + `stopOnPendingApprovalMarker` (~22) + dazugehörige Comment-Blöcke
+- `mapChatMessagesToCodexInput` Helper
+- `CodexResumeContext` + `AuditToolCallSnapshot` aus codex-adapter.ts
+- `AuditMcpToolUseInputShape.codexResumeContext`-Feld
+- `private codexAdapter` Member (TwinService)
+- `test-regression-89-step-walk.ts` (kompletter File)
+- Legacy-Imports
+
+**~140 LOC Add:**
+- `ApprovalRequestedError`-Klasse + Doc (~55)
+- `detectToolApprovalRequest`-Helper (~40)
+- `approveMcpToolUseViaHistoryReplay` + `rejectMcpToolUseViaHistoryReplay`
+  (~180 zusammen, davon ~80 Common-Pattern)
+- `createPendingAuditFromApprovalRequest`-Helper (~55)
+- `mapAssistantContentForModelMessage`-Helper (~50)
+- `runModel` Mini-Erweiterung um codexProvider-Branch (~20)
+- `toModelMessages` content-Array-Pass-through (~10)
+
+**Net:** ~1260 LOC raus.
+
+### Performance-Beobachtung
+
+oauth-Resume-Latenz: Spike §r hatte 2s für äquivalenten Smoke, Production-
+Smoke audit_0voltaVcvQaD vergleichbar (User-Beobachtung). Heute Phase
+3.3.1.3.2 (Codex-Resume-Context-Pattern) hatte 5.4s — Vercel-native ist
+**~2.7× schneller** weil keine Re-Persistierung + kein eigener Loop +
+schmalerer Provider-Round-Trip.
+
+### Lesson für #131 / Phase B
+
+**Spike-Pattern testet Happy-Path, Production-Pfad andere Type-Boundary.**
+Sub-Smoke-Disziplin pro Sub-Phase (oder mindestens vor Removal) hätte den
+V3↔V4-Schema-Mismatch früher gefangen — Cast über `unknown` maskiert den
+Type-Mismatch im typecheck, Vercel-SDK fängt es erst zur Runtime via
+Schema-Validation.
+
+**Konkretes Pattern für Phase B / Phase 5:** wenn Provider-Output und
+generateText-Input über `assistantContent`-ähnliche Felder kommuniziert,
+explizit ein `mapXyzForVercelSDK`-Mapping-Layer dazwischen. Nicht
+`as ChatMessage`-Cast vertrauen.
+
+### Open Item für Phase B (nice, kein Blocker)
+
+oauth-Audit `providerMetadata.planType` + `cfRay` sind nach Refactor
+`null`/`undefined` geworden (vor Phase 3.4.3.1 waren die im Codex-direct-
+fetch-Pfad populated). `codex-vercel-provider.mapCodexOutputToV3Result`
+liefert sie eigentlich (siehe Phase-3.4.1-Smoke-Output), aber im
+TwinService-Audit-Pfad gehen sie irgendwo verloren — vermutlich beim
+`providerMetadata`-Pass-through im `runModel`-Return. **BACKLOG-Item #141
+dokumentiert das.**
+
+### Phase-3.4-Closure-Status
+
+| Sub-Phase | Status |
+|-----------|--------|
+| 3.4.0 Spike (Provider-Mapping) | ✅ `69bd303` |
+| 3.4.1 Provider-Basis | ✅ `d0b2aa9` |
+| 3.4.2 Tool-Roundtrip-Smoke | ✅ `3f21b3f` |
+| 3.4.3.0 Spike (tool-approval-request) | ✅ `e5acb63` |
+| **3.4.3.1 Big-Bang inkl. 3.4.5-Removal** | ✅ **8 Commits** |
+| 3.4.4 Reasoning-Mapping-Smoke | offen (~10 Min, Phase B) |
+| 3.4.5 TwinService-Integration + runModelViaCodex-Removal | ✅ (in 3.4.3.1 mit-gemacht) |
+| 3.4.6 Marker-Cleanup api_key-Pfad | ✅ (in 3.4.3.1 mit-gemacht) |
+
+**Phase 3.4 ist substantiell-zu.** Phase 3.4.4 Reasoning-Smoke ist trivial
+(Codex-Provider liefert schon reasoning-Content-Parts) und kann mit
+Phase 4 (CLI-Login) oder Phase 5 (Web-UI) mit-gezogen werden.
+
 ## Re-Estimate Tag 27 Nachmittag
 
 Initial-Schätzung (Tag 25): L (3-5 Bautage)
