@@ -25,6 +25,7 @@
     "twin:diary-add": "tsx src/scripts/diary-add.ts",
     "twin:diary-list": "tsx src/scripts/diary-list.ts",
     "twin:memory-embed-all": "tsx src/scripts/memory-embed-all.ts",
+    "twin:oauth-phase1-smoke": "tsx src/scripts/test-oauth-phase1.ts",
     "key:generate": "tsx src/scripts/generate-master-key.ts",
     "session-secret:generate": "tsx src/scripts/generate-session-secret.ts",
     "user:create": "tsx src/scripts/create-user.ts",

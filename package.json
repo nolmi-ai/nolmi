@@ -35,6 +35,7 @@
     "twin:diary-add": "pnpm --filter @twin-lab/runtime twin:diary-add",
     "twin:diary-list": "pnpm --filter @twin-lab/runtime twin:diary-list",
     "twin:memory-embed-all": "pnpm --filter @twin-lab/runtime twin:memory-embed-all",
+    "twin:oauth-phase1-smoke": "pnpm --filter @twin-lab/runtime twin:oauth-phase1-smoke",
     "bridge:dev": "pnpm --filter @twin-lab/bridge dev",
     "bridge:db:init": "pnpm --filter @twin-lab/bridge db:init",
     "clean": "pnpm -r clean && rm -rf node_modules",
