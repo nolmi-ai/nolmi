@@ -1,12 +1,12 @@
-// ─── CODEX SSE PARSER (#131 PHASE 3.1.1) ────────────────────────────────────
+// ─── CODEX SSE PARSER (#131 PHASE 3.1.1 + 3.3.1.1) ──────────────────────────
 //
 // Stateful Server-Sent-Events-Parser für die OpenAI Codex-Response-API
 // (`chatgpt.com/backend-api/codex/responses`).
 //
 // Hybrid-Approach:
 //   - Explicit handle für bekannte Event-Types (Discriminated-Union, type-safe
-//     Akkumulation in `text`/`responseId`/`status`).
-//   - Generic fallback für unbekannte Event-Types: Name wird in
+//     Akkumulation in `text`/`responseId`/`status`/`toolCalls`).
+//   - Generic fallback für wirklich unbekannte Event-Types: Name wird in
 //     `unknownEventTypes` gesammelt, damit der Adapter beim Debug-Log
 //     sehen kann, was Codex neuerdings schickt.
 //   - Error-Events (`response.failed` + `response.error`) werden via
@@ -18,29 +18,88 @@
 // der `buffer` hält den letzten unvollständigen Event-Block zwischen
 // `read()`-Aufrufen.
 //
-// Phase 3.1.2 wird `parseChunk()` für Resume-after-Disconnect nutzen
-// (analog `BridgeStream`-Exponential-Backoff-Pattern aus
+// Phase 3.1.2 nutzt `parseChunk()` für Resume-after-Disconnect (analog
+// `BridgeStream`-Exponential-Backoff-Pattern aus
 // `apps/runtime/src/bridge/stream.ts`).
 //
-// Out of Scope (Phase 3.3):
-//   - Tool-Call-Event-Extraction (`response.output_item.added` mit
-//     Tool-Call-Items)
-//   - Reasoning-Traces
+// Phase 3.3.1.1 erweitert um Tool-Call-Event-Extraction (verifiziertes
+// Format aus §k Spike + §l Multi-Step-Spike):
+//   - `response.output_item.added`/`.done` mit `item.type`-Discrimination
+//     (function_call → toolCalls, reasoning → reasoningTraces, message → No-op)
+//   - `response.function_call_arguments.delta`/`.done` zum Aggregieren der
+//     Tool-Call-Argumente (kommen als Streaming-JSON-Chunks)
+//   - 5 Signal-Events explicit handled statt unknownEventTypes
+//     (response.in_progress, content_part.added/done, output_text.done)
+//
+// Reasoning-Trace-Capture ist Phase-3.3-No-Op-Persistenz für künftige
+// Sub-Phase 3.3.3 (Audit-Display) — Parser sammelt, Caller nutzt nicht.
+//
+// Out of Scope (Phase 3.3.1.2 + 3.4):
+//   - Multi-Step-Loop-Orchestration (Phase 3.3.1.2 baut die in TwinService)
+//   - SSE-Streaming bis zum Web-Client (heute collect-to-string)
 //   - Multimodal-Output (Audio, Bilder)
 //
 // Quellen: Reverse-Engineering Simon Willison Nov 2025, HuggingFace
-// codex-proxy. Spec: docs/131-OAUTH-STRATEGY.md §g + §i.
+// codex-proxy. Spec: docs/131-OAUTH-STRATEGY.md §g + §i + §k + §l.
+
+/** Codex-Output-Item-Discrimination basierend auf §k/§l-Findings.
+ *  Phase 3.3 nutzt `function_call` (→ toolCalls) + `reasoning` (→
+ *  reasoningTraces); `message`-Items sind heute No-Op weil Text-Akkumulation
+ *  via `output_text.delta` läuft. */
+export type CodexOutputItem =
+  | {
+      type: "message";
+      id?: string;
+      role?: string;
+      content?: unknown[];
+    }
+  | {
+      type: "function_call";
+      id?: string;
+      call_id?: string;
+      name?: string;
+      arguments?: string;
+    }
+  | {
+      type: "reasoning";
+      id?: string;
+      content?: unknown;
+    }
+  | {
+      type: string;
+      [k: string]: unknown;
+    };
 
 /** Discriminated-Union der bekannten Codex-Events. Generic-Form fängt
  *  alles auf, was Codex neuerdings schickt — ohne den Parser zu brechen. */
 export type CodexStreamEvent =
   | { type: "response.created"; response: { id?: string; status?: string } }
-  | { type: "response.output_item.added"; item: unknown }
+  | { type: "response.in_progress"; response?: unknown }
+  | { type: "response.output_item.added"; item: CodexOutputItem }
+  | { type: "response.output_item.done"; item: CodexOutputItem }
+  | { type: "response.content_part.added"; part?: unknown }
+  | { type: "response.content_part.done"; part?: unknown }
   | { type: "response.output_text.delta"; delta: string }
+  | { type: "response.output_text.done"; text?: string }
+  | { type: "response.function_call_arguments.delta"; item_id: string; delta: string }
+  | { type: "response.function_call_arguments.done"; item_id: string; arguments: string }
   | { type: "response.completed"; response: { id?: string; status?: string } }
   | { type: "response.failed"; error: { message: string; code?: string } }
   | { type: "response.error"; error: { message: string; code?: string } }
   | { type: string; data: unknown };
+
+/** Ein akkumulierter Tool-Call aus dem Codex-Stream. `call_id` ist die
+ *  Cross-Reference zu `function_call_output`-Items beim Multi-Step-Resume
+ *  (§l). `itemId` ist Codex-internes Tracking (z.B. für Streaming-Delta-
+ *  Akkumulation). */
+export interface CodexToolCall {
+  itemId: string;
+  callId: string;
+  name: string;
+  /** JSON-String — Caller muss `JSON.parse()` machen, weil Codex die
+   *  Args als String streamt (§k, §l). */
+  arguments: string;
+}
 
 export interface CodexParseResult {
   /** Akkumulierter Klartext aus allen `response.output_text.delta`-Events. */
@@ -49,6 +108,13 @@ export interface CodexParseResult {
   responseId?: string;
   /** Status aus `response.completed` (typisch `"completed"`). */
   status?: string;
+  /** Tool-Calls aus `function_call`-Items, mit akkumulierten Arguments.
+   *  Phase 3.3 nutzt das im TwinService-Branch (Phase 3.3.1.2). */
+  toolCalls: CodexToolCall[];
+  /** Reasoning-Items captured aber unbenutzt (Phase 3.3.3 wird sie ggf.
+   *  für Audit-Display verwerten). Kommen heute selten — Codex hat in den
+   *  Phase-3.3.0/3.3.2-Smokes `reasoning_tokens: 0` zurückgeliefert. */
+  reasoningTraces: unknown[];
   /** Event-Type-Strings, die NICHT im Explicit-Set waren. Für Debug-Logging. */
   unknownEventTypes: string[];
 }
@@ -84,6 +150,12 @@ export class CodexSSEParser {
   private responseId: string | undefined = undefined;
   private status: string | undefined = undefined;
   private readonly unknownTypes = new Set<string>();
+  /** Tool-Calls in Akkumulation, keyed by `item.id` (Codex-internes
+   *  Tracking — `function_call_arguments.delta/done` referenziert via
+   *  `item_id`). */
+  private readonly toolCallsByItemId = new Map<string, CodexToolCall>();
+  /** Reasoning-Items captured aus `output_item.added`. Phase 3.3 unused. */
+  private readonly reasoningTraces: unknown[] = [];
 
   /**
    * Liest einen ReadableStream<Uint8Array> komplett aus und gibt das
@@ -139,6 +211,8 @@ export class CodexSSEParser {
       text: this.text,
       responseId: this.responseId,
       status: this.status,
+      toolCalls: [...this.toolCallsByItemId.values()],
+      reasoningTraces: this.reasoningTraces,
       unknownEventTypes: [...this.unknownTypes],
     };
   }
@@ -219,9 +293,80 @@ export class CodexSSEParser {
         return;
       }
 
-      case "response.output_item.added": {
-        // Spike-Phase 3.1.1: No-op. Phase 3.3 wird Tool-Calls hier extrahieren
-        // (Item-Type `function_call`, `tool_call`, …).
+      case "response.output_item.added":
+      case "response.output_item.done": {
+        // Item-Type-Discrimination (§k/§l): function_call → toolCalls,
+        // reasoning → reasoningTraces, message → No-op (Text wird via
+        // output_text.delta akkumuliert). `.added` und `.done` werden
+        // beide hier behandelt — `.done` ist defensive (sollte das gleiche
+        // item liefern mit `status: completed`).
+        if (!isObject(event.item)) return;
+        const item = event.item as Record<string, unknown>;
+        const itemType = item.type;
+        if (itemType === "function_call") {
+          const itemId = typeof item.id === "string" ? item.id : "";
+          if (!itemId) return;
+          const callId =
+            typeof item.call_id === "string" ? item.call_id : "";
+          const name = typeof item.name === "string" ? item.name : "";
+          const args =
+            typeof item.arguments === "string" ? item.arguments : "";
+          const existing = this.toolCallsByItemId.get(itemId);
+          if (existing) {
+            // `.done` aktualisiert defensive Fields, falls sie sich
+            // gegenüber `.added` verändert haben (Codex könnte z.B.
+            // call_id erst beim Done-Event setzen — unwahrscheinlich,
+            // aber günstig).
+            if (callId) existing.callId = callId;
+            if (name) existing.name = name;
+            if (args) existing.arguments = args;
+          } else {
+            this.toolCallsByItemId.set(itemId, {
+              itemId,
+              callId,
+              name,
+              arguments: args,
+            });
+          }
+        } else if (itemType === "reasoning") {
+          // Capture-only, Phase 3.3 unused. `.done`-Variante wird nicht
+          // doppelt erfasst (heuristic: reasoning kommt typischerweise nur
+          // einmal pro item.id, in den Smokes 3.3.0/3.3.2 garnicht).
+          if (type === "response.output_item.added") {
+            this.reasoningTraces.push(item);
+          }
+        }
+        // message-Items: No-Op (Text via output_text.delta), ebenso unbekannte
+        // item-Types → ignoriert ohne unknownEventTypes-Eintrag, weil das
+        // wrapping-Event explicit handled ist.
+        return;
+      }
+
+      case "response.function_call_arguments.delta": {
+        // Streaming-Akkumulation der Tool-Call-Args (§k: kommt als
+        // JSON-String-Chunks zwischen .added und .done). `item_id`
+        // referenziert das function_call-Item.
+        const itemId =
+          typeof event.item_id === "string" ? event.item_id : "";
+        const delta = typeof event.delta === "string" ? event.delta : "";
+        if (!itemId || !delta) return;
+        const existing = this.toolCallsByItemId.get(itemId);
+        if (existing) existing.arguments += delta;
+        return;
+      }
+
+      case "response.function_call_arguments.done": {
+        // Final-Args sind vollständig. Überschreibt akkumulierte Variante
+        // als Sicherheit (Buffer-Boundary-Issue, fehlende Delta-Events) —
+        // §l-Beobachtung: `.done` liefert immer den kompletten arguments-
+        // String, nicht nur den letzten Chunk.
+        const itemId =
+          typeof event.item_id === "string" ? event.item_id : "";
+        const args =
+          typeof event.arguments === "string" ? event.arguments : "";
+        if (!itemId) return;
+        const existing = this.toolCallsByItemId.get(itemId);
+        if (existing && args) existing.arguments = args;
         return;
       }
 
@@ -229,6 +374,17 @@ export class CodexSSEParser {
         if (typeof event.delta === "string") {
           this.text += event.delta;
         }
+        return;
+      }
+
+      case "response.in_progress":
+      case "response.content_part.added":
+      case "response.content_part.done":
+      case "response.output_text.done": {
+        // Signal-Events ohne State-Mutation (§l-Verifikation): markieren
+        // Lifecycle-Phasen, die wir heute nicht abbilden. Explicit case
+        // verhindert, dass sie als `unknownEventTypes` getrackt werden —
+        // sonst füllt der Hybrid-Fallback das Audit-Meta mit Noise.
         return;
       }
 
