@@ -1,12 +1,11 @@
 import "dotenv/config";
 
-import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { loadMasterKey } from "../crypto-utils.js";
 import { createSqliteRepository } from "../repository/index.js";
+import { loadCodexToken } from "../oauth/codex-auth-file.js";
 import { OAuthTokensRepo } from "../oauth/oauth-tokens-repo.js";
 import { OAuthRefreshService } from "../oauth/refresh-service.js";
 import { CodexAdapter } from "../oauth/codex-adapter.js";
@@ -34,16 +33,6 @@ const WORKSPACE_ROOT = path.resolve(__dirname, "../../../..");
 const DB_PATH =
   process.env.TWIN_DATABASE_PATH ??
   path.resolve(WORKSPACE_ROOT, "data/twin.db");
-const CODEX_AUTH_PATH = path.resolve(os.homedir(), ".codex/auth.json");
-
-interface CodexAuthFile {
-  tokens?: {
-    access_token?: string;
-    refresh_token?: string;
-    account_id?: string;
-    id_token?: string;
-  };
-}
 
 type Mode = "smoke" | "setup" | "cleanup";
 
@@ -56,37 +45,22 @@ function parseMode(): Mode {
   );
 }
 
-function loadCodexToken(): {
-  accessToken: string;
-  refreshToken: string;
-  accountId: string | null;
-} {
-  if (!fs.existsSync(CODEX_AUTH_PATH)) {
-    throw new Error(
-      `Codex-Auth-File nicht gefunden: ${CODEX_AUTH_PATH}. ` +
-        `Bitte 'codex login' lokal laufen lassen vor dem Smoke.`,
-    );
-  }
-  const auth = JSON.parse(
-    fs.readFileSync(CODEX_AUTH_PATH, "utf-8"),
-  ) as CodexAuthFile;
-  const accessToken = auth.tokens?.access_token;
-  if (!accessToken) {
-    throw new Error(
-      `Kein access_token in ${CODEX_AUTH_PATH}. ` +
-        `'codex login --force' für frischen Token.`,
-    );
-  }
-  return {
-    accessToken,
-    refreshToken: auth.tokens?.refresh_token ?? "",
-    accountId: auth.tokens?.account_id ?? null,
-  };
-}
+// Phase 4.1: setup-Mode dieses Spikes ist DEPRECATED — Production-CLI
+// `pnpm twin:oauth-login <@handle>` ersetzt ihn vollständig (inkl. codex
+// login Subprocess-Wrapper). smoke + cleanup bleiben für Diagnose-Sessions.
 
 async function main(): Promise<void> {
   const mode = parseMode();
   console.log(`=== #131 Phase 3.0 Spike — Mode: ${mode} ===\n`);
+
+  if (mode === "setup") {
+    console.warn(
+      `⚠️  setup-Mode ist DEPRECATED seit Phase 4.1. Bitte stattdessen:\n` +
+        `      pnpm twin:oauth-login @<handle>\n` +
+        `   Production-CLI wrapt 'codex login' direkt — kein manueller ` +
+        `Token-Refresh nötig.\n`,
+    );
+  }
 
   const masterKey = loadMasterKey();
   const repo = createSqliteRepository(DB_PATH);
