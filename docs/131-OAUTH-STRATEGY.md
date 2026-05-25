@@ -2663,6 +2663,285 @@ nice-to-have-Polish.
 
 ---
 
+## §v — Phase 5.0 Diagnose: Web-UI Status + #131-Closure (Tag 28 Block 26)
+
+**Scope:** Pure Diagnose vor Phase-5.1-5.4-Bau. UI-Setzung Tag-28-Abend:
+Status-Display + "OAuth aktivieren"-Button öffnet Modal mit CLI-Befehl
+(Copy-Button) — kein Web-OAuth-Flow in Phase A, der CLI-Wrapper aus
+Phase 4 bleibt der Login-Pfad. Output: §v als Bau-Briefing-Grundlage.
+
+### §v.1 — Settings-Page Surface
+
+**Datei:** `apps/web/app/settings/page.tsx` — 1919 LOC single-file mit
+inline Forms + Tabs.
+
+**Existing Twin-Profile-Übersicht (`<dl>` mit `<Row label>`-Layout):**
+- `<Row label="LLM">` provider/model + baseUrl
+- `<Row label="API-Key">` Maske + Source (`user`/`system`) + "verschlüsselt in DB"-Hinweis
+- `<Row label="Bridge">` url + masked token
+- `<Row label="Mandates">` count
+- `<Row label="Status">` aktiv-Dot
+- `<Row label="Erstellt">` + `<Row label="Aktualisiert">` mit `formatGermanDate`
+
+**Phase 5.2 fügt ein:** neue `<Row label="Auth">` zwischen "API-Key" und
+"Bridge" — Mode (`api_key`/`oauth`) + bei oauth account_id + expires_at
++ optional Action-Button. Reuse-1:1 Pattern.
+
+**Existing Settings-Endpoints (Web → Runtime):**
+- `GET /twins/:handle/settings-data` (Z. 1607) — Persona + LLM + ActivePresets
+- `PATCH /twins/:handle/full-config` (Z. 1646) — atomares Submit
+
+### §v.2 — Backend-API + Sicherheits-Surface
+
+**Routing-Pattern:** `registerTwinSettingsRoutes(app, deps, requireOwner)`
+(server.ts:1595). `requireOwner` (Z. 173) liefert `{ entry, user }` nach
+401/403-Gate.
+
+**`profileToResponse` (server.ts:192) liefert HEUTE NICHT:**
+- `authMode` → fehlt komplett im Web-State
+- `oauthTokenPublic` → fehlt
+
+**OAuthTokensRepo:**
+- `toPublic(row): OAuthTokenPublic` ✅ vorhanden (Z. 156)
+- `OAuthTokenPublic` enthält: `twinId`, `provider`, `expiresAt`,
+  `accountId`, `isExpired`, `isExpiringSoon` (< 5 Min), Timestamps
+- **`access_token`/`refresh_token` werden NIE returned** — Public-View
+  ist Owner-Safe.
+- ABER: `findRowByTwinAndProvider` ist `private` (Z. 191) — Phase 5.1
+  muss neuen Public-Reader ergänzen, z.B. `findPublic(twinId, provider):
+  OAuthTokenPublic | null` (~10 LOC).
+
+**Endpoint-Strategie (Setzung Phase 5):**
+**Option A (gewählt):** `settings-data` um `auth: { mode, oauth?:
+OAuthTokenPublic }` erweitern. DRY — Settings-Page fetcht heute schon
+`settings-data` beim Mount. Kein neuer Endpoint, kein neuer Roundtrip.
+
+**Option B (verworfen):** dedizierter `/twins/:handle/auth-status`.
+Cleaner separated-concerns, aber zusätzlicher Fetch + Wiring ohne Nutzen.
+
+### §v.3 — UI-Component-Library
+
+| Lib | Status |
+|-----|--------|
+| `next` 14+ + React 18 | ✅ Stack |
+| `sonner` (Toast) | ✅ benutzt — `toast.success("Befehl kopiert!")` Pattern |
+| `react-markdown` + `remark-gfm` | für Markdown-Inhalt |
+| **shadcn/Radix/headlessui** | ❌ NICHT installiert — plain Tailwind |
+| `tailwindcss` | ✅ Styling |
+
+**Modal-Pattern:** `apps/web/components/ModalWrapper.tsx` 53 LOC —
+Backdrop, Escape-Key, Click-Outside, `maxWidthClass` für Größen-Variation.
+Reuse-Beispiele: `McpServerAddModal`, `RejectReasonModal`, `SkillEditorModal`,
+`ResearchFirstUseModal`.
+
+**Clipboard-Pattern:** `navigator.clipboard.writeText(text)` existiert in
+`apps/web/app/inbox/page.tsx:354`. Plain Web-API, kein Polyfill nötig.
+
+**Toast-Pattern:** `toast.success/error` aus `sonner` direkt importierbar
+(`Toaster` ist in `app/layout.tsx:3` mounted).
+
+### §v.4 — Architektur-Skizze Phase 5.1-5.4
+
+**Phase 5.1 — Backend-Erweiterung (~30 Min)**
+
+```ts
+// apps/runtime/src/oauth/oauth-tokens-repo.ts
+// Plus public Read-Method:
+findPublic(twinId: string, provider: OAuthProvider): OAuthTokenPublic | null {
+  const row = this.findRowByTwinAndProvider(twinId, provider);
+  if (!row) return null;
+  return this.toPublic(mapRow(row, this.masterKey));  // decrypt + Public-Cast
+}
+
+// apps/runtime/src/server.ts → registerTwinSettingsRoutes
+// settings-data-Response um auth-Block:
+return {
+  persona, personaSource, llmConfig, activePresets,
+  auth: {
+    mode: profile.authMode,  // 'api_key' | 'oauth'
+    oauth: profile.authMode === 'oauth'
+      ? deps.oauthTokensRepo.findPublic(profile.twinId, 'openai')
+      : null,
+  },
+};
+```
+
+`deps.oauthTokensRepo` ist in `index.ts:117/119` schon wired — keine
+weitere Verkabelung nötig.
+
+**Phase 5.2 — UI-Bau (~45-60 Min)**
+
+```tsx
+// apps/web/app/settings/page.tsx — neue Row in Profile-Übersicht:
+<Row label="Auth">
+  {auth.mode === 'api_key' && (
+    <div className="space-y-1">
+      <span className="text-text">API-Key</span>
+      <button onClick={() => setOAuthModalOpen(true)} className="...">
+        OAuth aktivieren
+      </button>
+    </div>
+  )}
+  {auth.mode === 'oauth' && auth.oauth && (
+    <div className="space-y-0.5">
+      <div className="text-text">OAuth (ChatGPT)</div>
+      <div className="text-xs text-muted font-mono">
+        account: {auth.oauth.accountId ?? '?'}
+      </div>
+      <div className="text-xs text-muted">
+        läuft ab: {formatGermanDate(Date.parse(auth.oauth.expiresAt))}
+        {auth.oauth.isExpired && <span className="ml-2 text-red-500">⚠️ abgelaufen</span>}
+        {auth.oauth.isExpiringSoon && !auth.oauth.isExpired &&
+          <span className="ml-2 text-amber-500">⏰ läuft bald ab</span>}
+      </div>
+      <button onClick={() => setOAuthModalOpen(true)} className="...">
+        Re-Login
+      </button>
+    </div>
+  )}
+</Row>
+```
+
+**Modal — neue Component `apps/web/components/OAuthActivationModal.tsx`
+(~80 LOC):**
+
+```tsx
+"use client";
+import { useState } from "react";
+import { toast } from "sonner";
+import { ModalWrapper } from "./ModalWrapper";
+
+interface Props {
+  handle: string;
+  onClose: () => void;
+  onRefresh: () => Promise<void>;
+}
+
+export function OAuthActivationModal({ handle, onClose, onRefresh }: Props) {
+  const cmd = `pnpm twin:oauth-login ${handle}`;
+  const [refreshing, setRefreshing] = useState(false);
+
+  const copy = async () => {
+    await navigator.clipboard.writeText(cmd);
+    toast.success("Befehl kopiert");
+  };
+
+  return (
+    <ModalWrapper onClose={onClose} maxWidthClass="max-w-lg">
+      <div className="p-6 space-y-4">
+        <h2 className="text-lg">OAuth für {handle} aktivieren</h2>
+        <ol className="space-y-2 text-sm">
+          <li>1. Terminal öffnen</li>
+          <li>2. Befehl unten kopieren + ausführen</li>
+          <li>3. Browser-Tab geht auf → ChatGPT-Login durchklicken</li>
+          <li>4. Hier zurück + „Status aktualisieren"</li>
+        </ol>
+        <div className="flex gap-2">
+          <code className="flex-1 bg-surface-2 p-2 font-mono text-xs">{cmd}</code>
+          <button onClick={copy} className="...">Kopieren</button>
+        </div>
+        <div className="flex justify-end gap-2">
+          <button onClick={onClose} className="...">Schließen</button>
+          <button
+            disabled={refreshing}
+            onClick={async () => {
+              setRefreshing(true);
+              try { await onRefresh(); toast.success("Status aktualisiert"); onClose(); }
+              catch (e) { toast.error("Refresh fehlgeschlagen"); }
+              finally { setRefreshing(false); }
+            }}
+            className="..."
+          >
+            {refreshing ? "Lade ..." : "Status aktualisieren"}
+          </button>
+        </div>
+      </div>
+    </ModalWrapper>
+  );
+}
+```
+
+**Phase 5.3 — Doku-Closure (~30 Min)**
+- ROADMAP-Update: Phase 3.3 + 3.4 + 4 als ✅, #131 nähert sich Closure
+- STAND-Update Tag-28-Tagessequenz (Block 26-28: 5.0/5.1+5.2/5.3+5.4)
+- README schon mit OAuth-Snippet (§u.5) — KEIN separates PHASE-A-OAUTH-
+  GUIDE.md nötig (User-Guide-Audience florian/heiko sind dev-fit, README-
+  Quick-Start reicht)
+
+**Phase 5.4 — BACKLOG-Cleanup (~15 Min)**
+- `#131` BACKLOG-Item (Z. 1528+) auf ✅ markieren oder verschlanken auf
+  „siehe docs/131-OAUTH-STRATEGY.md §a-§v"
+- `#139` Latenz-Tracking — Status-Update prüfen (eventuell teilweise
+  durch Phase-3.4-Vercel-Provider gelöst)
+- `#140`, `#141`, `#142` bleiben (Phase-B-Polish)
+- Phase-B-Items skizzieren als neue BACKLOG-Einträge:
+  - **Web-OAuth-Production** (XL): eigener PKCE-Listener im Runtime,
+    Web-Callback-Endpoint, kein CLI-Subprocess mehr. ~1-2 Bautage.
+  - **Token-Refresh-UI** (S): User-triggered Refresh-Button in Settings,
+    Backend ruft `OAuthRefreshService.ensureFresh(twinId)`.
+  - **OAuth-Deaktivieren-Pfad** (S): "Token entfernen"-Button in Settings,
+    cleared oauth_tokens-Row + setzt authMode='api_key'.
+
+### §v.5 — User-Flow
+
+1. User öffnet Settings-Page → fetch `/twins/@markus/settings-data`
+2. Response enthält `auth: { mode: 'api_key', oauth: null }`
+3. UI rendert "Auth: API-Key" + Button "OAuth aktivieren"
+4. Klick → `OAuthActivationModal` öffnet mit:
+   - Schritte 1-4
+   - Code-Block `pnpm twin:oauth-login @markus` + Copy-Button
+   - Refresh-Button
+5. User klickt Copy → `toast.success("Befehl kopiert")`
+6. User wechselt Terminal, paste, ausführen → Phase-4-CLI läuft
+7. User klickt Browser-OAuth-Approval durch (Phase-4-Hybrid-Detection)
+8. User wechselt zurück zur UI, klickt "Status aktualisieren"
+9. UI re-fetcht `settings-data` → `auth.mode === 'oauth'`, `auth.oauth`
+   enthält Public-View
+10. Row zeigt jetzt OAuth-Status mit account_id + expires_at + Re-Login-Button
+
+### §v.6 — Edge-Cases
+
+| Fall | UI-Verhalten |
+|------|--------------|
+| api_key, kein oauth_tokens-Row | `auth.mode='api_key'`, `auth.oauth=null` — "OAuth aktivieren"-Button |
+| oauth, expires_at in Zukunft | grüner Status, expires-Datum, Re-Login als sekundärer Button |
+| oauth, `isExpiringSoon` (< 5 Min) | amber-Badge "⏰ läuft bald ab" |
+| oauth, `isExpired` | rotes Badge "⚠️ abgelaufen" + primärer Re-Login-Button |
+| Race: User klickt Refresh während CLI noch läuft | Just-on-click Refresh (kein WebSocket-Push für Phase A) — alter Status bis zum nächsten Refresh |
+| Twin auf oauth aber oauth_tokens-Row fehlt | Inkonsistenter DB-Stand — UI fällt auf "api_key"-Render zurück, Error-Toast "Token nicht gefunden, bitte neu loggen" |
+
+### §v.7 — Aufwand-Estimate
+
+| Phase | Inhalt | Aufwand |
+|-------|--------|---------|
+| 5.1 Backend | `findPublic` + `settings-data`-Extension | 30 Min |
+| 5.2 UI | Row + OAuthActivationModal + State | 60 Min |
+| 5.3 Doku-Closure | ROADMAP + STAND-Closure | 30 Min |
+| 5.4 BACKLOG-Cleanup | #131 closed, Phase-B-Items skizziert | 15 Min |
+| **Σ Phase 5** | | **~2-2.5h** |
+
+Phase-4-Estimate war exakt das gleiche und ist genau eingehalten — ~2.5h
+real für Phase 5 ist plausibel.
+
+### §v.8 — Setzungen für Phase 5.1+ (zu bestätigen vor Bau)
+
+1. **Endpoint-Strategie:** Erweitere `settings-data` (Option A — DRY).
+   Kein neuer `/auth-status`.
+2. **UI-Pattern:** Inline `<Row label="Auth">` in Profile-Übersicht.
+   Kein eigener Tab, kein eigenes Sub-Page.
+3. **Modal:** `ModalWrapper` + custom Content (`OAuthActivationModal.tsx`),
+   ~80 LOC.
+4. **Refresh-Strategy:** Just-on-click Refresh-Button im Modal —
+   kein WebSocket-Push, kein Polling.
+5. **Phase-A-User-Guide:** README-Quick-Start (§u.5) reicht, kein
+   separates `PHASE-A-OAUTH-GUIDE.md`.
+6. **Code-Style:** Plain Tailwind, kein neuer Dep, sonner-Toast für
+   Copy-Feedback.
+7. **#131-Closure-Marker:** Phase 5.3-4 schließt #131. Statt komplettem
+   BACKLOG-Item-Delete: "Status: ✅ Done — siehe docs/131-OAUTH-STRATEGY.md".
+
+---
+
 ## Verweise
 
 - OpenAI Codex Auth-Doku: https://developers.openai.com/codex/auth
