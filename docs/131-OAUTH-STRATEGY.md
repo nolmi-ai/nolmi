@@ -2510,7 +2510,7 @@ Passt zur 1-Tag-Estimate aus dem ursprünglichen Bullet — die ~1400 LOC
 aus dem alten Loopback-Listener-Plan entfallen komplett, Wrapper-Pattern
 ist ~80 LOC plus Reuse.
 
-### §t.10 — Setzungen für Phase 4.1 (zu bestätigen vor Bau)
+### §t.10 — Setzungen für Phase 4.1 (User-bestätigt 25.05.2026 20:30 Tag-27-Abend)
 
 1. **Codex-Binary-Lookup:** `CODEX_BIN`-Env-Override → macOS-Default
    `/Applications/Codex.app/Contents/Resources/codex`. Linux-Path ist
@@ -2519,8 +2519,31 @@ ist ~80 LOC plus Reuse.
    case-insensitive). Kein Flag-Parsing — positional.
 3. **Owner-Check:** keiner in Phase A. Phase B kann `--as-user` ergänzen.
 4. **Confirmation-Prompts:** keine — Re-Login = explicit User-Intent.
-5. **Subprocess-Detection:** Process-Exit (`child.on('close', code)`),
-   kein File-Watcher. Validierung im Phase-4.2-Smoke.
+5. **Subprocess-Detection: Hybrid (CHANGED gegenüber §t.6).** Statt
+   reinem Process-Exit-Watch laufen drei Promises in `Promise.race`:
+
+   - **(a) `child.on('close', code)`** — codex login terminierte.
+     Bei `code === 0`: Success-Pfad weiter zu Token-Read.
+     Bei `code !== 0`: Fehler-Pfad mit Exit-Code im Error-Message.
+   - **(b) `fs.watch(~/.codex/auth.json)` für `mtime`-Update** — Token
+     wurde geschrieben, **trotz noch-laufendem Subprocess**. Trigger:
+     `change`-Event mit aktuellem `fs.statSync(...).mtimeMs > startMtime`.
+     Bei mtime-Update: Token-Read + DB-Persist sofort, Subprocess darf
+     im Hintergrund weiterlaufen (orphan-detach via `child.unref()`).
+   - **(c) 90s-Timeout** — `setTimeout(reject, 90_000)`. Falls weder
+     Exit noch mtime-Update: User-Hint "codex login scheint zu hängen,
+     bitte manuell prüfen (Browser-Tab offen? Re-Login nötig?)".
+
+   Was zuerst feuert, gewinnt. `fs.watch` muss **vor** Subprocess-Spawn
+   initialisiert sein, damit kein mtime-Update zwischen Spawn und Watch
+   verloren geht. Plus: pre-Spawn `startMtime` festhalten für
+   Comparison-Robustheit (nur Updates **nach** Login-Start zählen).
+
+   **Begründung Hybrid:** codex login kann unter Umständen länger laufen
+   als der Browser-Roundtrip dauert (z.B. Cleanup-Phase, OAuth-State-
+   Verification). mtime-Watch macht den User-Experience schneller —
+   sobald Token im File ist, kann twin-lab persistieren, ohne auf
+   Subprocess-Exit zu warten.
 6. **Token-Expiry-Default:** `Date.now() + 50min` (analog Spike).
    Refresh-Service holt sich bei Bedarf neuen Token.
 
