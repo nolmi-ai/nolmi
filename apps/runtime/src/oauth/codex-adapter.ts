@@ -39,6 +39,94 @@ export interface CodexInputItem {
   content: Array<{ type: "input_text" | "output_text"; text: string }>;
 }
 
+// #131 Phase 3.3.1.3.1: Multi-Step-Resume per §l-Pattern appendet zusätzlich
+// `function_call`- und `function_call_output`-Items ans input-Array. Phase
+// 3.2/3.3.1.2 hat das per `as unknown as CodexInputItem`-Cast gemacht — für
+// Resume-Context-Persistence (audit.input.codexResumeContext.inputItems)
+// brauchen wir aber einen Type, der das diskriminiert wieder hochlesen kann.
+// `CodexInputItemAny` ist die volle Union; `CodexInputItem` bleibt als
+// Schmal-Type für CodexAdapterInput.input erhalten — der Adapter selbst
+// braucht nur `message`-Strukturkenntnis, alle anderen Items werden
+// transparent durchgereicht (JSON-Serialisierung im Body).
+export interface CodexFunctionCallItem {
+  type: "function_call";
+  call_id: string;
+  name: string;
+  arguments: string;
+}
+export interface CodexFunctionCallOutputItem {
+  type: "function_call_output";
+  call_id: string;
+  output: string;
+}
+export type CodexInputItemAny =
+  | CodexInputItem
+  | CodexFunctionCallItem
+  | CodexFunctionCallOutputItem;
+
+// #131 Phase 3.3.1.3.1: Resume-Context für Codex-OAuth-Approval-Pause.
+// Beim Pre-Call-Detect eines `requiresApproval=true`-Skills wirft
+// runModelViaCodex `McpToolApprovalRequiredError` mit diesem Snapshot als
+// `codexResumeContext`-Property. Der existierende Catch in
+// `runOwnerDirect` persistiert das additiv in `audit.input.codexResumeContext`,
+// damit Phase 3.3.1.3.2 die Loop ab dem Pending-Tool-Call fortsetzen kann.
+//
+// WICHTIG zur Reihenfolge-treuen Semantik: `inputItems` ist der Snapshot
+// VOR dem `function_call`-Echo des Pending-Tools — Auto-Tools davor in
+// derselben Iteration sind bereits ausgeführt und stehen als
+// `function_call`+`function_call_output`-Paar im Array; das Pending-Tool
+// selbst noch nicht. Resume hängt beim Approve den ausgeführten
+// Pending-Output an dieser Stelle ein und startet die nächste Iteration.
+export interface CodexResumeContext {
+  /** Tool-Call, der approved werden muss. `name` ist der Codex-Tool-Name
+   *  (z.B. `mcp_everything-approval_get-sum`), nicht der Twin-Lab-Skill-
+   *  Name — Resume muss den Reverse-Lookup über `skillByCodexName`
+   *  wiederholen. */
+  pendingToolCall: {
+    name: string;
+    callId: string;
+    arguments: string;
+    itemId: string;
+  };
+  /** Snapshot des input-Arrays bis kurz VOR dem Pending-Tool-Call.
+   *  Auto-Tool-Roundtrips früherer Iterations stehen als
+   *  function_call+function_call_output-Paare drin. */
+  inputItems: CodexInputItemAny[];
+  /** Tool-Definitionen die Codex in dieser Iteration hatte — Resume nutzt
+   *  die gleiche Liste, falls der User zwischen Pause und Resume Skills
+   *  toggelt (semantische Stabilität). */
+  toolDefinitions: CodexToolDefinition[];
+  /** Loop-Iteration in der die Pause ausgelöst wurde (1-indexed). */
+  iterationCount: number;
+  /** Akkumulierter Text aus früheren Iterations (meist leer, weil Tools
+   *  vor finalem Text laufen). */
+  aggregatedText: string;
+  /** Bereits ausgeführte Tool-Calls — für Audit-Trail-Kontinuität im
+   *  Resume (Phase 3.3.1.3.2 mergt die in den finalen audit.output). */
+  previousToolCalls: AuditToolCallSnapshot[];
+  /** Codex-Response-Metadaten der letzten Iteration — informational, nicht
+   *  funktional für Resume (Codex liest `input`-Array, nicht
+   *  `previous_response_id`, siehe §l). */
+  lastResponseId: string | undefined;
+  lastStatus: string | undefined;
+  lastPlanType: string | null;
+  lastCfRay: string | null;
+  totalLatencyMs: number;
+  unknownEventTypes: string[];
+}
+
+/** Lokale Mini-Shape — wir wollen Resume-Context typesafe ohne harten Import
+ *  des `AuditToolCall`-Shared-Types in den OAuth-Layer. Felder matched
+ *  `AuditToolCall` aus `@twin-lab/shared` (input/output sind `z.unknown()` →
+ *  TypeScript mapped das auf `unknown` mit implizitem undefined-Subset, also
+ *  optional). */
+export interface AuditToolCallSnapshot {
+  toolName: string;
+  input?: unknown;
+  output?: unknown;
+  codexCallId?: string;
+}
+
 export interface CodexAdapterInput {
   twinId: string;
   /** Pre-built System-Prompt-String — Caller komponiert Persona + Facts +

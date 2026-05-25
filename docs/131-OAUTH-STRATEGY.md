@@ -944,6 +944,234 @@ zeigt: `input`-Array-Re-Submit funktioniert robust (HTTP 200, 521ms).
 Phase 3.3.1.3.0 ist **abgeschlossen ohne Code-Bau**. Phase 3.3.1.3.1
 braucht User-Bestätigung für Empfehlung (Hypothese 1) bevor Bau startet.
 
+## §n — Codex-Pause-Pfad ✅ (Phase 3.3.1.3.1, Tag 27 Block 15)
+
+**Scope:** Pause-Pfad isoliert — `runModelViaCodex` wirft
+`McpToolApprovalRequiredError` (mit `codexResumeContext`-Snapshot)
+sobald Codex ein `requiresApproval=true`-Skill aufruft, existierender
+Vercel-SDK-Catch in `runOwnerDirect` persistiert Pending-Audit. Resume
+ist **Phase 3.3.1.3.2** (folgt).
+
+### Architektur (A) — Throw + Symmetrie zum Vercel-SDK-Pfad
+
+§m hatte zwei Optionen — (A) Throw + Vercel-Catch-Reuse oder (B) Codex-
+lokaler Pending-Insert. **Entschieden: (A).** Begründung:
+
+- **Code-Reuse maximal:** der existierende Catch in
+  `twin-service.ts:728-759` ändert sich nur um eine spread-conditional
+  Zeile (`...(err.codexResumeContext ? { codexResumeContext: err.codexResumeContext } : {})`).
+  Pending-Audit-Insert + SSE-Notify + UI-Render-Pfad sind 100% wiederverwendet.
+- **Symmetrie:** beide Auth-Modi konvergieren auf denselben Error-Type
+  und Persistenz-Pfad. Future-Pflege (z.B. neuer Pending-Reason) muss
+  nur an einer Stelle.
+- **Schema additiv:** kein Migration. `audit.input.codexResumeContext`
+  ist optionales JSON-Field, Vercel-SDK-Pfad lässt es undefined,
+  `AuditMcpToolUseInputShape` (lokal in twin-service.ts) um ein
+  optionales Feld erweitert — `@twin-lab/shared`-`AuditMcpToolUseInputSchema`
+  bleibt unverändert (validiert weiter den Kern-Pflichtsatz).
+
+### Reihenfolge-treue Multi-Tool-Strategie (Option i)
+
+Bei mehreren Tool-Calls in einer Codex-Iteration wird strikt sequentiell
+verarbeitet (`for (const toolCall of result.toolCalls)`):
+
+- Auto-Tools FRÜHER in der Iteration werden ausgeführt + an `input`
+  appended (`function_call`+`function_call_output`-Paar pro Tool)
+- Erstes Approval-Tool → `throw McpToolApprovalRequiredError` mit
+  Snapshot vor dem function_call-Echo des Pending-Tools
+- Restliche Tool-Calls dieser Iteration werden verworfen — bei Resume
+  bekommt Codex die neue Iteration mit dem appended Pending-Output und
+  kann den Plan ändern (Codex re-decided, was als nächstes nötig ist)
+
+Matched existing Vercel-SDK "erster Marker gewinnt"-Semantik
+(`twin-service.ts:2255-2259`). Multi-Approval-Tools-pro-Iteration-Edge-
+Case → BACKLOG (siehe unten).
+
+### 12-Felder-Resume-Context-Schema
+
+Persistiert in `audit.input.codexResumeContext` (`apps/runtime/src/oauth/
+codex-adapter.ts` — `CodexResumeContext`-Interface):
+
+| Feld | Type | Zweck |
+|------|------|-------|
+| `pendingToolCall` | `{name, callId, arguments, itemId}` | Codex-Tool-IDs für function_call_output-Match bei Resume |
+| `inputItems` | `CodexInputItemAny[]` | Snapshot VOR Echo+Output des Pending-Tools — Auto-Tool-Roundtrips früherer Iterations stehen als Paare drin |
+| `toolDefinitions` | `CodexToolDefinition[]` | Tool-Set der Iteration — semantische Stabilität bei Skill-Toggle zwischen Pause+Resume |
+| `iterationCount` | `number` | Loop-Iteration (1-indexed) — Trace |
+| `aggregatedText` | `string` | Akkumulierter Text aus früheren Iterations (meist leer) |
+| `previousToolCalls` | `AuditToolCallSnapshot[]` | Bereits ausgeführte Tools — für Audit-Trail-Kontinuität im Resume |
+| `lastResponseId` | `string \| undefined` | Codex-Trace |
+| `lastStatus` | `string \| undefined` | Codex-Trace |
+| `lastPlanType` | `string \| null` | Token-Plan-Tracking |
+| `lastCfRay` | `string \| null` | Cloudflare-Trace-ID |
+| `totalLatencyMs` | `number` | Aggregat für finale Audit-Metadata |
+| `unknownEventTypes` | `string[]` | Parser-Hybrid-Fallback-Aggregat |
+
+**Neue Helper-Types in `codex-adapter.ts`:** `CodexFunctionCallItem` +
+`CodexFunctionCallOutputItem` + Union `CodexInputItemAny`. Vorher wurden
+die per `as unknown as CodexInputItem`-Cast geforced (§l-Pragmatik);
+Phase 3.3.1.3.1 bricht das auf in typesafe Discriminated-Union, damit
+Resume-Persistence typesafe wieder hochlesen kann.
+
+### Smoke-Bilanz — `audit_KgWbPjYW_BF4`
+
+Smoke-Setup: `pnpm twin:oauth-phase3-spike setup` (@markus auf
+`authMode='oauth'` + Codex-Token), Curl-Trigger:
+
+```bash
+POST /twins/@markus/chat
+  body: { messages: [{ role: "user", content:
+    "Bitte rufe das Tool mcp:everything-approval:get-sum mit a=17 und b=25 auf." }] }
+```
+
+**HTTP-Response:**
+```json
+{ "message": {...}, "auditId": "audit_KgWbPjYW_BF4", "pending": true }
+```
+
+**Audit-Verify (vollständige Resume-Context-Persistence):**
+```jsonc
+{
+  "capability": "mcp-tool-use",
+  "status": "pending",
+  "input": {
+    "lastMessage": "Bitte rufe das Tool mcp:everything-approval:get-sum mit a=17 und b=25 auf.",
+    "toolCall": {
+      "mcpServerId": "mcp_xkSaTJvmajv5KG4r",
+      "mcpToolName": "get-sum",
+      "args": { "a": 17, "b": 25 }
+    },
+    "pendingReply": "Ich möchte das Tool 'get-sum' mit Argumenten {...} nutzen...",
+    "originalCapability": "respond_to_chat",
+    "codexResumeContext": {
+      "pendingToolCall": {
+        "name": "mcp_everything-approval_get-sum",
+        "callId": "call_elbjcx5cdrdSLF1au4bls2V0",
+        "arguments": "{\"a\":17,\"b\":25}",
+        "itemId": "fc_0ed986896a817ba1016a14401b365c8191804a1a17fc9e28a8"
+      },
+      "inputItems": [...35 items...],
+      "toolDefinitions": [...36 defs...],
+      "iterationCount": 1,
+      "aggregatedText": "",
+      "previousToolCalls": [],
+      "lastResponseId": "resp_0ed986896a817ba1016a14401990e88191a2d360fcfb8055bf",
+      "lastStatus": "completed",
+      "lastPlanType": "pro",
+      "lastCfRay": null,
+      "totalLatencyMs": 2823,
+      "unknownEventTypes": []
+    }
+  }
+}
+```
+
+**Beweis-Punkte:**
+- Pre-Call-Detect funktioniert: Codex hat `mcp_everything-approval_get-sum`
+  (requires_approval=true) gepickt → Loop wirft VOR `mcp.callTool`
+- Resume-Context vollständig: 12/12 Felder gesetzt
+- Codex-IDs persistiert: callId+itemId verfügbar für Phase-3.3.1.3.2
+  function_call_output-Append
+- inputItems=35 zeigt: komplette History-Replay + ggf. Auto-Tool-Paare
+  früherer Iterations sind im Snapshot
+- previousToolCalls=0: in dieser Smoke-Iteration war Pending-Tool das
+  erste — späterer Test mit gemischtem Auto+Approval-Pattern erweitert
+  Beweisstärke (siehe BACKLOG)
+- Audit-Eintrag nach Verify gelöscht (DB-State sauber für Phase 3.3.1.3.2-Smoke)
+
+**Cleanup:** `pnpm twin:oauth-phase3-spike cleanup` → @markus zurück auf
+`api_key`, `oauth_tokens`-Eintrag entfernt.
+
+### Diagnose-Korrekturen die der Bau aufgedeckt hat
+
+§m hatte schon 8 Briefing-Korrekturen festgehalten. Bau-Phase
+verifiziert + ergänzt:
+
+- **Existing `audit.start()`-API ohne `createPending`:** Briefing-
+  Sample-Code hatte `auditRepo.createPending(...)` — diese Methode
+  existiert nicht. Korrekte API `audit.start({initialStatus: "pending"})`
+  funktioniert direkt; SSE `pending-added` wird im Service-Layer
+  automatisch emittiert (kein expliziter `bus.emit` nötig).
+- **`AuditEntry`-Top-Level hat KEINE `pendingReply`/`pendingToolCall`-
+  Felder:** Briefing-Sample war strukturell falsch (Top-Level statt
+  `input.*`). Korrekt: `input: { ..., toolCall: {...}, pendingReply: "..." }`.
+- **Skill-Konflikt im Smoke:** `mcp:everything:get-sum` (no-approval)
+  und `mcp:everything-approval:get-sum` (approval) sind beide aktiv.
+  Trigger musste explizit auf die approval-Variante zielen — sonst
+  pickt Codex potenziell die Auto-Execute-Variante und Smoke verifiziert
+  nicht den Pause-Pfad. Lesson: bei Smoke mit ambivalenten Tool-Pools
+  explizit den Skill-Pfad referenzieren.
+- **TypeScript-Quirk `z.unknown()` ↔ `unknown` optional:** `AuditToolCall.
+  input/output` aus `@twin-lab/shared` via `z.unknown()` mapped auf
+  TS-Type `input?: unknown` (implizit optional, weil `undefined` zu
+  `unknown` assignable ist). `AuditToolCallSnapshot` musste die
+  Optional-Markierung übernehmen.
+
+### Aufwand-Bilanz vs. §m-Estimate
+
+§m Schätzung Phase 3.3.1.3.1 + 3.3.1.3.2 zusammen: M, 1.5-2 Tage.
+**Phase 3.3.1.3.1 isoliert: realer Aufwand ~2.5h** (Pre-Call-Detect +
+Resume-Context-Type + Error-Erweiterung + Catch-Erweiterung + Setup +
+Smoke + Cleanup + Doku). Phase 3.3.1.3.2 Estimate damit auf S-M (3-4h),
+weil:
+
+- `approveMcpToolUse` authMode-Switch ist klein
+- `function_call_output`-Append + neue `runModelViaCodex`-Iteration:
+  §l-Pattern bekannt, Resume-Context hat alle Daten
+- Reject-Pfad: parallel zum existing Reject-Resume mit
+  `"[System] Tool wurde abgelehnt..."`-Append
+- Refresh-Service vor Resume-Call (siehe §m / BACKLOG #139 Token-
+  Latenz-Pattern)
+
+### Multi-Tool-Edge-Cases — Punkte für BACKLOG
+
+Phase 3.3.1.3.1 hat bewusst Single-Tool-Pending-Scope. Folgende Edge-
+Cases brauchen separate Iteration:
+
+1. **Auto-Tool + Approval-Tool in derselben Iteration:** unter (i)
+   Reihenfolge-treu funktioniert, aber Resume muss `inputItems` mit
+   bereits-appended Auto-Tool-Paaren korrekt fortführen. Smoke-Verify
+   noch ausstehend — wahrscheinlich Phase-3.3.1.3.2-Smoke-Variante.
+2. **Mehrere Approval-Tools in derselben Iteration:** heute "erster
+   gewinnt" — Resume wird Codex bei der nächsten Iteration neu plannen
+   lassen. Falls Codex die anderen Tools wiederholt: zweite
+   Approval-Pause. Sequentielle Approvals als UX-Kette akzeptabel,
+   aber Anti-Pattern für Batch-Workflows.
+3. **Token-Expiration während Pause:** wenn User minutenlang nicht
+   approved, ist Token bei Resume abgelaufen. Refresh-Service-Call vor
+   `runModelViaCodex`-Resume-Iteration nötig (Phase 3.3.1.3.2 muss das
+   adressieren; existing Lazy-Refresh-Pattern reicht aus, wenn der
+   `CodexAdapter`-Pfad konsistent durchgeht).
+4. **Pending-Audit-Speicher-Größe:** `toolDefinitions` als full-JSON
+   bei 36 aktiven Skills sind ~10-20 KB pro Pending-Audit. Optimization
+   für Phase 3.3.1.3.2: nur Skill-IDs persistieren, bei Resume
+   re-derive — spart Speicher, kostet einen Skills-Repo-Lookup.
+
+### Bridge-Hypothese Phase 3.3.1.3.2 (Resume-Pfad)
+
+Skizze für nachfolgendes Bau-Briefing:
+
+1. `TwinService.approvePending` Switch erweitern: `mcp-tool-use` +
+   `input.codexResumeContext != null` → neuer `approveMcpToolUseViaCodex`-
+   Branch (statt existing `approveMcpToolUse` = Vercel-SDK-Resume)
+2. `approveMcpToolUseViaCodex`:
+   - Token-Refresh via `oauthRefreshService.ensureFresh(twinId)`
+   - Tool-Execute via `mcpManager.callTool(serverId, toolName, args)`
+   - `function_call`-Echo + `function_call_output` ans `inputItems`
+     appenden (aus `codexResumeContext`)
+   - Neue `runModelViaCodex`-Iteration ab `iterationCount + 1` mit:
+     - `inputItems` als initiale `input`
+     - `toolDefinitions` als `tools`-Field (oder re-derive aus aktuellen
+       Skills — Architektur-Entscheidung)
+     - Akkumulierter `aggregatedText` + `previousToolCalls` aus
+       Resume-Context als Initial-State der neuen Loop-Vars
+   - Bei Loop-Ende: `audit.complete` mit gemergten `metadata.toolCalls`
+     (previousToolCalls + Pending-Tool + neue Auto-Tools)
+3. Reject-Pfad analog: System-Message-Append ans `inputItems`, neue
+   Iteration mit Tool deaktiviert oder Plan-Re-Entscheidung
+
+Estimate Phase 3.3.1.3.2: **S-M (3-4h)**, siehe oben.
+
 ## Re-Estimate Tag 27 Nachmittag
 
 Initial-Schätzung (Tag 25): L (3-5 Bautage)

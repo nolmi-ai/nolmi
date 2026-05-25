@@ -33,7 +33,12 @@ import {
 } from "./skills/pre-pass.js";
 import { TwinProfilesRepo } from "./twin-profiles-repo.js";
 import type { OAuthRefreshService } from "./oauth/refresh-service.js";
-import { CodexAdapter, type CodexInputItem } from "./oauth/codex-adapter.js";
+import {
+  CodexAdapter,
+  type CodexInputItem,
+  type CodexInputItemAny,
+  type CodexResumeContext,
+} from "./oauth/codex-adapter.js";
 import { mapSkillsToCodexTools } from "./oauth/codex-tool-mapper.js";
 import type { ConversationsRepo } from "./conversations/repo.js";
 import type {
@@ -746,6 +751,12 @@ export class TwinService {
             conversationId,
             pendingReply,
             originalCapability,
+            // #131 Phase 3.3.1.3.1: bei Codex-OAuth-Pfad trägt der Error den
+            // Resume-Context. Additiv ans `input`-Field — Vercel-SDK-Pfad
+            // hat das Feld nicht, Schema-konsistent (kein Migration).
+            ...(err.codexResumeContext
+              ? { codexResumeContext: err.codexResumeContext }
+              : {}),
           },
           initialStatus: "pending",
           conversationId,
@@ -1543,7 +1554,13 @@ export class TwinService {
 
     // Initial-Input: History + aktuelle User-Message (Caller-pre-built).
     // Multi-Step-Resume appended `function_call` + `function_call_output`.
-    const input = mapChatMessagesToCodexInput(messages);
+    // #131 Phase 3.3.1.3.1: Typ ist die volle Union `CodexInputItemAny`,
+    // damit die per §l-Pattern angehängten function_call/_output-Items ohne
+    // `unknown`-Cast typesafe sind. CodexAdapter selbst nimmt weiterhin
+    // `CodexInputItem[]` entgegen (schmal-Type für message-Items) — der Cast
+    // auf den Adapter-Param-Type ist die einzige Stelle wo wir die Verengung
+    // brauchen (Adapter reicht alle Items transparent durch).
+    const input: CodexInputItemAny[] = mapChatMessagesToCodexInput(messages);
 
     // Akkumulation über die Loop-Iterationen.
     let aggregatedText = "";
@@ -1561,7 +1578,7 @@ export class TwinService {
       const result = await this.codexAdapter.generateText({
         twinId: this.deps.twinId,
         instructions,
-        input,
+        input: input as CodexInputItem[],
         tools: codexTools,
       });
 
@@ -1603,12 +1620,47 @@ export class TwinService {
           );
         }
 
-        // Tool-Execution via existing McpClientManager — Auto-Execute
-        // (Phase 3.3.1.2 Scope: kein Approval-Wait, das kommt in 3.3.1.3).
-        // requires_approval-Skills landen ohnehin nicht im Codex-tools-Field,
-        // weil mapSkillsToCodexTools sie nicht zusätzlich filtert (TODO
-        // Phase 3.3.1.3) — heute akzeptable Vereinfachung, weil der Smoke
-        // mit no-approval-Tool läuft.
+        // #131 Phase 3.3.1.3.1: Pre-Call-Detect für requires_approval-Tools.
+        // Strategie (i) Reihenfolge-treu — Auto-Tools FRÜHER in dieser
+        // Iteration wurden bereits ausgeführt und an `input` appended
+        // (siehe Push-Block unten); wir stoppen VOR dem function_call-Echo
+        // des Pending-Tools. Resterliche Tool-Calls dieser Iteration werden
+        // verworfen (matched existing Vercel-SDK "erster Marker gewinnt").
+        // Resume holt sich Codex bei der nächsten Iteration neu, kann Plan
+        // dort ändern.
+        if (skill.manifestJson.requiresApproval) {
+          throw new McpToolApprovalRequiredError(
+            skill.mcpServerId,
+            skill.mcpToolName,
+            parsedArgs,
+            {
+              pendingToolCall: {
+                name: toolCall.name,
+                callId: toolCall.callId,
+                arguments: toolCall.arguments,
+                itemId: toolCall.itemId,
+              },
+              // Snapshot des input-Arrays VOR Echo+Output des Pending-Tools.
+              // Strukturelles Clone via Spread reicht — die Inhalte sind
+              // JSON-serialisierbare Werte (kein Object-Identity-Risk beim
+              // späteren Persist).
+              inputItems: [...input],
+              toolDefinitions: codexTools,
+              iterationCount: iterations,
+              aggregatedText,
+              previousToolCalls: [...allToolCalls],
+              lastResponseId,
+              lastStatus,
+              lastPlanType,
+              lastCfRay,
+              totalLatencyMs,
+              unknownEventTypes: Array.from(allUnknownEventTypes),
+            },
+          );
+        }
+
+        // Tool-Execution via existing McpClientManager — Auto-Execute für
+        // alle Skills ohne requires_approval=true.
         let outputContent: unknown;
         let isError = false;
         try {
@@ -1639,22 +1691,21 @@ export class TwinService {
         });
 
         // §l Multi-Step-Pattern: function_call-Echo + function_call_output
-        // ans input-Array für nächste Iteration. Cast über `unknown` weil
-        // CodexInputItem (Phase 3.2) heute nur `message`-Items typisiert —
-        // Phase 3.4 könnte den Type erweitern; heute Pragmatik-Cast.
+        // ans input-Array für nächste Iteration. Phase 3.3.1.3.1: kein
+        // `unknown`-Cast mehr — `input` ist jetzt CodexInputItemAny[].
         input.push({
           type: "function_call",
           call_id: toolCall.callId,
           name: toolCall.name,
           arguments: toolCall.arguments,
-        } as unknown as CodexInputItem);
+        });
         input.push({
           type: "function_call_output",
           call_id: toolCall.callId,
           output: isError
             ? `[isError=true] ${outputText}`
             : outputText,
-        } as unknown as CodexInputItem);
+        });
       }
     }
 
@@ -2242,6 +2293,10 @@ interface AuditMcpToolUseInputShape {
   conversationId?: string | null;
   pendingReply?: string;
   originalCapability?: string;
+  /** #131 Phase 3.3.1.3.1: nur gesetzt für Codex-OAuth-Pending. Trägt den
+   *  Loop-State-Snapshot, damit Phase 3.3.1.3.2 ab dem Pending-Tool-Call
+   *  fortsetzen kann. Vercel-SDK-Pfad lässt das Feld undefined. */
+  codexResumeContext?: CodexResumeContext;
 }
 
 /**

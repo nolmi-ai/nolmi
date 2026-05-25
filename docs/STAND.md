@@ -1,6 +1,6 @@
 # twin-lab — Stand
 
-**Letztes Update:** 25. Mai 2026, Sonntag spät-Abend (Tag 27 — Phase 3.3.1.2 ✅, 14 Blöcke an einem Tag)
+**Letztes Update:** 25. Mai 2026, Sonntag spät-Abend (Tag 27 — Phase 3.3.1.3.1 ✅, 15 Blöcke an einem Tag)
 
 ## Aktuell in Arbeit
 
@@ -492,9 +492,79 @@ Faktor 14× Latenz zwischen Smoke 1 (220s) und Smoke 2 (15s) bei identischem Flo
 - **Phase 3.3.3 Reasoning-Traces (Tag 29, optional, ~0.5 Tag)** — `item.type === "reasoning"` handlen, Audit-Persistenz
 - **Phase 3.4 Vercel-Provider-Refactor (optional, Tag 29-30)** — Entscheidung nach 3.3.1.3: wenn Direct-fetch sauber bleibt, kann 3.4 entfallen
 
+### #131 Nacht — Phase 3.3.1.3.0 Diagnose + Phase 3.3.1.3.1 Codex-Pause-Pfad (Commits `67dc9f3` + nächster, ~3h)
+
+**Block 15 splittet sich in zwei Sub-Phasen:** zuerst eine reine Diagnose der existing Approval-Pipeline (Phase 3.3.1.3.0, `67dc9f3`, kein Code), dann der Pause-Pfad-Bau (Phase 3.3.1.3.1).
+
+#### Phase 3.3.1.3.0 Diagnose-Output (kein Code-Commit, ~1h)
+
+Reverse-Engineering der Vercel-SDK-Approval-Pipeline als Grundlage für Phase-3.3.1.3.1-Architektur. Findings in §m (docs/131-OAUTH-STRATEGY.md):
+
+- **A:** Approval läuft via Marker-Pattern (`MCP_PENDING_APPROVAL_MARKER`), nicht Throw — AI SDK 6 schluckt `execute()`-Throws. `detectPendingToolCall` + `stopOnPendingApprovalMarker` triggern den Pending-Audit-Pfad.
+- **B:** Vollständiger Resume-Context in `audit.input` (`messages` + `toolCall` + `pendingReply` + `conversationId` + `originalCapability`) — Server-Restart-stabil.
+- **C:** `POST /audit/:id/approve` → synchron Tool-Execute + Resume-LLM-Call mit `enableMcpTools:false` → `audit.complete`. Race-Sicherheit via `entry.status !== "pending"`-Check.
+- **D:** Frontend ist SSE-getriebenes Audit-Stream-SSoT, kein Polling. `pending-added`/`pending-resolved` triggern Reload.
+
+**Empfehlung Phase 3.3.1.3.1:** Hypothese 1 (Async-Pending analog Vercel-SDK-Pfad). Schema-Erweiterung `audit.input.codexResumeContext` additiv (kein Migration). Aufwand M (1.5-2 Bautage geschätzt).
+
+#### Phase 3.3.1.3.1 Sub-Diagnose (Phase 3.3.1.3.1.1, kein Commit, ~30min)
+
+Diagnose-Reflex 14. Mal: substantielle Briefing-Korrekturen aufgedeckt vor Bau:
+
+1. `auditRepo.createPending(...)` existiert nicht — korrekte API ist `audit.start({initialStatus: "pending"})`. SSE `pending-added` wird automatisch emittiert.
+2. `AuditEntry`-Top-Level hat KEINE `pendingReply`/`pendingToolCall`-Felder — die leben in `input.*` (matched existing `AuditMcpToolUseInputShape`).
+3. `mapSkillsToCodexTools` braucht keinen Refactor — Skill-Object in der existing Map enthält bereits `manifestJson.requiresApproval`.
+4. `CodexInputItem`-Type ist heute schmal (`{type:"message",...}`); `function_call`/`function_call_output`-Items wurden per `unknown`-Cast geforced — für typesafe Resume-Persistence braucht's eine Discriminated Union (`CodexInputItemAny`).
+5. Pre-Call-Detect-Einbau-Stelle: zwischen `parsedArgs`-Parse (Z.1604) und `mcp.callTool` (Z.1614).
+6. **Substantielle Entdeckung:** @markus war im DB-Stand bereits auf `auth_mode='api_key'` zurückgesetzt (vorheriger Smoke-Cleanup). Smoke-Sequenz braucht `pnpm twin:oauth-phase3-spike setup` vorher.
+7. **Skill-Konflikt:** beide `mcp:everything:get-sum` (no-approval) und `mcp:everything-approval:get-sum` (approval) sind aktiv. Trigger musste explizit auf die approval-Variante zielen.
+
+Architektur-Wahl: **(A) Throw + Vercel-Catch-Reuse** statt (B) Codex-lokaler Pending-Insert — maximaler Code-Reuse, Symmetrie zum Vercel-Pfad. **(i) Reihenfolge-treu** für Multi-Tool-Edge-Cases — autoTools davor exekutiert, ApprovalTool stoppt, restliche verworfen.
+
+#### Bau Phase 3.3.1.3.1 (~1.5h)
+
+- `apps/runtime/src/oauth/codex-adapter.ts`: neue Types `CodexFunctionCallItem`, `CodexFunctionCallOutputItem`, Union `CodexInputItemAny`, plus `CodexResumeContext`-Interface (12 Felder) + `AuditToolCallSnapshot`-Mini-Shape (lokal, vermeidet harten Import des Shared-Types in OAuth-Layer)
+- `apps/runtime/src/mcp/errors.ts`: `McpToolApprovalRequiredError`-Class erweitert um optionales `codexResumeContext`-Property — single Class für beide Auth-Modi, Catch checkt nur `err.codexResumeContext != null`
+- `apps/runtime/src/twin-service.ts`:
+  - `input`-Array-Type von `CodexInputItem[]` auf `CodexInputItemAny[]` (Cast auf Adapter-Param-Type bei `codexAdapter.generateText`-Call)
+  - Pre-Call-Detect-Block im Multi-Step-Loop: vor `mcp.callTool` prüfen `skill.manifestJson.requiresApproval` → `throw McpToolApprovalRequiredError` mit Snapshot vor function_call-Echo
+  - `input.push()`-Casts cleanup: kein `as unknown as CodexInputItem` mehr — typesafe via `CodexInputItemAny`
+  - `AuditMcpToolUseInputShape` (lokal) um `codexResumeContext?: CodexResumeContext` erweitert
+  - Catch in `runOwnerDirect` (Z.728-759): additive spread-conditional `...(err.codexResumeContext ? { codexResumeContext: err.codexResumeContext } : {})` ans Pending-Audit-Input
+
+Typecheck grün. Build nicht aufgerufen (Memory: kein `next build` während Dev läuft).
+
+#### Smoke-Bilanz (echter @markus / oauth / Codex-Pro, audit `audit_KgWbPjYW_BF4`)
+
+Setup automatisch via `pnpm twin:oauth-phase3-spike setup`. User-Curl mit explizitem approval-Trigger:
+```
+Bitte rufe das Tool mcp:everything-approval:get-sum mit a=17 und b=25 auf.
+```
+
+**HTTP 200 mit `pending=true`** und vollständigem Audit-Eintrag persistiert:
+- `capability=mcp-tool-use`, `status=pending`
+- `input.toolCall.mcpServerId=mcp_xkSaTJvmajv5KG4r`, `mcpToolName=get-sum`, `args={a:17,b:25}`
+- `input.pendingReply` mit deutscher Persona-Wartemeldung
+- **`input.codexResumeContext` mit allen 12 Feldern persistiert:** `pendingToolCall` mit Codex-IDs (callId=`call_elbjcx5cdrdSLF1au4bls2V0`, itemId=`fc_0ed98...`), `inputItems`-Count=35, `toolDefinitions`-Count=36, `iterationCount=1`, `aggregatedText=""`, `previousToolCalls=[]`, `lastResponseId=resp_0ed98...`, `lastStatus=completed`, `lastPlanType=pro`, `lastCfRay=null`, `totalLatencyMs=2823`, `unknownEventTypes=[]`
+
+Audit-Eintrag nach Verify gelöscht (DB-State sauber für Phase 3.3.1.3.2-Smoke). Cleanup automatisch via `pnpm twin:oauth-phase3-spike cleanup` → @markus zurück auf `api_key`.
+
+Substantielle Architektur-Beweise:
+- **Pre-Call-Detect funktioniert:** Codex wählte `mcp_everything-approval_get-sum` (requires_approval=true) → Loop wirft VOR `mcp.callTool`, kein Tool-Execute
+- **Resume-Context Server-Restart-stabil:** alle Codex-IDs + Loop-State + Tool-Definitions in DB
+- **Symmetrie zum Vercel-SDK-Pfad:** identischer Pending-Audit-Insert-Pfad, additive spread-Zeile
+
+#### Plan Tag 28+ (revidiert)
+
+- **Phase 3.3.1.3.2 Codex-Resume-Pfad (Tag 28, ~3-4h S-M)** — `approveMcpToolUseViaCodex`-Branch: Token-Refresh, Tool-Execute, function_call_output-Append, neue `runModelViaCodex`-Iteration mit `inputItems`+`toolDefinitions`+`previousToolCalls` aus Resume-Context. Reject-Pfad analog mit System-Message-Append.
+- **Phase 3.3.3 Reasoning-Traces (Tag 28-29, optional, ~0.5 Tag)** — `item.type === "reasoning"` handlen, Audit-Persistenz
+- **Phase 3.4 Vercel-Provider-Refactor (optional, Tag 29-30)** — Entscheidung nach 3.3.1.3.2
+
+§n in docs/131-OAUTH-STRATEGY.md dokumentiert: Architektur-Wahl, Reihenfolge-treu-Strategie, 12-Felder-Resume-Context-Schema, Smoke-Bilanz mit JSON-Beweis, Multi-Tool-Edge-Cases für BACKLOG, Bridge-Hypothese für Phase 3.3.1.3.2.
+
 ### Tag-27-Closure-Bilanz
 
-**Vierzehn Blöcke an einem Tag — Husky-Hook bis Phase 3.3.1.2 End-to-End komplett:**
+**Fünfzehn Blöcke an einem Tag — Husky-Hook bis Phase 3.3.1.3.1 Codex-Pause-Pfad komplett:**
 
 | Block | Commit | Was |
 |---|---|---|
@@ -512,6 +582,7 @@ Faktor 14× Latenz zwischen Smoke 1 (220s) und Smoke 2 (15s) bei identischem Flo
 | 12. Phase 3.3.2 Spike | `e4d403a` | #131 Multi-Step-Tool-Roundtrip-Discovery — HYPOTHESE A wins first try, alle 5 Bonus-Discovery-Events vollständig zugeordnet, §l dokumentiert |
 | 13. Phase 3.3.1.1 | `d576c05` | #131 mapSkillsToCodexTools-Helper + CodexSSEParser Tool-Call-Support, 15/15 Smoke grün |
 | 14. Phase 3.3.1.2 | `797a464` | #131 Multi-Step-Loop + Auto-Execute Tool-Pipeline, Smoke 2 grün (get-sum a=89/b=134→223, codexIterations=2, codexCallId persistiert), 16/16 Smoke + BACKLOG #139 für Token-Refresh-Latenz |
+| 15. Phase 3.3.1.3.0 + 3.3.1.3.1 | `67dc9f3` + (Pause-Pfad) | #131 Approval-Pipeline reverse-engineered (§m) + Codex-Pause-Pfad gebaut: McpToolApprovalRequiredError-Erweiterung um codexResumeContext, CodexInputItemAny-Union, Pre-Call-Detect im Multi-Step-Loop (Reihenfolge-treu), Vercel-Catch-Reuse via Throw, 12-Felder-Resume-Context persistiert. Smoke grün mit `audit_KgWbPjYW_BF4` (mcp:everything-approval:get-sum → pending). §n dokumentiert. |
 
 **Fünf Lessons:** Recherche vor Bau (#1), STAND-Doppelpflege (#2), End-to-End-Validation vor Bau (#3), Migration ohne Repo-Update ist Anti-Pattern (#4), Twin-Lab-eigene Setzungen schlagen Industry-Defaults (#5).
 
@@ -519,7 +590,7 @@ Faktor 14× Latenz zwischen Smoke 1 (220s) und Smoke 2 (15s) bei identischem Flo
 
 **Phase-3.2-Bonus-Lesson (Diagnose-Wert, kein neuer Lesson-Eintrag):** Briefing für Phase 3.2 hatte angenommen, `runModelViaCodex` müsse `conversationId` akzeptieren und History selbst laden. Phase-3.2.1-Diagnose hat gezeigt: History ist bereits in `messages` (Caller `runOwnerDirect` lädt sie OUTSIDE `runModel` via `loadConversationHistory`). Ohne Diagnose wäre Phase 3.2 mit doppeltem History-Loading + neuer Dep-Injection gebaut worden — Phase-1.1-Diagnose-Pattern bestätigt 13. Mal.
 
-**Tag-27-Outcome #131:** Phase 1 ✅ + Phase 2 ✅ + Strategy-Iteration ✅ + Phase 3.0 Spike ✅ + Phase 3.1 ✅ + Phase 3.2 ✅ + Phase 3.3.0 Spike ✅ + Phase 3.3.2 Spike ✅ + Phase 3.3.1.1 ✅ (Helper + Parser, 16/16 Smoke) + Phase 3.3.1.2 ✅ (Multi-Step-Loop + Auto-Execute, End-to-End grün mit `mcp:everything:get-sum`). **Codex-OAuth-Twins können jetzt MCP-Tools rufen** — Auto-Execute via existing McpClient, Multi-Step-Roundtrip per §l-Pattern, Audit-Persistierung mit `codexCallId`. Phase 3.3.1.3 (Approval-Pipeline für `requires_approval`-Skills, Tag 28) ist die letzte substantielle Sub-Phase vor Phase-3-Closure — restliche Sub-Phasen (3.3.3 Reasoning, 3.4 Vercel-Provider-Refactor) sind optional.
+**Tag-27-Outcome #131:** Phase 1 ✅ + Phase 2 ✅ + Strategy-Iteration ✅ + Phase 3.0 Spike ✅ + Phase 3.1 ✅ + Phase 3.2 ✅ + Phase 3.3.0 Spike ✅ + Phase 3.3.2 Spike ✅ + Phase 3.3.1.1 ✅ (Helper + Parser, 16/16 Smoke) + Phase 3.3.1.2 ✅ (Multi-Step-Loop + Auto-Execute, End-to-End grün mit `mcp:everything:get-sum`) + Phase 3.3.1.3.0 ✅ (Approval-Pipeline reverse-engineered, §m) + Phase 3.3.1.3.1 ✅ (Codex-Pause-Pfad, Smoke grün mit `audit_KgWbPjYW_BF4`, §n). **Codex-OAuth-Twins können jetzt MCP-Tools mit `requires_approval=true` aufrufen und pausieren** — Pre-Call-Detect im Multi-Step-Loop, McpToolApprovalRequiredError-Throw mit 12-Felder-Resume-Context, existing Vercel-Catch in `runOwnerDirect` persistiert Pending-Audit symmetrisch zum api_key-Pfad. **Resume-Pfad (Phase 3.3.1.3.2, Tag 28, S-M 3-4h)** ist die letzte substantielle Sub-Phase vor Phase-3-Closure — restliche Sub-Phasen (3.3.3 Reasoning, 3.4 Vercel-Provider-Refactor) sind optional.
 
 **Tag-27-Outcome #138:** Local-Dev-Boot-Friction strukturell behoben, in der Praxis verifiziert beim Smoke-2-Setup.
 

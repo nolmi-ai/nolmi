@@ -6,6 +6,8 @@
 // (runModel-Catch, approve/reject-Resume) signalisieren — Lifecycle-Errors
 // haben keinen vergleichbaren Multi-Konsument-Charakter.
 
+import type { CodexResumeContext } from "../oauth/codex-adapter.js";
+
 /**
  * Wird vom Tool-Bridge `execute()` geworfen, wenn der LLM ein MCP-Tool mit
  * `requiresApproval: true` aufrufen will. Twin-Service catcht das auf der
@@ -23,21 +25,32 @@
  * interpretieren und den Loop fortsetzen statt zu propagieren. Falls das
  * im Smoke-Test auftritt, dokumentiert der Fallback-Plan ein Marker-
  * Pattern (siehe Briefing 3.2.F-Notes).
+ *
+ * #131 Phase 3.3.1.3.1: Im Codex-OAuth-Pfad wird der Error vom Multi-Step-
+ * Loop in `runModelViaCodex` pre-Tool-Execute geworfen (kein Marker-Pattern
+ * nötig, weil der Loop direkt orchestriert wird). `codexResumeContext` trägt
+ * dann den Loop-State-Snapshot mit, den der existierende Catch in
+ * `runOwnerDirect` additiv in `audit.input.codexResumeContext` persistiert
+ * — Phase 3.3.1.3.2 nutzt das für den Resume. Für den Vercel-SDK-Pfad
+ * (Anthropic/OpenAI-API) bleibt `codexResumeContext` undefined.
  */
 export class McpToolApprovalRequiredError extends Error {
   readonly mcpServerId: string;
   readonly mcpToolName: string;
   readonly toolArgs: Record<string, unknown>;
+  readonly codexResumeContext?: CodexResumeContext;
 
   constructor(
     serverId: string,
     toolName: string,
     args: Record<string, unknown>,
+    codexResumeContext?: CodexResumeContext,
   ) {
     super(`MCP-Tool '${toolName}' (server ${serverId}) requires approval`);
     this.name = "McpToolApprovalRequiredError";
     this.mcpServerId = serverId;
     this.mcpToolName = toolName;
     this.toolArgs = args;
+    if (codexResumeContext) this.codexResumeContext = codexResumeContext;
   }
 }
