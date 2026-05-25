@@ -1769,19 +1769,21 @@ Sollte als Pre-Push-Hook (Husky) oder GitHub-Action laufen. Vermeidet Wiederholu
 
 **Größe:** S · **Priorität:** should · **Aus:** Tag 26 Phase 5 Build-Bug · **Spur:** Polish nach Phase 5
 
-### 138. Local-Dev pnpm dev braucht dev-friendly Defaults für Telegram-Webhook
+### 138. Local-Dev pnpm dev braucht dev-friendly Defaults für Telegram-Webhook ✅
 
-Seit #130 Phase 5 (Telegram-Webhook-Mode) braucht `pnpm dev` entweder `RUNTIME_PUBLIC_URL` oder `TELEGRAM_USE_POLLING=true` damit die Runtime hochkommt — sonst Boot-Failure beim `telegramBotRegistry.eagerLoadAllBots()`-Schritt mit dem Hinweis "kein Public-URL für Webhook konfiguriert". Tag-27-Nachmittag-Erfahrung: nach `pnpm install` neu klonen / frischen Branch funktioniert das nicht out-of-the-box, weil die `.env` nicht gepflegt ist.
+**Abgeschlossen Tag 27 Abend (25. Mai 2026).** Hybrid-Branch in `apps/runtime/src/config.ts`: wenn weder `TELEGRAM_USE_POLLING` noch `RUNTIME_PUBLIC_URL` gesetzt sind, fällt die Runtime auf `TELEGRAM_USE_POLLING=true` mit Warning-Log zurück. `pnpm dev` aus pristinem Clone bootet damit out of the box. Production-Pfad (explicit `false` ohne URL) crasht weiter mit klarer Pflicht-Message.
 
-Dev-friendly Defaults (eine der drei Optionen):
+`.env.example` Default umgestellt auf `TELEGRAM_USE_POLLING=true` plus Auto-Detection-Note. SETUP.md (Zeile 91-100) Auto-Detection-Erklärung ergänzt. DEPLOYMENT.md §10 Production-Pattern detaillierter mit Fallback-Klarstellung („nicht für Production").
 
-1. **`TELEGRAM_USE_POLLING=true` als Compose-Default** für lokale `.env.example`-Vorlage
-2. **Telegram-Bot-Eager-Load bei fehlender Public-URL skippen** (Boot-Log: "Telegram-Bots disabled — set RUNTIME_PUBLIC_URL oder TELEGRAM_USE_POLLING=true")
-3. **Boot-Step machtoptional**: nur wenn aktive `telegram_configs`-Rows existieren wird der Eager-Load gemacht
+Smokes 4/4 grün (alle isoliert via `env -i` + tsx-eval gegen `loadRuntimeConfig`):
+1. Pristine env → Fallback + Warning
+2. Explicit `false` ohne URL → Throw
+3. Explicit `true` → kein Warning, polling=true
+4. Production-Konfig (`false` + URL) → wie konfiguriert
 
-Phase-A-Self-Hosting-Doku (#109) braucht das auch — der Self-Hoster ohne Telegram will nicht erst die Variable verstehen.
+Begründung Hybrid-Branch statt `parseBoolEnv`-Refactor: zwar ist `parseBoolEnv` heute nur Konsument für `TELEGRAM_USE_POLLING`, aber expliziter Branch am Call-Site ist lesbarer als Default-Magic im Util-Helper.
 
-**Größe:** S (5-10 LoC + Doku) · **Priorität:** should · **Aus:** Tag-27-Nachmittag Smoke-2-Aufsetz-Friction · **Spur:** Pre-Launch-Phase A Polish
+**Größe ursprünglich:** S — final: ~30 LoC + drei Doku-Files. **Aus:** Tag-27-Nachmittag Smoke-2-Aufsetz-Friction · **Spur:** Pre-Launch-Phase A Polish
 
 ## Pre-Launch-Phase A — Block 4: Self-Hosting-Polish
 

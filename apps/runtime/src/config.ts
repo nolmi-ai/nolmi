@@ -47,10 +47,11 @@ export interface RuntimeConfig {
   port: number;
   host: string;
   /**
-   * #130 Phase 2 — Telegram-Adapter-Modus. Default `false` = Webhook (Production).
-   * Local-Dev setzt `true` für Long-Polling, damit ohne öffentliche URL gearbeitet
-   * werden kann. Wenn `false`, muss `runtimePublicUrl` gesetzt sein, damit der
-   * `setWebhook`-Call beim Pairing eine erreichbare URL hat.
+   * #130 Phase 2 — Telegram-Adapter-Modus. Explicit `false` = Webhook (Production),
+   * explicit `true` = Long-Polling. Wenn die ENV komplett fehlt UND keine
+   * `runtimePublicUrl` gesetzt ist (#138 Local-Dev-Fallback), wird `true`
+   * angenommen und ein Warning geloggt — so bootet `pnpm dev` aus pristinem
+   * Clone ohne env-Setup. Wenn `false`, muss `runtimePublicUrl` gesetzt sein.
    */
   telegramUsePolling: boolean;
   /**
@@ -63,15 +64,44 @@ export interface RuntimeConfig {
 }
 
 export function loadRuntimeConfig(): RuntimeConfig {
-  const telegramUsePolling = parseBoolEnv(
-    process.env.TELEGRAM_USE_POLLING,
-    false,
-    "TELEGRAM_USE_POLLING",
-  );
   const runtimePublicUrl = process.env.RUNTIME_PUBLIC_URL?.trim() || null;
 
+  // #138 Local-Dev-Auto-Detection: drei Fälle, lesbarkeitshalber explizit als
+  // Hybrid-Branch (kein Default-Refactor in parseBoolEnv, damit der Util-
+  // Helper für künftige Boolean-ENVs ohne diese Spezial-Semantik nutzbar
+  // bleibt).
+  //
+  //   - TELEGRAM_USE_POLLING ungesetzt UND keine RUNTIME_PUBLIC_URL
+  //     → Local-Dev-Fallback: Polling=true mit Warning-Log. So bootet
+  //       `pnpm dev` aus pristinem Clone, ohne dass der Telegram-Webhook-
+  //       Cross-Check feuert.
+  //   - TELEGRAM_USE_POLLING explizit "false"/"0" UND keine PublicURL
+  //     → Throw wie vorher (jemand hat Webhook-Mode aktiv konfiguriert,
+  //       aber die URL fehlt — Production-Config-Fehler, soll lärmen).
+  //   - sonst → genau wie konfiguriert.
+  const telegramUsePollingRaw = process.env.TELEGRAM_USE_POLLING?.trim();
+  let telegramUsePolling: boolean;
+  if (!telegramUsePollingRaw && !runtimePublicUrl) {
+    console.warn(
+      "[config] Weder TELEGRAM_USE_POLLING noch RUNTIME_PUBLIC_URL gesetzt — " +
+        "falle auf TELEGRAM_USE_POLLING=true zurück (Local-Dev-Fallback). " +
+        "Für Production: RUNTIME_PUBLIC_URL setzen ODER TELEGRAM_USE_POLLING " +
+        "explizit konfigurieren.",
+    );
+    telegramUsePolling = true;
+  } else {
+    telegramUsePolling = parseBoolEnv(
+      process.env.TELEGRAM_USE_POLLING,
+      false,
+      "TELEGRAM_USE_POLLING",
+    );
+  }
+
   // Cross-Validation: Webhook-Mode braucht Public-URL für setWebhook beim Pairing.
-  // Im Polling-Mode irrelevant, Bot pollt selbst Telegram.
+  // Im Polling-Mode irrelevant, Bot pollt selbst Telegram. Der Fallback-Pfad
+  // oben hat telegramUsePolling=true gesetzt, falls beide envs ungesetzt waren —
+  // dieser Throw greift also nur, wenn jemand explizit Webhook-Mode wollte aber
+  // die URL vergessen hat.
   if (!telegramUsePolling && !runtimePublicUrl) {
     throw new Error(
       "RUNTIME_PUBLIC_URL ist Pflicht, wenn TELEGRAM_USE_POLLING=false. " +

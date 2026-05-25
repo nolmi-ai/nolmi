@@ -1774,7 +1774,7 @@ BotFather returns a bot token of the form `<bot_id>:<token>`.
 
 **2. Configure the runtime:**
 
-In your `.env` file (or compose-overlay):
+In your `.env` file (or compose-overlay) — **both variables required for Production**:
 
 ```
 TELEGRAM_USE_POLLING=false
@@ -1783,7 +1783,13 @@ RUNTIME_PUBLIC_URL=https://runtime.your-domain.com
 
 `RUNTIME_PUBLIC_URL` must be HTTPS — Telegram rejects HTTP webhooks. This is the public URL Telegram will call to deliver bot updates.
 
-**Note about ENV variable forwarding:** `docker-compose.yml` explicitly lists which environment variables get forwarded to the runtime container. `TELEGRAM_USE_POLLING` and `RUNTIME_PUBLIC_URL` are listed in the compose-yaml from the repo, so setting them in `.env` propagates them automatically. If you fork the compose-yaml or maintain your own overlay, ensure both variables remain in the runtime service's `environment:` block — otherwise the runtime fails to boot in webhook mode with `RUNTIME_PUBLIC_URL ist Pflicht`.
+**Local-Dev Auto-Detection (#138):** If both variables are unset, the runtime falls back to `TELEGRAM_USE_POLLING=true` with a warning log — convenient for `pnpm dev` from a pristine clone, but **NOT a Production-Pattern**. In Production always set both variables explicitly:
+
+- `TELEGRAM_USE_POLLING=true` only — Polling-Mode (Bot pulls from Telegram). Works without ingress, but doesn't scale for many bots and burns bandwidth.
+- `TELEGRAM_USE_POLLING=false` + `RUNTIME_PUBLIC_URL=https://…` — Webhook-Mode (recommended Production).
+- `TELEGRAM_USE_POLLING=false` without `RUNTIME_PUBLIC_URL` — runtime crashes at boot with `RUNTIME_PUBLIC_URL ist Pflicht` (config-error, surfaced loudly on purpose).
+
+**Note about ENV variable forwarding:** `docker-compose.yml` explicitly lists which environment variables get forwarded to the runtime container. `TELEGRAM_USE_POLLING` and `RUNTIME_PUBLIC_URL` are listed in the compose-yaml from the repo, so setting them in `.env` propagates them automatically. If you fork the compose-yaml or maintain your own overlay, ensure both variables remain in the runtime service's `environment:` block — otherwise the runtime falls back to Local-Dev Polling-Mode (silently functional but wrong for Production scale).
 
 **3. Pair the bot to a twin:**
 

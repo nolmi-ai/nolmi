@@ -88,9 +88,14 @@ Wenn du den Telegram-Adapter lokal testen willst:
 2. **Bot-Token im Twin konfigurieren** über die Settings-UI (Phase 2.5 —
    sobald die UI-Route da ist; bis dahin via direktem DB-Insert in
    `telegram_configs`).
-3. **Modus wählen.** Default ist Webhook (Production-Pattern), Local-Dev
-   nutzt entweder Long-Polling (kein öffentliches Ingress nötig) oder
-   Webhook + ngrok.
+3. **Modus wählen.** Local-Dev nutzt entweder Long-Polling (kein
+   öffentliches Ingress nötig) oder Webhook + ngrok. Production fährt
+   Webhook-Mode mit echter HTTPS-URL.
+
+   **Auto-Detection (#138):** Wenn weder `TELEGRAM_USE_POLLING` noch
+   `RUNTIME_PUBLIC_URL` gesetzt sind, fällt die Runtime mit Warning-Log auf
+   `TELEGRAM_USE_POLLING=true` zurück — `pnpm dev` aus pristinem Clone
+   bootet damit out of the box. Für Production beides explizit setzen.
 
 **Variante A — Long-Polling (einfach):**
 
