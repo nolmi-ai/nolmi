@@ -79,6 +79,10 @@ reads `~/.codex/auth.json`, and persists the token AES-256-GCM-encrypted
 in the twin's `oauth_tokens` row. The twin's `auth_mode` is set to
 `oauth` and Codex requests are routed via the Vercel-AI-SDK provider.
 
+The Settings page shows an "Auth" row per twin — API-Key or OAuth with
+account-id, expiry timestamp, and a Re-Login button. Activating OAuth
+from the UI opens a modal with the CLI command and a copy button.
+
 For production self-hosting with HTTPS, custom domain, and backups,
 see **[docs/DEPLOYMENT.md](docs/DEPLOYMENT.md)**.
 

@@ -147,6 +147,29 @@ Vollständige Spec: `docs/archive/3.4-STRATEGY.md`. Smoke-Protokoll: `docs/archi
 
 Cloud-Browser-Infrastruktur (hyperbrowser.ai) als MCP-Server. Direkter Drop-In auf MCP-Foundation aus 3.2, ENV-Wert für API-Key.
 
+### 3.7 — OpenAI-Subscription-OAuth (#131) ✅ Phase A komplett
+**Größe:** XL · **Abgeschlossen:** Tag 27/28 (25.-26. Mai 2026)
+
+ChatGPT-Subscription-OAuth (Codex-Pattern) als alternative zu API-Key.
+Beide Auth-Modi (api_key + oauth) laufen durch identische Vercel-SDK-
+Pipeline mit nativer V3-Approval-Mechanik.
+
+- **3.7.1** ✅ DB-Schema + PKCE-Client + Tokens-Repo (Migration 025)
+- **3.7.2** ✅ OAuthRefreshService (Background-Poll + Lazy-Refresh + Mutex)
+- **3.7.3** ✅ CodexAdapter + Codex-SSE-Parser (Phase 3.0–3.3)
+- **3.7.4** ✅ Vercel-Provider-Refactor + Big-Bang Approval-Refactor (3.4)
+- **3.7.5** ✅ Production-CLI `pnpm twin:oauth-login @<handle>` (Phase 4)
+- **3.7.6** ✅ Web-UI Auth-Status + Modal mit CLI-Command-Copy (Phase 5)
+
+**Auth-Bilanz:** Twin-Lab-Default bleibt BYOK (API-Key), OAuth ist Opt-in
+für ChatGPT-Subscriber. Full Strategy in [`docs/131-OAUTH-STRATEGY.md`](131-OAUTH-STRATEGY.md)
+(§a–§w, 27 Sub-Sections, 2700+ Lines).
+
+**Restlicher Polish (BACKLOG-tracked, nice-to-have):** #139 (Refresh-
+Latenz), #140 (Re-Pause-Smoke), #141+#142 (providerMetadata pass-through),
+plus Phase-B-Items (Web-OAuth-Production ohne CLI, VPS/Linux-Path via
+`--device-auth`, Multi-Account-Support).
+
 ### 3.6 — verschoben auf Pre-Launch-Phase B oder später
 **Status:** Strategy-Pivot Tag 18 Vormittag, siehe `docs/PRE-LAUNCH-A-STRATEGY.md`.
 

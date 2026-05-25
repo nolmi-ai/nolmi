@@ -2942,6 +2942,83 @@ real für Phase 5 ist plausibel.
 
 ---
 
+## §w — Phase 5.1+5.2+5.3 ✅ Web-UI + Doku-Closure (Tag 27 Block 27–29)
+
+**Scope:** Settings-UI zeigt Auth-Status pro Twin, OAuth-Aktivierung über
+Modal mit CLI-Command-Copy. ROADMAP-Häkchen + README-Hint für Web-UI.
+
+### §w.1 — Phase 5.1 Backend (`7616634`, Block 27)
+
+**Endpoint-Erweiterung:** `GET /twins/:handle/settings-data` liefert
+zusätzlich `auth: { mode, oauth }`. `mode` aus `twin_profiles.auth_mode`,
+`oauth` ist `OAuthTokenPublic | null` (Owner-Safe-View ohne
+access_token/refresh_token Klartext).
+
+**Wiring:**
+- `OAuthTokensRepo.findPublic(twinId, provider)` neu (~10 LOC, wrappt
+  `findDecryptedByTwinAndProvider` + `toPublic`).
+- `ServerDeps.oauthTokensRepo` neu, in `index.ts createServer-Call`
+  wired (Repo war seit Phase 1 für RefreshService da).
+- `@twin-lab/shared` Schema-Erweiterung: `AuthModeSchema`,
+  `OAuthTokenPublicSchema`, `SettingsDataResponseSchema.auth`.
+
+### §w.2 — Phase 5.2 Web-UI (`0468c2b`, Block 28)
+
+**Settings-Page Auth-Row:**
+- `mode=api_key` → "API-Key" + "OAuth aktivieren"-Button
+- `mode=oauth` + Token → "OAuth (ChatGPT)" + Account-ID + Ablauf-Zeit
+  + Re-Login-Button
+- `isExpired` → Badge "⚠ abgelaufen"
+- `isExpiringSoon` (< 5 Min) → Badge "⏰ läuft bald ab"
+- Inkonsistent-State (mode=oauth, kein Token) → Warn + "Neu loggen"
+
+**Neue Component `OAuthActivationModal.tsx` (~100 LOC):**
+- 4-Schritt-Anleitung im Modal
+- Code-Block mit `pnpm twin:oauth-login @<handle>` + Copy-Button
+  (`navigator.clipboard.writeText` + sonner-Toast)
+- "Status aktualisieren"-Button (just-on-click Refresh)
+- Auto-Refresh bei Modal-Close (§v.8 #4 Setzung) — User braucht keinen
+  manuellen Page-Reload nachdem CLI durchgelaufen ist
+- `ModalWrapper`-Reuse: Escape-Key + Backdrop-Click → Auto-Refresh+Close
+
+**Plus pragmatisch:** kein neuer Dep, kein shadcn — plain Tailwind +
+`sonner` (Toast) + bestehender ModalWrapper. Typecheck grün (Web +
+Shared + Runtime).
+
+### §w.3 — Phase 5.3 Doku-Closure (Block 29)
+
+**ROADMAP:** neue Section `### 3.7 — OpenAI-Subscription-OAuth (#131) ✅
+Phase A komplett` mit Sub-Phasen-Häkchen 3.7.1–3.7.6 + Verweis auf
+diese Strategy-Doc.
+
+**README:** OAuth-Section (§u.5) um Hinweis erweitert dass die
+Settings-Page die "Auth"-Row + Modal hat — kein dedizierter
+PHASE-A-OAUTH-GUIDE.md (Setzung §v.8 #5).
+
+**Strategy-Doc:** §w (dieser Block) dokumentiert Phase 5. §a–§w
+zusammen sind die vollständige #131-Bilanz (27 Sub-Sections).
+
+### §w.4 — Aufwand-Real
+
+| Sub-Phase | Estimate | Real |
+|-----------|----------|------|
+| 5.1 Backend | 30 Min | ~20 Min |
+| 5.2 UI | 60 Min | ~45 Min |
+| 5.3 Doku | 30 Min | ~25 Min |
+| **Σ bis hier** | **120 Min** | **~90 Min** |
+
+Phase 5.4 BACKLOG-Cleanup folgt separat (~15 Min). Total Phase 5 ~~~2h
+(Estimate war 2–2.5h, real schneller weil Reuse-Inventar aus §v.3
+exakt zugetroffen ist).
+
+### §w.5 — #131-Closure-Status
+
+**Phase A vollständig zu** mit Tag 27 Block 29 (Doku) + 30 (BACKLOG).
+`#131` BACKLOG-Item wird in Phase 5.4 auf "Status: ✅ Done — siehe
+docs/131-OAUTH-STRATEGY.md" verschlankt. Phase-B-Items neu skizziert.
+
+---
+
 ## Verweise
 
 - OpenAI Codex Auth-Doku: https://developers.openai.com/codex/auth
