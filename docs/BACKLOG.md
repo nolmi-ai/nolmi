@@ -2815,3 +2815,30 @@ Danach:
 - **#90 Resume-Prompt-Tuning** (should, M) — 5-Min-Edit
 - **#91 Reject-Reason-UI** (nice, S) — window.prompt durch Modal ersetzen (ModalWrapper aus 3.3.G3 verfügbar)
 
+## Tag-27-Items (#131-getrieben)
+
+### #139 OAuth-Token-Refresh-Latenz bei Multi-Step-Tool-Use untersuchen (M, should)
+
+**Symptom (Tag 27 Phase-3.3.1.2-Smoke):** Multi-Step-Tool-Use über Codex-OAuth zeigt substantielle Latenz-Diskrepanz zwischen Initial- und Folge-Smoke desselben Setups:
+
+- **Smoke 1** (audit `audit_huPk4-BddyVD`): 220s Wall-Clock für 2-Iteration-Multi-Step (`mcp:everything:get-sum`). Token war zu dem Zeitpunkt schon mehrere Minuten persistiert (zwischen `pnpm twin:oauth-phase3-spike setup` und Curl-Smoke).
+- **Smoke 2** (audit `audit_fKxYZKYZYL5j`): 16.4s Wall-Clock für identischen Flow nach `codex login --force` + Re-Setup. Codex-Latenz 15.1s, codexIterations=2.
+
+Faktor 14× langsamer im Initial-Smoke deutet auf Token-Refresh-Block hin: `OAuthRefreshService.ensureFresh` wird pro Codex-Request konsultiert (siehe `apps/runtime/src/oauth/codex-adapter.ts:78`), und bei nahem Ablauf vermutlich mit dem Refresh-Endpoint synchron blockiert. Mit Retry-Backoff im Codex-Adapter (3 Retries, 1s/2s/4s) summieren sich Refresh-Stalls zusätzlich auf.
+
+**Hypothesen:**
+
+1. Lazy-Refresh-Pfad blockiert Codex-Request länger als erwartet (z.B. >30s) wenn refresh_token expired oder Endpoint rate-limited
+2. File-Lock-Mutex aus Phase 2 (`apps/runtime/src/oauth/refresh-service.ts`) hält bei Concurrent-Requests den Adapter unnötig auf — Mutex-Wait + Refresh-Roundtrip kumulieren
+3. Withretry-Wrapper retried Refresh-bedingte 401s als „retryable" obwohl Refresh-Failure permanent ist
+
+**Diagnose-Pfad:**
+
+1. `pnpm dev`-Logs während Refresh-Trigger analysieren (`[oauth] refresh ...`-Lines mit Timestamps)
+2. `RefreshService.ensureFresh`-Latenz instrumentieren (eigenes `console.time`/`timeEnd`-Paar vor dem Codex-fetch)
+3. Smoke mit künstlich auf 10min expires_at gesetztem Token (statt 50min) — Reproducibility-Test für Lazy-Refresh-Block
+
+**Priorität:** Medium. Production-Use mit langlebigem User-Session (Codex-Subscription pro Owner) trifft den Lazy-Refresh-Pfad regelmäßig — 220s Wartezeit bei jedem ersten Send einer Session wäre UX-fatal. Workaround heute: Frontend könnte einen periodischen Keep-Alive-Refresh triggern; saubere Lösung ist Async-Refresh ohne Request-Block.
+
+**Out of Scope für Tag 27:** Phase 3.3.1.2 ist End-to-End-grün dokumentiert (Smoke 2), Phase 3.3.1.3 (Approval-Pipeline) hat Vorrang. #139 wird in Phase B oder als Polish-Item gezogen.
+
