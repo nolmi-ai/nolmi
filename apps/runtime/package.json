@@ -31,6 +31,7 @@
     "twin:oauth-phase3-3-spike": "tsx src/scripts/test-oauth-phase3-3-spike.ts",
     "twin:oauth-phase3-3-2-spike": "tsx src/scripts/test-oauth-phase3-3-2-spike.ts",
     "twin:oauth-phase3-3-3-spike": "tsx src/scripts/test-oauth-phase3-3-3-spike.ts",
+    "twin:oauth-phase3-4-spike": "tsx src/scripts/test-oauth-phase3-4-spike.ts",
     "test-codex-sse-parser": "tsx src/scripts/test-codex-sse-parser.ts",
     "test-codex-retry": "tsx src/scripts/test-codex-retry.ts",
     "key:generate": "tsx src/scripts/generate-master-key.ts",
@@ -79,6 +80,7 @@
     "zod": "^3.23.0"
   },
   "devDependencies": {
+    "@ai-sdk/provider": "^3.0.0",
     "@types/bcryptjs": "^2.4.6",
     "@types/better-sqlite3": "^7.6.0",
     "@types/eventsource": "^1.1.15",

@@ -1565,6 +1565,180 @@ expanded Content-Render.
 - Phase 4 CLI-Login-Command — ~1 Tag
 - Phase 5 Web-UI Status + Smoke + Doku + #131-Closure — ~1-1.5 Tage
 
+## §q — Vercel-Provider-Mapping-Spike (Phase 3.4.0, Tag 27 Block 19)
+
+**Scope:** Discovery-Spike: lässt sich der Codex-OAuth-Pfad als Vercel AI
+SDK V3 Custom-Provider verpacken? Wenn ja → Phase 3.4 Vollbau kann
+`runModelViaCodex` (~600 LOC) eliminieren und Vercel-SDK Multi-Step- /
+Reasoning- / Approval-Mechanik nutzen.
+
+### Doku-Check-Findings (Phase 3.4.0.0)
+
+**Installed:** `ai@6.0.173` + `@ai-sdk/provider@3.0.10` (V3-Spec).
+
+**`LanguageModelV3`-Interface:**
+- `doGenerate(options) → Promise<LanguageModelV3GenerateResult>` —
+  stateless, ein Request, Multi-Step-Loop wird vom SDK außen orchestriert
+- `doStream(options) → Promise<LanguageModelV3StreamResult>` — analog
+- Provider erwartet `specificationVersion: 'v3'` + `provider` + `modelId`
+  + `supportedUrls`
+
+**Native Stream-Primitives in V3** (substantieller Befund):
+- `text-start/-delta/-end` für Text-Streaming
+- **`reasoning-start/-delta/-end`** — native Reasoning-Support
+- `tool-input-start/-delta/-end` + `tool-call` + `tool-result`
+- **`tool-approval-request`** als first-class Type — Marker-Pattern aus
+  Phase 3.2.F wäre Anti-Pattern wenn man Vercel-Pfad neu macht
+
+**`LanguageModelV3ReasoningPart`** erwartet `text: string`. Codex liefert
+`summary: []` (siehe §p). Mapping = leerer String pro Reasoning-Item.
+Spec-konform, semantisch leichte Verlust.
+
+### Code-Diagnose (Phase 3.4.0.1)
+
+**oauth-Branch in `runModel` (`twin-service.ts:2294`):** ein-Zeilen-Branch,
+würde komplett wegfallen.
+
+**`runModelViaCodex`-Funktion** ist ~600 LOC mit Init-Branch + Multi-Step-
+Loop + Pre-Call-Detect + Reasoning-Aggregation + Resume-Pfad. Bei Refactor:
+
+| Logik heute | Bei Provider-Wrapper |
+|-------------|----------------------|
+| Multi-Step-Loop §l-Pattern | Vercel-SDK via `stopWhen(stepCountIs(N))` + History-Replay |
+| Pre-Call-Detect requires_approval | `tool-approval-request`-Stream-Part |
+| Resume-Pfad codexResumeContext | Vercel via Tool-Result-Message im Prompt |
+| Reasoning-Aggregation | Vercel aggregiert `reasoning-*`-Stream-Parts automatisch |
+| Token-Refresh + Retry | bleibt im Provider |
+
+### Spike-Setup (Phase 3.4.0.2)
+
+`apps/runtime/src/scripts/test-oauth-phase3-4-spike.ts` mit Setzung **(β)**:
+- Token-Pre-Check via JWT-Decode (Pattern aus Phase 3.3.3.0)
+- Inline `createCodexProvider()`-Factory mit `doGenerate`-Implementation
+  (~280 LOC inkl. Mapping)
+- Mapping-Helper: `mapV3PromptToCodex()` (System → instructions, User/
+  Assistant → message-Items, Tool-Calls → function_call, Tool-Results →
+  function_call_output per §l), `mapV3ToolsToCodex()` (V3-FunctionTool →
+  Codex function-format)
+- Output-Mapping: `CodexAdapterOutput` → `LanguageModelV3GenerateResult.
+  content[]` (Text + ToolCall + Reasoning + finishReason + usage +
+  providerMetadata)
+- Test 1: `generateText({model: provider.languageModel("gpt-5.5"),
+  prompt: "Was ist 17 plus 25?"})` — Basis-Mapping
+- Test 2: `generateText({..., tools: {get_sum: tool({...execute})},
+  stopWhen: stepCountIs(5)})` — Tool-Roundtrip via Vercel-Multi-Step
+
+`@ai-sdk/provider@^3.0.0` als devDep dazu (vorher transitive). Pragmatic
+für Spike + zukünftige Phase-3.4-Builds.
+
+### Spike-Output (beide Tests grün auf ersten Run)
+
+```
+TEST 1 — Simple Text:
+  ✓ 9084ms
+  text: "17 plus 25 ist **42**."
+  finishReason: stop
+  providerMetadata: openai-codex { planType, cfRay, latencyMs, responseId, codexStatus }
+
+TEST 2 — Tool-Roundtrip:
+  ✓ 2572ms
+  text: "Die Summe ist 42."
+  steps: 2
+  step[0]: text="", toolCalls=1, toolResults=1, finishReason=tool-calls
+    - tool-call: get_sum({"a":17,"b":25}) callId=call_HoLTTB3XfRad3nAjekiFLZAS
+    - tool-result: get_sum → {"sum":42}
+  step[1]: text="Die Summe ist 42.", toolCalls=0, toolResults=0, finishReason=stop
+```
+
+**Beweis-Punkte:**
+- V3Prompt → Codex-input-Mapping funktioniert (System-Part landet in
+  instructions, User-Part in message-Item)
+- V3 tools → Codex function-Field-Mapping funktioniert (get_sum mit
+  inputSchema → strict function-spec)
+- **Tool-Roundtrip via Vercel-Multi-Step ohne eigenen Loop**:
+  - Step[0]: Codex liefert tool-call → Provider returnt content-Array mit
+    `{type:"tool-call",...}`
+  - Vercel-SDK orchestriert: ruft execute() der Tool, baut tool-Role-
+    Message ans Prompt
+  - Step[1]: doGenerate wird mit erweitertem Prompt erneut aufgerufen →
+    Provider mapped Tool-Result-Part zu `function_call_output`-Item per
+    §l → Codex liefert finale Text-Antwort
+  - **Vercel-SDK reproduziert §l-Pattern transparent — kein eigener Loop
+    in runModelViaCodex nötig**
+- providerMetadata mit Codex-spezifischen Feldern durchgereicht (Audit-
+  Persistierung kann das wie heute extrahieren)
+- top-level `result.toolCalls=0`, aber `step[0].toolCalls=1` — matched
+  existing Step-Walk-Pattern (`collectAllToolCalls`-Helper in
+  twin-service.ts), kein neuer Code nötig
+
+### Phase-3.4-Vollbau-Empfehlung: ✅ LOHNT SICH
+
+Substantielle Vorteile:
+- **~600 LOC `runModelViaCodex` weg** + 1 Zeile oauth-Branch in runModel
+- Multi-Step-Logic in Vercel-SDK (test, dokumentiert, Multi-Provider-konsistent)
+- Native Approval-Primitives — Marker-Pattern aus 3.2.F könnte parallel
+  aufgeräumt werden (separater Refactor, lockt am Refactor-Trail mit)
+- Reasoning-Aggregation automatisch
+- Token-Refresh + Retry bleiben im Provider — keine Architektur-Änderung
+- Custom-Provider ist testbar wie ein normales Vercel-Backend (Multi-
+  Provider-Tests werden einfacher)
+
+Substantielle Aufwand-Treiber:
+- **Phase 3.4.1 — Provider-Move + Production-Wiring** (~2h): Spike-Code
+  ins `apps/runtime/src/oauth/codex-vercel-provider.ts`-Modul, mit
+  `OAuthRefreshService`-Injection statt direct token, Retry-Wrapper
+  übernehmen aus `codex-adapter.ts:84` (`withRetry`)
+- **Phase 3.4.2 — Tool-Approval-Mapping** (~3-4h): `tool-approval-request`-
+  Content-Part emittieren für Skills mit `requiresApproval=true`. Caller-
+  Side (`runOwnerDirect`) muss auf den neuen Content-Part-Type reagieren
+  statt `McpToolApprovalRequiredError` zu catchen. Plus
+  `approveMcpToolUseViaCodex` muss umgestellt werden auf V3-`tool-result`-
+  Message-Resume (statt eigener resumeContext).
+- **Phase 3.4.3 — runModelViaCodex-Removal + oauth-Branch-Cleanup**
+  (~1.5h): Caller-Pfad einheitlich auf Vercel-`generateText`. Plus
+  Smokes (Phase 3.3.1.2/3/3.3.3 müssen alle grün bleiben).
+- **Phase 3.4.4 — Approval-Pipeline-Symmetrie für api_key-Pfad**
+  (~2h, OPTIONAL): wenn man schon dabei ist, das Marker-Pattern aus
+  3.2.F auf `tool-approval-request` umstellen → einheitliche Approval-
+  Mechanik beide Auth-Modi. Substantiell aber lohnt-sich-Polish.
+
+**Total Phase 3.4 Vollbau: 6.5-9.5h** (~1 Bautag). Briefing-Estimate
+6-10h trifft das Mittelfeld.
+
+**Phase-B-Defensive-Wert (qualitativ):** existing Direct-fetch ist
+zentralisiert (`codex-adapter.ts:193-202` Body-Bau), aber das oauth-
+Branch + Multi-Step-Loop sind über `twin-service.ts` verteilt. Bei
+Codex-Format-Change ist Refactor-Surface heute substantiell. Mit
+Custom-Provider wäre die Mapping-Logik im Provider isoliert.
+
+### Bonus-Empfehlung: Marker-Pattern parallel aufräumen?
+
+Tag-27-Implementation hat das Marker-Pattern als Workaround für AI-SDK-6-
+Throw-Schluck-Verhalten gebaut (§m/§n). V3-Spec hat aber `tool-approval-
+request` als first-class Content-Part — der Workaround wäre obsolet wenn
+man den api_key-Pfad auch refactored.
+
+**Aber:** das ist gleichzeitig auch ein Anti-Pattern-Treiber: tool-bridge.
+ts (Marker-Emission), detectPendingToolCall (Marker-Scan),
+stopOnPendingApprovalMarker (StopCondition) wären alle Legacy. Refactor
+würde ~80 LOC sparen aber die existing Smokes brauchen Migration.
+
+**Empfehlung:** Phase 3.4.4 als **separate Sub-Phase** definieren (nach
+3.4.1-3 für oauth-Pfad), nur wenn User es ausdrücklich will. Heute
+funktioniert das Marker-Pattern stabil, kein dringender Refactor-Treiber.
+
+### Spike-Decision-Vorlage für User
+
+| Option | Aufwand | Outcome |
+|--------|---------|---------|
+| **(A)** Phase 3.4 jetzt bauen | ~1 Bautag (3.4.1+2+3) | Codex-OAuth-Pfad clean, ~600 LOC weg |
+| **(B)** Phase 3.4 + 3.4.4 Marker-Cleanup | ~1.5 Bautage | Beide Auth-Modi clean, Approval-Symmetrie |
+| **(C)** Phase 3.4 für später, Phase 4 (CLI-Login) priorisieren | 0 Bautage Phase 3.4 | Closure-Speed, Phase 3.4 als Phase-B-Polish |
+
+**Pre-Spike-Tendenz war "lean toward 'lohnt sich'"** — Spike-Output
+verstärkt das. Aber Phase-3.3-Closure ist substantiell — Phase 4 + 5 zu
+priorisieren für #131-Closure ist ebenso valide.
+
 ## Re-Estimate Tag 27 Nachmittag
 
 Initial-Schätzung (Tag 25): L (3-5 Bautage)
