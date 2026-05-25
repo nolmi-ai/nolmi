@@ -1,6 +1,6 @@
 # #131 OpenAI Subscription-OAuth — Strategy
 
-**Status:** Phase 1 + 2 + 3.0 Spike + 3.1 (3.1.1 + 3.1.2) ✅ Tag 27. Phase 3.2 nächster Schritt (Tag 28).
+**Status:** Phase 1 + 2 + 3.0 Spike + 3.1 (3.1.1 + 3.1.2) + 3.2 ✅ Tag 27. Phase 3.3 nächster Schritt (Tag 28-29) — Tool-Calls + Reasoning-Traces auf Basis der 5 captured Event-Types.
 
 Pre-Launch-Phase A Block 5 Item. Vorgezogen von Phase B in Tag 26.
 
@@ -175,7 +175,7 @@ initial geschätzt. Re-Estimate: XL → XXL. Bau in Sub-Phasen:
 | **3.0 Spike** (Tag 27 Vormittag/Nachmittag) | Direct-fetch Codex-Adapter, Minimal-Instructions, Twin-Chat-API gepatcht für oauth-Branch, Pre-Flight via existing Mock-Token | 2-4h | ✅ Commit `7b8aae4` + STAND-Smoke-2 `ad48c5d` |
 | **3.1.1 SSE-Parser standalone** (Tag 27 Nachmittag) | CodexSSEParser mit Hybrid-Approach (Discriminated-Union + generic Fallback), 8/8 Smoke | 1-1.5h | ✅ Commit `75d166d` |
 | **3.1.2 SSE-Integration + Retry** (Tag 27 Nachmittag) | CodexHttpError + isRetryableError + withRetry (3 Retries, Backoff 1s/2s/4s, Full-Restart), 11/11 Retry-Smoke + End-to-End-Smoke | 2-3h | ✅ Commit `707f941` |
-| **3.2 Codex-System-Prompt-Engineering** (Tag 28) | Echte Codex-CLI-Prefix-Recherche + Twin-Persona-Mapping als developer-role-Message, Facts-Block + History in `instructions` / `input` | 0.5-1 Tag | offen |
+| **3.2 Codex-System-Prompt + Persona-Mapping** (Tag 27 Nachmittag) | `composeOwnerSystemPrompt`-Helper extrahiert (Drift-Prevention zwischen Vercel-SDK- und Codex-Pfad), runModelViaCodex erweitert (persona + factsBlock + episodicBlock + summaryBlock + extraSystem), CodexAdapter wird reiner HTTP-Client (pre-built instructions + input), CodexInputItem-Type exportiert, Smoke 3 End-to-End grün mit klarer Markus-Persona | ~2h | ✅ Commit `a949b7e` |
 | **3.3 Tool-Calls + Reasoning-Traces** (Tag 29) | Codex-Response-Format → Twin-Lab AuditEntry-Mapping, Tool-Call-Round-Trips. **Eingangsdaten:** 5 zusätzliche Event-Types aus Phase-3.1.2-Smoke entdeckt, dokumentiert in STAND Tag 27 — Reverse-Engineering-Daten für Tool-Call-Mapping (siehe unten) | 1-2 Tage | offen |
 | **3.4 Vercel-Provider-Refactor** (optional, Tag 29-30) | Direct-fetch zu sauberem Vercel-AI-SDK-Custom-Provider migrieren | 1 Tag | offen |
 

@@ -1,6 +1,6 @@
 # twin-lab — Stand
 
-**Letztes Update:** 25. Mai 2026, Sonntag Nachmittag (Tag 27 — Phase 3.1 Komplett ✅, 9 Blöcke an einem Tag)
+**Letztes Update:** 25. Mai 2026, Sonntag Nachmittag/Abend (Tag 27 — Phase 3.2 ✅, 10 Blöcke an einem Tag)
 
 ## Aktuell in Arbeit
 
@@ -274,19 +274,80 @@ Das sind **Reverse-Engineering-Daten für Phase 3.3** (Tool-Calls + Reasoning-Tr
 
 **Architektur-Win:** Hybrid-Approach (Discriminated-Union + generic Fallback) zahlt sich sofort aus — strikte Schema-Validierung hätte heute schon 5 Events geworfen statt sie zu sammeln.
 
+### #131 Nachmittag/Abend — Phase 3.2 Codex-System-Prompt + Persona-Mapping (Commit `a949b7e`, ~2h)
+
+Phase 3.2 schließt die Phase-3.0-Lücke: `runModelViaCodex` ignorierte bisher Persona/Facts/Memory bewusst (Spike-Disziplin). Phase 3.2 reicht die komplette System-Prompt-Komposition + History durch — strukturell sauber via extrahiertem Helper.
+
+#### Diagnose-Catch
+
+Briefing-Annahme war, `runModelViaCodex` müsse eine `conversationId`-Option akzeptieren und History selbst via `conversationsRepo.loadMessages` laden. Phase-3.2.1-Diagnose hat das korrigiert: `messages`-Parameter enthält **bereits** History (vom Caller `runOwnerDirect` pre-built via `loadConversationHistory` + `auditsToOwnerDirectMessagesChronological`). Codex-Pfad braucht nur Format-Mapping, kein History-Loading. Substantielle Vereinfachung gegenüber Briefing-Plan.
+
+Zweiter Diagnose-Catch: kein dedizierter `buildSystemPrompt`-Helper existing — Composition ist **inline in `runModel`** (7 Schichten). Ohne Helper-Extraktion würde Phase 3.2 die Schichten-Logic im Codex-Pfad duplizieren — strukturelles Drift-Risiko bei künftigen Erweiterungen (Phase 3.3 zieht z.B. Skills + TOOL_USE_DIRECTIVE nach).
+
+#### Bau
+
+**`composeOwnerSystemPrompt(parts)`** — neue top-level Function in twin-service.ts neben `LANGUAGE_DIRECTIVE`. Sieben Parameter (persona, extraSystem, factsBlock, skillsBlock, toolUseDirective, summaryBlock, episodicBlock), `.filter(Boolean).join("\n\n")`-Pattern wie vorher. Beide Pfade nutzen denselben Helper:
+
+- **Vercel-SDK-Pfad (`runModel`):** alle 7 Schichten, `skillsBlock` + `TOOL_USE_DIRECTIVE` werden vom Caller berechnet
+- **Codex-Pfad (`runModelViaCodex`):** 5 von 7 Schichten — `skillsBlock` + `toolUseDirective` als `null` übergeben (Phase 3.3 zieht Tool-Use nach)
+
+**`mapChatMessagesToCodexInput(messages)`** — neue Helper-Function: user → `input_text`, assistant → `output_text` (matched Codex-Response-Format). System-Messages werden übersprungen, weil System-Prompt via `instructions`-Field geht.
+
+**`runModelViaCodex` neue Signatur:**
+
+```typescript
+private async runModelViaCodex(
+  persona: Persona,
+  messages: ChatMessage[],
+  extraSystem?: string,
+  options: {
+    factsBlock?: string | null;
+    episodicBlock?: string | null;
+    summaryBlock?: string | null;
+  } = {},
+): Promise<{ content: string; metadata: Record<string, unknown> }>
+```
+
+**`CodexAdapter` Hybrid-Architektur:** Adapter ist jetzt reiner HTTP-Client. `CodexAdapterInput` akzeptiert pre-built `instructions: string` + `input: CodexInputItem[]` statt rohes `userMessage`. `SPIKE_INSTRUCTIONS`-Konstante entfällt. `CodexInputItem`-Type exportiert für Caller-Type-Safety.
+
+**Aufruf-Site in `runModel`:** OAuth-Branch (Z. 1610) reicht jetzt `extraSystem` + `options.factsBlock/episodicBlock/summaryBlock` durch.
+
+#### Smoke 3 End-to-End grün (Audit `audit_kbYtQUfxn9Jy`)
+
+```
+POST /twins/@markus/chat
+  → Frage: "Wer bist du? Beschreib dich in 2-3 Sätzen."
+
+  → Reply: "Ich bin der digitale Twin von Markus Johannes Baier.
+     Ich spreche in seinem Namen, soweit das in meinem Mandat liegt:
+     AI-native Product Delivery, Design Systems, Vibe Coding,
+     Agentic AI und HARWAY Experience.
+     Ich bin nicht sein Assistent und treffe keine verbindlichen
+     Zusagen für ihn."
+
+  → providerMetadata = {
+      provider:    "openai-codex",
+      authMode:    "oauth",
+      planType:    "pro",
+      cfRay:       "a013e1491cb79b35-MUC",
+      latencyMs:   3215,
+      responseId:  "resp_00f5f250cc1ba6b2016a142562f5908191be7a85870e4aa375",
+      codexStatus: "completed",
+      unknownEventTypes: [5 captures wie Phase 3.1.2]
+    }
+  → memoryHits: 3 (episodic search lieferte 3 relevante Hits)
+```
+
+**Smoke-Bilanz:** klare Markus-Persona statt Phase-3.0-„Hello there, friend"-Output, deutsche Sprache (LANGUAGE_DIRECTIVE wirkt durch), Mandate-Wissen aus Persona-Markdown, Owner-vs-Twin-Guardrail aktiv, 3 Memory-Hits aus Episodic-Search durchgereicht. Phase-3.0-Lücke vollständig geschlossen.
+
 #### Plan Tag 28+
 
-- Phase 3.2 Codex-System-Prompt-Engineering (0.5-1 Tag)
-  - Echte Codex-CLI-Prefix-Recherche
-  - Twin-Persona als developer-role-Message
-  - Facts-Block + Memory-Hits + History-Loader in `instructions` / `input`
-  - `runModelViaCodex`-Signatur erweitern (analog `runModel(persona, messages, extraSystem?, options?)`)
-- Phase 3.3 Tool-Calls + Reasoning-Traces (Tag 29, 1-2 Tage)
-  - Nutzt Bonus-Discovery aus heutigem 3.1.2-Smoke als Eingangsdaten
+- **Phase 3.3 Tool-Calls + Reasoning-Traces (Tag 28-29, 1-2 Tage)** — Codex-Response-Format → Twin-Lab AuditEntry-Mapping. Eingangsdaten: 5 captured Event-Types aus Phase-3.1.2 + 3.2 Smokes (`response.in_progress`, `output_item.done`, `content_part.added`, `output_text.done`, `content_part.done`). Plus `skillsBlock` + `TOOL_USE_DIRECTIVE` als Schicht 3+4 im Codex-Pfad nachziehen (composeOwnerSystemPrompt-Helper kann beide Parameter schon).
+- **Phase 3.4 Vercel-Provider-Refactor (optional, Tag 29-30)** — Direct-fetch zu sauberem Vercel-AI-SDK-Custom-Provider migrieren. Entscheidung nach Phase 3.3: wenn Tool-Use-Mapping sauber im Direct-fetch geht, kann 3.4 entfallen.
 
 ### Tag-27-Closure-Bilanz
 
-**Neun Blöcke an einem Tag — Husky-Hook bis Phase 3.1 komplett:**
+**Zehn Blöcke an einem Tag — Husky-Hook bis Phase 3.2 komplett:**
 
 | Block | Commit | Was |
 |---|---|---|
@@ -299,12 +360,15 @@ Das sind **Reverse-Engineering-Daten für Phase 3.3** (Tool-Calls + Reasoning-Tr
 | 7. Local-Dev-Fix | `6d33ade` | #138 TELEGRAM_USE_POLLING Auto-Detection-Fallback |
 | 8. Phase 3.0 Smoke 2 | `ad48c5d` | #131 End-to-End via `/twins/@markus/chat` grün + STAND-Update |
 | 9. Phase 3.1 (3.1.1 + 3.1.2) | `75d166d` + `707f941` | #131 CodexSSEParser standalone + SSE-Integration + Retry-Wrapper, 8/8 + 11/11 + End-to-End-Smoke grün |
+| 10. Phase 3.2 | `a949b7e` | #131 composeOwnerSystemPrompt-Helper + Persona/Facts/Memory-Mapping + Smoke 3 mit klarer Markus-Persona-Response |
 
 **Fünf Lessons:** Recherche vor Bau (#1), STAND-Doppelpflege (#2), End-to-End-Validation vor Bau (#3), Migration ohne Repo-Update ist Anti-Pattern (#4), Twin-Lab-eigene Setzungen schlagen Industry-Defaults (#5).
 
 **Lesson Tag 27 #5: Twin-Lab-eigene Setzungen (CLAUDE.md) sind nicht zu überschreiben mit „industry best practice".** Phase 3.1.1 Bau-Briefing hatte Vitest reingebrieft („Standard für TypeScript-Unit-Tests"). Phase-1.1-Diagnose hat die CLAUDE.md-Setzung „keine Test-Suite" aufgefangen und Smoke-Script-Pattern empfohlen — matched Tag-12-Memory-Repos und Tag-22-MCP-Skills. Ergebnis: 8/8 + 11/11 Smoke grün ohne neue devDeps, ohne Husky-Hook-Eingriff, ohne CLAUDE.md-Bruch. Generelles Prinzip: **Project-spezifische Setzungen (CLAUDE.md, MEMORY, existing-Pattern-Dichte im Code) haben Vorrang vor generischen Industry-Defaults** — bevor neue Infrastruktur eingeführt wird, prüfen ob das Projekt eine eigene Setzung hat.
 
-**Tag-27-Outcome #131:** Phase 1 ✅ + Phase 2 ✅ + Strategy-Iteration ✅ + Phase 3.0 Spike ✅ (Smoke 1 + Smoke 2 grün) + Phase 3.1 ✅ (3.1.1 Parser + 3.1.2 Integration/Retry). Walking-Skeleton + Robustness-Layer stehen End-to-End. Phase 3.2 (Tag 28) hat freie Bahn für Persona/Facts/Memory-Pipeline-Wiring im Codex-Adapter, Phase 3.3 hat dank Bonus-Discovery 5 zusätzliche Event-Types als Eingangsdaten.
+**Phase-3.2-Bonus-Lesson (Diagnose-Wert, kein neuer Lesson-Eintrag):** Briefing für Phase 3.2 hatte angenommen, `runModelViaCodex` müsse `conversationId` akzeptieren und History selbst laden. Phase-3.2.1-Diagnose hat gezeigt: History ist bereits in `messages` (Caller `runOwnerDirect` lädt sie OUTSIDE `runModel` via `loadConversationHistory`). Ohne Diagnose wäre Phase 3.2 mit doppeltem History-Loading + neuer Dep-Injection gebaut worden — Phase-1.1-Diagnose-Pattern bestätigt 13. Mal.
+
+**Tag-27-Outcome #131:** Phase 1 ✅ + Phase 2 ✅ + Strategy-Iteration ✅ + Phase 3.0 Spike ✅ (Smoke 1 + Smoke 2 grün) + Phase 3.1 ✅ (3.1.1 Parser + 3.1.2 Integration/Retry) + Phase 3.2 ✅ (Persona/Facts/Memory durchgereicht, Smoke 3 grün mit klarer Markus-Persona). Walking-Skeleton + Robustness-Layer + Persona-Pipeline stehen End-to-End. Phase 3.3 (Tag 28-29) hat freie Bahn für Tool-Calls + Reasoning-Traces mit 5 captured Event-Types als Eingangsdaten und Schicht 3+4 im Codex-Pfad nachziehen (Helper ist vorbereitet).
 
 **Tag-27-Outcome #138:** Local-Dev-Boot-Friction strukturell behoben, in der Praxis verifiziert beim Smoke-2-Setup.
 
