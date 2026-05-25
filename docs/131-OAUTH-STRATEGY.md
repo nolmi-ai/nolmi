@@ -1172,6 +1172,161 @@ Skizze für nachfolgendes Bau-Briefing:
 
 Estimate Phase 3.3.1.3.2: **S-M (3-4h)**, siehe oben.
 
+## §o — Codex-Resume-Pfad ✅ (Phase 3.3.1.3.2, Tag 27 Block 16)
+
+**Scope:** Resume-Pfad nach User-Approval. Codex-OAuth-Twins können MCP-Tools
+mit `requires_approval=true` jetzt vollständig durchlaufen:
+**Pause (Phase 3.3.1.3.1) → User-Approve via Curl → Tool-Execute + Codex-
+Resume-Iteration → finale Antwort** — symmetrisch zum Vercel-SDK-Pfad.
+
+### Architektur-Symmetrie (Bauzeit ~3h, im S-M-Estimate)
+
+§n-Architektur (Throw + Vercel-Catch-Reuse für Pause) wird erweitert auf:
+- **Approve-Switch + Codex-Branch** in `approveMcpToolUse`. Vercel-Pfad
+  bleibt unverändert; Codex-Branch via `entry.input.codexResumeContext !=
+  null`.
+- **Reject-Switch + Codex-Branch** in `rejectPending` (inline mcp-tool-use-
+  Branch). Vercel-Pfad bleibt unverändert; Codex-Branch identisches
+  Schema.
+- **Helper-Extract `buildPendingMcpAuditFromError`** für Pending-Audit-
+  Build: ein-Ort-für-Pending-Logik, von zwei Stellen gerufen:
+  1. `runOwnerDirect`-Catch (initiale Pause beim Owner-Chat) — Refactor,
+     keine Verhaltensänderung
+  2. `approveMcpToolUseViaCodex`-Catch (Re-Pause während Resume-Iteration)
+     — neu mit `priorAuditId`-Link
+- **`runModelViaCodex` um `options.resumeContext` erweitert** (Option 1
+  aus Diagnose D). Init-Phase verzweigt: Initial-Run vs Resume-from-
+  Snapshot. Skill-Reverse-Map kommt aus aktuellen Skills (respektiert
+  User-Skill-Toggle zwischen Pause+Approve); Tool-Definitions kommen aus
+  persistiertem Pause-Snapshot (Codex-Konsistenz, §l).
+
+### Resume-Mechanik im Detail
+
+`approveMcpToolUseViaCodex` macht 5 Schritte:
+
+1. **Validate**: `codexResumeContext` + `toolCall` in `entry.input` müssen
+   da sein, sonst Error.
+2. **Tool-Execute**: `mcp.callTool(mcpServerId, mcpToolName, args)`. Fail
+   → `failWithReason` (audit auf failed), re-throw.
+3. **Skill-Lookup + Map-Build**: `skills.list({activeOnly:true})` +
+   `mapSkillsToCodexTools(...)`. Resume-Skill via `skillByCodexName.get(
+   ctx.pendingToolCall.name)` für korrekten Twin-Lab-Skill-Name (NICHT
+   naiver `replaceAll("_", ":")` — siehe §m-Korrektur).
+4. **Resume-Iteration**: `runModelViaCodex(persona, [], undefined,
+   {skills, resumeContext: {fromAudit, toolOutput, executedToolCall}})`.
+   Init-Branch in runModelViaCodex baut `input = [...inputItems,
+   function_call, function_call_output]`, restauriert Loop-State,
+   pusht `previousToolCalls + executedToolCall` ans `allToolCalls`.
+5. **Success-Complete**: `audit.complete` mit `reply, toolCall, toolResult,
+   toolIsError, providerMetadata`. SSE `pending-resolved` automatisch
+   via `maybeResolvePending`.
+
+### Re-Pause-Pfad (gebaut, aber nicht im Smoke verifiziert)
+
+Wenn Codex in der Resume-Iteration ein weiteres `requires_approval=true`-
+Tool aufruft, schlägt der Pre-Call-Detect aus Phase 3.3.1.3.1 wieder zu
+— `McpToolApprovalRequiredError` wird im Resume-Loop geworfen. Catch in
+`approveMcpToolUseViaCodex` macht:
+
+- **Original-Audit auf `executed`** mit `output.followUpPending=true`-
+  Marker und der Resume-Tool-Result-Detail (semantisch: "der approvete
+  Tool-Call ist durch, aber das ist nicht das Ende").
+- **Neuer Pending-Audit via Helper** mit `priorAuditId=entry.id`. Frontend
+  kann via SSE `pending-added` direkt rendern; UI könnte den Link für
+  "Folgeaktion zu ..."-Display nutzen.
+- **HTTP-Response** des Approve-Endpoints: `{auditId: <neu>, message,
+  reply: <neue Wartemeldung>, pending: true}`. `ApproveResult` ist um
+  `pending?: boolean` erweitert; Endpoint reicht das transparent durch.
+
+**Smoke-Status:** Re-Pause-Pfad ist code-komplett aber **nicht im End-to-
+End-Smoke verifiziert** — der `get-sum`-Smoke war zu trivial (Codex hat
+keine Follow-up-Tools gebraucht). Verification braucht einen Multi-Tool-
+Trigger (z.B. "rufe X auf, dann Y") wo beide Tools requires_approval
+sind. BACKLOG-Item dokumentiert (siehe Tag-27-Items).
+
+### Reject-Pfad mit `function_call_output` + `isError=true`-Marker
+
+`rejectMcpToolUseViaCodex` ist Pendant zu Approve, aber:
+- **Kein Tool-Execute** — Tool wird nicht ausgeführt
+- **Resume mit Rejection-Output**: `function_call_output.output =
+  "[isError=true] User rejected the tool call. Reason: <reason>. Please
+  respond directly without using that tool."` (Option (a) aus Diagnose-
+  Frage 5)
+- **Status bleibt `rejected`** — `audit.repo.update` (NICHT `audit.complete`),
+  exakt das gleiche Pattern wie der Vercel-SDK-Reject-Pfad
+- **Re-Pause nach Reject** möglich (Codex könnte trotz Rejection ein
+  anderes requires-approval-Tool rufen). Original-Audit kriegt
+  `followUpPending=true` im output, neuer Pending-Audit mit
+  `priorAuditId`-Link
+
+### Smoke-Bilanz `audit_gSqqVwGGBY6O` (executed)
+
+```jsonc
+{
+  "capability": "mcp-tool-use",
+  "status": "executed",
+  "reply": "17 plus 25 ergibt 42.",
+  "toolCallsCount": 1,
+  "toolCalls": [{
+    "toolName": "mcp:everything-approval:get-sum",
+    "output": "[{\"type\":\"text\",\"text\":\"The sum of 17 and 25 is 42.\"}]",
+    "codexCallId": "call_BG2NRMd2pGqunYM8sYuuJj9x"
+  }],
+  "codexIterations": 2,          // Pause-Iteration + Resume-Iteration
+  "followUpPending": null,        // Kein Re-Pause in diesem Smoke
+  "latencyMs": 5424,
+  "planType": "pro"
+}
+```
+
+**Beweis-Punkte:**
+- **Approve-Branch greift**: `audit.input.codexResumeContext` aus
+  Phase-3.3.1.3.1-Persistenz wird gelesen, Codex-Branch in
+  `approveMcpToolUse` aktiv
+- **Tool wird tatsächlich ausgeführt**: `get-sum(17,25)` → `"The sum of
+  17 and 25 is 42."` als Codex-Tool-Output sichtbar
+- **Resume-Iteration läuft**: `codexIterations=2` (Pause + Resume),
+  finale Antwort "17 plus 25 ergibt 42." auf Deutsch (Persona aktiv,
+  System-Prompt korrekt rekonstruiert)
+- **Audit-Trail komplett**: `toolCall` mit `codexCallId` aus dem
+  Original-Pending bewahrt; Reply persistiert
+- **Status-Transition**: pending → executed via `audit.complete` → SSE
+  `pending-resolved` automatisch
+- **Performance**: 5.4s mit frischem Token (vgl. §m-BACKLOG #139
+  Token-Refresh-Latenz)
+
+Smoke-Audit nach Verify gelöscht; Setup via `pnpm twin:oauth-phase3-spike
+setup`, Cleanup via `... cleanup` → @markus zurück auf `api_key`.
+
+### Phase-3-Outcome — #131 Substantiell-Closed
+
+Mit Phase 3.3.1.3.2 sind Codex-OAuth-Twins **funktional gleichwertig zu
+api_key-Twins** für den Tool-Use-Pfad:
+
+| Capability | api_key (Vercel-SDK) | oauth (Codex) |
+|------------|---------------------|---------------|
+| Auto-Execute (`requires_approval=false`) | Phase 3.2 ✅ | Phase 3.3.1.2 ✅ |
+| Pause (`requires_approval=true`) | Phase 3.2.F ✅ | **Phase 3.3.1.3.1 ✅** |
+| Approve + Resume + Tool-Result | Phase 3.2.F ✅ | **Phase 3.3.1.3.2 ✅** |
+| Reject + System-Message | Phase 3.2.F ✅ | **Phase 3.3.1.3.2 ✅** |
+| Multi-Step-Loop | Phase 3.2.E ✅ | Phase 3.3.1.2 ✅ |
+| Re-Pause in Resume | implizit ✅ | code-komplett, smoke offen |
+
+**Restliche Sub-Phasen (optional):**
+- **Phase 3.3.3 Reasoning-Traces** — `item.type === "reasoning"` handlen,
+  Audit-Persistenz. ~0.5 Tag, optional weil Reasoning heute nicht in der
+  UI gerendert wird.
+- **Phase 3.4 Vercel-Provider-Refactor** — Optional, weil Direct-fetch
+  sauber funktioniert. Würde sich erst lohnen wenn Vercel-AI-SDK eine
+  vergleichbare Funktion bietet (heute nicht).
+
+**Phase-3-Outcome:** #131 ist substantiell-zu. Direkt-fetch-Adapter +
+SSE-Parser + System-Prompt-Mapping + Multi-Step-Tool-Loop + Approval-
+Pipeline (Pause+Approve+Reject) ist Production-Ready für Owner-Self-
+Use mit Codex-Subscription. Phase 4 (CLI-Login-Command) + Phase 5
+(Web-UI Status + Doku + Smoke) sind die letzten Schritte vor #131-
+Closure.
+
 ## Re-Estimate Tag 27 Nachmittag
 
 Initial-Schätzung (Tag 25): L (3-5 Bautage)

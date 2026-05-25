@@ -2842,3 +2842,36 @@ Faktor 14× langsamer im Initial-Smoke deutet auf Token-Refresh-Block hin: `OAut
 
 **Out of Scope für Tag 27:** Phase 3.3.1.2 ist End-to-End-grün dokumentiert (Smoke 2), Phase 3.3.1.3 (Approval-Pipeline) hat Vorrang. #139 wird in Phase B oder als Polish-Item gezogen.
 
+### #140 Re-Pause-Pfad in Codex-Resume Smoke-verifizieren (S, nice)
+
+**Kontext (Tag 27 Block 16, Phase 3.3.1.3.2):** Codex-Resume nach Approval funktioniert End-to-End grün (`audit_gSqqVwGGBY6O`, `mcp:everything-approval:get-sum`). Beim Bau wurde der **Re-Pause-Pfad mit-implementiert** für den Fall dass Codex in der Resume-Iteration ein weiteres `requires_approval=true`-Tool aufruft:
+
+- Original-Audit kriegt `output.followUpPending=true` + Status auf `executed`
+- Neuer Pending-Audit via `buildPendingMcpAuditFromError`-Helper mit `priorAuditId`-Link zum Original
+- HTTP-Response des Approve-Endpoints: `{auditId: <neu>, pending: true, ...}` (durchgereicht via `ApproveResult.pending?: boolean`)
+
+**Status:** Code-komplett, aber **Smoke nicht durchgeführt** — der `get-sum`-Trigger war zu trivial (Codex hat keine Follow-up-Tools gebraucht). Re-Pause-Verhalten ist Architektur-Beweis nur via Code-Review.
+
+**Smoke-Plan:** Trigger der zwei requires_approval-Tools in Sequenz braucht. Kandidaten:
+- `"Rufe mcp:everything-approval:get-sum mit a=10,b=20 auf, addiere dann 5 mit demselben Tool."` (gleicher Tool zweimal)
+- `"Rufe mcp:everything-approval:get-sum mit a=10,b=20 auf, dann mcp:everything-approval:echo mit dem Ergebnis."` (zwei verschiedene Tools)
+
+**Verify-Erwartung:**
+- Approve auf Original-Pending → HTTP 200 mit `pending=true` + neuer auditId
+- Original-Audit: status=executed, `output.followUpPending=true`, `output.providerMetadata.toolCalls` enthält den ersten get-sum-Call
+- Neuer Audit: status=pending, `input.codexResumeContext` für nächste Resume, `input.priorAuditId` = Original-AuditId
+
+**Priorität:** Nice. Pattern ist symmetrisch zum verifizierten Pause-Pfad — Bugs unwahrscheinlich, aber End-to-End-Verifikation für Phase-3-Closure-Confidence sinnvoll. Wird mit Phase 3.3.3 oder Phase 4 mitgezogen, wenn dort sowieso Smoke-Setups laufen.
+
+### #131 Status nach Tag 27 (16 Blöcke)
+
+**Phase 3.3 substantiell-zu** mit Phase-3.3.1.3.2-Bau (Block 16). Capability-Parity zwischen api_key (Vercel-SDK) und oauth (Codex) Twins für den kompletten Tool-Use-Pfad: Auto-Execute + Pause + Approve+Resume + Reject + Multi-Step-Loop.
+
+**Restliche #131-Sub-Phasen (Tag 28+, Reihenfolge):**
+- **Phase 3.3.3 Reasoning-Traces** — optional, ~0.5 Tag. `item.type === "reasoning"` in CodexSSEParser handlen, Audit-Persistenz. Wird heute nicht in UI gerendert, also kein Blocker.
+- **Phase 3.4 Vercel-Provider-Refactor** — optional, lohnt sich erst wenn Vercel-AI-SDK einen vergleichbaren Direct-fetch-Custom-Provider-Path bietet.
+- **Phase 4 CLI-Login-Command** — ~1 Tag. `pnpm twin:oauth-login` Script mit Loopback-Listener (Port 1455), Auth-URL-Output, Token-Persist.
+- **Phase 5 Web-UI Status + Smoke + Doku + #131-Closure** — ~1-1.5 Tage. Settings-Page Auth-Mode-Indicator + Switch-Button, DEPLOYMENT.md §11 SSH-Tunnel-Setup, Production-Smoke 3/3, README-Update.
+
+**Bauzeit-Bilanz #131 bis Tag-27-Ende:** Phase 1 + 2 + 3.0-3.3.1.3.2 in 16 Blöcken (~15h netto) gegen Initial-Schätzung XL (5-7 Tage) bzw. nach Strategy-Iteration XXL (8-12 Tage). Diagnose-Reflex hat substantiell Aufwand gespart durch Pattern-Recognition (existing JSON-Audit-Pattern statt Migration, existing Catch-Pattern für Symmetrie, etc.).
+
