@@ -29,6 +29,33 @@ Inhalte (11 Items in drei Tranchen) unverändert, nur Build-Pfad
 leicht angepasst (#100/#101 vorgezogen, weil Vision-kritisch für
 die Differenzierungs-Story).
 
+## Tag 27 (25. Mai 2026, Sonntag) — Pre-Launch-Phase A Polish (#137)
+
+**Stand Tag 27 Vormittag:** #137 Husky Pre-Push-Build-Hook abgeschlossen (~1h). Strukturelle Prävention für Phase-5-Bug-Pattern (Production-Static-Generation strenger als pnpm dev). origin/main = `1a1f653` nach Push.
+
+### #137 Husky Pre-Push-Build-Hook (~45 Min)
+
+Strategy-Setzungen Vormittag:
+- Husky (lokal, nicht GitHub-Action — Sole-Maintainer-Setup)
+- Beide Builds via `pnpm build` Root-Script
+- Strict + Skip-Flag (`--no-verify` für WIP/Doku, in CONTRIBUTING dokumentiert)
+
+**Implementation:**
+- husky installiert (devDep root), prepare-Script in package.json triggert Setup beim `pnpm install`
+- `.husky/pre-push` ruft `pnpm build` (alle Workspaces via `pnpm -r build`), blockt Push bei Failure
+- CONTRIBUTING.md Pre-push-Section zwischen "How We Work" und "Pull Request Guidelines" ergänzt
+- README Quick-Start: `pnpm install`-Comment um „(also sets up git hooks via Husky)" erweitert
+
+**Test-Verifikation (3/3 grün):**
+- Smoke 2 (Build-Failure-Block): temp `apps/web/app/tmp-husky-test/page.tsx` mit useSearchParams ohne Suspense → Hook Exit 1, ❌-Message korrekt
+- Smoke 3a (Skip-Flag-Aktiv): `git push --no-verify --dry-run` → kein Pre-push-Output, Hook übersprungen
+- Smoke 3b (Hook-Aktiv): `git push --dry-run` → voller Build green, ✅-Message vor git-Output
+- Smoke 1 (Happy-Path): finaler feat-Push selbst (Hook firert für real, Build muss durchlaufen)
+
+**Detour Setzung-vs-Realität:** User-Setzung Smoke 3 sah `git reset --hard HEAD~1` zum Cleanup — hätte uncommitted Husky-Setup-Files gekillt, da working tree zu dem Zeitpunkt noch dirty war (feat-Commit kam nach Smokes). Stattdessen `--soft` für äquivalentes Result auf empty-Commit.
+
+Phase-5-Bug-Pattern strukturell prevented für future commits.
+
 ## Tag 26 — Sonntag, 25. Mai 2026
 
 ### Status
