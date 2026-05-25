@@ -1,6 +1,6 @@
 # #131 OpenAI Subscription-OAuth — Strategy
 
-**Status:** Phase 1 + 2 + 3.0 Spike + 3.1 (3.1.1 + 3.1.2) + 3.2 + 3.3.0 Spike ✅ Tag 27. Phase 3.3.1 nächster Schritt (Tag 28) — Parser-Erweiterung + MCP-Pipeline-Mapping auf Basis verifizierter §k-Findings.
+**Status:** Phase 1 + 2 + 3.0 Spike + 3.1 (3.1.1 + 3.1.2) + 3.2 + 3.3.0 Spike + 3.3.2 Spike ✅ Tag 27. Phase 3.3.1 nächster Schritt (Tag 28) — Parser-Erweiterung + MCP-Pipeline-Mapping auf zwei verifizierten Format-Schichten (§k Tool-Call-Events + §l Multi-Step-Roundtrip).
 
 Pre-Launch-Phase A Block 5 Item. Vorgezogen von Phase B in Tag 26.
 
@@ -177,8 +177,9 @@ initial geschätzt. Re-Estimate: XL → XXL. Bau in Sub-Phasen:
 | **3.1.2 SSE-Integration + Retry** (Tag 27 Nachmittag) | CodexHttpError + isRetryableError + withRetry (3 Retries, Backoff 1s/2s/4s, Full-Restart), 11/11 Retry-Smoke + End-to-End-Smoke | 2-3h | ✅ Commit `707f941` |
 | **3.2 Codex-System-Prompt + Persona-Mapping** (Tag 27 Nachmittag) | `composeOwnerSystemPrompt`-Helper extrahiert (Drift-Prevention zwischen Vercel-SDK- und Codex-Pfad), runModelViaCodex erweitert (persona + factsBlock + episodicBlock + summaryBlock + extraSystem), CodexAdapter wird reiner HTTP-Client (pre-built instructions + input), CodexInputItem-Type exportiert, Smoke 3 End-to-End grün mit klarer Markus-Persona | ~2h | ✅ Commit `a949b7e` |
 | **3.3.0 Spike Tool-Call-Discovery** (Tag 27 Abend) | Raw-fetch + Mock-Function-Tool, alle SSE-Events captured → §k dokumentiert Event-Format vollständig (7 distinct types, 14 Events, 2 IDs pro Tool-Call) | ~1h | ✅ Commit `9fa266a` |
-| **3.3.1 Parser-Erweiterung + MCP-Pipeline-Mapping** (Tag 28) | CodexSSEParser um function_call-Events erweitern, runModelViaCodex Tools durchreichen (skillsBlock + toolUseDirective), Mapping auf AuditMcpToolUseInputSchema, Multi-Step-Round-Trip-Spike | 1-2 Tage | offen |
-| **3.3.2 Reasoning-Traces** (Tag 29, optional) | reasoning-Item-Type handlen, Audit-Persistenz | 0.5 Tag | offen |
+| **3.3.2 Spike Multi-Step-Roundtrip** (Tag 27 Abend) | Drei Hypothesen sequenziell — HYPOTHESE A (function_call_output im input-Array) gewinnt First-Try, Tool-Result-Format verifiziert, alle 5 Bonus-Discovery-Events aus 3.1.2 jetzt zugeordnet → §l | ~45 Min | ✅ Commit `<pending>` |
+| **3.3.1 Parser-Erweiterung + MCP-Pipeline-Mapping** (Tag 28) | CodexSSEParser um function_call-Events erweitern (item.type-Discrimination), `mapSkillsToCodexTools`-Helper (~30 LoC), runModelViaCodex Tools durchreichen (skillsBlock + toolUseDirective composeOwnerSystemPrompt-Parameter aktivieren), Mapping auf AuditMcpToolUseInputSchema + optionales `codexCallId` für Resume-Pfad, Approval-Pipeline-Branch für provider=openai-codex | 1-2 Tage | offen, mit verifizierten §k + §l Format-Hypothesen |
+| **3.3.3 Reasoning-Traces** (Tag 29, optional) | reasoning-Item-Type handlen, Audit-Persistenz | 0.5 Tag | offen |
 | **3.4 Vercel-Provider-Refactor** (optional, Tag 29-30) | Direct-fetch zu sauberem Vercel-AI-SDK-Custom-Provider migrieren | 1 Tag | offen |
 
 **Stop-Punkte:** jede Sub-Phase mit eigenem Commit + Smoke. Wenn 3.0 Spike fails:
@@ -413,6 +414,181 @@ Plus Schicht 3+4 im Codex-Pfad nachziehen (`composeOwnerSystemPrompt`
 unterstützt `skillsBlock` + `toolUseDirective` bereits — `runModelViaCodex`
 muss sie aus dem Call-Site (`runModel` Z. 1610) durchreichen, plus
 Mock-Skill-Set aus TwinService an CodexAdapter geben).
+
+## §l — Codex-Tool-Result-Multi-Step-Roundtrip (Phase 3.3.2 Spike-Discovery, Tag 27)
+
+Phase 3.3.2 Spike-Script (`apps/runtime/src/scripts/test-oauth-phase3-3-2-spike.ts`)
+hat drei Multi-Step-Hypothesen sequenziell getestet. **HYPOTHESE A
+(function_call_output im input-Array) funktioniert beim ersten Versuch** —
+HTTP 200 in 521ms, finale Text-Antwort „It's 14:30 in Berlin right now."
+korrekt aus Mock-Tool-Output abgeleitet. Hypothesen B (`previous_response_id`)
+und C (context-fallback) wurden nicht gebraucht.
+
+### Multi-Step-Request-Format (verified)
+
+```jsonc
+{
+  "model": "gpt-5.5",
+  "instructions": "<gleicher System-Prompt wie Step 1>",
+  "input": [
+    {
+      "type": "message",
+      "role": "user",
+      "content": [{ "type": "input_text", "text": "What time is it in Berlin?" }]
+    },
+    {
+      "type": "function_call",
+      "call_id": "call_Do3rCLT9GQVYP8dDpprtmuVy",
+      "name": "get_current_time",
+      "arguments": "{\"timezone\":\"Europe/Berlin\"}"
+    },
+    {
+      "type": "function_call_output",
+      "call_id": "call_Do3rCLT9GQVYP8dDpprtmuVy",
+      "output": "{\"time\":\"2026-05-25T14:30:00+02:00\",\"timezone\":\"Europe/Berlin\"}"
+    }
+  ],
+  "tools": [<gleiche Tool-Definitionen wie Step 1>],
+  "tool_choice": "auto",
+  "parallel_tool_calls": false,
+  "store": false,
+  "stream": true
+}
+```
+
+**Substantielle Findings:**
+
+1. **`store: false` ist OK für Multi-Step.** Kein Codex-Side-State-
+   Management nötig — alles im Request-Body. Twin-Lab-Pattern bleibt
+   stateless (matched existing `store: false`-Setzung aus Phase 3.0).
+2. **`call_id` (NICHT `item.id`/`fc_...`) ist die Cross-Reference** zwischen
+   `function_call` und `function_call_output`. Bestätigt §k-Hypothese.
+3. **`previous_response_id` nicht notwendig** für Multi-Step. Wäre
+   incompatible mit `store: false` ohnehin (Codex müsste den voherigen
+   Response-State irgendwo halten).
+4. **Echo-Pattern:** Der `function_call`-Item im input-Array ist ein
+   Echo des LLM-Outputs aus Step 1 (gleiches `call_id`, `name`,
+   `arguments`). Phase 3.3.1 muss diese Daten beim Tool-Result-Resume
+   verfügbar haben — Persistenz im Pending-Audit ist notwendig.
+5. **`tools`-Field muss wiederholt werden** im Multi-Step-Request (sonst
+   weiß Codex nicht, dass `function_call_output` zu einem function-Tool
+   gehört). Caller darf den Tool-Set nicht weglassen.
+
+### Final-Antwort-Event-Sequenz (19 Events, 9 distinct Types)
+
+```
+  11× response.output_text.delta
+   1× response.created
+   1× response.in_progress
+   1× response.output_item.added       (item.type === "message")
+   1× response.content_part.added
+   1× response.output_text.done
+   1× response.content_part.done
+   1× response.output_item.done        (item.type === "message")
+   1× response.completed
+```
+
+**Alle 5 Phase-3.1.2-Bonus-Discovery-Event-Types sind jetzt zugeordnet:**
+
+| Event-Type | Zugehörige Phase | Rolle |
+|---|---|---|
+| `response.in_progress` | beide | Status-Marker nach `response.created`, identisches Body |
+| `response.output_item.added` | beide | Item-Lifecycle-Start — `item.type` discriminiert `message` (Text) vs `function_call` (Tool-Call) |
+| `response.output_item.done` | beide | Item-Lifecycle-Ende, finaler item-State (für message: vollständiger Text) |
+| `response.content_part.added` | nur Text | Content-Part innerhalb eines `message`-Items beginnt — bei `function_call`-Items fehlt das |
+| `response.content_part.done` | nur Text | Content-Part-Ende mit finalem text-String |
+| `response.output_text.done` | nur Text | Text-Akkumulation-Final-Marker mit komplettem Text-Field |
+
+### Message-Item-Schema (Text-Response)
+
+```jsonc
+// response.output_item.added (Text-Antwort beginnt):
+{
+  "type": "response.output_item.added",
+  "item": {
+    "id": "msg_0bf1b80cddd67e5f016a142c8bf1fc8191a6b9c8febd0fa282",
+    "type": "message",
+    "status": "in_progress",
+    "content": [],
+    "phase": "final_answer",     // bemerkenswert: Codex markiert Phase
+    "role": "assistant"
+  },
+  "output_index": 0,
+  "sequence_number": 2
+}
+
+// response.content_part.added (Text-Part beginnt):
+{
+  "type": "response.content_part.added",
+  "content_index": 0,
+  "item_id": "msg_...",
+  "output_index": 0,
+  "part": {
+    "type": "output_text",
+    "annotations": [],
+    "logprobs": [],
+    "text": ""
+  },
+  "sequence_number": 3
+}
+
+// response.output_text.done (vollständiger Text):
+{
+  "type": "response.output_text.done",
+  "content_index": 0,
+  "item_id": "msg_...",
+  "output_index": 0,
+  "sequence_number": 15,
+  "text": "It's 14:30 in Berlin right now."
+}
+```
+
+### Phase-3.3.1-Bau-Implikationen
+
+**CodexSSEParser:** Item-Type-Discrimination in `response.output_item.added`/`.done`
+muss zwei Branches haben:
+- `item.type === "function_call"` → existing §k-Tool-Call-Akkumulation
+- `item.type === "message"` → No-op (Text wird via `output_text.delta`
+  akkumuliert, das funktioniert schon)
+
+**Multi-Step-State im Codex-Adapter:** Der Adapter muss zwischen zwei
+Modi unterscheiden:
+- **Initial-Request:** `messages` (User-Input) → `input`-Array,
+  optional `tools` falls Skills aktiv
+- **Resume-Request:** `messages` + `function_call`-Echo (aus Pending-
+  Audit) + `function_call_output` (Tool-Result) → `input`-Array,
+  gleiche `tools`
+
+**`mapSkillsToCodexTools`-Helper** (ca. 30 LoC, parallel zu existing
+`buildMcpToolsFromSkills` — siehe §i Phase-3.3.1-Notiz):
+
+```typescript
+// Skizze:
+function mapSkillsToCodexTools(skills: Skill[]): CodexToolDefinition[] {
+  return skills
+    .filter((s) => s.source === "mcp" && s.isActive && s.mcpInputSchema)
+    .map((s) => ({
+      type: "function",
+      name: s.name.replaceAll(":", "_"),   // gleiche toolKey-Convention wie buildMcpToolsFromSkills
+      description: s.manifestJson.description ?? `MCP tool: ${s.mcpToolName}`,
+      parameters: s.manifestJson.mcpInputSchema as JsonSchema,
+    }));
+}
+```
+
+**call_id-Persistenz für Resume-Pfad:** Option (a) aus Diagnose 3.3.2.1.B
+— Pending-Audit-Input erweitern um optionales `codexCallId` (oder
+`providerCallId` für Provider-Agnostik). Migration in Phase 3.3.1
+trivial, da `AuditMcpToolUseInputSchema` heute keine Codex-spezifischen
+Felder hat.
+
+**Approval-Pipeline-Integration:** existing `/audit/:id/approve`-Route
+ruft Tool-Execution + neuen Resume-LLM-Call. Phase 3.3.1 muss den
+Resume-Branch zwei Pfade unterstützen lassen:
+- `provider: anthropic|openai-api` → existing AI-SDK-Resume mit
+  `tool_result`-Message in History
+- `provider: openai-codex` → neuer CodexAdapter-Call mit
+  `function_call_output`-Item im input-Array
 
 ## Re-Estimate Tag 27 Nachmittag
 
