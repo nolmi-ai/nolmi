@@ -34,6 +34,7 @@ import { FactsRepo } from "./facts/repo.js";
 import { TwinMaturityService } from "./twin-maturity/twin-maturity-service.js";
 import type { RegistryEntry, TwinServiceRegistry } from "./twin-service-registry.js";
 import { TwinProfilesRepo, type TwinProfile } from "./twin-profiles-repo.js";
+import { OAuthTokensRepo } from "./oauth/oauth-tokens-repo.js";
 import { encrypt } from "./crypto-utils.js";
 import { LLM_PROVIDERS, type StoredLlmConfig } from "./llm-config.js";
 import { buildPersonaMarkdown } from "./onboarding/persona-builder.js";
@@ -137,6 +138,8 @@ export interface ServerDeps {
   telegramBotRegistry: TelegramBotRegistry;
   /** #130 Phase 3 — geteilte Instanz mit Boot für Pairing-Code-API. */
   telegramPairingService: PairingService;
+  /** #131 Phase 5 — für GET /twins/:handle/settings-data Auth-Status-Block. */
+  oauthTokensRepo: OAuthTokensRepo;
 }
 
 export async function createServer(deps: ServerDeps) {
@@ -1625,6 +1628,15 @@ function registerTwinSettingsRoutes(
         .map((s) => s.name)
         .sort();
 
+      // #131 Phase 5.1 — Auth-Status: Mode + (bei oauth) Owner-Safe
+      // OAuth-Token-Public-View ohne Klartext. UI rendert Mode-Badge +
+      // expires_at + accountId, ruft bei Aktivierung das CLI-Wrapper-Tool
+      // `pnpm twin:oauth-login <@handle>` (Phase 4).
+      const oauth =
+        profile.authMode === "oauth"
+          ? deps.oauthTokensRepo.findPublic(profile.twinId, "openai")
+          : null;
+
       return {
         persona,
         personaSource: persona ? "structured" : "legacy_markdown",
@@ -1637,6 +1649,10 @@ function registerTwinSettingsRoutes(
           // Onboarding-Submit konsistent ist. Für vollständige Frische
           // wäre Registry-Reload nötig (siehe requiresRestart-Doku).
           apiKeyMasked: entry.llmDisplay.apiKeyMasked,
+        },
+        auth: {
+          mode: profile.authMode,
+          oauth,
         },
         activePresets,
       };

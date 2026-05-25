@@ -136,6 +136,7 @@ async function main() {
     telegramConfigsRepo,
     telegramBotRegistry,
     telegramPairingService: pairingService,
+    oauthTokensRepo,
   });
 
   // #130 Phase 2 — Eager-Load aller konfigurierten Bots (gepaart wie

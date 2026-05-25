@@ -170,6 +170,20 @@ export class OAuthTokensRepo {
     return rows.map((r) => r.twin_id);
   }
 
+  /**
+   * Public-View-Lookup für UI/Status-APIs. Returns null wenn kein Token
+   * für (twinId, provider) existiert. Decrypted Row wird nur kurz im
+   * Speicher gehalten und sofort über `toPublic` gefiltert — Klartext
+   * verlässt diese Methode nicht.
+   */
+  findPublic(
+    twinId: string,
+    provider: OAuthProvider,
+  ): OAuthTokenPublic | null {
+    const decrypted = this.findDecryptedByTwinAndProvider(twinId, provider);
+    return decrypted ? this.toPublic(decrypted) : null;
+  }
+
   /** Owner-Safe-Projection ohne Token-Klartext. Sicher für API-Responses. */
   toPublic(row: OAuthTokenDecrypted): OAuthTokenPublic {
     const expiresAtMs = new Date(row.expiresAt).getTime();
