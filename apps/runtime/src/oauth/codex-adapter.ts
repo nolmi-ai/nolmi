@@ -1,15 +1,18 @@
+import { CodexHttpError } from "./codex-http-error.js";
+import { CodexSSEParser } from "./codex-sse-parser.js";
+import { withRetry } from "./codex-retry.js";
 import type { OAuthRefreshService } from "./refresh-service.js";
 
-// ─── CODEX-ADAPTER (#131 PHASE 3.0 SPIKE) ────────────────────────────────────
+// ─── CODEX-ADAPTER (#131 PHASE 3.1.2) ────────────────────────────────────────
 //
-// Direct-fetch gegen das Codex-Backend von ChatGPT. Walking-Skeleton — beweist
-// die End-to-End-Architektur (OAuth-Token-Refresh → Codex-Endpoint → SSE-Text).
+// Direct-fetch gegen das Codex-Backend von ChatGPT. Phase 3.0 war Walking-
+// Skeleton; Phase 3.1 hat den SSE-Parser standalone gebaut (3.1.1) und ihn
+// hier integriert plus Retry-Wrapper drumherum gelegt (3.1.2).
 //
-// Out-of-Scope für Phase 3.0 (kommt in 3.1-3.4):
+// Out-of-Scope (kommt in 3.2-3.4):
 //   - Tool-Calls (tools=[] hardcoded)
 //   - Persona-/Mandate-Mapping (Minimal-Instructions, siehe SPIKE_INSTRUCTIONS)
 //   - SSE-Streaming bis zum Web-Client (collect-to-string-Pattern)
-//   - Disconnection-Recovery / Cookie-Jar-Wiederverwendung
 //   - Reasoning-Traces, Audit-Mapping
 //   - Vercel-AI-SDK-Custom-Provider (3.4, optional)
 //
@@ -40,12 +43,38 @@ export interface CodexAdapterOutput {
   cfRay: string | null;
   /** Latenz in ms vom fetch-Aufruf bis zum letzten SSE-Chunk. */
   latencyMs: number;
+  /** Aus `response.created`-Event geliefert. */
+  responseId: string | null;
+  /** Aus `response.completed`-Event geliefert (typisch `"completed"`). */
+  status: string | null;
+  /** Unbekannte SSE-Event-Types, die der Parser-Hybrid-Fallback aufgesammelt
+   *  hat. Phase 3.3 wird darauf reagieren, Phase 3.1.2 logged sie nur. */
+  unknownEventTypes: string[];
 }
 
 export class CodexAdapter {
   constructor(private refreshService: OAuthRefreshService) {}
 
   async generateText(input: CodexAdapterInput): Promise<CodexAdapterOutput> {
+    return withRetry(() => this.executeRequest(input), {
+      onRetry: (attempt, err) => {
+        // Konsistenz mit existing Adapter-Logging (console.warn statt
+        // Fastify-Logger-Plumbing — letzteres wäre Phase 3.4-Material).
+        const msg = err instanceof Error ? err.message : String(err);
+        console.warn(
+          `[codex-adapter] Retry ${attempt}/3 nach transient Failure: ${msg}`,
+        );
+      },
+    });
+  }
+
+  /** Ein vollständiger fetch + SSE-Parse-Durchlauf. Bei Retry wird das
+   *  komplett neu gestartet — kein previous_response_id, frischer Parser. */
+  private async executeRequest(
+    input: CodexAdapterInput,
+  ): Promise<CodexAdapterOutput> {
+    // ensureFresh INNERHALB des Retry-Loops, damit ein refresh-bedingter
+    // Token-Wechsel zwischen Versuchen automatisch greift.
     const token = await this.refreshService.ensureFresh(input.twinId);
     const startMs = Date.now();
 
@@ -77,70 +106,33 @@ export class CodexAdapter {
     });
 
     if (!res.ok) {
-      const errText = await res.text().catch(() => "");
-      throw new Error(
-        `[codex-adapter] HTTP ${res.status}: ${errText.slice(0, 300)}`,
+      const bodySnippet = await res.text().catch(() => "");
+      throw new CodexHttpError(
+        `[codex-adapter] HTTP ${res.status}: ${bodySnippet.slice(0, 300)}`,
+        res.status,
+        bodySnippet.slice(0, 300),
       );
     }
 
-    const text = await collectSSEText(res);
+    const parser = new CodexSSEParser();
+    const parseResult = await parser.parse(res.body);
     const latencyMs = Date.now() - startMs;
 
+    if (parseResult.unknownEventTypes.length > 0) {
+      console.warn(
+        `[codex-adapter] unknown SSE event types: ${parseResult.unknownEventTypes.join(", ")} ` +
+          `(Phase 3.3 wird das in Tool-Call-/Reasoning-Trace-Handling überführen)`,
+      );
+    }
+
     return {
-      text,
+      text: parseResult.text,
       planType: res.headers.get("x-codex-plan-type"),
       cfRay: res.headers.get("cf-ray"),
       latencyMs,
+      responseId: parseResult.responseId ?? null,
+      status: parseResult.status ?? null,
+      unknownEventTypes: parseResult.unknownEventTypes,
     };
   }
-}
-
-/**
- * Spike-Pragmatik: collect-to-string. Iteriert SSE-Events, sammelt
- * `response.output_text.delta`-Chunks. Phase 3.1 ersetzt das mit einem robusten
- * Stream-Parser (Event-Types, Tool-Calls, Reasoning-Traces, Recovery).
- */
-async function collectSSEText(res: Response): Promise<string> {
-  if (!res.body) {
-    throw new Error("[codex-adapter] response.body ist null — kein Stream");
-  }
-
-  const reader = res.body.getReader();
-  const decoder = new TextDecoder();
-  let buffer = "";
-  let collected = "";
-
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    buffer += decoder.decode(value, { stream: true });
-
-    // SSE-Events sind durch `\n\n` getrennt. Wir spalten am Doppel-Newline,
-    // letzter (potenziell unvollständiger) Teil bleibt im Buffer.
-    const events = buffer.split("\n\n");
-    buffer = events.pop() ?? "";
-
-    for (const event of events) {
-      const trimmed = event.trim();
-      if (!trimmed) continue;
-      const dataLine = trimmed
-        .split("\n")
-        .find((line) => line.startsWith("data: "));
-      if (!dataLine) continue;
-      const dataStr = dataLine.slice(6);
-      if (dataStr === "[DONE]") continue;
-
-      try {
-        const parsed = JSON.parse(dataStr) as { type?: string; delta?: string };
-        if (parsed.type === "response.output_text.delta" && parsed.delta) {
-          collected += parsed.delta;
-        }
-      } catch {
-        // Spike: malformed Events einfach überspringen. Phase 3.1 loggt das
-        // mit Sample, damit unbekannte Event-Types ans Tageslicht kommen.
-      }
-    }
-  }
-
-  return collected;
 }

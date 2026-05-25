@@ -1522,6 +1522,13 @@ export class TwinService {
         planType: result.planType ?? undefined,
         cfRay: result.cfRay ?? undefined,
         latencyMs: result.latencyMs,
+        // #131 Phase 3.1.2: jetzt aus CodexSSEParser geliefert.
+        responseId: result.responseId ?? undefined,
+        codexStatus: result.status ?? undefined,
+        unknownEventTypes:
+          result.unknownEventTypes.length > 0
+            ? result.unknownEventTypes
+            : undefined,
       },
     };
   }

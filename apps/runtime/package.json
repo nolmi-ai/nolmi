@@ -29,6 +29,7 @@
     "twin:oauth-phase2-smoke": "tsx src/scripts/test-oauth-phase2.ts",
     "twin:oauth-phase3-spike": "tsx src/scripts/test-oauth-phase3-spike.ts",
     "test-codex-sse-parser": "tsx src/scripts/test-codex-sse-parser.ts",
+    "test-codex-retry": "tsx src/scripts/test-codex-retry.ts",
     "key:generate": "tsx src/scripts/generate-master-key.ts",
     "session-secret:generate": "tsx src/scripts/generate-session-secret.ts",
     "user:create": "tsx src/scripts/create-user.ts",
