@@ -2878,6 +2878,18 @@ Faktor 14× langsamer im Initial-Smoke deutet auf Token-Refresh-Block hin: `OAut
 
 **Priorität:** Nice. Information ist nice-to-have für Debugging/Token-Accounting, kein User-Visual-Blocker. Phase B / Phase 5-Polish.
 
+### #142 oauth-providerMetadata authMode + twinId null nach Phase 4.2 Smoke (S, nice)
+
+**Kontext (Tag 27 Block 25, Phase 4.2 Smoke):** End-to-End-Smoke des Production-CLI grün (`audit_ukzHFjas_woB`, `provider="openai-codex/gpt-5.5"`, reply="Hallo.", capability=owner-direct). CLI-Pfad funktional, OAuth-Token korrekt persistiert + verwendet.
+
+**Beobachtung:** `audit.output.providerMetadata.authMode` + `twinId` sind `null`/`undefined` im Smoke-Audit. Analog zu #141 (`planType` + `cfRay` null) — gleicher Verlust-Pfad vermutet.
+
+**Hypothese:** Identisch zu #141 — `codex-vercel-provider`-Output kommt mit den Feldern im verschachtelten `providerMetadata["openai-codex"]`-Block, im TwinService-Audit-Pfad gehen sie beim flachen Pass-through verloren.
+
+**Empfehlung:** Mit #141 zusammen lösen — wahrscheinlich ein einziger Fix-Point im `runModel`-Return oder `audit.complete`-Caller adressiert beide Symptome. Bei Diagnose alle providerMetadata-Felder gleichzeitig prüfen (planType, cfRay, authMode, twinId, plus latencyMs falls auch betroffen).
+
+**Priorität:** Nice. Wie #141 — Debugging-/Audit-Hilfe, kein User-Visual-Blocker. Phase B / Phase 5-Polish.
+
 ### #131 Status nach Tag 27 (16 Blöcke)
 
 **Phase 3.3 substantiell-zu** mit Phase-3.3.1.3.2-Bau (Block 16). Capability-Parity zwischen api_key (Vercel-SDK) und oauth (Codex) Twins für den kompletten Tool-Use-Pfad: Auto-Execute + Pause + Approve+Resume + Reject + Multi-Step-Loop.

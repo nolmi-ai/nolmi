@@ -2549,6 +2549,120 @@ ist ~80 LOC plus Reuse.
 
 ---
 
+## §u — Phase 4.1 + 4.1.1 + 4.2 ✅ CLI-Login Production-Tool (Tag 27 Block 24+25)
+
+**Scope:** Production-CLI `pnpm twin:oauth-login <@handle>` gebaut, Handle-
+Bug nachgepatcht, End-to-End-Smoke grün. Setup-Spike-Code aus
+`test-oauth-phase3-spike.ts` durch Production-Pfad obsoleted (smoke +
+cleanup bleiben für Diagnose-Sessions, setup-Mode mit Runtime-DEPRECATED-
+Hint markiert).
+
+### §u.1 — Phase 4.1 CLI-Bau (Block 24, `a5fa712`)
+
+**Real-Aufwand:** ~50 Min (Estimate war 75). Sub-Phasen A-F:
+
+| Sub | Inhalt |
+|-----|--------|
+| A | `parseHandle` mit regex-Validation |
+| B | `locateCodexBinary` (`CODEX_BIN`-Env + macOS-Default + `fs.existsSync`) |
+| C | `waitForLoginCompletion` — Hybrid-`Promise` über `child.close` + `fs.watch` + Polling + 90s-Timeout, zentraler `cleanups[]`-Wrapper |
+| D | `loadCodexTokenWithRetry` mit 200ms-Settle bei partial-write, `OAuthTokensRepo.upsert` + `setAuthMode('oauth')` |
+| E | `twin:oauth-login` Script-Entry in `apps/runtime` + Root `package.json` |
+| F | Spike-Setup-Mode DEPRECATED-Comment + Runtime-Warn |
+
+**Bonus-Refactor:** `loadCodexToken` aus Spike in eigenes Module
+`apps/runtime/src/oauth/codex-auth-file.ts` extrahiert (DRY-Reuse durch
+CLI + Spike). Typed `CodexAuthFileError` ermöglicht saubere Retry-
+Diskriminierung (partial-write vs. echter Fehler).
+
+**LOC-Bilanz:**
+- `cli-oauth-login.ts` ~290 LOC (CLI)
+- `codex-auth-file.ts` ~85 LOC (extrahierter Helper)
+- `test-oauth-phase3-spike.ts` −39 LOC (DRY-Cleanup + DEPRECATED-Hint)
+- Net ~420 LOC Add.
+
+**Briefing-Pseudo-Code-Bugs gefangen:** Briefing hatte 3 API-Bugs
+(`upsert` mit 2-Args statt single-Object, `expiresAt` als Number statt
+ISO-String, `loadMasterKey()` als `await`). Implementation folgt der
+verifizierten Real-API aus Spike + Repo-Source.
+
+### §u.2 — Phase 4.1.1 Handle-Bug-Fix (`481945c`)
+
+**Bug-Discovery via Smoke-Failure:** Erster Smoke-Lauf failte mit "Twin
+@markus nicht gefunden". `parseHandle` strippte `@` → `"markus"`, aber
+`TwinProfilesRepo.findByHandle` erwartet `@`-prefixed Form matching
+DB-Storage `@markus` (verified via `sqlite3 SELECT hex(handle)` →
+`406D61726B7573`).
+
+**Plus Display-Bug:** Verfügbare-Twins-Liste wrapped DB-Handles mit
+extra `@` → "@@markus, @@florian, ...".
+
+**Fix-Atomar:**
+- `parseHandle` returnt `@`-normalized via `\`@${stripped}\``
+- Stripping robust für Edge-Case `@@x` via `replace(/^@+/, "")` statt
+  einmaligem `startsWith`-`slice`
+- 6 Display-Sites nutzen `handle`/`twin.handle`/`p.handle` direkt
+- JSDoc-Edge-Case-Tabelle (`@markus`/`markus`/`@MARKUS`/`@@markus` →
+  `@markus`, `mark.us` → Error)
+
+### §u.3 — Phase 4.2 End-to-End-Smoke (Block 25)
+
+**Pre-Smoke-Baseline:** `~/.codex/auth.json` gelöscht (User-Action
+`codex logout`), `@markus` zurück auf `auth_mode='api_key'`,
+`oauth_tokens` für `twin_YuB4Qaqmbrimv1Mz` leer.
+
+**CLI-Lauf:** `pnpm twin:oauth-login @markus`:
+- Browser öffnete via `codex login` Subprocess (stdio inherit)
+- User klickte ChatGPT-OAuth-Approval durch
+- **Hybrid-Detection feuerte via `auth.json`-mtime-Update** (nicht
+  child-close — mtime kam zuerst, Subprocess war noch in Cleanup-Phase)
+- 200ms-Settle + Token-Read grün im ersten Versuch (kein Retry nötig)
+- `OAuthTokensRepo.upsert` + `setAuthMode('oauth')` durch
+
+**Chat-Roundtrip:** `audit_ukzHFjas_woB` —
+`provider="openai-codex/gpt-5.5"`, `capability=owner-direct`,
+`reply="Hallo."`. Production-Stack mit CLI-persistiertem Token
+funktional.
+
+**Cosmetic-Note:** `audit.output.providerMetadata.authMode` + `twinId`
+sind `null` im Smoke-Audit — gleicher Verlust-Pfad wie BACKLOG #141
+(`planType` + `cfRay`). Tracked als BACKLOG #142, sollte mit #141
+zusammen gefixt werden.
+
+### §u.4 — Lesson Tag 27 #6: Args-Parser-Test-Cases im Bau-Briefing als Pflicht
+
+Phase-4.1-Briefing hatte `parseHandle`-Skelett mit `@`-Stripping ohne
+Test-Cases. Smoke deckte den Mismatch zwischen Parser-Output und
+DB-Storage-Form auf. **Konsequenz:** Bau-Briefings für Args-Parser müssen
+ab Tag 28 Edge-Case-Tabellen mit erwarteter Output-Form enthalten — nicht
+nur Input-Beispiele. JSDoc-Edge-Case-Tabelle im Code dokumentiert das
+Pattern für künftige CLI-Scripts.
+
+**Plus Diagnose-Pattern:** `sqlite3 SELECT hex(column)` ist Pflicht-Tool
+für Handle-/Encoding-Diagnose, wenn ein Resolver `null` zurückgibt obwohl
+der Wert "offensichtlich da" ist. Hat den Bug in <30 Sekunden lokalisiert.
+
+### §u.5 — Phase-4-Closure-Bilanz
+
+| Phase | Status | Commit |
+|-------|--------|--------|
+| 4.0 Diagnose | ✅ | `c8ebca8` + `8793cb8` |
+| 4.1 CLI-Bau | ✅ | `a5fa712` |
+| 4.1.1 Handle-Fix | ✅ | `481945c` |
+| 4.2 E2E-Smoke | ✅ | (kein Code-Change, `audit_ukzHFjas_woB`) |
+| 4.3 Doku | ✅ | (dieser Commit) |
+
+**Aufwand-Real Phase 4 gesamt:** ~2.5h (Diagnose + Bau + Bug-Fix + Smoke
++ Doku). Estimate aus §t.9 war ~2-2.5h — passt. Verglichen mit dem
+ursprünglichen 1-Tag-Estimate (Loopback-Listener-Plan) = ~4x schneller
+durch Wrapper-Architektur.
+
+**#131 Restliche Phasen:** Phase 5 (Web-UI Status + Smoke + Doku +
+#131-Closure, ~1-1.5 Tage). BACKLOG #139 + #140 + #141 + #142 als
+nice-to-have-Polish.
+
+---
+
 ## Verweise
 
 - OpenAI Codex Auth-Doku: https://developers.openai.com/codex/auth

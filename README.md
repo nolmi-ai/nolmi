@@ -64,6 +64,21 @@ pnpm dev
 
 **Requirements:** Node ≥20, pnpm ≥9, and an Anthropic API key.
 
+### OAuth-Twin via ChatGPT-Subscription (alternative to API keys)
+
+If you already pay for a ChatGPT subscription, a twin can use that
+plan directly via Codex OAuth — no extra API costs.
+
+```bash
+# Requires Codex Desktop App installed (macOS) or CODEX_BIN env (Linux)
+pnpm twin:oauth-login @<handle>
+```
+
+This wraps `codex login` (opens browser for ChatGPT OAuth approval),
+reads `~/.codex/auth.json`, and persists the token AES-256-GCM-encrypted
+in the twin's `oauth_tokens` row. The twin's `auth_mode` is set to
+`oauth` and Codex requests are routed via the Vercel-AI-SDK provider.
+
 For production self-hosting with HTTPS, custom domain, and backups,
 see **[docs/DEPLOYMENT.md](docs/DEPLOYMENT.md)**.
 
