@@ -1739,6 +1739,287 @@ funktioniert das Marker-Pattern stabil, kein dringender Refactor-Treiber.
 verstärkt das. Aber Phase-3.3-Closure ist substantiell — Phase 4 + 5 zu
 priorisieren für #131-Closure ist ebenso valide.
 
+## §r — tool-approval-request-Discovery (Phase 3.4.3.0 Spike, Tag 27 Block 21)
+
+**Scope:** Discovery-Spike vor Phase-3.4.3-Vollbau. Klären wie Vercel AI SDK 6
+native Approval-Pipeline funktioniert + ob Codex-Provider transparent
+mitmacht. Doku-Check + 3 Tests (Approval-Pending, Approve-Resume, Reject)
+gegen echten Codex-Pro.
+
+### Doku-Check-Findings
+
+**`needsApproval` ist Built-in Tool-Field** in `@ai-sdk/provider-utils@4.0.26`:
+
+```ts
+tool({
+  description: "...",
+  inputSchema: z.object({...}),
+  execute: async (args) => {...},
+  needsApproval?: boolean | ToolNeedsApprovalFunction<INPUT>,
+})
+
+type ToolNeedsApprovalFunction<INPUT> = (
+  input: INPUT,
+  options: { toolCallId, messages, experimental_context? }
+) => boolean | Promise<boolean>;
+```
+
+**V3-Spec hat `tool-approval-request`/`-response` als first-class Types**
+(`@ai-sdk/provider@3.0.10`):
+
+```ts
+type LanguageModelV3ToolApprovalRequest = {
+  type: 'tool-approval-request';
+  approvalId: string;
+  toolCallId: string;
+  providerMetadata?: SharedV3ProviderMetadata;
+};
+
+interface LanguageModelV3ToolApprovalResponsePart {
+  type: 'tool-approval-response';
+  approvalId: string;
+  approved: boolean;
+  reason?: string;
+}
+
+// Tool-Role-Message akzeptiert beides:
+{ role: 'tool', content: Array<ToolResultPart | ToolApprovalResponsePart> }
+```
+
+**Helper-Ecosystem:** `lastAssistantMessageIsCompleteWithApprovalResponses`,
+`ChatAddToolApproveResponseFunction`, `InvalidToolApprovalError`,
+`ToolCallNotFoundForApprovalError`, `getToolName`-Helpers — Chat-UI-
+Integration ist erstklassig dokumentiert.
+
+### Spike-Setup
+
+Spike `apps/runtime/src/scripts/test-oauth-phase3-4-3-spike.ts` mit
+Production-Provider-Reuse (`createCodexProvider` aus Phase 3.4.1, kein
+neuer Provider). Setup analog `test-codex-vercel-provider.ts`:
+DB+MasterKey+RefreshService+@markus-Lookup.
+
+Mock-Tool `get_sum` mit `needsApproval: true` (Static-Boolean) +
+execute-Tracking-Counter. Trigger-Prompt deutsch:
+`"Was ist 17 plus 25? Nutze das get_sum Tool."`
+
+### Test 1 — needsApproval triggert tool-approval-request ✅
+
+```
+✓ 1584ms
+text: ""
+finishReason: tool-calls
+steps: 1
+top-level toolCalls: 1, toolResults: 0
+executeCallCount: 0  ← Tool NICHT ausgeführt!
+
+result.content (2 parts):
+  - {type:"tool-call", toolCallId:"call_2KpfNTHBduEDVdcRhSBXB2F5",
+     toolName:"get_sum", input:{a:17,b:25}}
+  - {type:"tool-approval-request",
+     approvalId:"aitxt-SKZliSpaMWjsYCyk4D2Ivw5H",
+     toolCall:{type, toolCallId, toolName, input}}
+```
+
+**Beweis:** `needsApproval:true` Static-Boolean reicht — Vercel-SDK
+skipped `execute()` automatisch und emittiert `tool-approval-request` als
+Content-Part. Provider-Code (`codex-vercel-provider.ts`) wurde **nicht
+angefasst** — Approval-Mechanik lebt komplett im SDK-Caller.
+
+**Format-Detail:** Approval-Part hat `approvalId` (SDK-generiert,
+`aitxt-...`) und `toolCall` als VERSCHACHTELTES Objekt (NICHT nur
+`toolCallId` flat). `result.content[]` und `steps[0].content[]` enthalten
+beide das Part — duplizierte Repräsentation.
+
+### Test 2 — Approve-Resume via History-Replay ✅
+
+**Format-Discovery (Iteration 1 brach mit `AI_InvalidToolApprovalError`):**
+`SDK.collectToolApprovals` scannt message-history nach matching
+`tool-approval-request`-Parts via `approvalId`. Pure `tool-call`-Part in
+assistant-content reicht NICHT — der **Pending-Request-Part muss
+mit-persistiert** werden:
+
+```ts
+messages: [
+  { role: "user", content: "Was ist 17 plus 25? ..." },
+  {
+    role: "assistant",
+    content: [
+      { type: "tool-call", toolCallId, toolName: "get_sum", input: {...} },
+      { type: "tool-approval-request", approvalId, toolCallId },  // ← Pflicht!
+    ],
+  },
+  {
+    role: "tool",
+    content: [
+      { type: "tool-approval-response", approvalId, approved: true },
+    ],
+  },
+],
+```
+
+**Resume-Result:**
+```
+✓ 1971ms
+text: "17 plus 25 ist **42**."
+finishReason: stop
+steps: 1
+executeCallCount: 1  ← Tool ausgeführt nach Approve!
+```
+
+**Beweis:** SDK ruft `execute()` automatisch, integriert Tool-Result in
+nächste Iteration, liefert finale Text-Antwort. Substantieller Performance-
+Vorteil ggü heute (Phase 3.3.1.3.2 hatte 5.4s, Phase 3.4.3-Spike 2s
+End-to-End-Resume).
+
+### Test 3 — Reject via History-Replay ✅
+
+Gleiche History-Struktur mit `approved: false, reason: "User hat
+abgelehnt — bitte ohne Tool antworten."`:
+
+```
+✓ 1026ms
+text: "17 plus 25 ist 42."
+finishReason: stop
+executeCallCount: 0  ← Tool NICHT ausgeführt
+```
+
+Codex generiert Antwort ohne Tool-Use. Bei trivialen Math-Fragen reicht
+das interne Wissen — bei komplexeren Tools (z.B. `fetch_url`) würde
+Codex vermutlich eine "Kann ich nicht ohne das Tool"-Antwort geben.
+Reason-Field wird in den Prompt eingebaut, hilft Codex bei der
+Plan-Anpassung.
+
+### Phase-3.4.3.1 Architektur — Big-Bang (api_key + oauth gleichzeitig)
+
+**Setzung User Phase 3.4.3.0:** beide Pfade in einem Commit refactoren.
+Marker-Pattern (3.2.F) wird komplett obsolet — substantielle Code-
+Reduktion + Symmetrie zwischen Auth-Modi.
+
+**Refactor-Surface:**
+
+1. **`mcp/tool-bridge.ts:buildMcpToolsFromSkills`** erweitern:
+   ```ts
+   tools[toolKey] = tool({
+     description: ...,
+     inputSchema: ...,
+     needsApproval: skill.manifestJson.requiresApproval ?? false,  // NEU
+     execute: async (args) => { ... }  // unverändert, Marker-Return raus
+   });
+   ```
+   `execute` darf jetzt direkt `mcpClientManager.callTool` rufen — kein
+   `MCP_PENDING_APPROVAL_MARKER`-Return mehr nötig.
+
+2. **`mcp/tool-bridge.ts:MCP_PENDING_APPROVAL_MARKER`** + dazugehörige
+   Marker-Logik raus (kann entfernt werden).
+
+3. **`twin-service.ts:detectPendingToolCall` + `stopOnPendingApprovalMarker`**
+   raus — entfällt mit Marker.
+
+4. **`twin-service.ts:runOwnerDirect`-Catch:** `McpToolApprovalRequiredError`-
+   Catch ersetzen durch Post-Generate `result.content[]`-Scan nach
+   `tool-approval-request`-Part. Falls gefunden → Pending-Audit anlegen
+   mit: `messages` (history) + `assistantContent` (mit tool-call +
+   approval-request) + `approvalId` + `toolCallId` + `toolName` + `input`.
+
+5. **`twin-service.ts:approveMcpToolUse` + `approveMcpToolUseViaCodex`**:
+   beide refactor auf History-Replay. Vereinheitlichung: ein einziger
+   `approveMcpToolUse`-Branch, kein Codex-spezifischer. Vercel-SDK ruft
+   `execute()` (= `mcpClientManager.callTool` via tool-bridge), liefert
+   `result.text` direkt. Audit-Complete identisch zu heute aber ohne
+   eigenen Resume-Loop.
+
+6. **`twin-service.ts:rejectMcpToolUseViaCodex`** entfällt, `rejectPending`
+   ruft direkt History-Replay mit `approved:false`.
+
+7. **`McpToolApprovalRequiredError`-Klasse** kann entfernt werden (kein
+   Caller mehr).
+
+8. **`CodexResumeContext` + Resume-Pfad-Persistierung** (Phase 3.3.1.3.1/2)
+   entfällt vollständig — Vercel-SDK macht Resume via History,
+   keine codex-spezifische Persistenz nötig. **Substantielle Code-
+   Reduktion (~400 LOC).**
+
+9. **runModelViaCodex** kann eliminiert werden — oauth-Branch in
+   `runModel` (twin-service.ts:2294) auf `codex-vercel-provider` umstellen
+   (das ist Phase 3.4.5).
+
+**Audit-Pending-Surface heute vs nach Refactor:**
+
+| Heute (Marker + Codex-Resume-Context) | Nach 3.4.3.1 |
+|---------------------------------------|--------------|
+| `input.toolCall.{mcpServerId, mcpToolName, args}` | `input.toolCall.{toolName, input}` |
+| `input.messages: ChatMessage[]` | `input.messages: ModelMessage[]` (Vercel-Format) |
+| `input.pendingReply, originalCapability` | unverändert |
+| `input.codexResumeContext.{pendingToolCall, inputItems, toolDefinitions, iterationCount, ...12 Felder}` | `input.approvalId` + `input.assistantContent` (genug für History-Replay) |
+| `input.priorAuditId` (Re-Pause) | unverändert |
+
+**Datenmenge im Audit:** substantiell-kleiner (12 Felder → 2 Felder pro
+Pending-Audit).
+
+### Aufwand-Estimate Phase 3.4.3.1
+
+Briefing-Default war 3-4h. Nach Spike-Discovery realistischer:
+
+| Block | Schätzung |
+|-------|-----------|
+| `buildMcpToolsFromSkills` + Marker-Removal | 1h |
+| `runOwnerDirect`-Catch-Refactor (Post-Generate-Scan) | 1.5h |
+| `approveMcpToolUse` Unified (Codex+Vercel-Pfad) | 1.5h |
+| `rejectPending` Refactor | 1h |
+| Pending-Audit-Schema-Cleanup (codexResumeContext entfernen) | 0.5h |
+| Marker-Pattern-Dead-Code-Removal | 0.5h |
+| End-to-End-Smokes (api_key + oauth, Pause+Approve+Reject) | 2h |
+| Phase 3.3.1.3.2 Re-Smoke (Regression-Sicherheit) | 1h |
+
+**Total: ~9-10h** (substantieller als Briefing-Default — Big-Bang
+beinhaltet API-Key-Pfad-Migration + Phase-3.3.1.3.x-Code-Removal +
+End-to-End-Smoke-Migration für beide Auth-Modi).
+
+**Alternative: Graduelle Migration** (verworfen per Setzung 3.4.3.0):
+- Phase 3.4.3.1a (oauth-only, ~4h) → Phase 3.4.3.1b (api_key, ~3h) →
+  Phase 3.4.3.1c (Marker-Cleanup, ~2h)
+- Vorteil: kleinere Diffs, weniger Smoke-Risiko
+- Nachteil: längere Übergangsphase mit Doppelt-Code
+
+### Phase-3.4.4 (Reasoning) + 3.4.5 (TwinService-Integration)
+
+Phase 3.4.3.1 macht Phase 3.4.4 + 3.4.5 substantiell-kleiner:
+
+- **3.4.4 Reasoning:** Provider hat schon `reasoning`-Content-Parts (Phase
+  3.4.1). TwinService-Integration ergänzt nur Audit-Mapping. Trivial.
+- **3.4.5 TwinService-Integration:** oauth-Branch in `runModel` (1 Zeile)
+  ersetzt durch `codexProvider.languageModel(...)`. Plus
+  `runModelViaCodex`-Removal (~600 LOC weg). Plus alle Resume-Pfade aus
+  3.3.1.3.x weg (~400 LOC weg). **Total ~1000 LOC Removal-Win.**
+
+**#131 Phase-3-Closure-Schätzung:** Phase 3.4.3.1 + 3.4.4 + 3.4.5 zusammen
+**~12-14h (~1.5-2 Bautage)**. Danach Phase 4 + 5 (~2-2.5 Bautage). Plus
+Phase 5 Smoke + Doku — #131 voll geschlossen in **Tag 28-29**.
+
+### Bonus-Beobachtung: Resume-Performance
+
+End-to-End-Resume-Latenz im Spike: **2s** (Test 2 mit echtem Codex-Pro).
+Heutige Phase-3.3.1.3.2-Implementation: **5.4s** für gleiche Trigger.
+Substantielle Performance-Verbesserung durch:
+- Kein eigener Resume-Loop (Vercel-SDK direct execute + final-text in
+  einer Iteration)
+- Keine Re-Persistierung des codexResumeContext
+- Vermutlich auch weil Provider-Round-Trip schmaler ist (kein
+  `function_call_output`-Array-Append-Overhead)
+
+§p hat das schon angedeutet: "Tool-Call-Pfad ist Reasoning-frei". Resume-
+Iteration ohne Reasoning → ~1.5-2s schneller.
+
+### Stop für Phase-3.4.3.1-Bau-Freigabe
+
+§r-Findings reichen für Bau. User-Entscheidung:
+- **(A)** Phase 3.4.3.1 jetzt anfangen (Big-Bang, ~9-10h, vermutlich 2
+  Bautage)
+- **(B)** Phase 3.4.3.1 für morgen (Tag 28) priorisieren, Tag 27 hier
+  beenden (20+1=21 Blöcke)
+- **(C)** Phase 3.4.3.1 später, Phase 4 (CLI-Login) jetzt für Closure-
+  Speed
+
 ## Re-Estimate Tag 27 Nachmittag
 
 Initial-Schätzung (Tag 25): L (3-5 Bautage)
