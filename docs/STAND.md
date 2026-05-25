@@ -1,6 +1,6 @@
 # twin-lab — Stand
 
-**Letztes Update:** 25. Mai 2026, Sonntag Nachmittag/Abend (Tag 27 — Phase 3.2 ✅, 10 Blöcke an einem Tag)
+**Letztes Update:** 25. Mai 2026, Sonntag Abend (Tag 27 — Phase 3.3.0 Spike ✅, 11 Blöcke an einem Tag)
 
 ## Aktuell in Arbeit
 
@@ -340,14 +340,67 @@ POST /twins/@markus/chat
 
 **Smoke-Bilanz:** klare Markus-Persona statt Phase-3.0-„Hello there, friend"-Output, deutsche Sprache (LANGUAGE_DIRECTIVE wirkt durch), Mandate-Wissen aus Persona-Markdown, Owner-vs-Twin-Guardrail aktiv, 3 Memory-Hits aus Episodic-Search durchgereicht. Phase-3.0-Lücke vollständig geschlossen.
 
+### #131 Abend — Phase 3.3.0 Spike Tool-Call-Discovery (Commit `9fa266a`, ~1h)
+
+Spike-First wie Phase 3.0: vor dem Bau das Format verifizieren statt auf Hypothesen-Code zu bauen. Vorbereitung mit Diagnose A-D hat ergeben, dass CodexSSEParser `response.output_item.added` heute als No-op behandelt mit explizitem Phase-3.3-TODO-Marker (`apps/runtime/src/oauth/codex-sse-parser.ts:222-226`). Format der Tool-Call-Events war Spike-Ziel.
+
+#### Spike-Disziplin
+
+- **Token-Quelle direkt aus `~/.codex/auth.json`** (kein DB-Touch, kein authMode-Switch, kein Setup/Cleanup-Mode). Memory-Setzung etabliert: Discovery-Spikes lesen direkt, Production-Pfad-Tests (Smoke 1/2/3) gehen über DB + OAuthRefreshService.
+- **Kein CodexSSEParser-Touch.** Manuelles SSE-Parsing im Spike-Script — Parser-Erweiterung folgt in Phase 3.3.1 auf verifizierter Format-Hypothese statt auf Annahmen.
+- **Mock-Function-Definition** `get_current_time` (OpenAI Responses API Format), Prompt explizit mit Tool-Use-Anweisung („You MUST call the get_current_time tool").
+
+`apps/runtime/src/scripts/test-oauth-phase3-3-spike.ts` (215 Z) — Raw-fetch, Event-Histogram, Tool-Call-Match-Suche, Full-Raw-Dump. Plus Script-Eintrag in `apps/runtime/package.json` (`twin:oauth-phase3-3-spike`).
+
+#### Spike-Output (HTTP 200, 758ms to first byte, 1641ms total)
+
+**Event-Type-Histogram (14 Events, 7 distinct Types):**
+
+```
+  8× response.function_call_arguments.delta
+  1× response.created
+  1× response.in_progress
+  1× response.output_item.added
+  1× response.function_call_arguments.done
+  1× response.output_item.done
+  1× response.completed
+```
+
+**Drei neue Event-Types** gegenüber Phase-3.1/3.2-Text-Response-Smokes:
+
+- `response.output_item.added` mit `item.type === "function_call"` (Tool-Call beginnt)
+- `response.function_call_arguments.delta` (Streaming-Chunks der Argument-JSON, analog `output_text.delta` für Text)
+- `response.function_call_arguments.done` (vollständige Arguments JSON-String)
+
+Plus zwei bereits-bekannte Phase-3.1.2-Bonus-Discovery-Events (`response.in_progress` + `response.output_item.done`) werden hier auch genutzt.
+
+#### Substantielle Findings für Phase 3.3.1
+
+1. **2 IDs pro Tool-Call:** `item.id` (`fc_...`, Codex-internes Tracking) vs `call_id` (`call_...`, für Multi-Step-Tool-Result-Reference)
+2. **Arguments als JSON-String** (nicht Object) — Phase 3.3.1 muss `JSON.parse(item.arguments)` vor Mapping
+3. **`strict: true`** wurde Codex auto-ergänzt zum Tool-Schema
+4. **`obfuscation`-Field** auf jedem Delta-Event (vermutlich CF-Bot-Mgmt, ignorieren)
+5. **`output_index: 0`** auf allen Events (parallel_tool_calls=false setting — Multi-Index erst bei parallel=true)
+6. **Keine Reasoning-Traces** in diesem Smoke trotz `reasoning.effort: "medium"` (vermutlich bei diesem Tool-Call-Pfad kein Reasoning getriggert)
+7. **`usage`-Field** in `response.completed`: `input_tokens: 194`, `output_tokens: 22` — Cost-Tracking-Eingangsdaten für mögliche Phase 3.5
+
+#### Mapping-Hypothese auf existing MCP-Pipeline
+
+Ziel Phase 3.3.1: Codex-Tool-Call auf existing `AuditMcpToolUseInputSchema` mappen (`packages/shared/src/index.ts:383`), damit Approval-Pipeline (`/audit/:id/approve`) und MCP-Tool-Execution unverändert greifen. Skills-Repo-Reverse-Lookup `name → {mcpServerId, mcpToolName}` braucht ggf. Schema-Erweiterung wenn aktueller Skill-Lookup nur über interne IDs geht.
+
+**Offene Frage Phase 3.3.1:** Multi-Step-Round-Trip — nach Tool-Result muss neuer Codex-Request mit `function_call_output`-Input-Item gesendet werden. Schema noch nicht verifiziert (Spike 3.3.0 stoppt nach erstem Tool-Call). Bau-Briefing Phase 3.3.1 muss das als eigenen Sub-Spike adressieren oder via OpenAI-Responses-API-Doku-Recherche klären.
+
+Detail-Format + 4 JSON-Beispiel-Events in `docs/131-OAUTH-STRATEGY.md §k`.
+
 #### Plan Tag 28+
 
-- **Phase 3.3 Tool-Calls + Reasoning-Traces (Tag 28-29, 1-2 Tage)** — Codex-Response-Format → Twin-Lab AuditEntry-Mapping. Eingangsdaten: 5 captured Event-Types aus Phase-3.1.2 + 3.2 Smokes (`response.in_progress`, `output_item.done`, `content_part.added`, `output_text.done`, `content_part.done`). Plus `skillsBlock` + `TOOL_USE_DIRECTIVE` als Schicht 3+4 im Codex-Pfad nachziehen (composeOwnerSystemPrompt-Helper kann beide Parameter schon).
-- **Phase 3.4 Vercel-Provider-Refactor (optional, Tag 29-30)** — Direct-fetch zu sauberem Vercel-AI-SDK-Custom-Provider migrieren. Entscheidung nach Phase 3.3: wenn Tool-Use-Mapping sauber im Direct-fetch geht, kann 3.4 entfallen.
+- **Phase 3.3.1 Parser-Erweiterung + MCP-Pipeline-Mapping (Tag 28, 1-2 Tage)** — CodexSSEParser um `response.output_item.added`-Discrimination + `function_call_arguments.delta/done` erweitern, `composeOwnerSystemPrompt`-Helper-Parameter `skillsBlock` + `toolUseDirective` im Codex-Pfad aktivieren, runModelViaCodex Tools an Adapter durchreichen, Mapping auf AuditMcpToolUseInputSchema, Sub-Spike für Multi-Step-Round-Trip-Format
+- **Phase 3.3.2 Reasoning-Traces (Tag 29, optional, ~0.5 Tag)** — `item.type === "reasoning"` handlen, Audit-Persistenz
+- **Phase 3.4 Vercel-Provider-Refactor (optional, Tag 29-30)** — Entscheidung nach Phase 3.3: wenn Direct-fetch sauber bleibt, kann 3.4 entfallen
 
 ### Tag-27-Closure-Bilanz
 
-**Zehn Blöcke an einem Tag — Husky-Hook bis Phase 3.2 komplett:**
+**Elf Blöcke an einem Tag — Husky-Hook bis Phase 3.3.0 Spike komplett:**
 
 | Block | Commit | Was |
 |---|---|---|
@@ -361,6 +414,7 @@ POST /twins/@markus/chat
 | 8. Phase 3.0 Smoke 2 | `ad48c5d` | #131 End-to-End via `/twins/@markus/chat` grün + STAND-Update |
 | 9. Phase 3.1 (3.1.1 + 3.1.2) | `75d166d` + `707f941` | #131 CodexSSEParser standalone + SSE-Integration + Retry-Wrapper, 8/8 + 11/11 + End-to-End-Smoke grün |
 | 10. Phase 3.2 | `a949b7e` | #131 composeOwnerSystemPrompt-Helper + Persona/Facts/Memory-Mapping + Smoke 3 mit klarer Markus-Persona-Response |
+| 11. Phase 3.3.0 Spike | `9fa266a` | #131 Tool-Call-Event-Discovery — 7 distinct Event-Types verifiziert, §k dokumentiert (4 JSON-Beispiele + 7 Findings + Mapping-Hypothese) |
 
 **Fünf Lessons:** Recherche vor Bau (#1), STAND-Doppelpflege (#2), End-to-End-Validation vor Bau (#3), Migration ohne Repo-Update ist Anti-Pattern (#4), Twin-Lab-eigene Setzungen schlagen Industry-Defaults (#5).
 
@@ -368,7 +422,7 @@ POST /twins/@markus/chat
 
 **Phase-3.2-Bonus-Lesson (Diagnose-Wert, kein neuer Lesson-Eintrag):** Briefing für Phase 3.2 hatte angenommen, `runModelViaCodex` müsse `conversationId` akzeptieren und History selbst laden. Phase-3.2.1-Diagnose hat gezeigt: History ist bereits in `messages` (Caller `runOwnerDirect` lädt sie OUTSIDE `runModel` via `loadConversationHistory`). Ohne Diagnose wäre Phase 3.2 mit doppeltem History-Loading + neuer Dep-Injection gebaut worden — Phase-1.1-Diagnose-Pattern bestätigt 13. Mal.
 
-**Tag-27-Outcome #131:** Phase 1 ✅ + Phase 2 ✅ + Strategy-Iteration ✅ + Phase 3.0 Spike ✅ (Smoke 1 + Smoke 2 grün) + Phase 3.1 ✅ (3.1.1 Parser + 3.1.2 Integration/Retry) + Phase 3.2 ✅ (Persona/Facts/Memory durchgereicht, Smoke 3 grün mit klarer Markus-Persona). Walking-Skeleton + Robustness-Layer + Persona-Pipeline stehen End-to-End. Phase 3.3 (Tag 28-29) hat freie Bahn für Tool-Calls + Reasoning-Traces mit 5 captured Event-Types als Eingangsdaten und Schicht 3+4 im Codex-Pfad nachziehen (Helper ist vorbereitet).
+**Tag-27-Outcome #131:** Phase 1 ✅ + Phase 2 ✅ + Strategy-Iteration ✅ + Phase 3.0 Spike ✅ (Smoke 1 + Smoke 2 grün) + Phase 3.1 ✅ (3.1.1 Parser + 3.1.2 Integration/Retry) + Phase 3.2 ✅ (Persona/Facts/Memory durchgereicht, Smoke 3 grün mit klarer Markus-Persona) + Phase 3.3.0 Spike ✅ (Tool-Call-Event-Format verifiziert, §k dokumentiert). Walking-Skeleton + Robustness-Layer + Persona-Pipeline + Tool-Call-Format-Hypothese stehen. Phase 3.3.1 (Tag 28) hat freie Bahn für Parser-Erweiterung + MCP-Pipeline-Mapping auf verifizierter Format-Hypothese statt auf Annahmen — plus Sub-Spike für Multi-Step-Round-Trip-Format als nächste offene Frage.
 
 **Tag-27-Outcome #138:** Local-Dev-Boot-Friction strukturell behoben, in der Praxis verifiziert beim Smoke-2-Setup.
 
