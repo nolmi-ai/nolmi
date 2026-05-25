@@ -1525,7 +1525,18 @@ Wettbewerbs-Pivot aus Tag 25 Strategy-Session (`docs/BLOCK-5-STRATEGY.md`): Nano
 
 **Phase-B-Implikation:** Stufe 2 (External Senders mit Pre-Approval) und Stufe 3 (Voll-Multi-Twin-Router) bleiben Phase B. WhatsApp + Discord + Slack folgen in ROADMAP Phase 4.1-4.5 wie geplant.
 
-### 131. OpenAI Subscription-OAuth (Beta, Codex-Pattern)
+### 131. OpenAI Subscription-OAuth — ✅ Phase A DONE (25.–26. Mai 2026)
+
+**Status: ✅ DONE Phase A** (Tag 27–28, 30 Blöcke). Volle Bilanz in
+[`docs/131-OAUTH-STRATEGY.md`](./131-OAUTH-STRATEGY.md) §a–§w (27 Sub-
+Sections). CLI `pnpm twin:oauth-login @<handle>` (Phase 4) + Web-UI
+Auth-Status + Modal (Phase 5) live. Bauzeit ~3 Tage statt initial-
+geschätzten 5–7. Phase-B-Polish-Items: #139, #140, #141, #142, #143
+(Web-OAuth-Production), #144 (VPS/Linux-Path), #145 (Multi-Account).
+
+---
+
+**Historische Doku (Original-Spec aus Tag 25, vor Bau):**
 
 OpenAI Codex hat OAuth-Flow für Subscription-Auth (ChatGPT Plus/Pro/Team), offiziell für eigene Codex-Produkte. OpenClaw und vergleichbare Tools nutzen den Flow auch für eigene Apps — laut OpenClaw-Doku „explicitly supported", laut OpenAI-Codex-Doku nicht explizit für externe Apps adressiert.
 
@@ -2890,15 +2901,45 @@ Faktor 14× langsamer im Initial-Smoke deutet auf Token-Refresh-Block hin: `OAut
 
 **Priorität:** Nice. Wie #141 — Debugging-/Audit-Hilfe, kein User-Visual-Blocker. Phase B / Phase 5-Polish.
 
-### #131 Status nach Tag 27 (16 Blöcke)
+### #131 Status nach Tag 27 — ✅ Phase A DONE (30 Blöcke)
 
-**Phase 3.3 substantiell-zu** mit Phase-3.3.1.3.2-Bau (Block 16). Capability-Parity zwischen api_key (Vercel-SDK) und oauth (Codex) Twins für den kompletten Tool-Use-Pfad: Auto-Execute + Pause + Approve+Resume + Reject + Multi-Step-Loop.
+**Phase A vollständig zu** mit Tag 27 Block 30 (Phase 5.4 BACKLOG-Cleanup). Volle Architektur + Sub-Phasen-Doku in [`docs/131-OAUTH-STRATEGY.md`](./131-OAUTH-STRATEGY.md) §a–§w. Bauzeit-Bilanz ~3 Tage netto (~22h) gegen Initial-Schätzung XL (5-7 Tage) bzw. nach Strategy-Iteration XXL (8-12 Tage). Substantielle Einsparungen durch Diagnose-Reflex (Pattern-Recognition vor jedem Sub-Bau) + zwei Architektur-Pivots (Big-Bang Approval-Refactor §s ~1260 LOC Net-Removal; Phase-4-Wrapper-Pattern §t statt Loopback-Listener ~4x schneller).
 
-**Restliche #131-Sub-Phasen (Tag 28+, Reihenfolge):**
-- **Phase 3.3.3 Reasoning-Traces** — optional, ~0.5 Tag. `item.type === "reasoning"` in CodexSSEParser handlen, Audit-Persistenz. Wird heute nicht in UI gerendert, also kein Blocker.
-- **Phase 3.4 Vercel-Provider-Refactor** — optional, lohnt sich erst wenn Vercel-AI-SDK einen vergleichbaren Direct-fetch-Custom-Provider-Path bietet.
-- **Phase 4 CLI-Login-Command** — ~1 Tag. `pnpm twin:oauth-login` Script mit Loopback-Listener (Port 1455), Auth-URL-Output, Token-Persist.
-- **Phase 5 Web-UI Status + Smoke + Doku + #131-Closure** — ~1-1.5 Tage. Settings-Page Auth-Mode-Indicator + Switch-Button, DEPLOYMENT.md §11 SSH-Tunnel-Setup, Production-Smoke 3/3, README-Update.
+**Phase-B-Polish (BACKLOG-tracked, nice-to-have):** #139 (Refresh-Latenz), #140 (Re-Pause-Smoke), #141+#142 (providerMetadata pass-through, sollten gemeinsam gefixt werden), plus neue Phase-B-Items #143 (Web-OAuth-Production ohne CLI), #144 (VPS/Linux-Path via `--device-auth`), #145 (Multi-Account-Support).
 
-**Bauzeit-Bilanz #131 bis Tag-27-Ende:** Phase 1 + 2 + 3.0-3.3.1.3.2 in 16 Blöcken (~15h netto) gegen Initial-Schätzung XL (5-7 Tage) bzw. nach Strategy-Iteration XXL (8-12 Tage). Diagnose-Reflex hat substantiell Aufwand gespart durch Pattern-Recognition (existing JSON-Audit-Pattern statt Migration, existing Catch-Pattern für Symmetrie, etc.).
+### #143 Web-OAuth-Production-Flow ohne CLI-Subprocess (XL, should — Phase B)
+
+**Phase-A-Variante:** OAuth läuft über `pnpm twin:oauth-login` CLI-Wrapper (Phase 4). User braucht Codex Desktop App + Terminal-Zugang zum twin-lab-Repo. Akzeptabel für drei dev-fitte Owner (florian/heiko/markus), aber Mass-User-Onboarding-Friction.
+
+**Phase-B-Ziel:** Browser-only OAuth direkt aus der Settings-Page heraus. Klick "OAuth aktivieren" → eigener PKCE-Server im runtime nimmt Callback entgegen → Token-Persist + Settings-Refresh. Kein Terminal-Wechsel, kein Codex-App-Requirement.
+
+**Implementation-Skizze:**
+- Eigener Loopback-Listener (Port 1455 oder dynamisch) im runtime-Workspace
+- PKCE-Challenge clientseitig im Web, Auth-URL öffnet sich in neuem Tab
+- Callback-Endpoint `/oauth/callback` im runtime nimmt Code entgegen, exchanged gegen Token, persistiert in oauth_tokens
+- WebSocket oder SSE-Push an Settings-UI für Status-Update
+
+**Risiken:** OAuth-Redirect-Whitelist bei OpenAI Codex (hardcoded localhost:1455), VPS-Self-Hosting braucht SSH-Tunnel oder Port-Forwarding. Strategy-Doc §a-§b hat das in der Original-XXL-Estimate berücksichtigt.
+
+**Größe:** XL (3-5 Bautage). **Priorität:** should. **Spur:** Phase B.
+
+### #144 VPS/Linux-Path für CLI via `--device-auth` (M, nice — Phase B)
+
+**Phase-A-Setzung (§t.8):** `pnpm twin:oauth-login` baut nur den lokalen macOS-Path mit Codex-Desktop-App-Bundle. VPS/Linux-Self-Hoster können das CLI noch nicht nutzen.
+
+**Phase-B-Ziel:** CLI um `--device-auth`-Flag erweitern. `codex login --device-auth` startet Device-Code-Flow — User loggt sich am Mac-Browser ein, gibt 8-stelligen Code in VPS-Terminal ein. Pattern-Adaption analog Hermes für SSH-only-Self-Hoster.
+
+**Alternative:** CLI um Detect-Logik erweitern (`fs.existsSync('/Applications/Codex.app')` → macOS-Path, sonst → Linux-Binary von `@openai/codex`-npm-Package). Plus `--device-auth`-Flag als manueller Override.
+
+**Größe:** M (1-1.5 Bautage). **Priorität:** nice (erst wenn ein User es konkret fordert). **Spur:** Phase B oder Phase A nach Launch.
+
+### #145 Multi-Account-Support für mehrere ChatGPT-Accounts (M, nice — Phase B)
+
+**Phase-A-Limit:** `~/.codex/auth.json` ist single-tenant. Re-Login mit anderem ChatGPT-Account überschreibt `account_id` im File. User mit mehreren ChatGPT-Accounts (Personal + Work) müssen zwischen Logins manuell wechseln.
+
+**Phase-B-Ziel:** Pro-Twin-`auth.json` (z.B. `~/.codex/auth.json.@markus`, `~/.codex/auth.json.@florian`) — getrennte Files für getrennte Accounts. CLI managed das Switching via Symlink oder per-twin-config.
+
+**Alternative:** Settings-UI-Warnung beim Re-Login: "Vorheriger ChatGPT-Account: X. Neuer Login überschreibt." User akzeptiert bewusst.
+
+**Größe:** M (1-2 Bautage). **Priorität:** nice. **Spur:** Phase B nach Launch + Demand-Signal.
 
