@@ -50,6 +50,14 @@ const POST_MTIME_SETTLE_MS = 200;
 
 // ─── Sub-Phase A: Args-Parsing ──────────────────────────────────────────────
 
+/**
+ * Normalisiert User-Input zu DB-Storage-Form `@<lowercase>`:
+ *   - "@markus"  → "@markus"
+ *   - "markus"   → "@markus"
+ *   - "@MARKUS"  → "@markus"
+ *   - "@@markus" → "@markus" (führende @s werden gestrippt, dann ein-prefix)
+ *   - "mark.us"  → Error (regex-Validation)
+ */
 function parseHandle(argv: string[]): string {
   const raw = argv[2];
   if (!raw) {
@@ -58,14 +66,13 @@ function parseHandle(argv: string[]): string {
         "  Beispiel: pnpm twin:oauth-login @markus",
     );
   }
-  const stripped = raw.startsWith("@") ? raw.slice(1) : raw;
-  const normalized = stripped.trim().toLowerCase();
-  if (!/^[a-z][a-z0-9_-]*$/.test(normalized)) {
+  const stripped = raw.replace(/^@+/, "").trim().toLowerCase();
+  if (!/^[a-z][a-z0-9_-]*$/.test(stripped)) {
     throw new Error(
       `Ungültiger Handle '${raw}'. Erlaubt: Kleinbuchstaben, Ziffern, _, -.`,
     );
   }
-  return normalized;
+  return `@${stripped}`;
 }
 
 // ─── Sub-Phase B: Codex-Binary-Resolution ───────────────────────────────────
@@ -233,7 +240,7 @@ async function loadCodexTokenWithRetry(): Promise<CodexToken> {
 
 async function main(): Promise<void> {
   const handle = parseHandle(process.argv);
-  console.log(`🔐 OAuth-Login für Twin @${handle} ...\n`);
+  console.log(`🔐 OAuth-Login für Twin ${handle} ...\n`);
 
   // DB + Repos
   const masterKey = loadMasterKey();
@@ -246,21 +253,21 @@ async function main(): Promise<void> {
   if (!twin) {
     const verfuegbar = profilesRepo
       .list({ activeOnly: true })
-      .map((p) => `@${p.handle}`)
+      .map((p) => p.handle)
       .join(", ");
     throw new Error(
-      `Twin @${handle} nicht gefunden.\n` +
+      `Twin ${handle} nicht gefunden.\n` +
         `  Verfügbare aktive Twins: ${verfuegbar || "(keine)"}`,
     );
   }
   console.log(
-    `✅ Twin: @${twin.handle} (twinId=${twin.twinId}, ` +
+    `✅ Twin: ${twin.handle} (twinId=${twin.twinId}, ` +
       `aktueller authMode=${twin.authMode})`,
   );
 
   if (twin.authMode === "oauth") {
     console.log(
-      `⚠️  Twin @${twin.handle} ist bereits im OAuth-Mode — ` +
+      `⚠️  Twin ${twin.handle} ist bereits im OAuth-Mode — ` +
         `Re-Login schreibt Token neu.\n`,
     );
   }
@@ -308,7 +315,7 @@ async function main(): Promise<void> {
 
   console.log(
     `✅ Token persistiert (AES-256-GCM, expires ${expiresAt})\n` +
-      `✅ Twin @${twin.handle} ist jetzt im OAuth-Mode.\n\n` +
+      `✅ Twin ${twin.handle} ist jetzt im OAuth-Mode.\n\n` +
       `🎉 Login erfolgreich.`,
   );
 }
