@@ -1,6 +1,6 @@
 # twin-lab — Stand
 
-**Letztes Update:** 24. Mai 2026, Sonntag Abend (Tag 25 — #111 abgeschlossen, Block 4 = 3/3 ✅)
+**Letztes Update:** 25. Mai 2026, Sonntag Nachmittag (Tag 27 — Phase 3.1 Komplett ✅, 9 Blöcke an einem Tag)
 
 ## Aktuell in Arbeit
 
@@ -29,7 +29,7 @@ Inhalte (11 Items in drei Tranchen) unverändert, nur Build-Pfad
 leicht angepasst (#100/#101 vorgezogen, weil Vision-kritisch für
 die Differenzierungs-Story).
 
-## Tag 27 (25. Mai 2026, Sonntag) — Pre-Launch-Phase A Polish (#137)
+## Tag 27 (25. Mai 2026, Sonntag) — Pre-Launch-Phase A Polish (#137) + #131 Phase 3.0/3.1
 
 **Stand Tag 27 Vormittag:** #137 Husky Pre-Push-Build-Hook abgeschlossen (~1h). Strukturelle Prävention für Phase-5-Bug-Pattern (Production-Static-Generation strenger als pnpm dev). origin/main = `1a1f653` nach Push.
 
@@ -202,9 +202,91 @@ Phase 3.0 Spike damit **final verifiziert**. Walking-Skeleton steht End-to-End, 
 
 **Phase 3.0-Outcome:** Walking-Skeleton steht. Phase 3.1-3.4 bauen darauf inkrementell mit eigenen Stop-Punkten weiter (siehe Strategy-Doc §i).
 
+### #131 Nachmittag — Phase 3.1 Komplett (CodexSSEParser + Integration + Retry)
+
+Phase 3.1 (SSE-Parser-Robustness) ist beidseitig durch: Standalone-Parser in 3.1.1, Integration + Retry-Wrapper in 3.1.2. Strategy-Doc §i markiert beide Sub-Phasen als ✅. Damit ist der gesamte Phase-3.0-bis-3.1-Block heute an einem Tag abgeschlossen — Walking-Skeleton + Robustness-Layer ohne Übernachtung.
+
+#### Phase 3.1.1 — SSE-Parser Standalone (Commit `75d166d`, ~1-1.5h)
+
+`apps/runtime/src/oauth/codex-sse-parser.ts` mit Hybrid-Approach:
+
+- **Discriminated-Union** für sechs bekannte Event-Types (`response.created`, `response.output_item.added`, `response.output_text.delta`, `response.completed`, `response.failed`, `response.error`)
+- **Generic-Fallback** für unbekannte Event-Types: Name landet in `result.unknownEventTypes`, blockt nicht
+- **Error-Events werfen** `CodexStreamParseError` mit Message + Code + eventType (Spike-Phase 3.0 hat sie stillschweigend ignoriert)
+- **Stateful:** `buffer` tracked Buffer-Grenzen zwischen Reader-Chunks
+- **API:** `parse(body)` für Stream-Komplett-Verbrauch, `parseChunk()` + `finalize()` für Phase-3.1.2-Retry-after-Disconnect-Pfad
+
+**Test-Approach folgt CLAUDE.md-Setzung „keine Test-Suite":** Smoke-Script mit `node:assert` + Counter, kein vitest/jest. Pattern analog `test-memory-repos.ts` / `test-episodic-repos.ts`. **8/8 Cases grün:** happy-path, chunked-reads, `response.failed` wirft Error mit Code, `[DONE]`-Termination, malformed JSON ohne Crash, unknown-Event-Sammlung, null-body-Throw, leere Event-Blöcke.
+
+#### Phase 3.1.2 — SSE-Integration + Retry-Wrapper (Commit `707f941`, ~2-3h)
+
+CodexAdapter refactored: `collectSSEText` raus, `CodexSSEParser` rein. Plus Retry-Wrapper basierend auf BridgeStream-Pattern (adaptiert für Promise-Loop statt EventSource-Reconnect).
+
+**Drei neue Files:**
+
+- `oauth/codex-http-error.ts` — `CodexHttpError` mit `status: number` Field (Pattern analog `CodexStreamParseError`, vermeidet String-Matching auf Message)
+- `oauth/codex-retry.ts` — `isRetryableError` + `withRetry`, generisch typisiert (Phase 3.3 Tool-Call kann reusen)
+- `scripts/test-codex-retry.ts` — 10 Cases + 1 Bonus mit `node:assert` + Counter
+
+**Klassifizierung:**
+
+- `CodexStreamParseError` → no-retry (Codex hat Error-Event geschickt, endgültig)
+- `CodexHttpError` 4xx → no-retry (Auth/Quota/Validation, User-Action)
+- `CodexHttpError` 5xx → retry (transient server-side)
+- `AbortError` → no-retry (User-Cancel)
+- Network-Errors (`ECONNRESET`, `ETIMEDOUT`, `ENOTFOUND`, `fetch failed`, `socket hang up`) → retry
+- Conservative default: no-retry für unbekannte Messages
+
+**Retry-Konfiguration:** Max 3 Retries, Backoff 1s/2s/4s, Full-Restart-Pattern (neuer Parser, neuer fetch, `ensureFresh` re-konsultiert für refresh-bedingten Token-Wechsel).
+
+**11/11 Retry-Smoke grün** (10 Cases + Backoff-Timing-Bonus): isRetryableError × 6 + withRetry × 5 (Success, Loop, Non-Retryable, Exhaustion, Backoff-Sequenz).
+
+**End-to-End-Confidence-Smoke grün** (Audit-Entry `audit_n_O_SynH6dK1`):
+
+```
+POST /twins/@markus/chat
+  → HTTP 200 in 3815ms (server total, 2480ms davon Codex)
+  → providerMetadata = {
+      provider:           "openai-codex",
+      authMode:           "oauth",
+      planType:           "pro",
+      cfRay:              "a013ae658812c9e3-MUC",
+      latencyMs:          2480,
+      responseId:         "resp_0866ee19ccb58f72016a141d3ea74c819181950e39354aa1bc",
+      codexStatus:        "completed",
+      unknownEventTypes:  [siehe Bonus-Discovery]
+    }
+```
+
+Audit-Output ist deutlich reicher als nach Phase 3.0: `responseId` + `codexStatus` + `unknownEventTypes` kommen jetzt aus dem Parser durch TwinService bis ins Audit.
+
+#### Bonus-Discovery für Phase 3.3
+
+Der Hybrid-Fallback im SSE-Parser hat **fünf weitere Codex-Event-Types** in der Wildbahn captured, die heute via `unknownEventTypes` ins Audit-Meta fließen:
+
+- `response.in_progress`
+- `response.output_item.done`
+- `response.content_part.added`
+- `response.output_text.done`
+- `response.content_part.done`
+
+Das sind **Reverse-Engineering-Daten für Phase 3.3** (Tool-Calls + Reasoning-Traces + Content-Part-Handling). Statt diese Event-Types aus externen Quellen zu deduzieren (Simon-Willison-Blog, HuggingFace codex-proxy), haben wir sie jetzt mit echtem Codex-Pro-Account direkt aus dem Stream. Strategy-Doc §i hat den Hinweis unter Phase 3.3 dokumentiert.
+
+**Architektur-Win:** Hybrid-Approach (Discriminated-Union + generic Fallback) zahlt sich sofort aus — strikte Schema-Validierung hätte heute schon 5 Events geworfen statt sie zu sammeln.
+
+#### Plan Tag 28+
+
+- Phase 3.2 Codex-System-Prompt-Engineering (0.5-1 Tag)
+  - Echte Codex-CLI-Prefix-Recherche
+  - Twin-Persona als developer-role-Message
+  - Facts-Block + Memory-Hits + History-Loader in `instructions` / `input`
+  - `runModelViaCodex`-Signatur erweitern (analog `runModel(persona, messages, extraSystem?, options?)`)
+- Phase 3.3 Tool-Calls + Reasoning-Traces (Tag 29, 1-2 Tage)
+  - Nutzt Bonus-Discovery aus heutigem 3.1.2-Smoke als Eingangsdaten
+
 ### Tag-27-Closure-Bilanz
 
-**Sechs Commits + ein Pre-Flight an einem Tag:**
+**Neun Blöcke an einem Tag — Husky-Hook bis Phase 3.1 komplett:**
 
 | Block | Commit | Was |
 |---|---|---|
@@ -215,11 +297,14 @@ Phase 3.0 Spike damit **final verifiziert**. Walking-Skeleton steht End-to-End, 
 | 5. Pre-Flight | (kein Commit) | 3/3 HTTP 200 gegen Codex-Endpoint (Mac/VPS/Node v22) |
 | 6. Phase 3.0 Spike | `7b8aae4` | #131 Codex-Adapter Walking-Skeleton + Smoke 1 grün |
 | 7. Local-Dev-Fix | `6d33ade` | #138 TELEGRAM_USE_POLLING Auto-Detection-Fallback |
-| 8. Phase 3.0 Smoke 2 | (kein Commit, STAND-Update) | End-to-End via `/twins/@markus/chat` grün |
+| 8. Phase 3.0 Smoke 2 | `ad48c5d` | #131 End-to-End via `/twins/@markus/chat` grün + STAND-Update |
+| 9. Phase 3.1 (3.1.1 + 3.1.2) | `75d166d` + `707f941` | #131 CodexSSEParser standalone + SSE-Integration + Retry-Wrapper, 8/8 + 11/11 + End-to-End-Smoke grün |
 
-**Vier Lessons:** Recherche vor Bau (#1), STAND-Doppelpflege (#2), End-to-End-Validation vor Bau (#3), Migration ohne Repo-Update ist Anti-Pattern (#4).
+**Fünf Lessons:** Recherche vor Bau (#1), STAND-Doppelpflege (#2), End-to-End-Validation vor Bau (#3), Migration ohne Repo-Update ist Anti-Pattern (#4), Twin-Lab-eigene Setzungen schlagen Industry-Defaults (#5).
 
-**Tag-27-Outcome #131:** Phase 1 ✅ + Phase 2 ✅ + Strategy-Iteration ✅ + Phase 3.0 Spike ✅ (Smoke 1 + Smoke 2 grün). Walking-Skeleton steht End-to-End. Phase 3.1 (Tag 28) hat freie Bahn für SSE-Parser-Robustness + Persona/Facts/Memory-Pipeline-Wiring im Codex-Adapter.
+**Lesson Tag 27 #5: Twin-Lab-eigene Setzungen (CLAUDE.md) sind nicht zu überschreiben mit „industry best practice".** Phase 3.1.1 Bau-Briefing hatte Vitest reingebrieft („Standard für TypeScript-Unit-Tests"). Phase-1.1-Diagnose hat die CLAUDE.md-Setzung „keine Test-Suite" aufgefangen und Smoke-Script-Pattern empfohlen — matched Tag-12-Memory-Repos und Tag-22-MCP-Skills. Ergebnis: 8/8 + 11/11 Smoke grün ohne neue devDeps, ohne Husky-Hook-Eingriff, ohne CLAUDE.md-Bruch. Generelles Prinzip: **Project-spezifische Setzungen (CLAUDE.md, MEMORY, existing-Pattern-Dichte im Code) haben Vorrang vor generischen Industry-Defaults** — bevor neue Infrastruktur eingeführt wird, prüfen ob das Projekt eine eigene Setzung hat.
+
+**Tag-27-Outcome #131:** Phase 1 ✅ + Phase 2 ✅ + Strategy-Iteration ✅ + Phase 3.0 Spike ✅ (Smoke 1 + Smoke 2 grün) + Phase 3.1 ✅ (3.1.1 Parser + 3.1.2 Integration/Retry). Walking-Skeleton + Robustness-Layer stehen End-to-End. Phase 3.2 (Tag 28) hat freie Bahn für Persona/Facts/Memory-Pipeline-Wiring im Codex-Adapter, Phase 3.3 hat dank Bonus-Discovery 5 zusätzliche Event-Types als Eingangsdaten.
 
 **Tag-27-Outcome #138:** Local-Dev-Boot-Friction strukturell behoben, in der Praxis verifiziert beim Smoke-2-Setup.
 

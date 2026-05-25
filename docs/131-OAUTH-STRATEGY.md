@@ -1,6 +1,6 @@
 # #131 OpenAI Subscription-OAuth — Strategy
 
-**Status:** Strategy-Phase abgeschlossen Tag 27 Vormittag, Bau-Start pending.
+**Status:** Phase 1 + 2 + 3.0 Spike + 3.1 (3.1.1 + 3.1.2) ✅ Tag 27. Phase 3.2 nächster Schritt (Tag 28).
 
 Pre-Launch-Phase A Block 5 Item. Vorgezogen von Phase B in Tag 26.
 
@@ -170,13 +170,14 @@ Requests hinweg (reduziert Re-Inspection-Overhead).
 Phase 3 (Provider-Auth-Mode-Switch + Codex-Adapter) ist substantieller als
 initial geschätzt. Re-Estimate: XL → XXL. Bau in Sub-Phasen:
 
-| Sub-Phase | Was | Aufwand |
-|---|---|---|
-| **3.0 Spike** (Tag 27) | Direct-fetch Codex-Adapter, Minimal-Instructions, Twin-Chat-API gepatcht für oauth-Branch, Pre-Flight via existing Mock-Token | 2-4h |
-| **3.1 SSE-Parser-Robustness** (Tag 28) | SSE-Stream-Parser für Codex-Response-Format, Error-Handling, Disconnection-Recovery | 1 Tag |
-| **3.2 Codex-System-Prompt-Engineering** (Tag 28) | Echte Codex-CLI-Prefix-Recherche + Twin-Persona-Mapping als developer-role-Message | 0.5-1 Tag |
-| **3.3 Tool-Calls + Reasoning-Traces** (Tag 29) | Codex-Response-Format → Twin-Lab AuditEntry-Mapping, Tool-Call-Round-Trips | 1-2 Tage |
-| **3.4 Vercel-Provider-Refactor** (optional, Tag 29-30) | Direct-fetch zu sauberem Vercel-AI-SDK-Custom-Provider migrieren | 1 Tag |
+| Sub-Phase | Was | Aufwand | Status |
+|---|---|---|---|
+| **3.0 Spike** (Tag 27 Vormittag/Nachmittag) | Direct-fetch Codex-Adapter, Minimal-Instructions, Twin-Chat-API gepatcht für oauth-Branch, Pre-Flight via existing Mock-Token | 2-4h | ✅ Commit `7b8aae4` + STAND-Smoke-2 `ad48c5d` |
+| **3.1.1 SSE-Parser standalone** (Tag 27 Nachmittag) | CodexSSEParser mit Hybrid-Approach (Discriminated-Union + generic Fallback), 8/8 Smoke | 1-1.5h | ✅ Commit `75d166d` |
+| **3.1.2 SSE-Integration + Retry** (Tag 27 Nachmittag) | CodexHttpError + isRetryableError + withRetry (3 Retries, Backoff 1s/2s/4s, Full-Restart), 11/11 Retry-Smoke + End-to-End-Smoke | 2-3h | ✅ Commit `707f941` |
+| **3.2 Codex-System-Prompt-Engineering** (Tag 28) | Echte Codex-CLI-Prefix-Recherche + Twin-Persona-Mapping als developer-role-Message, Facts-Block + History in `instructions` / `input` | 0.5-1 Tag | offen |
+| **3.3 Tool-Calls + Reasoning-Traces** (Tag 29) | Codex-Response-Format → Twin-Lab AuditEntry-Mapping, Tool-Call-Round-Trips. **Eingangsdaten:** 5 zusätzliche Event-Types aus Phase-3.1.2-Smoke entdeckt, dokumentiert in STAND Tag 27 — Reverse-Engineering-Daten für Tool-Call-Mapping (siehe unten) | 1-2 Tage | offen |
+| **3.4 Vercel-Provider-Refactor** (optional, Tag 29-30) | Direct-fetch zu sauberem Vercel-AI-SDK-Custom-Provider migrieren | 1 Tag | offen |
 
 **Stop-Punkte:** jede Sub-Phase mit eigenem Commit + Smoke. Wenn 3.0 Spike fails:
 Diagnose-Output statt blinder Weiter-Bau.
@@ -184,6 +185,19 @@ Diagnose-Output statt blinder Weiter-Bau.
 **LLM-Client-Integration (Sub-Phase 3.0):** Direct-fetch im LLM-Client mit
 Branch nach `twin.auth_mode`. Vercel-AI-SDK-Provider-Integration ist Sub-Phase
 3.4 (optional, falls Direct-fetch sich als sauber genug erweist kann 3.4 entfallen).
+
+**Phase-3.3-Eingangsdaten (Bonus-Discovery aus 3.1.2-End-to-End-Smoke):** der
+Hybrid-Fallback im SSE-Parser hat folgende Codex-Event-Types in der Wildbahn
+captured, die heute via `unknownEventTypes` im Audit landen und Phase 3.3 als
+Reverse-Engineering-Daten für Tool-Call- bzw. Content-Part-Handling dienen:
+
+- `response.in_progress`
+- `response.output_item.done`
+- `response.content_part.added`
+- `response.output_text.done`
+- `response.content_part.done`
+
+Details und Audit-Beleg siehe STAND.md Tag 27 (Sub-Section „Phase 3.1 Komplett — Bonus-Discovery").
 
 ## §j — Risiko-Assessment (Tag 27 Nachmittag)
 
