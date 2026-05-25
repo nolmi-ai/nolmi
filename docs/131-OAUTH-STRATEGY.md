@@ -62,6 +62,8 @@ Begründung: SSH-Tunnel braucht eh Shell, User ist eh in Session. Web-UI-Trigger
 
 Matches Hermes' `hermes auth` Pattern.
 
+**Bau-Granularität (Tag 27 Setzung):** Phase 3 wird als Spike-First gebaut, nicht als ein Block. Walking-Skeleton beweist Architektur, dann inkrementeller Ausbau in Sub-Phasen 3.1-3.4. Siehe §i für Sub-Phase-Sequenz.
+
 ### §b — Exklusiver Auth-Mode pro Twin
 
 `twins.auth_mode` ist either `api_key` or `oauth`, nicht beides. Switch in Settings löscht alten Auth-Modus.
@@ -112,6 +114,125 @@ OpenRouter ist OpenAI-API-kompatibel, kein Twin-Lab-Refactor nötig. Existing Pr
 Token-Refresh-Failure invalidiert Twin nicht. Twin antwortet mit User-Facing-Error („Bitte erneut authentifizieren: `pnpm twin:oauth-login --twin=@markus`"), Auth-Mode bleibt `oauth`.
 
 Analog #130 §h (Persistent-Pairing): User-Trust ist persistent, nicht Session-State.
+
+## §g — Codex-Endpoint-Architektur (Tag 27 Nachmittag-Findings)
+
+OAuth-Token funktioniert NICHT mit Standard-OpenAI-API (`api.openai.com/v1/*`).
+Codex-spezifischer Backend-Endpoint ist erforderlich:
+
+**Endpoint:** `POST https://chatgpt.com/backend-api/codex/responses`
+
+**Request-Schema (OpenAI Responses API, nicht Chat-Completions):**
+- `model`: z.B. `gpt-5.5`, `gpt-5.3-codex`
+- `instructions`: System-Prompt (Codex-spezifisch, Pflicht-Field)
+- `input`: Array von Messages mit `type`/`role`/`content`
+- `tools`, `tool_choice`, `parallel_tool_calls`
+- `store: false`, `stream: true` (Pflicht für Subscription-Auth)
+
+**Required Headers:**
+- `Authorization: Bearer <access_token>`
+- `Content-Type: application/json`
+- `OpenAI-Beta: responses=v1`
+
+**Response:** SSE-Stream mit `event: response.created`, `response.output_item.added`,
+`response.completed`, plus Cloudflare `__cf_bm` Bot-Management-Cookie.
+
+**Response-Headers (Pro-Plan):**
+- `x-codex-plan-type: pro`
+- `x-codex-active-limit: premium`
+- `x-codex-bengalfox-limit-name: GPT-5.3-Codex-Spark` (Rate-Limit-Tracking)
+
+**Quellen:**
+- Reverse-Engineering: Simon Willison (Nov 2025), HuggingFace codex-proxy
+- Pre-Flight verifiziert Tag 27: Test 1 (curl Mac), Test 2 (Production-Container), Test 3 (Node native fetch) alle HTTP 200
+
+## §h — Cloudflare-TLS-Pre-Flight (Tag 27 Nachmittag)
+
+Codex-CLI nutzt curl-FFI/rustls für TLS-Fingerprint-Bypass weil Cloudflare
+viele non-browser TLS-Stacks blockt. Pre-Flight-Test hat verifiziert dass
+Node.js v22 native fetch durchgelassen wird:
+
+| Test | Status | Latenz |
+|---|---|---|
+| Local curl Mac | HTTP 200 | 1556ms |
+| Production-Container (Node 20-slim, VPS 31.97.78.73) | HTTP 200 | 2976ms |
+| Local Node v22 native fetch | HTTP 200 | 537ms |
+
+**Implikation:** Phase 3 baut mit Vanilla-Node-fetch. Kein curl-Subprocess,
+kein Bun-Migration, kein TLS-Fingerprint-Workaround nötig.
+
+**Cloudflare-Bot-Management-Detail:** `__cf_bm` Cookie wird gesetzt aber nicht
+geblockt. Best-Practice für Production: Cookie-Jar pro Twin reusen über
+Requests hinweg (reduziert Re-Inspection-Overhead).
+
+## §i — Phase 3 Sub-Phase-Sequenz (Tag 27 Setzung)
+
+Phase 3 (Provider-Auth-Mode-Switch + Codex-Adapter) ist substantieller als
+initial geschätzt. Re-Estimate: XL → XXL. Bau in Sub-Phasen:
+
+| Sub-Phase | Was | Aufwand |
+|---|---|---|
+| **3.0 Spike** (Tag 27) | Direct-fetch Codex-Adapter, Minimal-Instructions, Twin-Chat-API gepatcht für oauth-Branch, Pre-Flight via existing Mock-Token | 2-4h |
+| **3.1 SSE-Parser-Robustness** (Tag 28) | SSE-Stream-Parser für Codex-Response-Format, Error-Handling, Disconnection-Recovery | 1 Tag |
+| **3.2 Codex-System-Prompt-Engineering** (Tag 28) | Echte Codex-CLI-Prefix-Recherche + Twin-Persona-Mapping als developer-role-Message | 0.5-1 Tag |
+| **3.3 Tool-Calls + Reasoning-Traces** (Tag 29) | Codex-Response-Format → Twin-Lab AuditEntry-Mapping, Tool-Call-Round-Trips | 1-2 Tage |
+| **3.4 Vercel-Provider-Refactor** (optional, Tag 29-30) | Direct-fetch zu sauberem Vercel-AI-SDK-Custom-Provider migrieren | 1 Tag |
+
+**Stop-Punkte:** jede Sub-Phase mit eigenem Commit + Smoke. Wenn 3.0 Spike fails:
+Diagnose-Output statt blinder Weiter-Bau.
+
+**LLM-Client-Integration (Sub-Phase 3.0):** Direct-fetch im LLM-Client mit
+Branch nach `twin.auth_mode`. Vercel-AI-SDK-Provider-Integration ist Sub-Phase
+3.4 (optional, falls Direct-fetch sich als sauber genug erweist kann 3.4 entfallen).
+
+## §j — Risiko-Assessment (Tag 27 Nachmittag)
+
+### Risiko 1: ToS-Grauzone
+
+Codex-OAuth-Token-Reuse für 3rd-Party-Apps ist nicht offiziell dokumentiert.
+Existing Implementations (Hermes, OpenClaw, RooCode, openai-oauth) sind
+explicit "personal use only" — Twin-Lab als Self-Hosted-Server-App ist
+Reverse-Engineering-Tolerance-Zone.
+
+**Mitigation:**
+- Tos-Disclaimer in Settings-UI prominent (Phase 5)
+- Monitoring auf 4xx/403 Responses (Phase 3.1)
+- OpenRouter-Fallback dokumentiert (existing §e)
+
+### Risiko 2: Pattern-Block
+
+Präzedenz: Anthropic hat April 2026 Claude-Pro/Max-OAuth-Pattern für
+3rd-Party-Tools geblockt. OpenAI könnte gleiches machen.
+
+**Mitigation:**
+- BYOK-API-Key + OpenRouter-Fallback bleiben funktional
+- Phase-1+2 (OAuth-Foundation) ist generisch genug für andere OAuth-Provider
+- Closed-Beta-Approach: kein massiv-User-facing Marketing für OAuth-Feature
+  bis Pattern stabil
+
+### Risiko 3: Codex-Endpoint-Format-Changes
+
+OpenAI kann Codex-Request/Response-Schema jederzeit ändern. Existing CLI-User
+sind affected, Twin-Lab müsste nachziehen.
+
+**Mitigation:**
+- Monitoring auf neue Codex-CLI-Releases (changelog watch)
+- Sub-Phase 3.4 Custom-Vercel-Provider isoliert das Format-Mapping
+
+## Re-Estimate Tag 27 Nachmittag
+
+Initial-Schätzung (Tag 25): L (3-5 Bautage)
+Strategy-Closure Tag 27 Vormittag: XL (5-7 Bautage)
+**Nach Phase-3-Architektur-Findings: XXL (8-12 Bautage)**
+
+Substantielle Komplexitäts-Treiber:
+- Codex-Endpoint-Reverse-Engineering (eigene Request/Response-Logic)
+- SSE-Streaming-Robustness (Disconnection-Recovery, Cloudflare __cf_bm)
+- Tool-Calls + Reasoning-Traces Format-Mapping
+- ToS-Maintenance-Burden (Endpoint-Format kann sich ändern)
+
+Phase-A-Launch-Window-Impact: KW 33-34 (statt KW 31-32). Buffer 0-7 Tage
+(statt 5-15 Tage). Phase-A bleibt machbar aber ohne weiteren Slack.
 
 ## Bau-Plan — 5 Phasen mit Stop-Punkten
 

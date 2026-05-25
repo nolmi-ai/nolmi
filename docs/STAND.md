@@ -85,6 +85,58 @@ Strategy-Doc: [`docs/131-OAUTH-STRATEGY.md`](./131-OAUTH-STRATEGY.md), 6 §-Sect
 
 **Phase-A-Launch-Window-Update:** Buffer 5-15 Tage (von 10-23 Tage vorher) — XL akzeptiert für Power-User-Feature-Sorgfalt, KW 32-33 als realistisches Launch-Window.
 
+### #131 Phase 1 + 2 Bau (Tag 27 Vormittag-Nachmittag)
+
+**Phase 1 — Backend-Foundation (Commit `cfe223c`):** Migration 025 (`oauth_tokens`-Tabelle + `twins.auth_mode`-Spalte), PKCE-Client (`apps/runtime/src/oauth/openai-pkce.ts`) mit S256 + State-Generator + Token-Exchange, OAuth-Tokens-Repository mit AES-256-GCM-Verschlüsselung (analog `crypto-utils.ts`-Pattern). Manual-Curl-Smoke via Mock-Code grün.
+
+**Phase 2 — Refresh-Service (Commit `638e200`):** Background-Polling-Loop (60s-Interval), Lazy-Refresh bei Request-Time (<5 Min remaining), File-Lock-Mutex gegen Concurrent-Refresh. Refresh-Roundtrip via Mock-Token verifiziert, File-Lock-Race-Test grün.
+
+### #131 Nachmittag — Phase 3 Strategy-Iteration + Pre-Flight (~2.5h)
+
+Phase 3 sollte initial als ein Block gebaut werden (Provider-Auth-Mode-Switch). Strategy-Iteration vor Bau hat substantielle Findings ergeben, die das Re-Estimate auf XXL und einen Spike-First-Approach erzwungen haben.
+
+**Phase 3 Architektur-Findings:**
+
+1. **OAuth-Token funktioniert NICHT mit Standard-OpenAI-API.** Naive Annahme „Codex-Token = OpenAI-API-Key" stimmt nicht. Codex-OAuth-Token ist für einen separaten Backend-Endpoint scoped.
+
+2. **Codex-Endpoint:** `POST https://chatgpt.com/backend-api/codex/responses` (Responses-API-Format, nicht Chat-Completions). Required Headers `Authorization: Bearer ...` + `Content-Type: application/json` + `OpenAI-Beta: responses=v1`. Pflicht-Field `instructions` (System-Prompt). Streaming via SSE mit `response.created`/`response.output_item.added`/`response.completed`. Quellen: Simon Willison Reverse-Engineering (Nov 2025), HuggingFace codex-proxy.
+
+3. **Cloudflare-TLS-Pre-Flight grün.** Codex-CLI nutzt curl-FFI/rustls für TLS-Fingerprint-Bypass weil CF viele non-browser Stacks blockt. Aber: Node.js v22 native fetch wird durchgelassen.
+
+| Pre-Flight-Test | Status | Latenz |
+|---|---|---|
+| Local curl Mac | HTTP 200 | 1556ms |
+| Production-Container Node 20-slim VPS 31.97.78.73 | HTTP 200 | 2976ms |
+| Local Node v22 native fetch | HTTP 200 | 537ms |
+
+**Implikation:** Phase 3 baut mit Vanilla-Node-fetch. Kein curl-Subprocess, kein Bun-Migration, kein TLS-Fingerprint-Workaround. `__cf_bm` Cookie wird gesetzt aber nicht geblockt — Best-Practice: Cookie-Jar pro Twin reusen.
+
+**Re-Estimate XL → XXL (8-12 Bautage):**
+
+Komplexitäts-Treiber: Codex-Endpoint-Reverse-Engineering (eigene Request/Response-Logic), SSE-Streaming-Robustness, Tool-Calls + Reasoning-Traces Format-Mapping, ToS-Maintenance-Burden.
+
+**Bau-Approach: Spike-First Walking-Skeleton + Sub-Phasen 3.1-3.4:**
+
+| Sub-Phase | Aufwand | Tag |
+|---|---|---|
+| 3.0 Spike (Direct-fetch + Minimal-Instructions, Twin-Chat-API gepatcht) | 2-4h | 27 |
+| 3.1 SSE-Parser-Robustness | 1 Tag | 28 |
+| 3.2 Codex-System-Prompt-Engineering | 0.5-1 Tag | 28 |
+| 3.3 Tool-Calls + Reasoning-Traces | 1-2 Tage | 29 |
+| 3.4 Vercel-Provider-Refactor (optional) | 1 Tag | 29-30 |
+
+Jede Sub-Phase mit eigenem Commit + Smoke. Wenn 3.0 fails: Diagnose statt blinder Weiter-Bau.
+
+**Risiko-Assessment (neu in Strategy-Doc §j):**
+
+- **Risiko 1: ToS-Grauzone** — Codex-OAuth-Token-Reuse nicht offiziell für 3rd-Party-Apps dokumentiert. Existing Implementations (Hermes, OpenClaw, RooCode) sind „personal use only". Mitigation: Disclaimer + 4xx/403-Monitoring + OpenRouter-Fallback (§e).
+- **Risiko 2: Pattern-Block-Präzedenz** — Anthropic hat April 2026 Claude-Pro/Max-OAuth-Pattern für 3rd-Party-Tools geblockt. Mitigation: BYOK-API-Key + OpenRouter bleiben funktional, OAuth-Foundation generisch für andere Provider, Closed-Beta-Approach (kein Massiv-Marketing bis Pattern stabil).
+- **Risiko 3: Codex-Endpoint-Format-Changes** — OpenAI kann Schema jederzeit ändern. Mitigation: Codex-CLI-Changelog-Monitoring, Sub-Phase 3.4 Custom-Vercel-Provider isoliert das Format-Mapping.
+
+**Launch-Window-Impact:** KW 33-34 (statt KW 31-32). Buffer 0-7 Tage (statt 5-15 Tage). Phase-A bleibt machbar aber ohne weiteren Slack.
+
+**Lesson Tag 27 #3: End-to-End-Validation vor Bau** — Pre-Flight-Test mit drei Stacks (Mac curl, VPS Production-Container, Node v22 native fetch) hat in ~45 Min Klarheit über TLS-Realität geschaffen. Ohne Pre-Flight wären 1-2 Tage in TLS-Bypass-Recherche gegangen („wir brauchen curl-FFI / Bun / undici-Workaround"). Verstärkt Lesson #1 (Recherche-Investment vor Bau-Planung) — generelles Prinzip: **bei Reverse-Engineering-Items immer mit echtem Request-Smoke verifizieren, nicht aus Quellen extrapolieren**. Externe Implementierungen können legacy Workarounds tragen, die für unseren Stack nicht nötig sind.
+
 ## Tag 26 — Sonntag, 25. Mai 2026
 
 ### Status

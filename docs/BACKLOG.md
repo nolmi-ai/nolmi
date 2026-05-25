@@ -1583,6 +1583,36 @@ Strategy-Setzungen:
 
 Strategy-Doc: [`docs/131-OAUTH-STRATEGY.md`](./131-OAUTH-STRATEGY.md).
 
+**Status-Notiz Tag 27 Nachmittag (25. Mai 2026):** Phase 1 + 2 abgeschlossen (Commits `cfe223c` Backend-Foundation, `638e200` Refresh-Service). Phase 3 Strategy-Iteration mit substantiellen Architektur-Findings.
+
+**Re-Estimate XL → XXL (8-12 Bautage):**
+
+- OAuth-Token funktioniert NICHT mit Standard-OpenAI-API (`api.openai.com/v1/*`)
+- Codex-spezifischer Backend-Endpoint `chatgpt.com/backend-api/codex/responses` ist Pflicht
+- Pre-Flight 3/3 HTTP 200 verifiziert (curl Mac, VPS-Container, Node v22 native fetch)
+- Node native fetch durchgelassen — kein TLS-Bypass / curl-FFI nötig
+- Spike-First-Approach: Walking-Skeleton vor inkrementellem Sub-Phasen-Ausbau
+
+**Phase 3 Sub-Phasen-Sequenz:**
+
+| Sub-Phase | Aufwand | Tag |
+|---|---|---|
+| 3.0 Spike (Direct-fetch + Minimal-Instructions) | 2-4h | 27 |
+| 3.1 SSE-Parser-Robustness | 1 Tag | 28 |
+| 3.2 Codex-System-Prompt-Engineering | 0.5-1 Tag | 28 |
+| 3.3 Tool-Calls + Reasoning-Traces | 1-2 Tage | 29 |
+| 3.4 Vercel-Provider-Refactor (optional) | 1 Tag | 29-30 |
+
+**Risiko-Assessment (neu in Strategy-Doc §j):**
+
+- Risiko 1: ToS-Grauzone (Mitigation: Disclaimer + Monitoring + OpenRouter-Fallback)
+- Risiko 2: Pattern-Block-Präzedenz (Anthropic April 2026), Mitigation: BYOK bleibt funktional, Closed-Beta-Approach
+- Risiko 3: Codex-Endpoint-Format-Changes, Mitigation: CLI-Release-Monitoring, Format-Mapping isoliert in 3.4
+
+**Launch-Window-Impact:** KW 33-34 (statt KW 31-32). Buffer 0-7 Tage (statt 5-15 Tage). Phase-A bleibt machbar aber ohne weiteren Slack.
+
+Strategy-Doc erweitert um §g (Codex-Endpoint-Architektur), §h (Cloudflare-TLS-Pre-Flight), §i (Sub-Phase-Sequenz), §j (Risiko-Assessment), Re-Estimate-Section.
+
 ### 132. Anthropic Subscription-Auth (Claude-CLI-Reuse-Pattern)
 
 Anthropic hat keine offizielle 3rd-Party-OAuth-Surface für Claude Pro/Max-Subscription-Nutzung in externen Apps. Stattdessen: Claude-CLI-Reuse-Pattern — wenn auf dem Host-System ein gültiger Claude-CLI-Login existiert, kann eine externe App diese Credentials wiederverwenden.
