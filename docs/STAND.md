@@ -165,7 +165,38 @@ Jede Sub-Phase mit eigenem Commit + Smoke. Wenn 3.0 fails: Diagnose statt blinde
 
 Bilanz Smoke 1: echter Codex-Token → DB-Persist + AES-256-GCM → Refresh-Service `ensureFresh` → Direct-fetch → SSE-Stream → Text-Collect. End-to-End-Architektur verifiziert.
 
-**Smoke 2 (End-to-End via `/twins/@markus/chat`) — skipped → Phase 3.1.** `pnpm dev` lokal nicht erreichbar (Runtime auf :4000 hochgekommen nicht), Tag-27-Zeit-Budget ausgeschöpft. Sub-Phase 3.1 (Tag 28) zieht den End-to-End-Smoke zusammen mit SSE-Parser-Robustness nach. Spike-Architektur ist durch Smoke 1 trotzdem voll bewiesen — Server-Layer-Aufruf ist nur noch Wiring (`requireOwner` + `entry.service.chat()` durch existing Pfade, der OAuth-Branch sitzt in `runModel` und ist von beiden Send-Pfaden erreichbar).
+**Smoke 2 (End-to-End via `/twins/@markus/chat`) — grün nach #138-Fix.** Nachdem #138 (Local-Dev-Default für Runtime-Boot) durch war, `pnpm dev` neu gestartet, Setup-Mode auf `@markus`, Login als `markus.baier@harway.de`, curl gegen `/twins/@markus/chat`.
+
+```
+POST /twins/@markus/chat
+  → HTTP 200 in 2937ms (server total)
+  → message.content = "Hello there, friend"
+  → Audit-Eintrag audit_1Qzg49Ganjsr
+       capability   = owner-direct (Owner-Bypass-Pfad, kein Mandate-Check)
+       status       = executed
+       providerMetadata = {
+         provider:  "openai-codex",
+         authMode:  "oauth",
+         planType:  "pro",
+         cfRay:     "a01375f40961f66d-MUC",
+         latencyMs: 1396
+       }
+```
+
+Server-Latenz (2.9s) − Codex-Latenz (1.4s) ≈ 1.5s Owner-Direct-Vor-Pipeline (Facts-Load, Memory-Retrieval, History-Load, Audit-Start). Das ist die existing Multi-Layer-Send-Path-Kosten und unabhängig vom Codex-Branch.
+
+**Diagnose-Erkenntnis (wichtig für Phase 3.2):** `runModelViaCodex` ignoriert Persona/Facts/Memory **bewusst** — Spike-Disziplin. Der Owner-Direct-Vor-Pfad in `chat()` lädt `[facts] loaded 9 approved facts` und `[memory-retrieval] 3 hits`, hängt sie ans Audit-Output für den Frontend-Memory-Indicator (#100), aber dem Codex-Request gehen nur `messages.at(-1).content` mit. Das `instructions`-Field bleibt der Hardcode `"You are a helpful coding assistant."` — Markus-Persona-Stimme fehlt.
+
+**Phase 3.2 Aufgabenliste (aus Smoke-2-Diagnose):**
+- Persona-Markdown → `instructions`-Field, eventuell hinter Codex-CLI-Echtem-Prefix
+- Approved Facts → `instructions`-Anhang (analog `buildFactsBlock` im Vercel-SDK-Pfad)
+- Memory-Hits → zusätzliche `input`-Messages (developer-Role) oder Header im User-Prompt
+- History-Loader → vorherige User/Assistant-Turns als `input`-Messages
+- `runModelViaCodex` braucht erweiterte Signatur (analog `runModel(persona, messages, extraSystem?, options?)`)
+
+**#138-Verifikation in der Praxis:** Der Runtime-Restart vor Smoke 2 lief ohne explizite `TELEGRAM_USE_POLLING` in `.env` durch — Auto-Detection-Fallback hat sauber gegriffen, Warning-Log erschien, 9 Twins kamen hoch.
+
+Phase 3.0 Spike damit **final verifiziert**. Walking-Skeleton steht End-to-End, alle Server-Layer (`requireOwner`, Owner-Bypass, Audit-Pipeline, Conversation-Persistierung) sind durchlaufen. Phase 3.1 (Tag 28) kann auf der existing Architektur aufbauen.
 
 **Lesson Tag 27 #4: Migration ohne Repo-Update ist Anti-Pattern** — Phase 1 (#131 Tag 27 Vormittag) hat Migration 025 mit `twin_profiles.auth_mode`-Spalte angelegt, aber das Feld nie in `TwinProfile`-Interface / Row-Mapping / `SELECT *`-Queries durchgezogen. Phase 3.0 hat den Fehler beim ersten echten Konsum aufgedeckt (`profile.authMode` undefined obwohl DB-Default `'api_key'`). Repair ~30 LoC, kein Production-Risiko, aber strukturell hätten Phase 1 + Tests-fehlen das fangen müssen. Generelles Prinzip: **eine Migration ist erst „durch", wenn die Spalte sowohl im Read- als auch Write-Pfad des zuständigen Repos lebt** — Migration alleine ist Schema-Modifikation, nicht Feature-Capability.
 
@@ -173,7 +204,7 @@ Bilanz Smoke 1: echter Codex-Token → DB-Persist + AES-256-GCM → Refresh-Serv
 
 ### Tag-27-Closure-Bilanz
 
-**Sechs Bau-Blöcke an einem Tag:**
+**Sechs Commits + ein Pre-Flight an einem Tag:**
 
 | Block | Commit | Was |
 |---|---|---|
@@ -182,11 +213,15 @@ Bilanz Smoke 1: echter Codex-Token → DB-Persist + AES-256-GCM → Refresh-Serv
 | 3. Phase 2 | `638e200` | #131 Refresh-Service (Background-Poll + Lazy-Refresh + Mutex) |
 | 4. Strategy-Iteration | `6667b81` | #131 Strategy-Doc §g/§h/§i/§j + Re-Estimate XL→XXL |
 | 5. Pre-Flight | (kein Commit) | 3/3 HTTP 200 gegen Codex-Endpoint (Mac/VPS/Node v22) |
-| 6. Phase 3.0 Spike | folgt | #131 Codex-Adapter Walking-Skeleton |
+| 6. Phase 3.0 Spike | `7b8aae4` | #131 Codex-Adapter Walking-Skeleton + Smoke 1 grün |
+| 7. Local-Dev-Fix | `6d33ade` | #138 TELEGRAM_USE_POLLING Auto-Detection-Fallback |
+| 8. Phase 3.0 Smoke 2 | (kein Commit, STAND-Update) | End-to-End via `/twins/@markus/chat` grün |
 
 **Vier Lessons:** Recherche vor Bau (#1), STAND-Doppelpflege (#2), End-to-End-Validation vor Bau (#3), Migration ohne Repo-Update ist Anti-Pattern (#4).
 
-**Tag-27-Nachgang (neu im BACKLOG):** #138 — `pnpm dev` Boot-Friction durch fehlenden `RUNTIME_PUBLIC_URL` / `TELEGRAM_USE_POLLING` Default seit #130 Phase 5.
+**Tag-27-Outcome #131:** Phase 1 ✅ + Phase 2 ✅ + Strategy-Iteration ✅ + Phase 3.0 Spike ✅ (Smoke 1 + Smoke 2 grün). Walking-Skeleton steht End-to-End. Phase 3.1 (Tag 28) hat freie Bahn für SSE-Parser-Robustness + Persona/Facts/Memory-Pipeline-Wiring im Codex-Adapter.
+
+**Tag-27-Outcome #138:** Local-Dev-Boot-Friction strukturell behoben, in der Praxis verifiziert beim Smoke-2-Setup.
 
 ## Tag 26 — Sonntag, 25. Mai 2026
 
