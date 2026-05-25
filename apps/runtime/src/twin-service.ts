@@ -77,7 +77,10 @@ import {
   buildMcpToolsFromSkills,
   MCP_PENDING_APPROVAL_MARKER,
 } from "./mcp/tool-bridge.js";
-import { McpToolApprovalRequiredError } from "./mcp/errors.js";
+import {
+  ApprovalRequestedError,
+  McpToolApprovalRequiredError,
+} from "./mcp/errors.js";
 
 // ─── TWIN SERVICE ────────────────────────────────────────────────────────────
 //
@@ -748,11 +751,25 @@ export class TwinService {
       //      zukünftiges SDK-Update das Verhalten ändert, ist der Catch hier
       //      schon bereit. Beide Pfade haben identische Pending-Audit-Logik.
       if (err instanceof McpToolApprovalRequiredError) {
-        // #131 Phase 3.3.1.3.2: Pending-Audit-Build extrahiert in Helper —
-        // beide Stellen (hier + Re-Pause-Catch in approveMcpToolUseViaCodex)
-        // teilen die Logik. Helper persistiert Audit + emittiert SSE +
-        // returnt das ApproveResult/Pending-Shape.
+        // #131 Phase 3.3.1.3.2 (Legacy bis Sub-Phase F): Marker-Pattern-
+        // Catch. Wird mit Marker-Removal obsolet.
         const pending = await this.buildPendingMcpAuditFromError(err, {
+          llmMessages,
+          lastUser,
+          conversationId,
+          originalCapability,
+        });
+        this.deps.bus.emit({ type: "twin.idle", payload: {} });
+        return {
+          message: pending.message,
+          auditId: pending.auditId,
+          pending: true,
+        };
+      }
+      if (err instanceof ApprovalRequestedError) {
+        // #131 Phase 3.4.3.1 Big-Bang: native V3-Approval-Catch. Persistiert
+        // approvalId + assistantContent für History-Replay-Approve.
+        const pending = await this.createPendingAuditFromApprovalRequest(err, {
           llmMessages,
           lastUser,
           conversationId,
@@ -1048,6 +1065,72 @@ export class TwinService {
           ? { codexResumeContext: err.codexResumeContext }
           : {}),
         // Re-Pause-Link: Original-Audit das die Folge-Pause getriggert hat.
+        ...(context.priorAuditId
+          ? { priorAuditId: context.priorAuditId }
+          : {}),
+      },
+      initialStatus: "pending",
+      conversationId: context.conversationId,
+    });
+    return {
+      auditId: pendingAudit.id,
+      pendingReply,
+      message: { role: "assistant", content: pendingReply },
+    };
+  }
+
+  /**
+   * #131 Phase 3.4.3.1 Big-Bang: Pending-Audit-Build aus `ApprovalRequestedError`
+   * (native V3-Pattern). Symmetrie zu `buildPendingMcpAuditFromError`, aber
+   * Resume-Format ist anders:
+   * - Persistiert `approvalId` + `assistantContent` für History-Replay
+   *   (statt `mcpServerId`/`mcpToolName`/`args` flat)
+   * - Resume-Approve appendet `assistantContent` als assistant-Message +
+   *   tool-Role-Message mit `tool-approval-response{approved}` ans Prompt
+   *   und ruft `generateText` — SDK ruft `execute()` automatisch
+   *
+   * `priorAuditId` ist Re-Pause-Link (analog Phase-3.3.1.3.2-Pattern).
+   * `toolCall.{mcpServerId, mcpToolName, args}` weggelassen — Resume nutzt
+   *   nur den V3-`toolCallId`/`approvalId`-Match. Frontend kann
+   *   `toolName` (skill-name) + `toolInput` für UI-Display nutzen.
+   */
+  private async createPendingAuditFromApprovalRequest(
+    err: ApprovalRequestedError,
+    context: {
+      llmMessages: ChatMessage[];
+      lastUser: string;
+      conversationId: string | null;
+      originalCapability: string;
+      priorAuditId?: string;
+    },
+  ): Promise<{
+    auditId: string;
+    pendingReply: string;
+    message: ChatMessage;
+  }> {
+    const pendingReply = composeToolApprovalRequest(
+      err.toolName,
+      (err.toolInput ?? {}) as Record<string, unknown>,
+    );
+    const pendingAudit = await this.deps.audit.start({
+      capability: "mcp-tool-use",
+      mandateId: null,
+      input: {
+        messages: context.llmMessages,
+        lastMessage: context.lastUser,
+        toolCall: {
+          // Schmal-View für UI-Display (toolName ist hier der Tool-Key wie
+          // im Vercel-Tool-Set, z.B. `mcp_everything-approval_get-sum`).
+          toolName: err.toolName,
+          input: err.toolInput,
+        },
+        // V3-Approval-Daten für History-Replay:
+        approvalId: err.approvalId,
+        toolCallId: err.toolCallId,
+        assistantContent: err.assistantContent,
+        conversationId: context.conversationId,
+        pendingReply,
+        originalCapability: context.originalCapability,
         ...(context.priorAuditId
           ? { priorAuditId: context.priorAuditId }
           : {}),
@@ -2488,6 +2571,21 @@ REGEL 6: Wenn der User dich explizit bittet, ein Tool zu nutzen ("rufe das X-Too
       }
     }
 
+    // #131 Phase 3.4.3.1 Big-Bang: native V3-Approval-Detect. Vercel-SDK
+    // emittiert `tool-approval-request` als Content-Part wenn ein Tool mit
+    // needsApproval=true aufgerufen wurde — execute() wurde noch nicht
+    // gerufen. Wir scannen result.content[] + alle steps[i].content[] (Step-
+    // Walk-Pattern wie bei toolCalls) und werfen `ApprovalRequestedError`
+    // mit allen Resume-History-Daten. Catch in `runOwnerDirect` baut den
+    // Pending-Audit. Marker-Detect oben wird durch needsApproval-Pattern
+    // obsolet — bleibt bis Sub-Phase F für Defense-in-Depth.
+    if (hasTools) {
+      const approval = detectToolApprovalRequest(result);
+      if (approval) {
+        throw new ApprovalRequestedError(approval);
+      }
+    }
+
     // 3.2.H Patch: bei forciertem toolChoice macht AI SDK 6 nur EINEN Step.
     // Tool wird gerufen, Result kommt zurück, finishReason='tool-calls' —
     // aber kein Synthese-Step für die finale Text-Antwort, also `text=""`.
@@ -2896,6 +2994,61 @@ export function detectPendingToolCall(
       mcpToolName: skill.mcpToolName,
       input: (toolCall.input ?? {}) as Record<string, unknown>,
     };
+  }
+  return null;
+}
+
+/**
+ * #131 Phase 3.4.3.1 Big-Bang: scannt das Vercel-`generateText`-Result auf
+ * `tool-approval-request`-Parts und extrahiert die Resume-History-Daten.
+ *
+ * Step-Walk: der Part lebt in `result.steps[i].content[]` (Spike §r hat
+ * verifiziert: identisch dupliziert in `result.content[]`, aber Step-Walk
+ * ist robust gegen Multi-Step-Iterationen). Erstes Match gewinnt — bei
+ * mehreren parallelen Approval-Requests wäre Re-Approval-Chain via
+ * priorAuditId-Link nötig (Out of Scope für 3.4.3.1, gleicher Pattern
+ * wie Phase 3.3.1.3.2-"erster Marker gewinnt").
+ *
+ * Resume-History braucht assistantContent (komplettes step.content-Array
+ * mit tool-call + tool-approval-request) damit das SDK den Pending-Request
+ * via approvalId matchen kann. Spike Test 2 hat das verifiziert (Iteration
+ * 1 brach mit AI_InvalidToolApprovalError, Fix war assistantContent-
+ * Persistierung).
+ */
+function detectToolApprovalRequest(
+  result: GenerateTextOutcome,
+): {
+  approvalId: string;
+  toolCallId: string;
+  toolName: string;
+  toolInput: unknown;
+  assistantContent: unknown;
+} | null {
+  const steps = result.steps ?? [];
+  for (const step of steps) {
+    const content = step.content as Array<Record<string, unknown>> | undefined;
+    if (!Array.isArray(content)) continue;
+    for (const part of content) {
+      if (part?.type !== "tool-approval-request") continue;
+      const approvalId =
+        typeof part.approvalId === "string" ? part.approvalId : null;
+      const toolCall = part.toolCall as
+        | { toolCallId?: string; toolName?: string; input?: unknown }
+        | undefined;
+      if (!approvalId || !toolCall) continue;
+      const toolCallId =
+        typeof toolCall.toolCallId === "string" ? toolCall.toolCallId : null;
+      const toolName =
+        typeof toolCall.toolName === "string" ? toolCall.toolName : null;
+      if (!toolCallId || !toolName) continue;
+      return {
+        approvalId,
+        toolCallId,
+        toolName,
+        toolInput: toolCall.input ?? {},
+        assistantContent: content,
+      };
+    }
   }
   return null;
 }

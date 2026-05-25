@@ -34,6 +34,52 @@ import type { CodexResumeContext } from "../oauth/codex-adapter.js";
  * — Phase 3.3.1.3.2 nutzt das für den Resume. Für den Vercel-SDK-Pfad
  * (Anthropic/OpenAI-API) bleibt `codexResumeContext` undefined.
  */
+/**
+ * #131 Phase 3.4.3.1 Big-Bang: native Vercel-V3-Approval-Error. Wird von
+ * `runModel` nach `generateText` geworfen, wenn das Result-Content-Array
+ * eine `tool-approval-request`-Part enthält (Vercel-SDK skipped execute()
+ * bei needsApproval=true und emittiert die Part). Catch in `runOwnerDirect`
+ * baut den Pending-Audit via `createPendingAuditFromApprovalRequest`.
+ *
+ * Trägt ALLE Daten die für History-Replay-Approve nötig sind — der
+ * `assistantContent` enthält tool-call + tool-approval-request, das Resume
+ * appendet die Tool-Response-Message und ruft `generateText` erneut.
+ *
+ * Ersetzt `McpToolApprovalRequiredError` (Phase 3.2.F Marker-Pattern) für
+ * den Vercel-SDK-Pfad. Marker-Klasse bleibt parallel bis Sub-Phase F
+ * (Codex-Loop nutzt sie noch). Sub-Phase F entfernt beide Klassen.
+ */
+export class ApprovalRequestedError extends Error {
+  readonly approvalId: string;
+  readonly toolCallId: string;
+  readonly toolName: string;
+  readonly toolInput: unknown;
+  /** Komplettes `assistant`-Content-Array aus dem Vercel-Result: enthält
+   *  `tool-call` + `tool-approval-request`-Part. Resume-History-Replay
+   *  appendet dieses Array als assistant-Message + ergänzt tool-role-
+   *  Message mit `tool-approval-response`. */
+  readonly assistantContent: unknown;
+
+  constructor(opts: {
+    approvalId: string;
+    toolCallId: string;
+    toolName: string;
+    toolInput: unknown;
+    assistantContent: unknown;
+  }) {
+    super(
+      `Tool '${opts.toolName}' (callId ${opts.toolCallId}) requires approval ` +
+        `(approvalId ${opts.approvalId})`,
+    );
+    this.name = "ApprovalRequestedError";
+    this.approvalId = opts.approvalId;
+    this.toolCallId = opts.toolCallId;
+    this.toolName = opts.toolName;
+    this.toolInput = opts.toolInput;
+    this.assistantContent = opts.assistantContent;
+  }
+}
+
 export class McpToolApprovalRequiredError extends Error {
   readonly mcpServerId: string;
   readonly mcpToolName: string;
