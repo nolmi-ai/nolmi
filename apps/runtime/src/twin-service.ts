@@ -1118,12 +1118,10 @@ export class TwinService {
       input: {
         messages: context.llmMessages,
         lastMessage: context.lastUser,
-        toolCall: {
-          // Schmal-View für UI-Display (toolName ist hier der Tool-Key wie
-          // im Vercel-Tool-Set, z.B. `mcp_everything-approval_get-sum`).
-          toolName: err.toolName,
-          input: err.toolInput,
-        },
+        // V3-Display-Surface (toolName ist Tool-Key wie
+        // `mcp_everything-approval_get-sum`):
+        toolName: err.toolName,
+        toolInput: err.toolInput,
         // V3-Approval-Daten für History-Replay:
         approvalId: err.approvalId,
         toolCallId: err.toolCallId,
@@ -1223,15 +1221,20 @@ export class TwinService {
     // kann (gleicher Pfad wie executed-Audits mit reply).
     if (entry.capability === "mcp-tool-use") {
       const input = entry.input as AuditMcpToolUseInputShape;
-      if (!input.toolCall) return;
-      // #131 Phase 3.3.1.3.2: Codex-Reject läuft via runModelViaCodex mit
-      // function_call_output + [isError=true]-Marker statt System-Message.
-      // Branch via codexResumeContext-Existenz; Vercel-Pfad bleibt ab hier
-      // unverändert.
+      // #131 Phase 3.4.3.1 Big-Bang: Native-V3-Pfad — History-Replay mit
+      // tool-approval-response{approved:false}. SDK skipped execute() und
+      // reicht reason in den Prompt durch.
+      if (input.approvalId && input.assistantContent) {
+        await this.rejectMcpToolUseViaHistoryReplay(entry, reason);
+        return;
+      }
+      // Legacy Phase 3.3.1.3.2: Codex-Reject via runModelViaCodex.
       if (input.codexResumeContext) {
         await this.rejectMcpToolUseViaCodex(entry, reason);
         return;
       }
+      // Legacy Phase 3.2.F: Marker-Pattern + System-Message-Resume.
+      if (!input.toolCall) return;
       const resumeMessages: ChatMessage[] = [
         ...(input.messages ?? []),
         {
@@ -1396,6 +1399,88 @@ export class TwinService {
     }
   }
 
+  /**
+   * #131 Phase 3.4.3.1 Big-Bang: Native-V3-Reject via History-Replay.
+   * Vereinheitlicht api_key + oauth Pfade. SDK ruft execute() NICHT auf
+   * weil approved=false — Codex bekommt reason als Kontext und antwortet
+   * ohne Tool (Spike §r Test 3 verifiziert).
+   *
+   * Status bleibt `rejected` (audit.reject() lief vor dem Branch), Output
+   * wird via audit.repo.update appended (matched existing Reject-Pattern).
+   */
+  private async rejectMcpToolUseViaHistoryReplay(
+    entry: AuditEntry,
+    reason: string,
+  ): Promise<void> {
+    const input = entry.input as AuditMcpToolUseInputShape;
+    if (!input.approvalId || !input.assistantContent) return;
+
+    const baseMessages = input.messages ?? [];
+    const resumeMessages: ChatMessage[] = [
+      ...baseMessages,
+      {
+        role: "assistant",
+        content: input.assistantContent,
+      } as unknown as ChatMessage,
+      {
+        role: "tool",
+        content: [
+          {
+            type: "tool-approval-response",
+            approvalId: input.approvalId,
+            approved: false,
+            reason,
+          },
+        ],
+      } as unknown as ChatMessage,
+    ];
+
+    try {
+      const reply = await this.runModel(this.deps.persona, resumeMessages);
+      const updatedEntry = await this.deps.audit.repo.get(entry.id);
+      if (updatedEntry) {
+        updatedEntry.output = {
+          reply: reply.content,
+          rejected: true,
+          rejectReason: reason,
+          providerMetadata: reply.metadata,
+        };
+        await this.deps.audit.repo.update(entry.id, updatedEntry);
+        this.deps.bus.emit({ type: "audit.updated", payload: updatedEntry });
+      }
+    } catch (err) {
+      if (err instanceof ApprovalRequestedError) {
+        // Re-Approval nach Reject — Codex hat trotz Rejection neues Tool
+        // gerufen. Original-Audit kriegt followUpPending-Marker, neuer
+        // Pending mit priorAuditId-Link.
+        const updatedEntry = await this.deps.audit.repo.get(entry.id);
+        if (updatedEntry) {
+          updatedEntry.output = {
+            reply: "",
+            rejected: true,
+            rejectReason: reason,
+            followUpPending: true,
+          };
+          await this.deps.audit.repo.update(entry.id, updatedEntry);
+          this.deps.bus.emit({ type: "audit.updated", payload: updatedEntry });
+        }
+        await this.createPendingAuditFromApprovalRequest(err, {
+          llmMessages: baseMessages,
+          lastUser: input.lastMessage ?? "",
+          conversationId: input.conversationId ?? null,
+          originalCapability:
+            input.originalCapability ?? "respond_to_chat",
+          priorAuditId: entry.id,
+        });
+        return;
+      }
+      const msg = err instanceof Error ? err.message : String(err);
+      console.warn(
+        `[mcp-tool-use:reject-v3] Resume-LLM-Call fehlgeschlagen: ${msg}`,
+      );
+    }
+  }
+
   // ─── Approve-Branches ──────────────────────────────────────────────────────
 
   /**
@@ -1415,20 +1500,24 @@ export class TwinService {
     persona: Persona,
   ): Promise<ApproveResult> {
     const input = entry.input as AuditMcpToolUseInputShape;
-    if (!input.toolCall) {
-      throw new Error(
-        `Audit ${entry.id} hat keinen toolCall im Input — kann nicht approved werden`,
-      );
+    // #131 Phase 3.4.3.1 Big-Bang: Native-V3-Pfad — neuer Pending-Audit-
+    // Format hat `approvalId` + `assistantContent`. Resume via History-
+    // Replay durch denselben runModel-Pfad (oauth + api_key unified).
+    if (input.approvalId && input.assistantContent) {
+      return this.approveMcpToolUseViaHistoryReplay(entry, persona);
     }
-    // #131 Phase 3.3.1.3.2: Codex-OAuth-Pfad hat einen anderen Resume-
-    // Mechanismus — direct via runModelViaCodex mit resumeContext-Option,
-    // nicht via runModel(persona, resumeMessages). Branch via
-    // codexResumeContext-Existenz (in Phase 3.3.1.3.1 vom Pause-Pfad
-    // persistiert). Vercel-SDK-Pfad bleibt unverändert ab hier.
+    // Legacy Phase 3.3.1.3.2: Codex-Resume-Context-Pfad (bleibt bis Sub-
+    // Phase F als Backward-Compat für ältere Pending-Audits in DB).
     if (input.codexResumeContext) {
       return this.approveMcpToolUseViaCodex(entry, persona);
     }
-
+    // Legacy Phase 3.2.F: Marker-Pattern Vercel-SDK-Pfad — braucht den
+    // Legacy-toolCall mit mcpServerId/mcpToolName/args.
+    if (!input.toolCall) {
+      throw new Error(
+        `Audit ${entry.id} hat keinen toolCall, approvalId oder codexResumeContext — kann nicht approved werden`,
+      );
+    }
     const { mcpServerId, mcpToolName, args } = input.toolCall;
     const messages = input.messages ?? [];
 
@@ -1482,8 +1571,117 @@ export class TwinService {
   }
 
   /**
-   * #131 Phase 3.3.1.3.2: Approve-Resume für Codex-OAuth-Pfad. Symmetrie
-   * zum Vercel-Pfad in `approveMcpToolUse`, aber andere Resume-Mechanik:
+   * #131 Phase 3.4.3.1 Big-Bang: Native-V3-Approve via History-Replay.
+   * Vereinheitlicht api_key + oauth Pfade — Vercel-SDK kümmert sich um
+   * execute() + tool-result + Multi-Step automatisch nach approval.
+   *
+   * Resume-Pattern (aus §r Spike Test 2 verifiziert):
+   *   messages: [
+   *     ...stored-history,
+   *     { role: "assistant", content: <stored-assistantContent> },
+   *     { role: "tool", content: [{type:"tool-approval-response",
+   *                                approvalId, approved:true}] },
+   *   ]
+   *
+   * Re-Approval-Check: wenn die Resume-Iteration erneut ein needsApproval-
+   * Tool triggert, wirft runModel `ApprovalRequestedError` — Catch hier
+   * baut neuen Pending-Audit mit `priorAuditId`-Link.
+   */
+  private async approveMcpToolUseViaHistoryReplay(
+    entry: AuditEntry,
+    persona: Persona,
+  ): Promise<ApproveResult> {
+    const input = entry.input as AuditMcpToolUseInputShape;
+    if (!input.approvalId || !input.assistantContent) {
+      throw new Error(
+        `Audit ${entry.id} hat keinen approvalId/assistantContent — V3-Resume nicht möglich`,
+      );
+    }
+    const baseMessages = input.messages ?? [];
+    const resumeMessages: ChatMessage[] = [
+      ...baseMessages,
+      // Bewusster Cast über `unknown`: ChatMessage ist Twin-Lab-intern (role
+      // + content-string), aber Vercel-SDK akzeptiert die V3-Message-Form
+      // mit content-Array (tool-call + tool-approval-request). runModel
+      // reicht messages an toModelMessages weiter — das pass-throughed
+      // bekannte Vercel-Shapes.
+      {
+        role: "assistant",
+        content: input.assistantContent,
+      } as unknown as ChatMessage,
+      {
+        role: "tool",
+        content: [
+          {
+            type: "tool-approval-response",
+            approvalId: input.approvalId,
+            approved: true,
+          },
+        ],
+      } as unknown as ChatMessage,
+    ];
+
+    this.deps.bus.emit({
+      type: "twin.thinking",
+      payload: { capability: "mcp-tool-use" },
+    });
+
+    let reply: { content: string; metadata: Record<string, unknown> };
+    try {
+      reply = await this.runModel(persona, resumeMessages);
+    } catch (err) {
+      // Re-Approval: Resume-Iteration hat erneut needsApproval-Tool
+      // getriggert. Original-Audit auf executed mit followUpPending-Marker,
+      // neuer Pending-Audit mit priorAuditId-Link via History-Replay-Helper.
+      if (err instanceof ApprovalRequestedError) {
+        await this.deps.audit.complete(entry.id, {
+          reply: "",
+          approvalId: input.approvalId,
+          toolCallId: input.toolCallId,
+          toolName: input.toolName,
+          followUpPending: true,
+          providerMetadata: { approvedAndChainedTo: "see-next-pending" },
+        });
+        const pending = await this.createPendingAuditFromApprovalRequest(err, {
+          llmMessages: input.messages ?? [],
+          lastUser: input.lastMessage ?? "",
+          conversationId: input.conversationId ?? null,
+          originalCapability:
+            input.originalCapability ?? "respond_to_chat",
+          priorAuditId: entry.id,
+        });
+        this.deps.bus.emit({ type: "twin.idle", payload: {} });
+        return {
+          auditId: pending.auditId,
+          message: pending.message,
+          reply: pending.pendingReply,
+          pending: true,
+        };
+      }
+      await this.failWithReason(entry.id, err);
+      throw err;
+    }
+
+    await this.deps.audit.complete(entry.id, {
+      reply: reply.content,
+      approvalId: input.approvalId,
+      toolCallId: input.toolCallId,
+      toolName: input.toolName,
+      toolInput: input.toolInput,
+      providerMetadata: reply.metadata,
+    });
+    this.deps.bus.emit({ type: "twin.idle", payload: {} });
+    return {
+      auditId: entry.id,
+      message: { role: "assistant", content: reply.content },
+      reply: reply.content,
+    };
+  }
+
+  /**
+   * #131 Phase 3.3.1.3.2 (LEGACY, bis Sub-Phase F): Approve-Resume für
+   * Codex-OAuth-Pfad. Symmetrie zum Vercel-Pfad in `approveMcpToolUse`,
+   * aber andere Resume-Mechanik:
    *
    *   1. Tool-Execute via `mcp.callTool` (kein Approval-Recheck — User hat
    *      durch das Approve schon genehmigt).
@@ -2875,6 +3073,11 @@ function mapChatMessagesToCodexInput(
 interface AuditMcpToolUseInputShape {
   messages?: ChatMessage[];
   lastMessage?: string;
+  /** Legacy-Form (Phase 3.2.F + 3.3.1.3.x): mcpServerId/mcpToolName/args
+   *  für direkte Tool-Re-Execution via mcpManager.callTool. Native-V3-
+   *  Pending-Audits lassen das Feld optional und nutzen toolName/toolInput
+   *  als parallele Display-Felder (Resume läuft via approvalId + history-
+   *  replay). */
   toolCall?: {
     mcpServerId: string;
     mcpToolName: string;
@@ -2883,14 +3086,30 @@ interface AuditMcpToolUseInputShape {
   conversationId?: string | null;
   pendingReply?: string;
   originalCapability?: string;
-  /** #131 Phase 3.3.1.3.1: nur gesetzt für Codex-OAuth-Pending. Trägt den
-   *  Loop-State-Snapshot, damit Phase 3.3.1.3.2 ab dem Pending-Tool-Call
-   *  fortsetzen kann. Vercel-SDK-Pfad lässt das Feld undefined. */
+  /** #131 Phase 3.3.1.3.1 (Legacy): nur gesetzt für Codex-OAuth-Pending
+   *  aus Pre-3.4.3.1-Pause. Trägt den Loop-State-Snapshot. Wird mit
+   *  Sub-Phase F entfernt. */
   codexResumeContext?: CodexResumeContext;
   /** #131 Phase 3.3.1.3.2: bei Re-Pause-Audit gesetzt — Link zum vorher-
-   *  pausierten Audit der nach Approve eine neue Pause getriggert hat.
-   *  Optional, nur für Trace/UX. */
+   *  pausierten Audit der nach Approve eine neue Pause getriggert hat. */
   priorAuditId?: string;
+  /** #131 Phase 3.4.3.1 Big-Bang: Native-V3-Approval-ID aus Vercel-SDK.
+   *  Resume-Approve nutzt diese ID + `assistantContent` für History-Replay.
+   *  Wenn gesetzt, ist `toolCall` (Legacy-Form) typisch undefined — V3-
+   *  Pending nutzt `toolName`/`toolInput` als Display-Surface. */
+  approvalId?: string;
+  /** #131 Phase 3.4.3.1: Vercel-tool-call-ID. */
+  toolCallId?: string;
+  /** #131 Phase 3.4.3.1: Tool-Key aus Vercel-Tool-Set (z.B.
+   *  `mcp_everything-approval_get-sum`) für UI-Display. */
+  toolName?: string;
+  /** #131 Phase 3.4.3.1: Tool-Input-Args für UI-Display (geparst aus
+   *  approval-request.toolCall.input). */
+  toolInput?: unknown;
+  /** #131 Phase 3.4.3.1: komplettes `assistant`-Content-Array aus dem
+   *  Pause-Result (enthält tool-call + tool-approval-request). Resume
+   *  appendet das als assistant-Message ans messages-Array. */
+  assistantContent?: unknown;
 }
 
 /**
