@@ -2994,7 +2994,9 @@ Faktor 14× langsamer im Initial-Smoke deutet auf Token-Refresh-Block hin: `OAut
 
 **Hinweis:** Wenn implementiert, kann Block-6-Guard optional entfernt oder als permanente Notfall-Sicherung bleiben — Default Off statt On.
 
-### #150 Token-Lifetime-Klarstellung in `131-OAUTH-STRATEGY.md` (XS, nice)
+### #150 Token-Lifetime-Klarstellung in `131-OAUTH-STRATEGY.md` — ✅ Tag 28 DONE
+
+**Status-Notiz Tag 28 (26. Mai 2026):** Doku-Section §x in `docs/131-OAUTH-STRATEGY.md` neu (6 Sub-Sections §x.1-§x.6). Inhalt: Refresh-Token-Lifetime ist 10 Tage (`expires_in:863999`), Code limitiert nichts, `pnpm twin:oauth-login`-Initial-Token ist CLI-Artefakt (~50 Min, springt nach erstem Refresh auf 10 Tage), Background-Poll-Konsequenz + Cross-Ref #149, Setzungen für zukünftige Sessions, Lesson Beobachtungs-Artefakt vs. System-Constraint.
 
 **Hintergrund (Tag 28 Block 7):** Codex-OAuth-Refresh-Token-Lifetime ist **10 Tage** (`expires_in: 863999` Sekunden), live verifiziert in `audit_FuawriTsQd1j`. Unser Code limitiert das nicht — `new Date(Date.now() + response.expires_in * 1000)` in `refresh-service.ts:165-167` schreibt direkt was Codex liefert.
 

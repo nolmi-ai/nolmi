@@ -3019,6 +3019,73 @@ docs/131-OAUTH-STRATEGY.md" verschlankt. Phase-B-Items neu skizziert.
 
 ---
 
+## §x — Token-Lifetime-Klarstellung (Tag 28 Phase-A-Diagnose, Block 7)
+
+**Scope:** Klärung der OAuth-Token-Lifetime-Realität nach Tag-28-Phase-A-Diagnose. Wichtig für zukünftige Sessions, weil zwischenzeitliche Beobachtungen zu inkonsistenten Lifetime-Annahmen geführt hatten.
+
+### §x.1 — Refresh-Token-Lifetime ist 10 Tage
+
+Codex-OAuth-Token-Endpoint (`https://auth.openai.com/oauth/token`) liefert beim Refresh-Call:
+
+```json
+{
+  "access_token": "...",
+  "refresh_token": "...",
+  "expires_in": 863999,
+  "id_token": "...",
+  "scope": "openid profile email offline_access api.connectors.read api.connectors.invoke",
+  "token_type": "Bearer"
+}
+```
+
+`expires_in: 863999` Sekunden ≈ **9.999 Tage** ≈ 10 Tage Lifetime.
+
+Live-Verifikation Tag 28 Block 7: `audit_FuawriTsQd1j` mit `oauth-refresh-success`, `newExpiresAt: 2026-06-05T13:08:16.657Z` (10 Tage nach Refresh-Zeitpunkt).
+
+### §x.2 — Unser Code limitiert die Lifetime nicht
+
+`OAuthRefreshService.doRefreshIfNeeded` (`apps/runtime/src/oauth/refresh-service.ts`):
+
+```typescript
+const newExpiresAt = new Date(
+  Date.now() + response.expires_in * 1000,
+).toISOString();
+```
+
+Direkter Pass-Through des Codex-`expires_in`. Kein Hardcap, kein Min/Max, kein Clamping. Was Codex liefert, landet in der DB.
+
+### §x.3 — `pnpm twin:oauth-login`-Initial-Token ist kurzlebiger
+
+Beobachtung Tag 28 Block 7 (zweimal reproduziert): nach `pnpm twin:oauth-login @markus` ist der Initial-`expires_at` in der DB nur **~50-60 Min** in der Zukunft, nicht 10 Tage.
+
+Quelle: vermutlich `id_token.exp`-Claim oder ein Codex-CLI-internes Initial-Token-Lifecycle. Der CLI-Wrapper (`apps/runtime/src/scripts/cli-oauth-login.ts`) liest den Token aus `~/.codex/auth.json`, dort steht der CLI-Initial-Wert.
+
+**Sobald der erste Refresh durchläuft, springt `expires_at` auf 10 Tage** (Codex liefert dann die volle Lifetime).
+
+### §x.4 — Konsequenz für Background-Poll
+
+Background-Poll (`OAuthRefreshService.start` → `setInterval` alle 60s) mit `refreshThresholdMinutes = 5` triggert bei 10-Tage-Lifetime selten — typischerweise einmal pro ~10 Tage pro Twin.
+
+**Aber:** direkt nach `pnpm twin:oauth-login` ist der Initial-Token nur ~50 Min gültig. Background-Poll merkt das ab Min 45 (`expires_at - now < 5 Min`), würde Refresh triggern. Bei parallelem Lazy-Trigger (Codex-Call läuft gleichzeitig) entsteht ein theoretisches Race-Window in der `inFlight`-Mutex (`Map.get` / `Map.set` synchron, aber zwischen den Statements keine Lock). Direkt-Beweis fehlt, empirisch entschärft via Block-6-Guard (`OAUTH_REFRESH_POLL_DISABLED=true`).
+
+Cross-Ref:
+- **#149** — Mutex-Hardening (Phase-B-Item, M)
+- Block-6-Guard ist permanente Sicherheits-Maßnahme
+
+### §x.5 — Setzungen für zukünftige Sessions
+
+1. **Wenn `expires_at` < 10 Tage in DB für aktiven Twin auftaucht:** entweder Initial-Token nach CLI-Login (normal, springt nach erstem Refresh), oder Codex-Server-Side-Anomaly (selten).
+2. **Wenn `expires_at` < 10 Tage *dauerhaft* bleibt** (auch nach Refresh-Cycle): Token-Source-Klärung nötig, eventuell `id_token`-Claim-Auswertung (Cross-Ref #151).
+3. **Token-Lifetime-Annahme im Code:** keine. Code rechnet immer `Date.now() + response.expires_in * 1000`, egal welcher Wert kommt.
+
+### §x.6 — Lesson Tag 28
+
+**Beobachtungs-Artefakt vs. System-Constraint sauber trennen.** Die ~50-Min-Lifetime-Beobachtung am Tag-28-Vormittag wurde zwischenzeitlich als „Codex-OAuth-Realität" interpretiert und führte zu „Phase-A-Show-Stopper"-Reality-Check, der sich als überdramatisiert herausstellte. Real ist die Lifetime 10 Tage — `pnpm twin:oauth-login`-Initial-Token war das Artefakt.
+
+Lesson generell: bei Lifetime-/Quota-/Timeout-Werten immer den **Server-Response-Body** als Wahrheit nehmen, nicht den DB-Snapshot eines Wrapper-Tools.
+
+---
+
 ## Verweise
 
 - OpenAI Codex Auth-Doku: https://developers.openai.com/codex/auth
