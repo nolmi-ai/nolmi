@@ -2874,7 +2874,9 @@ Faktor 14× langsamer im Initial-Smoke deutet auf Token-Refresh-Block hin: `OAut
 
 **Priorität:** Nice. Pattern ist symmetrisch zum verifizierten Pause-Pfad — Bugs unwahrscheinlich, aber End-to-End-Verifikation für Phase-3-Closure-Confidence sinnvoll. Wird mit Phase 3.3.3 oder Phase 4 mitgezogen, wenn dort sowieso Smoke-Setups laufen.
 
-### #141 oauth-providerMetadata-Verlust nach Big-Bang-Refactor (S, nice)
+### #141 oauth-providerMetadata-Verlust nach Big-Bang-Refactor — ✅ Tag 28 DONE (Commit `0b02482`)
+
+**Status-Notiz Tag 28 (26. Mai 2026):** Gemeinsam mit #142 gefixt via 2-Phasen-Patch in `apps/runtime/src/twin-service.ts:runModel`-Return. Un-Nest des verschachtelten `providerMetadata["openai-codex"]`-Namespace + flat-merge ins Audit-Output. `provider`/`model`-Split, `authMode`+`twinId`-Inject via `this.deps.twinId`, `latencyMs` zentral pre-Branch gemessen, `unknownEventTypes` Array-normalisiert. Mikro-Korrektur in Block 2.3: `model` aus `result.response.modelId` (Provider-deklariert) statt aus `activeModelLabel`-Split. Verifiziert via frischen Audit `audit_kEc7Oap0pQfo` (provider=openai-codex, model=gpt-5.5, authMode=oauth, twinId, planType=pro, cfRay, latencyMs, responseId, codexStatus alle gefüllt).
 
 **Kontext (Tag 27 Block 22, Phase 3.4.3.1):** Nach Big-Bang Approval-Refactor läuft oauth-Pfad jetzt durch Vercel-`generateText` via `codexProvider`. End-to-End-Smoke `audit_0voltaVcvQaD` verifiziert: Tool-Roundtrip + History-Replay-Approve grün, finale Antwort "17 plus 25 ergibt 42.", `provider="openai-codex/gpt-5.5"`.
 
@@ -2889,7 +2891,9 @@ Faktor 14× langsamer im Initial-Smoke deutet auf Token-Refresh-Block hin: `OAut
 
 **Priorität:** Nice. Information ist nice-to-have für Debugging/Token-Accounting, kein User-Visual-Blocker. Phase B / Phase 5-Polish.
 
-### #142 oauth-providerMetadata authMode + twinId null nach Phase 4.2 Smoke (S, nice)
+### #142 oauth-providerMetadata authMode + twinId null nach Phase 4.2 Smoke — ✅ Tag 28 DONE (Commit `0b02482`)
+
+**Status-Notiz Tag 28 (26. Mai 2026):** Gemeinsam mit #141 gefixt im gleichen Patch — `authMode` + `twinId` werden jetzt via TwinService-Kontext (`this.deps.twinId`, `isOAuth`-Flag) im `runModel`-Return injected. Siehe #141-Status-Notiz für Details.
 
 **Kontext (Tag 27 Block 25, Phase 4.2 Smoke):** End-to-End-Smoke des Production-CLI grün (`audit_ukzHFjas_woB`, `provider="openai-codex/gpt-5.5"`, reply="Hallo.", capability=owner-direct). CLI-Pfad funktional, OAuth-Token korrekt persistiert + verwendet.
 
@@ -2942,4 +2946,34 @@ Faktor 14× langsamer im Initial-Smoke deutet auf Token-Refresh-Block hin: `OAut
 **Alternative:** Settings-UI-Warnung beim Re-Login: "Vorheriger ChatGPT-Account: X. Neuer Login überschreibt." User akzeptiert bewusst.
 
 **Größe:** M (1-2 Bautage). **Priorität:** nice. **Spur:** Phase B nach Launch + Demand-Signal.
+
+## Tag-28-Items (#141+#142-Follow-ups)
+
+### #146 `extractModel()` Split-Fallback-Cleanup (XS, nice)
+
+**Kontext (Tag 28):** Nach Fix #141+#142 (Commit `0b02482`) produzieren neue Audits `providerMetadata.model` als eigenes flaches Feld (aus `result.response.modelId`, Provider-deklariert). Der Compound-String-Split-Fallback in `apps/web/lib/audit-render/utils.ts:50-64` (`provider.split("/")` mit Take-Last-After-Slash) ist nur noch für Pre-Refactor-Audits relevant.
+
+**Soll-Stand:** `extractModel()` kann den Fallback-Pfad löschen, sobald entweder (a) alle Pre-Refactor-Audits via Pruning weg sind, oder (b) ein Cut-Off-Datum gesetzt wird ab dem die DB nur noch Post-Patch-Audits enthält. Im Code dann nur noch `return output?.providerMetadata?.model ?? null;`.
+
+**Priorität:** nice. Funktionaler Impact null (Fallback funktioniert weiterhin korrekt), Wartungs-Hygiene. Erst sinnvoll wenn Tag-28-Audits in der Mehrheit sind oder DB-Pruning durchläuft.
+
+### #147 Auto-Tool-Picker-Reliability blockiert Approve-Pfad-Smoke (Cross-Ref #87/#89)
+
+**Kontext (Tag 28 Block 2.2):** Bei #141+#142-Verifikation hat das LLM (Opus 4.7 im Codex-Pfad) in drei Anläufen verweigert, das `mcp:everything-approval:get-sum`-Tool zu rufen — "Tool ist nicht verfügbar"-Antwort statt Tool-Call, obwohl Skill aktiv und im Tool-Set. Vermutlich Auto-Tool-Picker-Problem aus der LLM-Tool-Use-Behavior-Familie (#87 Skills-UI, #89 Tool-Use-Behavior-Tuning).
+
+**Konsequenz für #141+#142:** Resume-Pfad-Verifikation für `mcp-tool-use`-Audits wurde **nur code-analytisch** durchgeführt (via Code-Trace `approveMcpToolUse` → `runModel` → patched Return). Live-Smoke ausstehend, sobald Auto-Tool-Picker zuverlässig approval-Tools rufen kann.
+
+**Status:** Cross-Reference, kein neues Bau-Item. #87/#89 sind die eigentlichen Träger. Hier nur dokumentiert, dass dieses Verhalten **Resume-Pfad-Smokes generell** blockiert, nicht nur #141+#142.
+
+**Priorität:** nice (transitiv aus #87/#89).
+
+### #148 api_key-Pfad-Smoke für #141+#142 nachholen (S, nice)
+
+**Kontext (Tag 28 Block 2.1):** Smoke C (api_key-Pfad) wurde während #141+#142-Verifikation skipped, weil keine api_key-Twins für aktive Smokes verfügbar waren — `@markus` ist seit Phase 5.2 oauth, andere Twins (`@florian`, `@heiko`) sind formal api_key, aber im aktuellen Setup nicht in der Smoke-Loop.
+
+**Soll-Stand:** Beim nächsten Anlass mit aktivem api_key-Twin (z.B. neuer Onboarding-Smoke, oder explizit ein Test-Twin auf api_key gesetzt) den `providerMetadata`-Flat-Merge gegen den Anthropic-Pfad verifizieren. Erwartet: `provider:"anthropic"`, `authMode:"api_key"`, `twinId`, `latencyMs`, `model` aus `result.response.modelId` (Anthropic kann Versions-Suffix mitliefern, z.B. `claude-opus-4-7-20260101` statt Alias).
+
+**Risiko:** sehr niedrig. Fix ist code-strukturell symmetrisch — gleicher `runModel`-Return, gleicher Un-Nest-Mechanismus für beide Provider-Namespaces (`openai-codex` vs `anthropic`). Anthropic-SDK liefert `providerMetadata` vermutlich nach gleichem V3-Pattern.
+
+**Priorität:** nice. Verifikation ist Bestätigungs-Smoke, kein erwarteter Bug.
 

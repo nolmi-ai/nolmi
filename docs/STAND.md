@@ -1,6 +1,6 @@
 # twin-lab — Stand
 
-**Letztes Update:** 25. Mai 2026, Sonntag (Tag 27 — Phase 3.4.3.1 ✅ Big-Bang Approval-Refactor + Phase 4 ✅ CLI-Login + Phase 5 ✅ Web-UI + Doku-Closure + BACKLOG-Cleanup §t/§u/§v/§w, 30 Blöcke an einem Tag — **#131 Phase A komplett ✅**)
+**Letztes Update:** 26. Mai 2026, Montag (Tag 28 — #141+#142 providerMetadata-Verlust gefixt via 2-Phasen-Patch in `runModel`-Return + Mikro-Korrektur, BACKLOG-Closure für #141/#142 + drei neue Follow-up-Items #146/#147/#148)
 
 ## Aktuell in Arbeit
 
@@ -28,6 +28,51 @@ A2A-Bridge**. Nicht Computer-Use.
 Inhalte (11 Items in drei Tranchen) unverändert, nur Build-Pfad
 leicht angepasst (#100/#101 vorgezogen, weil Vision-kritisch für
 die Differenzierungs-Story).
+
+## Tag 28 (26. Mai 2026, Montag) — #141+#142 providerMetadata-Fix (Polish-Tag)
+
+**Stand Tag 28:** Phase-A-Polish-Item #141+#142 (providerMetadata-Verlust nach Big-Bang Approval-Refactor) gefixt in drei Blöcken (Diagnose → Bau → Doku). Commit `0b02482` auf `origin/main`. Patch zentral in `apps/runtime/src/twin-service.ts:runModel`-Return — Un-Nest des verschachtelten Provider-Namespace + flat-merge ins Audit-Output + TwinService-Kontext-Inject (`authMode`, `twinId`) + pre-Branch `latencyMs`-Messung für oauth + api_key. Mikro-Korrektur in Block 2.3: `model` aus `result.response.modelId` (Provider-deklariert) statt aus `activeModelLabel`-Split — gleiche Werte, sauberere Source.
+
+### #141+#142 providerMetadata-Verlust gefixt (~2h netto)
+
+**Diagnose (Block 1):** Alle 7 LLM-tragenden `audit.complete`-Caller in `twin-service.ts` reichen `providerMetadata: reply.metadata` durch. `reply.metadata` kommt aus `runModel`-Return, das vor Patch `result.providerMetadata` komplett verworfen hat. Verlust ist mono-kausal in einem Return-Statement zentralisiert → Variante B (Fix in `runModel`-Return) ist Single-Point-Fix für alle Caller, inkl. Resume-Pfad via `approveMcpToolUseViaHistoryReplay`.
+
+**Bau (Block 2):** Patch um Z. 2009-2020 in `twin-service.ts`:
+- `providerKey = isOAuth ? "openai-codex" : "anthropic"` wählt Namespace
+- `rawMeta[providerKey]` un-nestet (V3-Spec: `Record<providerName, Record<string, unknown>>`)
+- `activeModelLabel.split("/")` für `provider`/`model`-Split (Pre-Refactor-Konsistenz)
+- `authMode` + `twinId` via `this.deps.twinId` + `isOAuth`-Flag injected
+- `unknownEventTypes` Array-normalisiert (vom Provider als CSV-String emittiert)
+- `latencyMs` zentral pre-Branch gemessen mit `Date.now()`-Diff um `generateText`-Call
+
+**Diagnose-Spike (Block 2.2):** Smoke-Output zeigte vermeintliche "Lücken" — Pre-Refactor-Audits ohne neue Felder. Pre-Bau-Check auf `data/twin.db` ergab: keine 26.05-Audits vor Diag-Spike. Lessons direkt umgesetzt: temp-Diag-Log via `/tmp`-Dump-Datei (Hot-Reload safe), Live-Smoke gegen `@markus`, Verifikation gegen frischen Audit (`audit_WQx50REscTUL` → alle Felder gefüllt), Diag-Log wieder entfernt. Befund: `result.response.modelId === "gpt-5.5"` ist Provider-deklarierte Source-of-Truth für `model`-Wert. `unknownEventTypes` ist by-design weg seit Codex-SSE-Parser-Cleanup (`codex-sse-parser.ts:31` — Parser kennt alle Events, Field nur sichtbar wenn `length > 0`).
+
+**Mikro-Korrektur (Block 2.3):** `model` aus `result.response.modelId` mit Fallback auf `activeModelLabel.split("/")`. Provider-deklarierte ID statt Label-Reconstruktion. Verifikation `audit_kEc7Oap0pQfo` (26.05 11:53) — alle Felder gefüllt, `model:"gpt-5.5"` identisch zum Pre-Mikro-Wert.
+
+### Tag-28-Closure-Bilanz
+
+**Drei Blöcke an einem Polish-Tag — #141+#142 + Follow-up-Items:**
+
+| Block | Commit | Was |
+|---|---|---|
+| 1. Diagnose | (kein Commit) | #141+#142 Verlust-Pfade lokalisiert. Code-Trace aller 7 `audit.complete`-Caller. Variante B (`runModel`-Return-Fix) als Single-Point-Fix empfohlen — eine Stelle deckt initial-Pfad + Resume-Pfad ab. ~10 Min. |
+| 2. Bau | (Patch in-place) | #141+#142 Fix in `twin-service.ts:runModel`-Return: Un-Nest `providerMetadata["openai-codex"]`-Namespace + flat-merge + `provider`/`model`-Split + `authMode`/`twinId`-Inject + `latencyMs`-pre-Branch-Messung + `unknownEventTypes`-Array-Norm. TS-Build green. ~30 Min. |
+| 2.1 | (ad-hoc Skript) | Smoke-Skript A/B/C/D + Pre-Refactor-Vergleichs-Spot. Smoke C skipped (api_key-Setup-Overhead, → #148), Smoke B/D Approve-Pfad blockt durch Auto-Tool-Picker-Problem (#87/#89, → #147). ~5 Min. |
+| 2.2 | (Diag-Logs nicht committed) | Diagnose-Spike — vermeintliche Lücken (`model`/`twinId`/`unknownEventTypes` fehlen in Smoke A; mcp-tool-use über Anthropic) als Pre-Refactor-Audit-Beobachtungen entlarvt. Temp `/tmp/diag-141-*.json`-Dump aus `runModel` zeigt `result.response.modelId` als bessere Source-of-Truth, `result.providerMetadata` ist tatsächlich verschachtelt unter `"openai-codex"`. Diag-Logs danach wieder entfernt, nicht committed. ~20 Min. |
+| 2.3 | `0b02482` | Mikro-Korrektur: `model` bevorzugt aus `result.response.modelId` (Provider-deklariert), Fallback auf `activeModelLabel.split("/")`. Verifikation gegen frischen Audit `audit_kEc7Oap0pQfo` (26.05 11:53) — Wert "gpt-5.5" identisch, Source-of-Truth-Wechsel ohne funktionale Änderung. Commit + Push (Husky grün). ~10 Min. |
+| 3. BACKLOG + STAND | (dieser Commit) | #141 + #142 als ✅ Tag 28 DONE im BACKLOG markiert mit Status-Notiz und Commit-Verweis. Neue Section "Tag-28-Items (#141+#142-Follow-ups)" mit #146 (`extractModel()`-Cleanup nice), #147 (Auto-Tool-Picker-Reliability Cross-Ref #87/#89 nice), #148 (api_key-Pfad-Smoke S nice). STAND-Tag-28-Section + Block-Tabelle 1-3 + Lessons. ~10 Min. |
+
+**Lessons Tag 28:**
+
+- **Lesson Tag 28 #1: Smoke-Auswertung braucht Audit-ID + Timestamp.** Tag-28-Block-2.2 hat ohne Audit-ID-Check Pre-Refactor-Audits gelesen und als "Lücken im Fix" interpretiert. Lesson: SQL-Queries in Smoke-Skripten geben `id` + `timestamp` mit aus, Auswertung muss explizit "frischer Audit?" prüfen, bevor "Soll-Felder fehlen" gefolgert wird.
+
+- **Lesson Tag 28 #2: Pre-Refactor-Audit-Drift ist Normalität.** Schemas ändern sich über Refactors (z.B. `unknownEventTypes` weg, `model` + `twinId` dazu). Alte Audits in der DB sind Schnappschüsse des damaligen Schemas, kein Bug. Vergleich Pre/Post nur als "was hat sich strukturell geändert", nicht als "was fehlt jetzt".
+
+- **Lesson Tag 28 #3: STOP + Diagnose hat gegriffen.** Bei Smoke-Output "Felder fehlen" wäre Default-Pattern weiter-debuggen mit Hypothesen gewesen. Stattdessen Block 2.2 als sauberer Diagnose-Spike (temp-Log via `/tmp`-Dump, Live-Smoke, Diag-Log raus), der die vermeintlichen Lücken als Beobachtungs-Artefakt aufgelöst hat. ~20 Min Diagnose haben einen Falsch-Fix gespart.
+
+- **Lesson Tag 28 #4: Mikro-Korrekturen über Polish-Tage einsammeln.** `result.response.modelId` als Source-of-Truth war keine Anforderung im Original-Briefing, sondern eine Beobachtung im Diagnose-Output. Polish-Tage sind genau das richtige Zeitfenster für solche Mikro-Polituren — auf Bau-Tagen würde man sie als Scope-Creep abweisen.
+
+**Tag-28-Outcome:** #141+#142 zu, drei neue Follow-up-Items im BACKLOG. Polish-Item-Quartett (#139 Refresh-Latenz, #140 Re-Pause-Smoke, #141 providerMetadata-Verlust, #142 authMode/twinId-Verlust) jetzt zur Hälfte abgearbeitet — #139 + #140 bleiben offen für Phase B / Polish. Code-Vereinfachung: `runModel`-Return ist jetzt Single-Source-of-Truth für `providerMetadata`-Aufbereitung, alle 7 LLM-Caller benefit automatisch ohne Per-Capability-Duplikation.
 
 ## Tag 27 (25. Mai 2026, Sonntag) — Pre-Launch-Phase A Polish (#137) + #131 Phase 3.0/3.1
 
