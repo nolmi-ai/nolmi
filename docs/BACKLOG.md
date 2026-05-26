@@ -3047,3 +3047,35 @@ Dies ist die plausibelste Erklärung für die Tag-28-Vormittag-Failures, die urs
 
 **Aufwand:** M (Variante A) bis L (Variante B). Variante C ist XS-Doku, aber kein "Fix".
 
+### #153 DEPLOYMENT.md §11 OAuth-Production-Workflow dokumentieren (XS, should — Phase B)
+
+**Hintergrund (Tag 28 Block 14-15):** Phase-B-CLI-Erweiterung `--auth-json=<path>` (Commit `76e49fe`) ermöglicht VPS-OAuth-Login ohne Codex-Binary im Container. Production-Workflow ist 4-Schritt-manuell:
+
+1. Mac-lokal: `codex login` → schreibt `~/.codex/auth.json`
+2. Mac: `scp ~/.codex/auth.json root@srv1046432:/tmp/auth.json`
+3. VPS: `docker cp /tmp/auth.json twin-lab-runtime:/tmp/auth.json`
+4. VPS: `docker exec twin-lab-runtime npx tsx /app/apps/runtime/src/scripts/cli-oauth-login.ts <@handle> --auth-json=/tmp/auth.json`
+5. Cleanup: `docker exec ... rm /tmp/auth.json` + `rm /tmp/auth.json` auf VPS-Host
+
+**Action:** in `docs/DEPLOYMENT.md` einen neuen `### §11 OAuth-Login für Production-Twins`-Abschnitt mit der Sequenz, Security-Hinweis (auth.json enthält access_token + refresh_token, nicht in Repo committen + nach Use löschen), und Cross-Ref auf #131-OAUTH-STRATEGY §y. Zusätzlich Re-Login-Pfad dokumentieren (gleiche Sequenz, `oauth_tokens.upsert` überschreibt existing Row).
+
+**Priority:** should. Solange #143 (Web-OAuth ohne CLI) Phase-B-Item ist, ist Manual-Workflow das produktive Pattern für `@florian`/`@heiko`-Onboarding und Re-Login. Ohne Doku-Anker wird die Sequenz aus Chat-Transkripten rekonstruiert. **Aufwand:** XS (~15-20 Min).
+
+### #154 DEPLOYMENT.md Deploy-Section: `--build-arg NEXT_PUBLIC_RUNTIME_URL` explizit dokumentieren (XS, should — Phase B)
+
+**Hintergrund (Tag 28 Block 13):** Production-Deploy ist auf einen Build-Arg-Bug gelaufen. `apps/web/Dockerfile` deklariert `ARG NEXT_PUBLIC_RUNTIME_URL=http://localhost:4000` als Default. Beim Production-`docker build` ohne `--build-arg` wurde der Default in das JS-Bundle inlined — NEXT_PUBLIC_*-Vars sind build-time-Konstanten in Next.js, kein Runtime-Lookup. Folge: Web-Container rief `http://localhost:4000/auth/login` statt der Production-Runtime-URL. ~30 Min Diagnose, ~10 Min Re-Build mit korrektem Build-Arg.
+
+**Action:** in `docs/DEPLOYMENT.md` Web-Build-Section explizit ergänzen:
+
+```sh
+docker build \
+  --build-arg NEXT_PUBLIC_RUNTIME_URL=https://runtime.twin.harwayexperience.com \
+  -t twin-lab-web:latest \
+  -f apps/web/Dockerfile \
+  .
+```
+
+Plus Warn-Box: "Ohne `--build-arg` greift der Dockerfile-Default `http://localhost:4000` und der Web-Container ruft localhost an. Always explicit."
+
+**Priority:** should. Einmaliger Doku-Aufwand, vermeidet ~40 Min Diagnose beim nächsten Production-Build. **Aufwand:** XS (~5-10 Min).
+

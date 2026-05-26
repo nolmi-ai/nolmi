@@ -3086,6 +3086,85 @@ Lesson generell: bei Lifetime-/Quota-/Timeout-Werten immer den **Server-Response
 
 ---
 
+## §y — Phase B Block 14: `--auth-json`-Flag + VPS-Production-Workflow (Tag 28)
+
+**Scope:** Erweiterung der Phase-A-CLI `pnpm twin:oauth-login` um einen `--auth-json=<path>`-Flag, damit OAuth-Login auch auf VPS/Production funktioniert, wo kein Codex-Binary verfügbar ist und die Container-DB nicht direkt erreichbar ist.
+
+### §y.1 Problem
+
+Phase-A-CLI (siehe §t + §u) spawnt `codex login` als Subprocess + liest `~/.codex/auth.json`. Das funktioniert nur auf macOS mit Codex Desktop App. VPS-Setup (Linux-Container) hat:
+
+- **Keinen Codex-Binary** — `/Applications/Codex.app/...`-Default greift nicht, `CODEX_BIN`-Env auch keine Lösung weil OpenAI keinen Linux-Codex-Binary publiziert (Stand Tag 28).
+- **DB im Docker-Volume** — direktes `sqlite3 data/twin.db` vom VPS-Host würde gegen ein anderes File schreiben als der Container; CLI muss innerhalb des Containers laufen.
+- **Kein User-Home im Container** — `~/.codex/auth.json` ist konzeptionell unsinnig für einen ephemeren Container.
+
+### §y.2 Setzung: Option (c) aus §t.8
+
+Drei Pfade waren in §t.8 skizziert:
+
+- (a) Linux-Codex-Binary suchen / kompilieren / bundlen — abgelehnt, OpenAI publiziert keinen
+- (b) Device-Auth-Flow (`codex login --device-auth`) — Phase-B-Item #144, braucht aber dieselbe Subprocess-Architektur
+- (c) `scp` + `docker cp` + `docker exec` Manual-Workflow — **gewählt**
+
+Begründung: pragmatisch, keine neuen Dependencies, funktioniert mit existing Phase-A-Code wenn die CLI einen alternativen `auth.json`-Pfad akzeptiert. Re-Login-Frequenz ist niedrig (Token-Lifetime 10 Tage nach erstem Refresh, siehe §x.1), Manual-4-Schritt akzeptabel bis #143 (Web-OAuth ohne CLI) gebaut ist.
+
+### §y.3 Code-Pattern: `--auth-json=<path>` Flag
+
+**Files:** `apps/runtime/src/scripts/cli-oauth-login.ts` + `apps/runtime/src/oauth/codex-auth-file.ts` (Commit `76e49fe`).
+
+Drei Änderungen:
+
+1. **`parseHandle(argv) → parseArgs(argv)`** mit Return `{ handle, authJsonPath }`. Strict-fail bei unbekannten Args (statt silent-ignore). Handle bleibt positional argv[2], Flag kann beliebig in argv[3+] stehen.
+2. **`loadCodexToken(filePath: string = CODEX_AUTH_PATH)`** mit Default-Parameter. Default-Flow unverändert, Caller kann optional alternativen Pfad übergeben.
+3. **`main()`-Branch:** wenn `authJsonPath !== null`, skip Subprocess-Spawn + Hybrid-Detection (`waitForLoginCompletion`) komplett, lese direkt aus angegebenem Pfad via `loadCodexTokenWithRetry(authJsonPath)`. Persist + `setAuthMode` + Success-Log danach identisch für beide Pfade.
+
+Default-Flow (`pnpm twin:oauth-login @markus` ohne Flag) bleibt 100% kompatibel — `parseArgs` returnt `authJsonPath: null`, main() läuft den existing Subprocess-Branch.
+
+### §y.4 Production-Workflow (4 Schritte + Cleanup)
+
+```sh
+# 1. Mac-lokal: codex login (Browser-PKCE durchklicken)
+codex login
+
+# 2. Mac → VPS via scp
+scp ~/.codex/auth.json root@srv1046432:/tmp/auth.json
+
+# 3. VPS-Host → Container via docker cp
+ssh srv1046432
+docker cp /tmp/auth.json twin-lab-runtime:/tmp/auth.json
+
+# 4. Container: CLI mit --auth-json
+docker exec twin-lab-runtime \
+  npx tsx /app/apps/runtime/src/scripts/cli-oauth-login.ts \
+  @markus --auth-json=/tmp/auth.json
+
+# 5. Cleanup (Security: auth.json enthält access_token + refresh_token)
+docker exec twin-lab-runtime rm /tmp/auth.json
+rm /tmp/auth.json
+```
+
+Security-Hinweis: `auth.json` enthält Klartext-Tokens für eine OpenAI-Account. Niemals committen, niemals in Logs, immer nach Use löschen.
+
+### §y.5 Smoke-Validierung Tag 28 (Block 14)
+
+- **CLI-Lauf:** `docker exec ... --auth-json=/tmp/auth.json` grün, Token in `oauth_tokens` persistiert, `@markus authMode='oauth'`.
+- **DB-Check:** `account_id=07b2ba12-a439-4df2-8b45-2b1fd220f775`, `expires_at` ~50 Min future (Initial-Token-Lifetime, springt nach erstem Refresh auf 10 Tage — siehe §x.3).
+- **Chat-Roundtrip:** Audit `audit_u31GW1dRJtjk` (2026-05-26T17:22:53.441Z), `providerMetadata.provider="openai-codex"`, `model="gpt-5.5"`, `authMode="oauth"`, `planType="pro"`, `cfRay="a01e76db0d9571b9-FRA"`, `latencyMs=2758`, `responseId` filled.
+- **Settings-UI:** Auth-Row zeigt `OAuth (ChatGPT)` mit maskierter Account-ID + Re-Login-Link.
+- **Webhook + Bridge + Refresh-Service:** alle aktiv, kein Boot-Drama beim Container-Restart.
+
+### §y.6 Offene Punkte für Phase B
+
+`--auth-json` ist **Bridge-Solution**, nicht Endziel. Phase-B-Roadmap:
+
+- **#143 Web-OAuth-Production-Flow ohne CLI-Subprocess (XL):** PKCE-Server im Runtime + Browser-Auth-Flow direkt aus Settings-UI. Ersetzt den 4-Schritt-Manual-Workflow durch Single-Click. Hardcoded `localhost:1455`-Redirect-Constraint (siehe §a) ist die offene Frage — möglich via SSH-Tunnel oder Cloudflare-Tunnel mit Custom-Mapping.
+- **#144 VPS/Linux-Path via `--device-auth` (M):** Codex-CLI Device-Auth-Flow als Alternative für VPS-User die kein macOS haben. Braucht trotzdem `codex`-Binary auf Linux (unklar ob/wann OpenAI das publiziert).
+- **#153 DEPLOYMENT §11 OAuth-Production-Workflow dokumentieren (XS):** §y.4-Sequenz in DEPLOYMENT.md aufnehmen, damit Re-Login + Onboarding-Pfad nicht aus Chat-Transkripten rekonstruiert werden muss.
+
+Bis Phase B durch ist, gilt der 4-Schritt-Manual-Workflow als produktiv-akzeptiert. Re-Login-Frequenz mit 10-Tage-Token-Lifetime ist niedrig genug für Manual-Aufwand.
+
+---
+
 ## Verweise
 
 - OpenAI Codex Auth-Doku: https://developers.openai.com/codex/auth
