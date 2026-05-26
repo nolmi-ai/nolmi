@@ -2,6 +2,11 @@
 
 Stand: 12. Mai 2026 Nachmittag, nach Phase 3.3 in Production deployed plus Vision-Session plus Strategie-Session vor Phase 3.4.
 
+> **Stand-Warnung (Tag 28, 26. Mai 2026):** Dieses Dokument ist Stand 12. Mai
+> 2026 (Tag 12) und reflektiert nicht die Bauphasen 3.4-3.5 + Pre-Launch-Phase A
+> Block 4-5. Re-baseline als eigener Bauauftrag geplant. Für aktuellen Stand
+> siehe `docs/STAND.md` und `docs/PRE-LAUNCH-A-STRATEGY.md`.
+
 ---
 
 ## Wo wir stehen

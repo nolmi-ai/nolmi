@@ -1,12 +1,17 @@
 # Pre-Launch-Phase A: Self-Hosting-Launch
 
 **Datum:** 17. Mai 2026 (Tag 18, Strategie-Session Vormittag)
+**Letztes Refresh:** 26. Mai 2026 (Tag 28, Doku-Hygiene-Welle Block 18)
 **Ziel:** Twin-Lab Open-Source-Repo öffentlich nutzbar für Tech-Affine,
 ~8 Wochen Bauzeit
-**Launch-Datum:** KW 29-30 (15.-22. Juli 2026, weiches Ziel)
+**Launch-Datum:** KW 31-32 (27. Juli – 10. August 2026, weiches Ziel, Tag-26-Update)
 **Verschoben von KW 25-27 (Ende Juni / Anfang Juli):** Wettbewerbs-Pivot
 Tag 25 (Telegram-Adapter Stufe 1 vorgezogen, siehe
 `docs/BLOCK-5-STRATEGY.md`).
+**Verschoben von KW 29-30 (15.-22. Juli):** Tag-26-OAuth-Vorziehung
+(#131 OpenAI-Subscription-OAuth + Production-Polish, siehe
+`docs/131-OAUTH-STRATEGY.md`). Phase A am Tag 27 komplett zu, Phase-B-Items
+#143/#144/#145 als BACKLOG.
 **Scope:** Self-Hosting only. SaaS folgt in Phase B.
 
 **Charakter dieses Dokuments:** Strategie-Setzung, **nicht Bau-Briefing**.

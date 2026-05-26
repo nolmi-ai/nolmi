@@ -11,6 +11,12 @@ Stufe 3 langfristig.
 „Stufe" ist die Reife-Ziel-Marke eines einzelnen Items. Welle 1
 adressiert primär Items mit Ziel Stufe 1, plus drei mit Ziel Stufe 2.
 
+**Stand Tag 28 (26. Mai 2026):** UX-Welle 1 ist abgeschlossen (11/11 Items
+durch, alle in Production). „Parallel zu Phase 3.6"-Formulierung im Original
+ist nicht mehr aktuell — Phase 3.6 (Computer-Use-Agent-Pattern) wurde Tag 18
+auf Pre-Launch-Phase B verschoben (siehe `PRE-LAUNCH-A-STRATEGY.md` Entscheidung
+2). Schmaler Computer-Use-Hook (#107/#108) statt formelle Phase 3.6 ist live.
+
 ## Kontext
 
 twin-lab ist nach Phase 3.5 Production-Live funktional vollständig —
