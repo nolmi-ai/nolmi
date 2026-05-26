@@ -1,4 +1,5 @@
 import type { AuditEntry } from "@twin-lab/shared";
+import type { BridgeMessageType } from "../bridge/types.js";
 import type { BridgeMessage } from "../bridge/types.js";
 
 // ─── CONVERSATION MERGE (2.5.4.3) ────────────────────────────────────────────
@@ -22,7 +23,7 @@ export interface MergedMessage {
   content: string;
   createdAt: string;
   inReplyTo: string | null;
-  messageType: "twin" | "system";
+  messageType: BridgeMessageType;
   auditCapability: string | null;
   auditStatus: AuditEntry["status"] | null;
   readAt: string | null;

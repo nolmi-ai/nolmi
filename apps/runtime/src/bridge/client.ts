@@ -1,5 +1,10 @@
 import type { FastifyBaseLogger } from "fastify";
-import type { BridgeConfig, BridgeMessage, BridgeMessageType } from "./types.js";
+import {
+  BRIDGE_MESSAGE_TYPES,
+  type BridgeConfig,
+  type BridgeMessage,
+  type BridgeMessageType,
+} from "./types.js";
 
 // ─── BRIDGE HTTP CLIENT ──────────────────────────────────────────────────────
 //
@@ -35,13 +40,18 @@ export class BridgeClient {
   async sendMessage(opts: {
     to: string;
     content: string;
+    /** Reserviert für künftiges Quote-Reply-Feature. Empfänger-Verhalten wird
+     *  seit Tag-28-Block-16 über `messageType` ausgewertet, nicht mehr über
+     *  `inReplyTo`-Heuristik mit Bridge-Lookup. */
     inReplyTo?: string | null;
-    /** Default "twin". "system" markiert Wartemeldung/Reject — Empfänger
-     *  filtert das raus und beantwortet nicht (Loop-Schutz). */
+    /** Default "twin-initiated". "owner-direct" für UI-Sends durch Owner,
+     *  "twin-reply" für Antworten auf eingehende Twin-Messages, "system"
+     *  für Wartemeldung/Reject. Vier Werte sind Single-Source-of-Truth für
+     *  das Empfänger-Verhalten (Tag-28-Block-16-Refactor). */
     messageType?: BridgeMessageType;
   }): Promise<{ messageId: string }> {
     const endpoint = "/messages";
-    const messageType = opts.messageType ?? "twin";
+    const messageType = opts.messageType ?? "twin-initiated";
     this.logger?.info(
       { to: opts.to, inReplyTo: opts.inReplyTo ?? null, messageType },
       "[bridge] sendMessage",
@@ -74,22 +84,27 @@ export class BridgeClient {
     const body = (await res.json()) as { messages: BridgeMessage[] };
     // Defensive: alte Bridge-Versionen liefern messageType evtl. nicht.
     // Default-Mapping auf "twin" damit Type-Property garantiert existiert.
+    // Defensive: nur whitelisted Werte durchlassen, alles andere
+    // (alte Bridges ohne Tag-28-Block-16-Update) fällt auf "twin" zurück.
+    // Receiver normalisiert "twin" zu "twin-initiated".
     return body.messages.map((m) => ({
       ...m,
-      messageType: m.messageType === "system" ? "system" : "twin",
+      messageType: BRIDGE_MESSAGE_TYPES.includes(m.messageType)
+        ? m.messageType
+        : "twin",
     }));
   }
 
   /**
-   * Holt zu einer messageId den ursprünglichen Absender. Genutzt für
-   * Reply-Detection (2.5.4.2): wenn eine eingehende Nachricht inReplyTo-set
-   * hat und der Sender der referenzierten Nachricht WIR sind, ist die neue
-   * Nachricht eine Antwort, kein neuer Anfrage-Trigger.
+   * @deprecated Tag-28-Block-16: Empfänger-Verhalten wird jetzt über
+   * `messageType` ausgewertet (vier Werte: owner-direct, twin-initiated,
+   * twin-reply, system), nicht mehr über `inReplyTo`-Lookup gegen die Bridge.
+   * Diese Methode bleibt definiert für ein künftiges Quote-Reply-Feature
+   * (Cross-Ref: BACKLOG-Item bei Aktivierung). Aktuell keine Production-
+   * Caller — receiveBridgeMessage's alter Reply-Detection-Branch ist raus.
    *
-   * Returns null bei 404 (Original-Message gibt's in der Bridge nicht mehr —
-   * ältere Conversation, gelöscht, ...). Network-Errors werfen — das Calling
-   * Code (`receiveBridgeMessage`) entscheidet, ob es failsafe weitermachen
-   * will oder nicht.
+   * Holt zu einer messageId den ursprünglichen Absender (Bridge-Lookup).
+   * Returns null bei 404. Network-Errors werfen.
    */
   async lookupSender(
     messageId: string,
@@ -131,9 +146,14 @@ export class BridgeClient {
     });
     if (!res.ok) throw await this.toError(res, endpoint);
     const body = (await res.json()) as { messages: BridgeMessage[] };
+    // Defensive: nur whitelisted Werte durchlassen, alles andere
+    // (alte Bridges ohne Tag-28-Block-16-Update) fällt auf "twin" zurück.
+    // Receiver normalisiert "twin" zu "twin-initiated".
     return body.messages.map((m) => ({
       ...m,
-      messageType: m.messageType === "system" ? "system" : "twin",
+      messageType: BRIDGE_MESSAGE_TYPES.includes(m.messageType)
+        ? m.messageType
+        : "twin",
     }));
   }
 

@@ -2092,9 +2092,6 @@ function registerFactRoutes(
 
 const SendSchema = z.object({
   content: z.string().min(1).max(8000),
-  /** Wenn die Conversation-View in einem Thread antwortet: id der Original-
-   *  Message. Empfänger nutzt das für Reply-Detection — kein neuer Pending. */
-  inReplyTo: z.string().nullable().optional(),
 });
 
 interface ConversationItem {
@@ -2358,7 +2355,7 @@ function registerConversationRoutes(
   // POST /twins/:handle/conversations/:partnerHandle/send — Owner-Direct-Send
   app.post<{
     Params: { handle: string; partnerHandle: string };
-    Body: { content?: string; inReplyTo?: string | null };
+    Body: { content?: string };
   }>(
     "/twins/:handle/conversations/:partnerHandle/send",
     async (request, reply) => {
@@ -2393,7 +2390,6 @@ function registerConversationRoutes(
         const result = await entry.service.ownerDirectSend({
           toHandle: partner,
           content: parsed.data.content,
-          inReplyTo: parsed.data.inReplyTo ?? null,
         });
         return reply.status(201).send({
           messageId: result.messageId,

@@ -132,14 +132,22 @@ interface TrustEntry {
   trustedHandle: string;
 }
 
-// Spiegelt MergedMessage aus apps/runtime/src/audit/conversation-merge.ts
+// Spiegelt MergedMessage aus apps/runtime/src/audit/conversation-merge.ts.
+// Tag-28-Block-16-Refactor: messageType-Union um drei A2A-präzise Werte
+// erweitert (owner-direct, twin-initiated, twin-reply). Legacy "twin" bleibt
+// für alte DB-Rows + Bridge-Backward-Compat.
 interface ConversationMessage {
   bridgeMessageId: string;
   direction: "sent" | "received";
   content: string;
   createdAt: string;
   inReplyTo: string | null;
-  messageType: "twin" | "system";
+  messageType:
+    | "twin"
+    | "system"
+    | "owner-direct"
+    | "twin-initiated"
+    | "twin-reply";
   auditCapability: string | null;
   auditStatus: "pending" | "approved" | "executed" | "rejected" | "blocked" | "failed" | null;
   readAt: string | null;
@@ -1558,19 +1566,13 @@ function A2AChat({
     return () => clearTimeout(timer);
   }, [messages, handle, load, onMarkedRead]);
 
-  // Letzte empfangene Bridge-Message — für inReplyTo beim Senden, damit der
-  // Empfänger Reply-Detection greift und kein neuer Pending entsteht. Wir
-  // ignorieren System-Messages bewusst, sonst antworten wir auf eine Warte-
-  // meldung statt auf den eigentlichen Inhalt.
-  const lastReceivedBridgeId = useMemo(() => {
-    for (let i = messages.length - 1; i >= 0; i--) {
-      const m = messages[i];
-      if (m && m.direction === "received" && m.messageType !== "system") {
-        return m.bridgeMessageId;
-      }
-    }
-    return null;
-  }, [messages]);
+  // Tag-28-Block-16-Refactor: `inReplyTo`-Heuristik aus Send-Body entfernt.
+  // Empfänger-Verhalten wird über `messageType` ausgewertet, nicht über
+  // automatisch gesetztes `inReplyTo`. Owner-Sends gehen jetzt mit
+  // `messageType:"owner-direct"` raus (Runtime setzt das in ownerDirectSend),
+  // damit der Empfänger-Twin korrekt mit LLM-Reply antwortet statt das fälschlich
+  // als Reply zu framen. `message.inReplyTo` bleibt in der Display-Logik für
+  // künftiges Quote-Reply-UI verfügbar.
 
   async function send() {
     if (!input.trim() || busy) return;
@@ -1585,7 +1587,6 @@ function A2AChat({
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             content: input.trim(),
-            inReplyTo: lastReceivedBridgeId,
           }),
         },
       );

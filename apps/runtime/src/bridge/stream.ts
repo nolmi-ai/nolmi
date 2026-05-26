@@ -1,6 +1,6 @@
 import EventSource from "eventsource";
 import type { FastifyBaseLogger } from "fastify";
-import type { BridgeConfig, BridgeMessage } from "./types.js";
+import { BRIDGE_MESSAGE_TYPES, type BridgeConfig, type BridgeMessage } from "./types.js";
 
 // ─── BRIDGE SSE STREAM ───────────────────────────────────────────────────────
 //
@@ -96,13 +96,14 @@ export class BridgeStream {
         if (event.payload?.id) {
           // Defensive Normalisierung — alte Bridge-Versionen ohne 002-Migration
           // schicken messageType evtl. gar nicht. Gleiche Logik wie in
-          // getInbox(); ohne sie würde TypeScript "messageType" als undefined
-          // sehen und der TwinService könnte den Loop-Filter nicht greifen.
+          // getInbox(); nur whitelisted Werte durchlassen, alles andere fällt
+          // auf "twin" zurück. Receiver normalisiert "twin" → "twin-initiated".
           const normalized = {
             ...event.payload,
-            messageType:
-              event.payload.messageType === "system" ? "system" : "twin",
-          } as const;
+            messageType: BRIDGE_MESSAGE_TYPES.includes(event.payload.messageType)
+              ? event.payload.messageType
+              : "twin",
+          };
           this.onMessage(normalized);
         } else {
           this.logger?.warn({ event }, "[bridge:stream] message ohne payload.id");

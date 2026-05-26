@@ -768,16 +768,16 @@ export class TwinService {
   //
   // Wird von POST /twins/:handle/conversations/:partnerHandle/send aufgerufen.
   // Owner ist eingeloggt, hat selbst getippt — kein Mandate-Check, kein
-  // Approval-Loop. Direkter Bridge-Send mit messageType="twin".
+  // Approval-Loop. Direkter Bridge-Send mit messageType="owner-direct".
   //
-  // inReplyTo optional: in der Conversation-View setzt das Frontend das auf
-  // die letzte empfangene Nachricht, damit der Empfänger das via Reply-
-  // Detection als Antwort erkennt und keinen neuen Pending erzeugt.
+  // Tag-28-Block-16-Refactor: `inReplyTo`-Parameter entfernt. Empfänger-
+  // Verhalten wird über `messageType` ausgewertet. Wenn jemand künftig
+  // Quote-Reply-Feature baut, kommt `inReplyTo` als separater Parameter
+  // mit anderer Semantik zurück.
 
   async ownerDirectSend(opts: {
     toHandle: string;
     content: string;
-    inReplyTo?: string | null;
   }): Promise<{ messageId: string; auditId: string; sentAt: string }> {
     if (!this.deps.bridgeClient) {
       throw new Error("Bridge-Modus ist nicht aktiv — owner-direct-send nicht möglich");
@@ -789,7 +789,6 @@ export class TwinService {
       input: {
         toHandle: opts.toHandle,
         content: opts.content,
-        inReplyTo: opts.inReplyTo ?? null,
         sentAt,
       },
       // Konsistent mit trusted-bypass / owner-direct: kein Approval-Workflow,
@@ -801,7 +800,7 @@ export class TwinService {
       const sent = await this.deps.bridgeClient.sendMessage({
         to: opts.toHandle,
         content: opts.content,
-        inReplyTo: opts.inReplyTo ?? null,
+        messageType: "owner-direct",
       });
       await this.deps.audit.complete(audit.id, {
         sentMessageId: sent.messageId,
@@ -865,58 +864,45 @@ export class TwinService {
       return;
     }
 
-    // 2. Reply-Detection (2.5.4.2): wenn die Nachricht inReplyTo-set hat
-    // UND die referenzierte Original-Message von uns gesendet wurde, ist die
-    // neue Nachricht eine Antwort. Kein Mandate-Check, kein neuer Pending —
-    // sondern reply-received-Audit + SSE-Event für die Sidebar.
+    // 2. Message-Type-Switch (Tag-28-Block-16): Single-Source-of-Truth für
+    // Empfänger-Verhalten. Vier Werte:
+    //   - "owner-direct"    → Owner schickt via UI → durch zum Trust/Mandate-Pfad (LLM-Reply)
+    //   - "twin-initiated"  → Twin schickt autonom → durch zum Trust/Mandate-Pfad (LLM-Reply)
+    //   - "twin-reply"      → Antwort auf vorherige eigene Anfrage → reply-received-Audit, kein LLM
+    //   - "system"          → schon oben gefiltert
     //
-    // Failsafe: bei Bridge-Lookup-Fehler (Network down etc.) loggen wir und
-    // fallen auf den TrustLevel-Pfad zurück. Lieber doppelt verarbeiten als
-    // eine echte Anfrage fälschlich verschlucken.
-    if (msg.inReplyTo) {
-      let originalSender: { fromHandle: string } | null = null;
-      let lookupFailed = false;
-      try {
-        originalSender = await this.deps.bridgeClient.lookupSender(msg.inReplyTo);
-      } catch (err) {
-        lookupFailed = true;
-        const reason = err instanceof Error ? err.message : String(err);
-        console.warn(
-          `[twin] lookupSender(${msg.inReplyTo}) fehlgeschlagen: ${reason} — failsafe auf TrustLevel-Pfad`,
-        );
-      }
-      if (
-        !lookupFailed &&
-        originalSender &&
-        originalSender.fromHandle.toLowerCase() ===
-          this.deps.bridgeClient.handle.toLowerCase()
-      ) {
-        // Antwort auf eine Message von uns → reply-received.
-        const audit = await this.deps.audit.start({
-          capability: "reply-received",
-          mandateId: null,
-          input: {
-            bridgeMessageId: msg.id,
-            fromHandle: msg.fromHandle,
-            content: msg.content,
-            inReplyTo: msg.inReplyTo,
-            receivedAt: new Date().toISOString(),
-          },
-          initialStatus: "executed",
-        });
-        await this.safeAck(msg.id);
-        this.deps.bus.emit({
-          type: "reply-received",
-          payload: {
-            auditId: audit.id,
-            partnerHandle: msg.fromHandle,
-            content: msg.content,
-          },
-        });
-        return;
-      }
-      // Sonst: lookup === null oder fromHandle !== uns → fällt durch zum
-      // normalen Pfad. Auch bei lookupFailed: failsafe weiter.
+    // Legacy: `"twin"` aus alten Bridge-Rows wird semantisch als
+    // `"twin-initiated"` behandelt (durchfallen zum Trust/Mandate-Pfad).
+    //
+    // Ersetzt die alte `inReplyTo`-Heuristik mit Bridge-`lookupSender`-Lookup
+    // (Pre-Block-16-Pfad). Web-UI setzt `inReplyTo` nicht mehr automatisch,
+    // damit Owner-Direct-Sends nicht fälschlich als Reply geframed werden.
+    const normalizedType =
+      msg.messageType === "twin" ? "twin-initiated" : msg.messageType;
+
+    if (normalizedType === "twin-reply") {
+      const audit = await this.deps.audit.start({
+        capability: "reply-received",
+        mandateId: null,
+        input: {
+          bridgeMessageId: msg.id,
+          fromHandle: msg.fromHandle,
+          content: msg.content,
+          inReplyTo: msg.inReplyTo,
+          receivedAt: new Date().toISOString(),
+        },
+        initialStatus: "executed",
+      });
+      await this.safeAck(msg.id);
+      this.deps.bus.emit({
+        type: "reply-received",
+        payload: {
+          auditId: audit.id,
+          partnerHandle: msg.fromHandle,
+          content: msg.content,
+        },
+      });
+      return;
     }
 
     // 3. Trust-Level checken — Hot-Path-Lookup über (twin_id, trusted_handle).
@@ -1462,6 +1448,10 @@ export class TwinService {
       const sent = await this.deps.bridgeClient.sendMessage({
         to: targetHandle,
         content: reply.content,
+        // Twin schickt aktiv eine Anfrage an einen anderen Twin
+        // (z.B. send_to_twin-Mandate, skill-triggered). Empfänger antwortet
+        // via LLM. Cross-Ref Tag-28-Block-16.
+        messageType: "twin-initiated",
       });
       await this.deps.audit.complete(entry.id, {
         reply: reply.content,
@@ -1512,7 +1502,10 @@ export class TwinService {
       const sent = await this.deps.bridgeClient.sendMessage({
         to: input.fromHandle,
         content: reply.content,
-        inReplyTo: input.bridgeMessageId,
+        // Wir antworten auf eine eingehende Twin-Message (approveTwinResponse-
+        // Pfad nach Approval). Empfänger schreibt reply-received-Audit ohne
+        // LLM-Reply. Cross-Ref Tag-28-Block-16.
+        messageType: "twin-reply",
       });
       await this.deps.audit.complete(entry.id, {
         reply: reply.content,
@@ -1581,7 +1574,11 @@ export class TwinService {
       const sent = await this.deps.bridgeClient.sendMessage({
         to: msg.fromHandle,
         content: reply.content,
-        inReplyTo: msg.id,
+        // Trusted-Bypass: Inbound-Twin-Message wurde von trusted-twin gesendet
+        // (kein Mandate-Check nötig), wir antworten direkt. Aus Empfänger-Sicht
+        // ist das die Antwort auf seine Anfrage → twin-reply.
+        // Cross-Ref Tag-28-Block-16.
+        messageType: "twin-reply",
       });
       await this.deps.audit.complete(audit.id, {
         reply: reply.content,

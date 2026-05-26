@@ -10,13 +10,30 @@ import type { Db } from "./db.js";
 // Liefer-Semantik bewusst empfänger-getrieben: SSE-Push ist nur Best-Effort,
 // die Wahrheit über Zustellung steht in der Tabelle.
 
-// "twin"   → normale Konversations-Nachricht zwischen zwei Twins.
-// "system" → Statusinfo (Wartemeldung, Reject-Hinweis), die der empfangende
-//            Twin NICHT als Anfrage beantworten soll. Der Receiver-Runtime
-//            filtert diese Nachrichten und logged sie nur.
-export type MessageType = "twin" | "system";
+// Vier message_type-Werte für Empfänger-Verhalten (Tag-28-Block-16-Refactor):
+//   "owner-direct"    → Owner schickt via UI direkt an fremden Twin → LLM-Reply
+//   "twin-initiated"  → Twin schickt autonom Anfrage → LLM-Reply
+//   "twin-reply"      → Twin antwortet auf vorherige Anfrage → reply-received-Audit, kein LLM
+//   "system"          → Bridge/Runtime-System-Message → system-message-received-Audit, kein LLM
+//
+// Legacy: "twin" (vor Tag-28-Block-16) ist semantisch äquivalent zu
+// "twin-initiated" und wird im Receiver-Code-Branch entsprechend normalisiert.
+// Bridge-DB-Schema bleibt unverändert — alte Rows behalten "twin", neue Rows
+// werden mit den vier präzisen Werten geschrieben.
+export type MessageType =
+  | "twin"
+  | "system"
+  | "owner-direct"
+  | "twin-initiated"
+  | "twin-reply";
 
-export const MESSAGE_TYPES: readonly MessageType[] = ["twin", "system"] as const;
+export const MESSAGE_TYPES: readonly MessageType[] = [
+  "twin",
+  "system",
+  "owner-direct",
+  "twin-initiated",
+  "twin-reply",
+] as const;
 
 export interface Message {
   id: string;
@@ -133,9 +150,14 @@ export class MessagesRepo {
 }
 
 function rowToMessage(row: MessageRow): Message {
-  // Defensive: bei Legacy-Rows ohne message_type (theoretisch, weil DEFAULT
-  // 'twin' beim ALTER greift) fallen wir auf "twin" zurück.
-  const type: MessageType = row.message_type === "system" ? "system" : "twin";
+  // Defensive: nur die in MESSAGE_TYPES whitelisteten Werte sind valid.
+  // Alles andere (auch theoretische Legacy-NULL bei alten ALTER-DEFAULTs)
+  // fällt auf "twin" zurück. Receiver normalisiert "twin" zu "twin-initiated".
+  const type: MessageType = MESSAGE_TYPES.includes(
+    row.message_type as MessageType,
+  )
+    ? (row.message_type as MessageType)
+    : "twin";
   return {
     id: row.id,
     fromHandle: row.from_handle,
