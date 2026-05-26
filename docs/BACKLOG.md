@@ -2855,7 +2855,11 @@ Faktor 14× langsamer im Initial-Smoke deutet auf Token-Refresh-Block hin: `OAut
 
 **Out of Scope für Tag 27:** Phase 3.3.1.2 ist End-to-End-grün dokumentiert (Smoke 2), Phase 3.3.1.3 (Approval-Pipeline) hat Vorrang. #139 wird in Phase B oder als Polish-Item gezogen.
 
-### #140 Re-Pause-Pfad in Codex-Resume Smoke-verifizieren (S, nice)
+### #140 Re-Pause-Pfad in Codex-Resume Smoke-verifizieren — ✅ Tag 28 DONE
+
+**Status-Notiz Tag 28 (26. Mai 2026, Abend):** End-to-End grün via 2-Tool-Pause-Sequenz. Trigger-Prompt: „Rufe `mcp:everything-approval:get-sum` mit a=17, b=25 auf, danach `mcp:everything-approval:echo` mit dem Ergebnis als message." Pending-Audit 1 `audit_utkmv7E3YmUu` (get-sum, status=pending) → User approved → transitioniert zu `executed` mit `followUpPending=true`. Pending-Audit 2 `audit_Bm2GfH-gUD6R` (echo, status=pending) mit `priorAuditId: audit_utkmv7E3YmUu` → User approved → `executed`. Final-Audit: `Echo: 42`, `providerMetadata.provider="openai-codex"`, `model="gpt-5.5"`, `authMode="oauth"`, `planType="pro"`, `latencyMs=1822`. **Resume-nach-Resume verifiziert** — Codex bleibt zwischen zwei aufeinanderfolgenden Pauses im OAuth-Pfad, kein Token-Drift, kein `refresh_token_reused`. Polish-Item-Quartett #139+#140+#141+#142 damit zu 4/4.
+
+
 
 **Kontext (Tag 27 Block 16, Phase 3.3.1.3.2):** Codex-Resume nach Approval funktioniert End-to-End grün (`audit_gSqqVwGGBY6O`, `mcp:everything-approval:get-sum`). Beim Bau wurde der **Re-Pause-Pfad mit-implementiert** für den Fall dass Codex in der Resume-Iteration ein weiteres `requires_approval=true`-Tool aufruft:
 
@@ -3078,4 +3082,24 @@ docker build \
 Plus Warn-Box: "Ohne `--build-arg` greift der Dockerfile-Default `http://localhost:4000` und der Web-Container ruft localhost an. Always explicit."
 
 **Priority:** should. Einmaliger Doku-Aufwand, vermeidet ~40 Min Diagnose beim nächsten Production-Build. **Aufwand:** XS (~5-10 Min).
+
+### #155 A2A Reply-Architektur-Korrektur (messageType als Single-Source-of-Truth) — ✅ Tag 28 DONE (Commit `903a813`)
+
+**Status-Notiz Tag 28 (26. Mai 2026, Abend):** Refactor von `inReplyTo`-Heuristik auf `messageType` als Single-Source-of-Truth für Empfänger-Verhalten. Bug: Web-UI setzte `inReplyTo` automatisch mit der letzten Thread-Message bei jedem Send (`apps/web/app/chat/[handle]/page.tsx` `lastReceivedBridgeId`-Memo) → jede neue Owner-Frage wurde als „reply" geframed → Empfänger-Twin-Service schrieb `reply-received`-Audit ohne LLM-Call. Wurzel: Tag-14-Implementierung (3. Mai 2026) hat Reply-Detection als generischen Fallschirm gebaut, der den Asymmetrie-Fall (Owner→Twin in aktivem Thread) nicht unterschied von Twin→Twin-Reply.
+
+**Refactor:** Bridge-Schema `MessageType`-Union von 2 auf 5 Werte erweitert (`twin`, `system`, `owner-direct`, `twin-initiated`, `twin-reply`). Runtime-Send-Pfade: `ownerDirectSend → "owner-direct"`, `approveTwinSend → "twin-initiated"`, `approveTwinResponse` + `handleTrustedBridgeMessage → "twin-reply"`. Inbound-Switch in `receiveBridgeMessage`: alter Reply-Detection-Block (~53 LOC mit `lookupSender`-Failsafe) entfernt, ersetzt durch ~30 LOC `messageType`-Switch mit Legacy-Normalisierung `'twin' → 'twin-initiated'`. Web-UI: `lastReceivedBridgeId`-Memo + `inReplyTo` aus Send-Body raus. `inReplyTo` bleibt im Schema reserviert für künftiges Quote-Reply-Feature, `lookupSender` als `@deprecated` markiert. 8 Files, +173/-115.
+
+**Production-Smoke:** 3 Container rebuilt + recreated (Runtime + Web + Bridge — Bridge initial übersehen, siehe Lesson #15). Smoke 1 grün: Owner-Direct an vertrauten Twin → Trusted-Bypass → Reply. Audits `audit_yBNtNszbAbkF` (owner-direct-send), `audit_qx0zMZHtSO21` (trusted-bypass), `audit_QZ0Rl-YFte5P` (reply-received). Latenz ~4 Sek.
+
+### #156 DEPLOYMENT.md Multi-Service-Refactor-Sequenz dokumentieren (XS, should — Phase B)
+
+**Hintergrund (Tag 28 Block 16):** Multi-Service-Refactor (#155 A2A Reply-Architektur) hat Bridge + Runtime + Web geändert. Deploy-Briefing nannte nur Runtime + Web, Bridge wurde übersehen. Production-Smoke schlug fehl mit Bridge-400 `"messageType muss einer von [twin, system] sein"` weil Bridge-Container noch alten Type-Union-Build hatte. Failed-Audit `audit_pk2D6B1bbdMx` ist live als forensische Spur.
+
+**Action:** Neue Section `### Multi-Service-Deploys` in `docs/DEPLOYMENT.md` mit:
+- Checklist: bei Schema-Changes die mehrere Container kennen müssen, **alle drei Container (Bridge + Runtime + Web) zusammen rebuilden + recreaten**
+- Beispiel-Build-Sequenz (alle drei Images parallel)
+- Hinweis auf `docker compose up -d --force-recreate bridge runtime web` als atomare Aktion
+- Cross-Ref Lesson #15 Tag 28 + #155
+
+**Priority:** should. Vermeidet ~5-10 Min Diagnose pro Multi-Service-Deploy. **Aufwand:** XS (~10-15 Min).
 
