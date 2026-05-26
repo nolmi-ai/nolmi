@@ -47,20 +47,21 @@ export function extractUsage(entry: AuditEntry): unknown {
   return output?.providerMetadata?.usage ?? null;
 }
 
-/** Model-String aus providerMetadata, falls vorhanden (sonst null). */
-export function extractModel(entry: AuditEntry): string | null {
+/**
+ * Model-String aus providerMetadata.model. Pre-Tag-28-Audits ohne flaches
+ * `model`-Feld liefern `"unknown"` zurück — der Compound-String-Split aus
+ * `providerMetadata.provider` (Pre-#141+#142-Pfad) wurde mit #146 entfernt,
+ * weil neue Audits seit Commit `0b02482` `model` immer flach mitschreiben.
+ * Drift in alten Audits ist akzeptiert (Debug-Surface, kein User-Facing).
+ */
+export function extractModel(entry: AuditEntry): string {
   const output = entry.output as
-    | { providerMetadata?: { model?: string; provider?: string } }
+    | { providerMetadata?: { model?: string } }
     | null;
-  // Anthropic AI-SDK schreibt 'provider' (z.B. 'anthropic/claude-opus-4-7'),
-  // OpenAI schreibt 'model'. Provider-String enthält oft das Modell hinten,
-  // also extrahieren wir es nach dem '/'.
-  if (output?.providerMetadata?.model) return output.providerMetadata.model;
-  if (output?.providerMetadata?.provider) {
-    const parts = output.providerMetadata.provider.split("/");
-    return parts[parts.length - 1] ?? null;
+  if (typeof output?.providerMetadata?.model === "string" && output.providerMetadata.model.length > 0) {
+    return output.providerMetadata.model;
   }
-  return null;
+  return "unknown";
 }
 
 /** Memory-Hits aus `output.memoryHits`, leer falls fehlt. */
