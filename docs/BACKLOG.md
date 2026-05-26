@@ -2951,7 +2951,9 @@ Faktor 14× langsamer im Initial-Smoke deutet auf Token-Refresh-Block hin: `OAut
 
 ## Tag-28-Items (#141+#142-Follow-ups)
 
-### #146 `extractModel()` Split-Fallback-Cleanup (XS, nice)
+### #146 `extractModel()` Split-Fallback-Cleanup — ✅ Tag 28 DONE (Commit `3dbbc0b`)
+
+**Status-Notiz Tag 28 (26. Mai 2026):** Split-Fallback komplett entfernt, Return-Type von `string | null` auf `string` mit `"unknown"`-Fallback. Pre-Tag-28-Audits zeigen jetzt `"unknown"` statt zerlegtem Model-Wert — akzeptiert als Debug-Surface-Drift (keine User-Facing-Surface). `extractModel`-Konsumenten (`twin-answer.tsx:39`, `a2a-activity.tsx:73`) unverändert; ihr `?? undefined`-Pattern ist jetzt dead code für die rechte Seite, funktional aber äquivalent (`formatTokenCost` fällt für `"unknown"` über Pricing-Lookup-Miss auf `DEFAULT_MODEL` zurück).
 
 **Kontext (Tag 28):** Nach Fix #141+#142 (Commit `0b02482`) produzieren neue Audits `providerMetadata.model` als eigenes flaches Feld (aus `result.response.modelId`, Provider-deklariert). Der Compound-String-Split-Fallback in `apps/web/lib/audit-render/utils.ts:50-64` (`provider.split("/")` mit Take-Last-After-Slash) ist nur noch für Pre-Refactor-Audits relevant.
 
@@ -2979,7 +2981,9 @@ Faktor 14× langsamer im Initial-Smoke deutet auf Token-Refresh-Block hin: `OAut
 
 **Priorität:** nice. Verifikation ist Bestätigungs-Smoke, kein erwarteter Bug.
 
-### #149 Mutex-Hardening in `OAuthRefreshService.ensureFresh` (M, nice)
+### #149 Mutex-Hardening in `OAuthRefreshService.ensureFresh` — ✅ Tag 28 DONE (Diagnose, Pattern Null)
+
+**Status-Notiz Tag 28 (26. Mai 2026):** Block-11-Diagnose-Spike hat das Item strukturell aufgelöst. `inFlight`-Mutex in `OAuthRefreshService.ensureFresh` ist korrekt im pure-JS-Single-Process-Modell: `Map.get` und `Map.set` sind synchron im selben Event-Loop-Tick, kein await-Boundary dazwischen, kein Race-Window. Tag-28-Vormittag-Failures (`refresh_token_reused`, `refresh_token_invalidated`) sind nicht durch dieses Mutex-Pattern entstanden — wahrscheinlichste Erklärung: Hot-Reload-Race (`tsx watch` erzeugt parallele `OAuthRefreshService`-Instanzen) oder CLI-Concurrent-Write (`pnpm twin:oauth-login` schreibt DB-State parallel zur Runtime). Adressiert via JSDoc in `refresh-service.ts:ensureFresh` (Cross-Ref auf Block-6-Guard + #152). **Kein Code-Patch in diesem Item nötig** — Pattern Null als Verdikt. Strukturelle Adressierung der Hot-Reload-Race siehe #152.
 
 **File:** `apps/runtime/src/oauth/refresh-service.ts:102-111` (`ensureFresh`).
 
@@ -3024,4 +3028,22 @@ Faktor 14× langsamer im Initial-Smoke deutet auf Token-Refresh-Block hin: `OAut
 **Action:** `OAuthTokenResponse`-Type um optionale Felder erweitern, JWT-Parsing-Helper für `id_token`-Claims, optionaler Spalten-Erweiterung im `oauth_tokens`-Repo (z.B. `id_token_email` indizierbar für Account-Lookup).
 
 **Priority:** nice-to-have, Phase B. **Aufwand:** S (~3-4h für Type + Parser + Repo-Erweiterung, ohne UI-Integration).
+
+### #152 Hot-Reload-Race im `tsx watch`-Dev-Setup adressieren (M-L, nice — Phase B)
+
+**Hintergrund (Tag 28 Block 11-12):** Block-11-Diagnose-Spike für #149 hat identifiziert: `tsx watch` (Dev-Setup für Runtime) kann mehrere `OAuthRefreshService`-Instanzen parallel laufen lassen — bei Code-Change in `refresh-service.ts` oder umgebenden Files startet eine neue Instanz, während die alte noch in-flight ist. Jede Instanz hat ihre eigene `inFlight`-Map, der Mutex greift nicht über Instanzen-Grenze hinweg. Mögliche Folge: zwei parallele `refreshAccessToken`-Calls für denselben Twin, OpenAI invalidiert beide Tokens (`refresh_token_reused`).
+
+Dies ist die plausibelste Erklärung für die Tag-28-Vormittag-Failures, die ursprünglich H3-Race-Verdacht in #149 ausgelöst hatten. #149 ist code-seitig korrekt (Single-Process-Modell), die Wurzelursache liegt im Dev-Tool-Lifecycle.
+
+**Production-Relevanz:** Aktuell **niedrig**, weil Production-Container-Restarts (nicht Hot-Reload) immer sauber booten. Aber: relevant für Container-Cluster-Setups (Phase B+) oder Multi-Instance-Skalierung mit horizontaler Replikation.
+
+**Lösungspfade:**
+
+- **Variante A — `OAuthRefreshService` als Singleton via Module-Scope.** Statt Instance-Field in `TwinService`-Konstruktion eine Module-Level-Variable mit Lazy-Init. Hot-Reload re-importiert das Module, aber der Module-Scope-Cache ist persistent (Node-Module-System). Komplexität: M.
+- **Variante B — SQLite-Lock auf `oauth_tokens`-Row für die Refresh-Dauer.** `BEGIN IMMEDIATE` + `UPDATE ... WHERE expires_at = ?` als atomic Check-and-Lock. Cross-Process-Safe, adressiert auch Container-Cluster-Setup. Komplexität: M-L.
+- **Variante C — In Dev-Setup `OAUTH_REFRESH_POLL_DISABLED=true` als Default in `.env.local` setzen.** Schnell-Fix via Doku, keine echte strukturelle Lösung. Bereits empirisch greifend ab Tag 28 Block 6.
+
+**Priority:** nice, Phase B. Bis dahin: Block-6-Guard (`OAUTH_REFRESH_POLL_DISABLED=true`) als pragmatische Mitigation, JSDoc in `ensureFresh` als forensische Spur für zukünftige Sessions.
+
+**Aufwand:** M (Variante A) bis L (Variante B). Variante C ist XS-Doku, aber kein "Fix".
 

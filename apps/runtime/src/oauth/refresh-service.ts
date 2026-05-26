@@ -105,13 +105,38 @@ export class OAuthRefreshService {
    * Lazy-Refresh-API: stellt sicher dass Token nicht expired ist.
    * Returnt entweder den existing frischen Token oder einen frisch geholten.
    *
-   * Mutex-Coalescing: zweiter Call für gleichen twinId während laufendem
-   * Refresh returnt das gleiche In-Flight-Promise. Verhindert dass zwei
-   * parallele Chats gegen die OpenAI-Auth-API rennen.
+   * Concurrency / Mutex-Coalescing: parallele Aufrufe für denselben twinId
+   * während laufendem Refresh teilen sich das gleiche In-Flight-Promise via
+   * `inFlight: Map<twinId, Promise>`. Im pure-JS-Single-Process-Modell ist
+   * dieses Pattern atomic: `Map.get` und `Map.set` sind synchron im selben
+   * Event-Loop-Tick, kein await-Boundary dazwischen, kein Microtask kann
+   * dazwischen springen (Tag-28-Block-11-Diagnose).
    *
    * Bewusst NICHT `async`: ein `async`-Wrapper würde den returned Promise
    * neu wrappen, Identity ginge verloren — die Coalescing-Garantie hängt
    * an der gemeinsamen Promise-Referenz im inFlight-Map.
+   *
+   * Bekannte Race-Quellen *ausserhalb* dieses Mutex (nicht durch
+   * `inFlight`-Coalescing adressierbar):
+   *
+   *   - **Hot-Reload-Race:** `tsx watch` kann zwei `OAuthRefreshService`-
+   *     Instanzen parallel laufen lassen, jede mit eigener `inFlight`-Map.
+   *     Mutex greift nicht über Instanzen-Grenze hinweg. Vermutete Ursache
+   *     für Tag-28-Vormittag-Failures (`refresh_token_reused` +
+   *     `refresh_token_invalidated`). Mitigation: env-Guard
+   *     `OAUTH_REFRESH_POLL_DISABLED=true` deaktiviert den Background-Poll
+   *     (siehe `start()`-Implementation). Strukturelle Adressierung:
+   *     BACKLOG #152 (Singleton-via-Module-Scope oder SQLite-Lock).
+   *
+   *   - **CLI-Concurrent-Write:** `pnpm twin:oauth-login` schreibt
+   *     `~/.codex/auth.json` und persistiert Token via CLI-Wrapper in die
+   *     DB. Wenn parallel ein Codex-Call läuft und einen Refresh triggert,
+   *     kann der refresh_token von OpenAI als `reused` invalidiert werden.
+   *     Mitigation: CLI-Login während keiner aktiven Codex-Session.
+   *
+   * Cross-Refs: BACKLOG #139 (Tracking, Tag 28 done), BACKLOG #149 (Mutex-
+   * Diagnose, Tag 28 done — Pattern Null), BACKLOG #152 (Hot-Reload-Race,
+   * Phase B).
    */
   ensureFresh(
     twinId: string,
