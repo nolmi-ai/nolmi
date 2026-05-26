@@ -1907,6 +1907,10 @@ REGEL 6: Wenn der User dich explizit bittet, ein Tool zu nutzen ("rufe das X-Too
           `nicht im aktiven Tool-Set — fallback auf toolChoice='auto'`,
       );
     }
+    // #141/#142: latencyMs zentral messen — gilt für oauth + api_key (inkl.
+    // Followup-Step). Vorher nur im Codex-Provider-Output, jetzt provider-
+    // agnostisch in der Audit-Metadata sichtbar.
+    const startedAt = Date.now();
     const result = await generateText({
       model: activeModel,
       system,
@@ -2005,11 +2009,52 @@ REGEL 6: Wenn der User dich explizit bittet, ein Tool zu nutzen ("rufe das X-Too
     const mergedUsage = followupResult
       ? mergeTokenUsage(result.usage, followupResult.usage)
       : result.usage;
+    const latencyMs = Date.now() - startedAt;
+
+    // #141/#142: providerMetadata-Aufbereitung für audit.output.
+    //   - `result.providerMetadata` ist nach V3-Spec verschachtelt unter dem
+    //     Provider-Namespace (`{ "openai-codex": {...} }` bzw. `{ anthropic: {...} }`).
+    //     Wir un-nesten flach (Pre-Refactor-Konsistenz, Debug-Query-freundlich).
+    //   - `provider` + `model` werden aus dem Compound-`activeModelLabel`
+    //     (`"openai-codex/gpt-5.5"`) gesplittet — Pre-Refactor-Audits hatten
+    //     `provider` flach ohne Modell-Suffix.
+    //   - `authMode` + `twinId` werden via TwinService-Kontext injected (Provider
+    //     kennt sie nicht).
+    //   - `unknownEventTypes` wird vom Provider als kommaseparierter String
+    //     emittiert (codex-vercel-provider.ts:297) — hier zurück zu Array für
+    //     Konsistenz mit Pre-Refactor-Audits.
+    const providerKey = isOAuth ? "openai-codex" : "anthropic";
+    const rawMeta = (result.providerMetadata ?? {}) as Record<string, unknown>;
+    const nestedMeta =
+      (rawMeta[providerKey] as Record<string, unknown> | undefined) ?? {};
+
+    const [providerName, ...modelParts] = activeModelLabel.split("/");
+    const responseModelId = (result.response as { modelId?: string } | undefined)
+      ?.modelId;
+    const splitModelName = modelParts.join("/");
+    const modelName = responseModelId || splitModelName || undefined;
+
+    const rawUnknown = nestedMeta.unknownEventTypes;
+    const unknownEventTypes =
+      typeof rawUnknown === "string"
+        ? rawUnknown
+            .split(",")
+            .map((s) => s.trim())
+            .filter(Boolean)
+        : Array.isArray(rawUnknown)
+        ? rawUnknown
+        : [];
 
     return {
       content: finalText,
       metadata: {
-        provider: activeModelLabel,
+        ...nestedMeta,
+        provider: providerName ?? providerKey,
+        ...(modelName ? { model: modelName } : {}),
+        authMode: isOAuth ? "oauth" : "api_key",
+        twinId: this.deps.twinId,
+        latencyMs,
+        ...(unknownEventTypes.length > 0 ? { unknownEventTypes } : {}),
         usage: mergedUsage,
         finishReason: finalFinishReason,
         ...(toolCallsForAudit.length > 0
