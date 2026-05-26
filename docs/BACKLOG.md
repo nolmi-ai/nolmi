@@ -2461,3 +2461,44 @@ Plus Warn-Box: "Ohne `--build-arg` greift der Dockerfile-Default `http://localho
 
 **Priority:** should. Vermeidet ~5-10 Min Diagnose pro Multi-Service-Deploy. **Aufwand:** XS (~10-15 Min).
 
+### #157 Smoke-Scripts-Hygiene-Welle (Phase-by-Phase-Archivierung, M-L, nice — Phase B)
+
+**Status:** Offen | Phase B | Aufwand: M-L (1-1.5 Bautage)
+**Cross-Ref:** `docs/INVENTORY-tag28.md` Sektion B2
+
+Aktuell 35 `test-*.ts`-Smoke-Scripts in `apps/runtime/src/scripts/` (22 in `package.json` registriert, 13 unregistriert), alle aus konkreten Bauphasen (Phase 3.1 Skills, 3.2 MCP, 3.3 Memory/Facts, 3.4 OAuth/Codex, #130 Telegram).
+
+**Setzung Schule B (Tag 28 Block 19/20):** Phase-Closure-getriggert Smoke-Scripts nach `apps/runtime/src/scripts/archive/<phase>/` verschieben. `package.json`-Scripts entsprechend dokumentieren oder entfernen. Phase-bezogenes Mapping als `README.md` im jeweiligen Archive-Subfolder.
+
+**Scope-Bauschritte:**
+- Pro Bauphase Liste der Smoke-Scripts ermitteln (aus STAND/BACKLOG-Spuren zusammensuchen)
+- `archive/`-Subfolder mit `README.md`-Stub anlegen
+- Files mit `git mv` verschieben
+- `package.json`-Scripts-Section bereinigen
+- STRATEGY-Docs-Cross-Refs aktualisieren falls direkt auf Script-Pfad verwiesen wird
+
+**Nicht-Scope:**
+- Vitest-Migration (eigene Diskussion, nicht hier)
+- Aktive Phase (z.B. Phase 3.5 falls noch nicht closed) bleibt live
+
+**Findings aus Block 19 Inventur:**
+- **22 registriert** (B2.2 Inventur): `oauth-phase1/2/3-Spikes`, `codex-vercel-provider`, `codex-sse-parser`, `codex-retry`, `trust-test`, `memory-repos`, `episodic-repos`, `embedding-providers`, `model-cache-dir`, `memory-embedding-service`, `memory-retrieval-service/hybrid`, `twin-diary-cli`, `memory-maintenance`, `summary-engine`, `history-with-summary`, `prompt-builder`, `extraction-engine`
+- **13 unregistriert** (B2.3 Inventur): `test-conversation-flow/history`, `test-conversations-repo`, `test-mcp-client-manager`, `test-mcp-servers-repo`, `test-mcp-skill-sync`, `test-mcp-tool-execution`, `test-skill-engine`, `test-skill-repo`, `test-telegram-phase2/3`, `test-telegram-repos`, `setup-telegram-manual-smoke`
+
+### #158 Strategy-Doc-Lifecycle-Konvention etablieren (S, nice — Phase B)
+
+**Status:** Offen | Phase B | Aufwand: S (~30 Min Setup-Block, danach laufende Disziplin)
+**Cross-Ref:** `docs/INVENTORY-tag28.md` Beobachtung 9, `docs/archive/README.md`
+
+`131-OAUTH-STRATEGY.md` mit 141 KB und 25 Sub-Sections (§a-§y) zeigt: wenn jedes substantielle Phase-Item ein Live-Tagebuch bekommt, wachsen wir uns mit den Strategy-Docs kaputt. Brauchen Konvention.
+
+**Setzung:** Strategy-Docs leben in `docs/` während ihre Phase aktiv ist. Nach Phase-Closure wandern sie nach `docs/archive/`. Konvention dokumentiert im `docs/archive/README.md` (Block 20).
+
+**Scope-Bauschritte:**
+- Bei nächster Phase-Closure (z.B. Phase 3.5 oder #131 OAuth final-closed) Strategy-Doc nach `docs/archive/` verschieben
+- Live-STAND-Header weist auf Archive-Pfad hin
+- Falls künftige Phase Live-Strategy-Doc braucht: `README.md` im Phase-Folder vermerken, nicht im Repo-Root
+
+**Nicht-Scope:**
+- Retroaktive Archivierung von `131-OAUTH-STRATEGY.md` (Phase A closed seit Tag 27, aber Strategy-Doc ist heute Tag 28 Block 14 + 15 um §x + §y erweitert worden — hat noch live-Spuren). Wenn Phase A komplett closed ist und keine `--auth-json`-Folge-Iteration mehr ansteht, dann Move.
+

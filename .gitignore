@@ -12,6 +12,10 @@ apps/bridge/data/*.db-wal
 *.log
 .DS_Store
 .turbo
+*.orig
+*.bak
+*.swp
+*.swo
 data/*.db-shm
 data/*.db-wal
 *.tsbuildinfo
