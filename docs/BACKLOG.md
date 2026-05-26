@@ -2828,7 +2828,9 @@ Danach:
 
 ## Tag-27-Items (#131-getrieben)
 
-### #139 OAuth-Token-Refresh-Latenz bei Multi-Step-Tool-Use untersuchen (M, should)
+### #139 OAuth-Token-Refresh-Latenz bei Multi-Step-Tool-Use untersuchen — ✅ Tag 28 DONE
+
+**Status-Notiz Tag 28 (26. Mai 2026):** Tracking-Pfad gebaut. `OAuthRefreshService.recordSuccess` analog `recordFailure` schreibt einen `oauth-refresh-success`-Audit mit `output: { latencyMs, oldExpiresAt, newExpiresAt, triggeredBy }`. `doRefreshIfNeeded` misst Latenz um den `refreshAccessToken`-Roundtrip. `ensureFresh(twinId, triggeredBy)` neu signiert (Default `"lazy"`), `pollAllTokens` markiert seinen Pfad als `"background"`. Plus Block-6-Sicherung: `OAUTH_REFRESH_POLL_DISABLED=true`-env-Guard in `start()` (Default unverändert, Lazy-Refresh bleibt aktiv), eingeführt nach zwei Token-Invalidierungs-Smokes (`refresh_token_reused` + `refresh_token_invalidated`). Phase-A-Diagnose (Block 7): H1 (refresh_token-Rotation nicht atomar) widerlegt, H2 (refreshAccessToken-Parsing-Bug) widerlegt, H3 (Race-Condition) unverifiziert, via Guard pragmatisch entschärft. Live-Smoke `audit_FuawriTsQd1j`: `latencyMs: 446`, `triggeredBy: "lazy"`, atomare Token-Rotation, `newExpiresAt` 10 Tage future. **Codex-Refresh-Token-Lifetime ist 10 Tage** (`expires_in: 863999`), nicht durch Code limitiert — siehe #150 für Doku-Klarstellung. Folge-Items: #149 (Mutex-Hardening), #150 (Token-Lifetime-Doku), #151 (id_token-/scope-Evaluation).
 
 **Symptom (Tag 27 Phase-3.3.1.2-Smoke):** Multi-Step-Tool-Use über Codex-OAuth zeigt substantielle Latenz-Diskrepanz zwischen Initial- und Folge-Smoke desselben Setups:
 
@@ -2976,4 +2978,48 @@ Faktor 14× langsamer im Initial-Smoke deutet auf Token-Refresh-Block hin: `OAut
 **Risiko:** sehr niedrig. Fix ist code-strukturell symmetrisch — gleicher `runModel`-Return, gleicher Un-Nest-Mechanismus für beide Provider-Namespaces (`openai-codex` vs `anthropic`). Anthropic-SDK liefert `providerMetadata` vermutlich nach gleichem V3-Pattern.
 
 **Priorität:** nice. Verifikation ist Bestätigungs-Smoke, kein erwarteter Bug.
+
+### #149 Mutex-Hardening in `OAuthRefreshService.ensureFresh` (M, nice)
+
+**File:** `apps/runtime/src/oauth/refresh-service.ts:102-111` (`ensureFresh`).
+
+**Hintergrund (Tag 28 Block 5-7):** Bei Smoke-Verifikation für #139 traten zwei aufeinanderfolgende Token-Invalidierungen auf — erst `refresh_token_reused`, nach Re-Login dann `refresh_token_invalidated`. Plausibelste Erklärung: Race-Condition zwischen Background-Poll-Loop (`pollAllTokens` → `ensureFresh`) und Lazy-Trigger (`CodexAdapter.executeRequest` → `ensureFresh`) im theoretisch atomaren V8-Synchron-Block zwischen `Map.get` und `Map.set` der `inFlight`-Mutex. Phase-A-Diagnose (Block 7) hat das nicht direkt verifiziert, aber via Block-6-Guard (`OAUTH_REFRESH_POLL_DISABLED=true`) empirisch entschärft.
+
+**Action:** `ensureFresh`-Mutex auf hartere Garantien umstellen. Optionen:
+- **A:** Atomare Check-and-Set via Promise-Marker (Promise wird ins Map gesetzt **bevor** `doRefreshIfNeeded` startet — heute schon der Fall, aber zwischen den zwei Statements liegt ein synthetisches Race-Window. Re-Read als Patternverifikation reicht eventuell.)
+- **B:** DB-Lock auf `oauth_tokens`-Row während Refresh (better-sqlite3 `BEGIN IMMEDIATE`-Transaktion um find-update-Sequenz).
+- **C:** Refresh-Pfad serialisieren via Module-Singleton-Promise-Queue für alle Twins (Overkill bei Single-Twin-Self-Hosting).
+
+**Priority:** nice-to-have, empirisch entschärft via Block-6-Guard. **Aufwand:** M (~1 Tag).
+
+**Hinweis:** Wenn implementiert, kann Block-6-Guard optional entfernt oder als permanente Notfall-Sicherung bleiben — Default Off statt On.
+
+### #150 Token-Lifetime-Klarstellung in `131-OAUTH-STRATEGY.md` (XS, nice)
+
+**Hintergrund (Tag 28 Block 7):** Codex-OAuth-Refresh-Token-Lifetime ist **10 Tage** (`expires_in: 863999` Sekunden), live verifiziert in `audit_FuawriTsQd1j`. Unser Code limitiert das nicht — `new Date(Date.now() + response.expires_in * 1000)` in `refresh-service.ts:165-167` schreibt direkt was Codex liefert.
+
+**Beobachtung:** `pnpm twin:oauth-login` (CLI-Wrapper über `codex login`) schreibt Initial-`expires_at` mit nur ~50-60 Min in die DB. Quelle vermutlich `id_token.exp` oder Codex-CLI-internes Initial-Token-Lifecycle-Step. Sobald der erste Refresh durchgelaufen ist, springt `expires_at` auf 10 Tage.
+
+**Action:** Abschnitt "Token-Lifetime" in `docs/131-OAUTH-STRATEGY.md` ergänzen:
+- (a) Refresh-Token-Lifetime laut Codex-API: 10 Tage (`expires_in: 863999`)
+- (b) Initial-Token nach `pnpm twin:oauth-login` kann kürzer sein (~50 Min) — CLI-Wrapper-Artefakt, nicht System-Constraint
+- (c) Nach erstem Lazy-Refresh durch `CodexAdapter.executeRequest` springt `expires_at` auf 10 Tage
+- (d) Code limitiert nichts, `expires_in` aus Refresh-Response wird 1:1 in DB persistiert
+
+**Priority:** nice-to-have, Doku-only, kein Code-Change. **Aufwand:** XS.
+
+### #151 `id_token` + `scope` aus Refresh-Response evaluieren (S, nice — Phase B)
+
+**Files:** `apps/runtime/src/oauth/openai-pkce.ts` (`OAuthTokenResponse`-Type), `apps/runtime/src/oauth/oauth-tokens-repo.ts`.
+
+**Hintergrund (Tag 28 Block 7 Live-Diag):** Codex-Refresh-Response liefert die Felder `[access_token, expires_in, id_token, refresh_token, scope, token_type]` — siehe `audit_FuawriTsQd1j`-Begleit-Diag-Dump. Heute werden nur `access_token` + `refresh_token` + `expires_in` extrahiert. `id_token` (JWT mit Claims) und `scope` werden ignoriert.
+
+**Mögliche Use-Cases:**
+- **`id_token.exp`-Claim** für Initial-Token-Lifetime-Konsistenz (Cross-Ref #150). Würde erklären woher die ~50-Min-Initial-Lifetime nach `codex login` kommt.
+- **`id_token.email`** für Account-Verifikation. Owner-User-Mapping könnte gestärkt werden — heute basiert das nur auf `account_id`.
+- **`scope`** für Multi-Scope-Support in Phase B (z.B. wenn zusätzliche OpenAI-Capabilities pro Twin geschaltet werden sollen).
+
+**Action:** `OAuthTokenResponse`-Type um optionale Felder erweitern, JWT-Parsing-Helper für `id_token`-Claims, optionaler Spalten-Erweiterung im `oauth_tokens`-Repo (z.B. `id_token_email` indizierbar für Account-Lookup).
+
+**Priority:** nice-to-have, Phase B. **Aufwand:** S (~3-4h für Type + Parser + Repo-Erweiterung, ohne UI-Integration).
 

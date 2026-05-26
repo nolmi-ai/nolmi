@@ -66,6 +66,20 @@ export class OAuthRefreshService {
       logger.warn("[oauth-refresh] start() während laufendem Loop — ignored");
       return;
     }
+    // TEMPORÄR Tag 28 — Background-Poll deaktivierbar via env.
+    // Hintergrund: refresh_token_invalidated-Verdacht (Smoke #139 hat zwei
+    // Failure-Audits in Folge erzeugt: `refresh_token_reused` und
+    // `refresh_token_invalidated`). Diagnose-Spike pending — bis Klarheit,
+    // Loop pausierbar damit nicht alle 60s neue Failure-Audits geflutet
+    // werden + parallele Refresh-Versuche keine weiteren Tokens invalidieren.
+    // Lazy-Refresh (via ensureFresh in CodexAdapter.executeRequest) bleibt
+    // aktiv. Guard wieder entfernen sobald Phase-A-Bug verstanden ist.
+    if (process.env.OAUTH_REFRESH_POLL_DISABLED === "true") {
+      logger.warn(
+        "[oauth-refresh] background poll DISABLED via OAUTH_REFRESH_POLL_DISABLED=true — lazy-refresh on Codex-calls still active",
+      );
+      return;
+    }
     this.intervalId = setInterval(() => {
       this.pollAllTokens().catch((err) => {
         const msg = err instanceof Error ? err.message : String(err);
@@ -99,11 +113,14 @@ export class OAuthRefreshService {
    * neu wrappen, Identity ginge verloren — die Coalescing-Garantie hängt
    * an der gemeinsamen Promise-Referenz im inFlight-Map.
    */
-  ensureFresh(twinId: string): Promise<OAuthTokenDecrypted> {
+  ensureFresh(
+    twinId: string,
+    triggeredBy: "lazy" | "background" = "lazy",
+  ): Promise<OAuthTokenDecrypted> {
     const existing = this.inFlight.get(twinId);
     if (existing) return existing;
 
-    const promise = this.doRefreshIfNeeded(twinId).finally(() => {
+    const promise = this.doRefreshIfNeeded(twinId, triggeredBy).finally(() => {
       this.inFlight.delete(twinId);
     });
     this.inFlight.set(twinId, promise);
@@ -127,7 +144,7 @@ export class OAuthRefreshService {
 
     for (const twinId of twinIds) {
       try {
-        await this.ensureFresh(twinId);
+        await this.ensureFresh(twinId, "background");
       } catch (err) {
         // doRefreshIfNeeded hat bereits Audit-Entry geschrieben.
         // Hier nur Log, damit Loop weiter läuft.
@@ -146,6 +163,7 @@ export class OAuthRefreshService {
    */
   private async doRefreshIfNeeded(
     twinId: string,
+    triggeredBy: "lazy" | "background",
   ): Promise<OAuthTokenDecrypted> {
     const token = this.repo.findDecryptedByTwinAndProvider(twinId, "openai");
     if (!token) {
@@ -160,31 +178,50 @@ export class OAuthRefreshService {
       return token; // noch frisch, kein Refresh
     }
 
+    // #139: Latenz um den Refresh-Roundtrip messen + oldExpiresAt sichern,
+    // damit recordSuccess Before/After-Vergleich persistieren kann.
+    const oldExpiresAt = token.expiresAt;
+    const refreshStartedAt = Date.now();
+
+    let response;
     try {
-      const response = await refreshAccessToken(token.refreshToken);
-      const newExpiresAt = new Date(
-        Date.now() + response.expires_in * 1000,
-      ).toISOString();
-
-      const updated = this.repo.upsert({
-        twinId,
-        provider: "openai",
-        accessToken: response.access_token,
-        refreshToken: response.refresh_token,
-        expiresAt: newExpiresAt,
-        accountId: response.account_id ?? token.accountId,
-      });
-
-      this.logger?.info(
-        { twinId, expiresAt: newExpiresAt },
-        "[oauth-refresh] refreshed token",
-      );
-      return updated;
+      response = await refreshAccessToken(token.refreshToken);
     } catch (err) {
       const reason = err instanceof Error ? err.message : String(err);
       await this.recordFailure(twinId, reason);
       throw err;
     }
+
+    const refreshLatencyMs = Date.now() - refreshStartedAt;
+    const newExpiresAt = new Date(
+      Date.now() + response.expires_in * 1000,
+    ).toISOString();
+
+    const updated = this.repo.upsert({
+      twinId,
+      provider: "openai",
+      accessToken: response.access_token,
+      refreshToken: response.refresh_token,
+      expiresAt: newExpiresAt,
+      accountId: response.account_id ?? token.accountId,
+    });
+
+    this.logger?.info(
+      { twinId, expiresAt: newExpiresAt, refreshLatencyMs, triggeredBy },
+      "[oauth-refresh] refreshed token",
+    );
+
+    // #139: Success-Audit analog recordFailure, sodass beide Refresh-Outcomes
+    // (success + failure) im audit-Log auswertbar sind. recordSuccess hat
+    // eigenes try/catch — Audit-Write-Fehler darf den Refresh nicht brechen.
+    await this.recordSuccess(twinId, {
+      latencyMs: refreshLatencyMs,
+      oldExpiresAt,
+      newExpiresAt,
+      triggeredBy,
+    });
+
+    return updated;
   }
 
   /**
@@ -217,6 +254,47 @@ export class OAuthRefreshService {
       this.logger?.error(
         { twinId, auditErr: msg },
         "[oauth-refresh] audit append failed",
+      );
+    }
+  }
+
+  /**
+   * #139: Schreibt einen one-shot Audit-Entry für erfolgreichen Refresh.
+   * Pattern analog `recordFailure` — direkt auf AuditRepository (kein
+   * Lifecycle), Capability `oauth-refresh-success` als Discriminator.
+   * Output enthält `latencyMs` (Refresh-Roundtrip-Dauer), `oldExpiresAt`
+   * + `newExpiresAt` (Before/After), `triggeredBy` ('lazy' = vor Codex-Call
+   * via CodexAdapter, 'background' = via pollAllTokens-Loop).
+   */
+  private async recordSuccess(
+    twinId: string,
+    output: {
+      latencyMs: number;
+      oldExpiresAt: string;
+      newExpiresAt: string;
+      triggeredBy: "lazy" | "background";
+    },
+  ): Promise<void> {
+    const entry: AuditEntry = {
+      id: `audit_${nanoid(12)}`,
+      twinId,
+      timestamp: new Date().toISOString(),
+      capability: "oauth-refresh-success",
+      mandateId: null,
+      status: "executed",
+      input: { provider: "openai" },
+      output,
+      reason: null,
+      conversationId: null,
+    };
+    try {
+      await this.auditRepo.append(entry);
+    } catch (auditErr) {
+      const msg =
+        auditErr instanceof Error ? auditErr.message : String(auditErr);
+      this.logger?.error(
+        { twinId, auditErr: msg },
+        "[oauth-refresh] audit append failed (success)",
       );
     }
   }
