@@ -28,12 +28,24 @@ import { TwinProfilesRepo } from "../twin-profiles-repo.js";
 // Strategy + Setzungen: docs/131-OAUTH-STRATEGY.md §t (insbesondere §t.10).
 //
 // Aufruf:
-//   pnpm twin:oauth-login @markus       (mit @ — case-insensitive)
-//   pnpm twin:oauth-login markus        (ohne @ — case-insensitive)
+//   pnpm twin:oauth-login @markus                   (lokal mit @)
+//   pnpm twin:oauth-login markus                    (lokal ohne @)
+//   ... @markus --auth-json=/tmp/auth.json          (Production/VPS-Mode)
+//
+// Flags:
+//   --auth-json=<path>  Skip Subprocess + Hybrid-Detection. Liest Token aus
+//                       der angegebenen auth.json. Workflow für VPS/Production
+//                       wo codex-Binary fehlt:
+//                         1. Mac-lokal: codex login → ~/.codex/auth.json
+//                         2. scp ~/.codex/auth.json root@vps:/tmp/auth.json
+//                         3. docker cp /tmp/auth.json container:/tmp/auth.json
+//                         4. docker exec container npx tsx <script> @handle \
+//                              --auth-json=/tmp/auth.json
 //
 // ENV:
 //   CODEX_BIN  Override für codex-Binary-Pfad (Linux/CI). Default: macOS-
 //              App-Bundle `/Applications/Codex.app/Contents/Resources/codex`.
+//              Wird im --auth-json-Modus nicht konsultiert.
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const WORKSPACE_ROOT = path.resolve(__dirname, "../../../..");
@@ -50,21 +62,35 @@ const POST_MTIME_SETTLE_MS = 200;
 
 // ─── Sub-Phase A: Args-Parsing ──────────────────────────────────────────────
 
+interface ParsedArgs {
+  /** Normalisiertes Handle in DB-Storage-Form `@<lowercase>`. */
+  handle: string;
+  /** Pfad zu einer alternativen auth.json (--auth-json-Modus). `null` =
+   *  Default-Flow mit Subprocess-Spawn + `~/.codex/auth.json`. */
+  authJsonPath: string | null;
+}
+
+const USAGE =
+  "Usage: pnpm twin:oauth-login <@handle> [--auth-json=<path>]\n" +
+  "  Beispiel (lokal):       pnpm twin:oauth-login @markus\n" +
+  "  Beispiel (Production):  npx tsx .../cli-oauth-login.ts @markus --auth-json=/tmp/auth.json";
+
 /**
- * Normalisiert User-Input zu DB-Storage-Form `@<lowercase>`:
+ * Parst CLI-Args:
+ *   - Position 2 (argv[2]): Handle (positional, required)
+ *   - Optional: `--auth-json=<path>` als beliebiges weiteres Arg
+ *
+ * Handle-Normalisierung zu DB-Storage-Form `@<lowercase>`:
  *   - "@markus"  → "@markus"
  *   - "markus"   → "@markus"
  *   - "@MARKUS"  → "@markus"
  *   - "@@markus" → "@markus" (führende @s werden gestrippt, dann ein-prefix)
  *   - "mark.us"  → Error (regex-Validation)
  */
-function parseHandle(argv: string[]): string {
+function parseArgs(argv: string[]): ParsedArgs {
   const raw = argv[2];
-  if (!raw) {
-    throw new Error(
-      "Usage: pnpm twin:oauth-login <@handle>\n" +
-        "  Beispiel: pnpm twin:oauth-login @markus",
-    );
+  if (!raw || raw.startsWith("--")) {
+    throw new Error(USAGE);
   }
   const stripped = raw.replace(/^@+/, "").trim().toLowerCase();
   if (!/^[a-z][a-z0-9_-]*$/.test(stripped)) {
@@ -72,7 +98,30 @@ function parseHandle(argv: string[]): string {
       `Ungültiger Handle '${raw}'. Erlaubt: Kleinbuchstaben, Ziffern, _, -.`,
     );
   }
-  return `@${stripped}`;
+  const handle = `@${stripped}`;
+
+  let authJsonPath: string | null = null;
+  for (const arg of argv.slice(3)) {
+    if (arg.startsWith("--auth-json=")) {
+      const value = arg.slice("--auth-json=".length).trim();
+      if (value.length === 0) {
+        throw new Error(
+          `--auth-json=<path> braucht einen Wert.\n${USAGE}`,
+        );
+      }
+      authJsonPath = value;
+      continue;
+    }
+    if (arg === "--auth-json") {
+      throw new Error(
+        `--auth-json benötigt einen Wert via '=', z.B. --auth-json=/tmp/auth.json.\n${USAGE}`,
+      );
+    }
+    // Unbekanntes Flag — strict-fail statt silent-ignore
+    throw new Error(`Unbekanntes Argument '${arg}'.\n${USAGE}`);
+  }
+
+  return { handle, authJsonPath };
 }
 
 // ─── Sub-Phase B: Codex-Binary-Resolution ───────────────────────────────────
@@ -225,21 +274,25 @@ async function sleep(ms: number): Promise<void> {
 /**
  * Token-Read mit einem Retry. Bei mtime-Trigger kann codex login mitten im
  * Write sein — JSON.parse wirft dann. Kurz warten, nochmal versuchen.
+ * Im --auth-json-Modus übergibt der Caller den expliziten Pfad; Default
+ * (Subprocess-Modus) bleibt `~/.codex/auth.json`.
  */
-async function loadCodexTokenWithRetry(): Promise<CodexToken> {
+async function loadCodexTokenWithRetry(
+  filePath?: string,
+): Promise<CodexToken> {
   try {
-    return loadCodexToken();
+    return loadCodexToken(filePath);
   } catch (err) {
     if (!(err instanceof CodexAuthFileError)) throw err;
     await sleep(POST_MTIME_SETTLE_MS);
-    return loadCodexToken();
+    return loadCodexToken(filePath);
   }
 }
 
 // ─── Main ───────────────────────────────────────────────────────────────────
 
 async function main(): Promise<void> {
-  const handle = parseHandle(process.argv);
+  const { handle, authJsonPath } = parseArgs(process.argv);
   console.log(`🔐 OAuth-Login für Twin ${handle} ...\n`);
 
   // DB + Repos
@@ -272,33 +325,44 @@ async function main(): Promise<void> {
     );
   }
 
-  // Codex-Binary
-  const codexBin = locateCodexBinary();
-  console.log(`✅ codex-Binary: ${codexBin}\n`);
+  let token: CodexToken;
+  if (authJsonPath !== null) {
+    // --auth-json-Modus: Subprocess + Hybrid-Detection komplett skippen,
+    // Token direkt aus dem angegebenen Pfad lesen. Workflow für VPS/Production
+    // wo codex-Binary fehlt und auth.json per scp + docker cp eingeschleust wird.
+    console.log(
+      `📄 Lese Token aus ${authJsonPath} (--auth-json-Modus, kein Subprocess)\n`,
+    );
+    token = await loadCodexTokenWithRetry(authJsonPath);
+  } else {
+    // Default-Flow: codex login Subprocess + Hybrid-Detection + ~/.codex/auth.json.
+    const codexBin = locateCodexBinary();
+    console.log(`✅ codex-Binary: ${codexBin}\n`);
 
-  // Baseline-mtime VOR Subprocess-Spawn festhalten (sonst Race)
-  const baselineMtime = await getMtimeMs(CODEX_AUTH_PATH);
+    // Baseline-mtime VOR Subprocess-Spawn festhalten (sonst Race)
+    const baselineMtime = await getMtimeMs(CODEX_AUTH_PATH);
 
-  // Subprocess starten
-  console.log(`🌐 Starte 'codex login' (Browser öffnet sich) ...\n`);
-  const child = spawn(codexBin, ["login"], { stdio: "inherit" });
+    // Subprocess starten
+    console.log(`🌐 Starte 'codex login' (Browser öffnet sich) ...\n`);
+    const child = spawn(codexBin, ["login"], { stdio: "inherit" });
 
-  // Hybrid-Detection
-  const reason = await waitForLoginCompletion(
-    child,
-    baselineMtime,
-    SUBPROCESS_TIMEOUT_MS,
-  );
-  console.log(
-    `\n✅ Login-Detection: ${
-      reason.kind === "child-exit"
-        ? `Subprocess-Exit (code=${reason.code})`
-        : "auth.json mtime-Update"
-    }`,
-  );
+    // Hybrid-Detection
+    const reason = await waitForLoginCompletion(
+      child,
+      baselineMtime,
+      SUBPROCESS_TIMEOUT_MS,
+    );
+    console.log(
+      `\n✅ Login-Detection: ${
+        reason.kind === "child-exit"
+          ? `Subprocess-Exit (code=${reason.code})`
+          : "auth.json mtime-Update"
+      }`,
+    );
 
-  // Token lesen (mit Retry bei partial-write)
-  const token = await loadCodexTokenWithRetry();
+    // Token lesen (mit Retry bei partial-write)
+    token = await loadCodexTokenWithRetry();
+  }
   console.log(`✅ Token geladen (account=${token.accountId ?? "?"})`);
 
   // Persist
