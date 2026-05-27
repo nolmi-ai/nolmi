@@ -1152,22 +1152,15 @@ Phase-4-Scope war zu eng für den Refactor, deshalb in Phase 4.3 pragmatisch das
 
 **Status-Notiz Tag 26:** Angelegt aus Phase 4.3 Tag-26-Closure (Commit `402a1ae`). Heutiges Coupling funktional, aber UX-suboptimal — Tab-Switch innerhalb Konfiguration ist nicht "kosten-frei".
 
-### 135. Account-Settings UI (Email/Password-Edit-Surface)
+### 135. Account-Settings UI (Email/Password-Edit-Surface) ✅
 
-Heute existiert kein UI für Email- oder Password-Edit. Logout läuft über ProfileMenu/TopNav, aber Account-Self-Service (Password ändern, Email aktualisieren) ist nicht möglich.
+**Abgeschlossen Tag 29 (27. Mai 2026, Mittwoch).** Option B umgesetzt: eigene Route `/account` mit zwei Forms (Email-Change + Password-Change), beide mit Current-Password-Confirm. UsersRepo um `updateEmail` (Email-Uniqueness-Pre-Check, wirft `UserAlreadyExistsError`) + `updatePassword` (bcrypt cost 12) erweitert. Zwei neue Endpoints `PATCH /auth/me/email` und `PATCH /auth/me/password` mit Session-Check (`getCurrentUser`) + `verifyPassword`-Confirm. ProfileMenu-Link „Account" oberhalb Logout. Middleware `PROTECTED_PREFIXES` um `/account` ergänzt.
 
-Für Self-Hosting-Launch potentiell relevant:
-- User vergisst Password → Self-Service-Reset (siehe auch #44 Self-Service-Password-Reset, anderer Aspekt)
-- Email-Wechsel falls User den initial-Email-Account verliert
-- Admin-Pattern wo User die eigenen Account-Settings sehen darf
+Phase-A-Setzungen umgesetzt: Email-Change ohne Verify-Link (direkt umstellen für drei dev-fitte Owner), Old-Password als Confirm-Pflicht beim Passwort-Wechsel. Account-Delete bewusst **defer** auf eigenes Item (semantisch heavy: Twin-Kaskadierung, A2A-Konversationen), Email-Verify-Flow defer auf Phase B.
 
-UI-Verortung:
-- **Option A:** Neuer „Account"-Tab im Settings-Page (Top-Level neben Profil/Reife/...). Pro-Twin-Scoping irrelevant — Account ist user-global, nicht twin-scoped. Tab-Mapping inkonsistent.
-- **Option B:** Eigene Page `/account` als separate User-Settings-Route. Sauberer scope-mäßig (Account = User, nicht Twin).
+Typecheck grün (alle vier Workspaces). Local-Smoke steht beim User aus.
 
-**Empfehlung Phase-4-Backlog-Anlage:** Option B (eigene Route) wegen scope-Konsistenz.
-
-**Größe:** S (~0.5 Bautag — Page + Form + 1-2 Backend-Endpoints für Email-Change + Password-Change). **Priorität:** should. **Spur:** Pre-Launch-Phase A Block 4 (Self-Hosting-Polish, falls vor Launch nötig) oder Phase B.
+**Größe ursprünglich:** S (~0.5 Bautag — Page + Form + 1-2 Backend-Endpoints für Email-Change + Password-Change). **Final:** ~3h netto (Backend ~30 Min, Frontend ~1h, Middleware + ProfileMenu + Doku ~30 Min, Diagnose-First ~15 Min). **Spur:** Pre-Launch-Phase A Block 4 (Self-Hosting-Polish).
 
 **Status-Notiz Tag 26:** Angelegt aus Phase 4 Tag-26-Strategy-Session. Out-of-Scope für #130 Phase 4 (Tab-Restructuring war Channel-Adapter-Fokussiert).
 

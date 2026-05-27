@@ -13,11 +13,12 @@ import { NextResponse, type NextRequest } from "next/server";
 // Endpoints (/onboarding/submit + /validate-api-key) prüfen Auth selbst,
 // /onboarding/check-handle ist absichtlich offen.
 //
-// Protected: /chat/*, /settings, /stream/*, /inbox/* + die Home-Route /.
+// Protected: /chat/*, /settings, /stream/*, /inbox/*, /account + die
+// Home-Route /.
 
 const SESSION_COOKIE_NAME = "twin-lab-session";
 
-const PROTECTED_PREFIXES = ["/chat", "/settings", "/stream", "/inbox"];
+const PROTECTED_PREFIXES = ["/chat", "/settings", "/stream", "/inbox", "/account"];
 
 export function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;

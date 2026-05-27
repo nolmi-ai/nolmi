@@ -145,6 +145,14 @@ export function ProfileMenu() {
           >
             Settings
           </Link>
+          <Link
+            href="/account"
+            role="menuitem"
+            onClick={() => setOpen(false)}
+            className="block px-4 py-2 text-sm text-text hover:bg-bg transition-colors focus:outline-none focus:bg-bg"
+          >
+            Account
+          </Link>
           <div className="border-t border-border" />
           <button
             type="button"

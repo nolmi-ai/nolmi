@@ -1,6 +1,6 @@
 # twin-lab — Stand
 
-**Letztes Update:** 26. Mai 2026, Dienstag (Tag 28 — A2A Reply-Architektur-Korrektur #155 + #140 Re-Pause-Smoke E2E grün)
+**Letztes Update:** 27. Mai 2026, Mittwoch (Tag 29 Block 1 — #135 Account-Settings UI Email/Password-Edit)
 
 ## Historisches Archiv
 
@@ -35,6 +35,43 @@ A2A-Bridge**. Nicht Computer-Use.
 Inhalte (11 Items in drei Tranchen) unverändert, nur Build-Pfad
 leicht angepasst (#100/#101 vorgezogen, weil Vision-kritisch für
 die Differenzierungs-Story).
+
+## Tag 29 (27. Mai 2026, Mittwoch) — Pre-Launch-Phase A Block 4 Self-Hosting-Polish
+
+**Stand Tag 29 Block 1:** #135 Account-Settings UI gebaut. Owner-Self-Service für Email + Passwort-Wechsel via eigener `/account`-Route mit zwei Forms, beide mit Current-Password-Confirm. Phase-A-Setzungen (Tag 26) umgesetzt: kein Verify-Link, kein Account-Delete im Scope. Typecheck grün, Local-Smoke steht beim User aus.
+
+### Block 1 — #135 Account-Settings UI (Email/Password-Edit)
+
+| Block | Item | Commit | Aufwand | Was |
+|---|---|---|---|---|
+| Block 1 | #135 Account-Settings UI (Email/Password-Edit) | (dieser Commit) | ~3h | UsersRepo um `updateEmail` (Email-Uniqueness-Pre-Check, `UserAlreadyExistsError`) + `updatePassword` (bcrypt cost 12) erweitert. Zwei neue Endpoints `PATCH /auth/me/email` + `PATCH /auth/me/password` (Session-Check + `verifyPassword`-Confirm + Zod-Validierung min 8 Zeichen). Route `/account` mit zwei separaten Forms (Email-Change + Password-Change), Live-Validation auf Passwort-Mismatch + Mindestlänge, toast-Feedback. ProfileMenu-Link „Account" oberhalb Logout. Middleware `PROTECTED_PREFIXES` um `/account` ergänzt. Typecheck 4/4 grün. Local-Smoke 7-Schritt-Liste steht beim User aus. |
+
+**Phase-A-Setzungen umgesetzt (aus Tag-26-Briefing):**
+- Email-Change-Flow: direkt umstellen, kein Verify-Link (Phase-A-pragmatisch für drei dev-fitte Owner)
+- Password-Change-Flow: Old-Password als Confirm-Pflicht
+- Account-Delete: **defer** auf eigenes Item (semantisch heavy — Twin-Kaskadierung, A2A-Konversationen)
+- Email-Verify-Flow: **defer** auf Phase B
+
+**Diagnose-First-Befunde (vor Code-Änderung):**
+- `getCurrentUser(request, db)` ist der existing Session-Pattern (bereits in `/auth/me`, `/auth/register`, ...)
+- Kein `toPublicUser`-Helper — Endpoints bauen Response manuell: `{ userId, email, displayName }`. Pattern 1:1 für PATCH-Endpoints übernommen.
+- `apps/web/lib/toast.ts` wrappt sonner (UX.1.A.1 Pattern aus Tag 22)
+- Middleware-`PROTECTED_PREFIXES` ist die saubere Stelle für neue protected Routen
+- AppHeader rendert ProfileMenu global — keine Page-spezifische Integration nötig
+
+**Code-Hotspots:**
+- `apps/runtime/src/auth/users-repo.ts:107-141` — zwei neue Methoden, beide normalisieren bzw. hashen analog `create()` (DRY-Konsistenz). Repo wirft NotFound nicht — Returnt `null`, Caller-Endpoint mappt auf 404.
+- `apps/runtime/src/server.ts:918-988` — zwei neue PATCH-Endpoints nach `/auth/me`. Email-Endpoint: 400 (Schema), 401 (nicht eingeloggt / falsches Passwort), 409 (Email vergeben), 200. Password-Endpoint: 400, 401, 200 mit `{ ok: true }`.
+- `apps/web/app/account/page.tsx` — 250 LOC, zwei `<section>`-Cards mit `border + bg-surface` Pattern aus Settings, separater Busy-State + Submit-Disabled-Logic pro Form.
+- `apps/web/components/ProfileMenu.tsx:148-156` — Account-Link zwischen Settings und Divider.
+- `apps/web/middleware.ts:20` — `/account` in `PROTECTED_PREFIXES`.
+
+### Tag-29-Outcome-Bilanz
+
+**Item-Closures Tag 29 (laufend):**
+- #135 ✅ Account-Settings UI (Block 1)
+
+**Neue BACKLOG-Items aus Tag 29:** keine (Account-Delete + Email-Verify als BACKLOG-Items separat anlegen, wenn der nächste Block dort hingeht).
 
 ## Tag 28 (26. Mai 2026, Dienstag) — Polish + Production-Deploy + #131 Phase B + A2A-Architektur-Fix (#155) + #140 Smoke
 

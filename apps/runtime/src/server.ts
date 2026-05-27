@@ -914,6 +914,75 @@ function registerAuthRoutes(app: FastifyInstance, deps: ServerDeps) {
       displayName: user.displayName,
     };
   });
+
+  // PATCH /auth/me/email — Email umstellen. Phase-A-pragmatisch: direkt
+  // umstellen, kein Verify-Link (Setzung Tag 26 für drei dev-fitte Owner).
+  // Current-Password-Confirm Pflicht, damit ein gestohlenes Cookie nicht
+  // reicht, um die Email zu kapern.
+  const PatchEmailSchema = z.object({
+    newEmail: EmailSchema,
+    currentPassword: z.string().min(1),
+  });
+
+  app.patch("/auth/me/email", async (request, reply) => {
+    const user = await getCurrentUser(request, deps.db);
+    if (!user) return reply.status(401).send({ error: "Nicht eingeloggt" });
+
+    const parsed = PatchEmailSchema.safeParse(request.body);
+    if (!parsed.success) {
+      return reply.status(400).send({ error: parsed.error.message });
+    }
+
+    const verified = usersRepo.verifyPassword(user.email, parsed.data.currentPassword);
+    if (!verified) {
+      return reply.status(401).send({ error: "Aktuelles Passwort falsch" });
+    }
+
+    try {
+      const updated = usersRepo.updateEmail(user.userId, parsed.data.newEmail);
+      if (!updated) {
+        return reply.status(404).send({ error: "User nicht gefunden" });
+      }
+      return {
+        userId: updated.userId,
+        email: updated.email,
+        displayName: updated.displayName,
+      };
+    } catch (err) {
+      if (err instanceof UserAlreadyExistsError) {
+        return reply.status(409).send({ error: err.message });
+      }
+      throw err;
+    }
+  });
+
+  // PATCH /auth/me/password — Passwort umstellen. Old-Password-Confirm
+  // Pflicht (Setzung Tag 26). Min-Length 8 Zeichen, kein Complexity-Check.
+  const PatchPasswordSchema = z.object({
+    currentPassword: z.string().min(1),
+    newPassword: z.string().min(8, "Passwort muss mind. 8 Zeichen haben"),
+  });
+
+  app.patch("/auth/me/password", async (request, reply) => {
+    const user = await getCurrentUser(request, deps.db);
+    if (!user) return reply.status(401).send({ error: "Nicht eingeloggt" });
+
+    const parsed = PatchPasswordSchema.safeParse(request.body);
+    if (!parsed.success) {
+      return reply.status(400).send({ error: parsed.error.message });
+    }
+
+    const verified = usersRepo.verifyPassword(user.email, parsed.data.currentPassword);
+    if (!verified) {
+      return reply.status(401).send({ error: "Aktuelles Passwort falsch" });
+    }
+
+    const updated = usersRepo.updatePassword(user.userId, parsed.data.newPassword);
+    if (!updated) {
+      return reply.status(404).send({ error: "User nicht gefunden" });
+    }
+    return { ok: true };
+  });
 }
 
 // ─── TRUST ROUTES ────────────────────────────────────────────────────────────

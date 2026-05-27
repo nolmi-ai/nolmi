@@ -102,6 +102,42 @@ export class UsersRepo {
     const ok = bcrypt.compareSync(passwordPlain, user.passwordHash);
     return ok ? user : null;
   }
+
+  /**
+   * Setzt eine neue Email für den User. Wirft UserAlreadyExistsError, wenn
+   * die Ziel-Email schon einem anderen User gehört. Normalisiert Email
+   * analog zu create() (trim + lowercase). Caller ist verantwortlich für
+   * Current-Password-Confirm (verifyPassword vorab), Repo macht das nicht.
+   */
+  updateEmail(userId: string, newEmail: string): User | null {
+    const normalizedEmail = newEmail.trim().toLowerCase();
+    const existing = this.findByEmail(normalizedEmail);
+    if (existing && existing.userId !== userId) {
+      throw new UserAlreadyExistsError(normalizedEmail);
+    }
+    const now = new Date().toISOString();
+    const result = this.db
+      .prepare("UPDATE users SET email = ?, updated_at = ? WHERE user_id = ?")
+      .run(normalizedEmail, now, userId);
+    if (result.changes === 0) return null;
+    return this.findById(userId);
+  }
+
+  /**
+   * Re-hasht und setzt ein neues Passwort. Caller ist verantwortlich für
+   * Current-Password-Confirm (verifyPassword vorab), Repo macht das nicht.
+   */
+  updatePassword(userId: string, newPasswordPlain: string): User | null {
+    const passwordHash = bcrypt.hashSync(newPasswordPlain, BCRYPT_COST);
+    const now = new Date().toISOString();
+    const result = this.db
+      .prepare(
+        "UPDATE users SET password_hash = ?, updated_at = ? WHERE user_id = ?",
+      )
+      .run(passwordHash, now, userId);
+    if (result.changes === 0) return null;
+    return this.findById(userId);
+  }
 }
 
 function rowToUser(row: UserRow): User {
