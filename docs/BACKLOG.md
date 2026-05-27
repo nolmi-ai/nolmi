@@ -1154,13 +1154,13 @@ Phase-4-Scope war zu eng für den Refactor, deshalb in Phase 4.3 pragmatisch das
 
 ### 135. Account-Settings UI (Email/Password-Edit-Surface) ✅
 
-**Abgeschlossen Tag 29 (27. Mai 2026, Mittwoch).** Option B umgesetzt: eigene Route `/account` mit zwei Forms (Email-Change + Password-Change), beide mit Current-Password-Confirm. UsersRepo um `updateEmail` (Email-Uniqueness-Pre-Check, wirft `UserAlreadyExistsError`) + `updatePassword` (bcrypt cost 12) erweitert. Zwei neue Endpoints `PATCH /auth/me/email` und `PATCH /auth/me/password` mit Session-Check (`getCurrentUser`) + `verifyPassword`-Confirm. ProfileMenu-Link „Account" oberhalb Logout. Middleware `PROTECTED_PREFIXES` um `/account` ergänzt.
+**Abgeschlossen Tag 29 (27. Mai 2026, Mittwoch), Commit `f39b14f` auf `origin/main`.** Option B umgesetzt: eigene Route `/account` mit zwei Forms (Email-Change + Password-Change), beide mit Current-Password-Confirm. UsersRepo um `updateEmail` (Email-Uniqueness-Pre-Check, wirft `UserAlreadyExistsError`) + `updatePassword` (bcrypt cost 12) erweitert. Zwei neue Endpoints `PATCH /auth/me/email` und `PATCH /auth/me/password` mit Session-Check (`getCurrentUser`) + `verifyPassword`-Confirm. ProfileMenu-Link „Account" oberhalb Logout. Middleware `PROTECTED_PREFIXES` um `/account` ergänzt.
 
-Phase-A-Setzungen umgesetzt: Email-Change ohne Verify-Link (direkt umstellen für drei dev-fitte Owner), Old-Password als Confirm-Pflicht beim Passwort-Wechsel. Account-Delete bewusst **defer** auf eigenes Item (semantisch heavy: Twin-Kaskadierung, A2A-Konversationen), Email-Verify-Flow defer auf Phase B.
+Phase-A-Setzungen umgesetzt: Email-Change ohne Verify-Link (direkt umstellen für drei dev-fitte Owner), Old-Password als Confirm-Pflicht beim Passwort-Wechsel. Account-Delete bewusst **defer** auf eigenes Item (semantisch heavy: Twin-Kaskadierung, A2A-Konversationen), Email-Verify-Flow defer auf Phase B. Keine neuen BACKLOG-Items aus dem #135-Bau angelegt — die Defers sind im Briefing als „eigenes Item für später" formuliert ohne Anlegen-Anweisung; sie werden konkret, wenn der jeweilige Block sie zieht.
 
-Typecheck grün (alle vier Workspaces). Local-Smoke steht beim User aus.
+Typecheck 4/4 grün, Husky-Build 4/4 grün (Push-Hook), Local-Smoke 7/7 grün (Login + `/account` via ProfileMenu + Email-Change Happy-Path + Re-Login mit neuer Email + Password-Change Happy-Path + Re-Login mit neuem PW + Edge-Cases: 401-Toast bei falschem Current-PW, 409-Toast bei kollidierender Email, Submit-Disabled bei `<8`-Char und Mismatch).
 
-**Größe ursprünglich:** S (~0.5 Bautag — Page + Form + 1-2 Backend-Endpoints für Email-Change + Password-Change). **Final:** ~3h netto (Backend ~30 Min, Frontend ~1h, Middleware + ProfileMenu + Doku ~30 Min, Diagnose-First ~15 Min). **Spur:** Pre-Launch-Phase A Block 4 (Self-Hosting-Polish).
+**Größe ursprünglich:** S (~0.5 Bautag — Page + Form + 1-2 Backend-Endpoints für Email-Change + Password-Change). **Final:** ~3h netto (Backend ~30 Min, Frontend ~1h, Middleware + ProfileMenu + Doku ~30 Min, Diagnose-First ~15 Min, Closure-Doku ~10 Min). **Spur:** Pre-Launch-Phase A Block 4 (Self-Hosting-Polish).
 
 **Status-Notiz Tag 26:** Angelegt aus Phase 4 Tag-26-Strategy-Session. Out-of-Scope für #130 Phase 4 (Tab-Restructuring war Channel-Adapter-Fokussiert).
 
