@@ -2523,3 +2523,22 @@ Aktuell 35 `test-*.ts`-Smoke-Scripts in `apps/runtime/src/scripts/` (22 in `pack
 **Nicht-Scope:**
 - Retroaktive Archivierung von `131-OAUTH-STRATEGY.md` (Phase A closed seit Tag 27, aber Strategy-Doc ist heute Tag 28 Block 14 + 15 um §x + §y erweitert worden — hat noch live-Spuren). Wenn Phase A komplett closed ist und keine `--auth-json`-Folge-Iteration mehr ansteht, dann Move.
 
+### #159 FK-Cascade-Check für alle User/Twin/Owner-Relations (S, nice — Phase B)
+
+**Status:** Offen | Phase B | Aufwand: S (~30-60 Min Audit + ggf. punktuelle Pragma-Fixes + CLI-Cheat-Sheet)
+**Cross-Ref:** Lesson Tag 29 #4, `apps/runtime/src/scripts/_mcp-cli-helpers.ts:77-78`, `apps/runtime/src/scripts/init-db.ts`
+
+**Befund Tag 29 (27. Mai 2026):** Bei Block-5-Smoke-Cleanups via `sqlite3`-CLI sind Orphan-Rows entstanden — `DELETE FROM users WHERE email='test@…'` hinterließ `twin_profiles` + `audit_log` + `mcp_servers`-Rows ohne User. Wurzel: `sqlite3`-CLI enforced Foreign-Keys per default **nicht**, das Pragma muss pro Connection gesetzt werden. Application-Code macht das schon konsistent (`db.pragma("foreign_keys = ON")` in jedem DB-Connector, siehe `_mcp-cli-helpers.ts`, `init-db.ts`, `runtime/src/index.ts`), aber ad-hoc Shell-Sessions sind blind.
+
+**Scope:**
+1. **Audit aller DB-öffnenden Code-Pfade.** `grep -rn "new Database(" apps/` + `grep -rn "better-sqlite3" apps/` → für jeden Treffer verifizieren, dass `db.pragma("journal_mode = WAL")` und `db.pragma("foreign_keys = ON")` direkt nach dem Open gerufen werden. Fehlende Pragma-Setzungen ergänzen.
+2. **Schema-Audit der FK-Beziehungen.** Welche Tabellen referenzieren `users(user_id)`, `twin_profiles(twin_id)`, `owner_user_id`? `ON DELETE CASCADE` vs. `RESTRICT` vs. `SET NULL` — pro Beziehung dokumentieren, ob die Cascade-Policy gewollt ist (z.B. User-Delete → Twin-Delete? Oder Soft-Lock?).
+3. **DB-CLI-Cheat-Sheet** in `docs/SETUP.md` (oder neuer `docs/DB-CHEATSHEET.md`): "Vor manuellen DELETEs immer `PRAGMA foreign_keys = ON;` setzen. Empfohlener Header-Block für ad-hoc Cleanup-Sessions."
+4. **Optional:** Smoke-Cleanup-Helper-Skript (`pnpm db:cleanup-test-user <email>`) das die Pragma sauber setzt und User + abhängige Rows in einer Transaktion löscht — verhindert künftige Orphan-Drift.
+
+**Nicht-Scope:**
+- Account-Delete-UI (eigenes Item, aus #135 defer)
+- Datenmigration historischer Orphan-Rows (separater Cleanup-Block falls vorhandene Test-DB-Reste relevant werden)
+
+**Wert:** vermeidet stille DB-Drift bei künftigen Smokes, dokumentiert die FK-Semantik für jeden, der manuell in die DB greift. Niedriges Risiko, hoher Cleanliness-Impact für die Phase-B-Self-Hosting-Phase wenn externe Owner ihre Test-Twins iterativ wegputzen.
+
