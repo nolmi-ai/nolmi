@@ -1,6 +1,6 @@
 # twin-lab — Stand
 
-**Letztes Update:** 27. Mai 2026, Mittwoch (Tag 29 Block 2 — #135 Account-Settings UI Closure, Smoke 7/7 grün)
+**Letztes Update:** 27. Mai 2026, Mittwoch (Tag 29 Block 4 — #135 Production-Deploy live, Production-Smoke 7/7 grün)
 
 ## Historisches Archiv
 
@@ -38,14 +38,16 @@ die Differenzierungs-Story).
 
 ## Tag 29 (27. Mai 2026, Mittwoch) — Pre-Launch-Phase A Block 4 Self-Hosting-Polish
 
-**Stand Tag 29 Block 2:** #135 Account-Settings UI gebaut **und** Local-Smoke 7/7 grün. Owner-Self-Service für Email + Passwort-Wechsel via eigener `/account`-Route mit zwei Forms, beide mit Current-Password-Confirm. Phase-A-Setzungen (Tag 26) umgesetzt: kein Verify-Link, kein Account-Delete im Scope. Commit `f39b14f` auf `origin/main`.
+**Stand Tag 29 Block 4:** #135 Account-Settings UI **live in Production**. Local-Smoke 7/7 grün, Production-Deploy auf Commit `3561122`, Production-Smoke 7/7 grün, Original-Email + -Passwort restored. Owner-Self-Service für Email + Passwort-Wechsel via eigener `/account`-Route mit zwei Forms, beide mit Current-Password-Confirm. Phase-A-Setzungen (Tag 26) umgesetzt: kein Verify-Link, kein Account-Delete im Scope.
 
 ### Block 1 — #135 Account-Settings UI (Email/Password-Edit)
 
 | Block | Item | Commit | Aufwand | Was |
 |---|---|---|---|---|
 | Block 1 | #135 Account-Settings UI (Email/Password-Edit) | `f39b14f` | ~3h | UsersRepo um `updateEmail` (Email-Uniqueness-Pre-Check, `UserAlreadyExistsError`) + `updatePassword` (bcrypt cost 12) erweitert. Zwei neue Endpoints `PATCH /auth/me/email` + `PATCH /auth/me/password` (Session-Check + `verifyPassword`-Confirm + Zod-Validierung min 8 Zeichen). Route `/account` mit zwei separaten Forms (Email-Change + Password-Change), Live-Validation auf Passwort-Mismatch + Mindestlänge, toast-Feedback. ProfileMenu-Link „Account" oberhalb Logout. Middleware `PROTECTED_PREFIXES` um `/account` ergänzt. Typecheck 4/4 grün, Husky-Build 4/4 grün, Local-Smoke 7/7 grün. |
-| Block 2 | #135 Closure-Doku | (dieser Commit) | ~10 Min | STAND-Tag-29-Section mit Block-1-SHA + Smoke-Status, BACKLOG #135 als ✅ Tag 29 DONE finalisiert (Smoke-Bestätigung in Status-Notiz), Tag-29-Outcome-Bilanz nach Block 1 initialisiert (1 Block, 1 Closure). |
+| Block 2 | #135 Closure-Doku | `3561122` | ~10 Min | STAND-Tag-29-Section mit Block-1-SHA + Smoke-Status, BACKLOG #135 als ✅ Tag 29 DONE finalisiert (Smoke-Bestätigung in Status-Notiz), Tag-29-Outcome-Bilanz nach Block 1 initialisiert. |
+| Block 3 | #135 Production-Deploy | (Deploy-Action) | ~20 Min | `git pull origin main` auf VPS `srv1046432` zog `f39b14f` + `3561122` (Drift ab Tag-28-Block-20 `7453bd9` → `3561122`, ~2 Code-Commits + 1 Doku). **Bridge bewusst nicht rebuilt** — Lesson Tag 28 #15 angewandt: #135 fasst nur Runtime + Web an, Bridge-Schema unverändert. `docker build` runtime + web mit korrektem `--build-arg NEXT_PUBLIC_RUNTIME_URL=https://runtime.twin.harwayexperience.com` (aus Tag-28-Lesson #13), `docker compose up -d --force-recreate runtime web` grün. Production-Smoke 7/7: Login → `/account` via ProfileMenu → Email-Change Happy-Path → Re-Login mit neuer Email → Password-Change Happy-Path → Re-Login mit neuem PW → Edge-Cases (401 falsches PW, 409 kollidierende Email, Submit-Disabled bei `<8` und Mismatch). DB-Verify: `markus.baier@harway.de`, `updated_at: 2026-05-27T16:08:18.760Z` (Audit-trail-fähig). Nach Smoke Original-Email + Original-Passwort restored. |
+| Block 4 | #135 Production-Deploy-Closure-Doku | (dieser Commit) | ~10 Min | STAND Block 3+4, BACKLOG-Status um Production-Deploy + DB-Verify + Original-Restore, Tag-29-Outcome auf „1 Closure inkl. Production", Lesson Tag 29 #1 (Bridge-Skip aus Tag-28-Lesson #15 sauber angewandt). |
 
 **Phase-A-Setzungen umgesetzt (aus Tag-26-Briefing):**
 - Email-Change-Flow: direkt umstellen, kein Verify-Link (Phase-A-pragmatisch für drei dev-fitte Owner)
@@ -70,11 +72,15 @@ die Differenzierungs-Story).
 ### Tag-29-Outcome-Bilanz
 
 **Item-Closures Tag 29 (laufend):**
-- #135 ✅ Account-Settings UI (Block 1+2, Commit `f39b14f` Bau + Closure-Commit Doku, Smoke 7/7 grün)
+- #135 ✅ Account-Settings UI **Code + Doku + Production** (Block 1 Bau `f39b14f`, Block 2 Closure-Doku `3561122`, Block 3 Production-Deploy auf `3561122` mit Production-Smoke 7/7 grün + DB-Verify `markus.baier@harway.de` `updated_at: 2026-05-27T16:08:18.760Z`, Original-Werte restored, Block 4 Production-Closure-Doku)
 
 **Neue BACKLOG-Items aus Tag 29:** keine. Account-Delete und Email-Verify-Flow sind aus dem #135-Briefing als „defer" markiert ohne dass das Briefing eigene Items dafür gefordert hat — wenn sie konkret werden, legt der jeweils briefende Block ein neues Item an.
 
-**Tag-29-Total bis Block 2:** 1 Closure (#135), ~3h Bau + ~10 Min Closure-Doku = ~3h 10 Min Netto.
+**Tag-29-Total bis Block 4:** 1 Closure (#135) inkl. Production-Deploy, ~3h 40 Min Netto (Bau ~3h + Closure-Doku ~10 Min + Production-Deploy ~20 Min + Production-Closure-Doku ~10 Min), keine neuen BACKLOG-Items.
+
+**Lessons Tag 29:**
+
+- **Lesson Tag 29 #1: Production-Deploy ohne Bridge-Rebuild wenn kein Bridge-Code touched.** Tag-28-Lesson #15 hatte das Multi-Service-Deploy-Briefing als Risiko markiert (Bridge wurde übersehen, weil das Briefing nur Runtime + Web nannte). Block 3 Tag 29 wendet die Lesson aktiv in die **andere Richtung** an: bewusste Bridge-Skip. #135 fasst ausschließlich `apps/runtime/src/auth/` + `apps/runtime/src/server.ts` + `apps/web/**` an, das Bridge-Schema (`MessageType`-Union etc.) bleibt unverändert. Deshalb nur runtime + web rebuilt + recreated, Bridge-Container unangetastet. Generelles Prinzip: Multi-Service-Disziplin schneidet in beide Richtungen — bei Schema-Changes muss man alle Services rebuilden, bei Single-Service-Items muss man die anderen bewusst nicht anfassen, sonst riskiert man unnötige Downtime + Cache-Warm-up. **Mini-Checkliste vor Deploy:** `git diff <last-prod-sha>..HEAD --name-only` → welche `apps/*` und `packages/*`-Verzeichnisse sind im Diff → exakt diese Container rebuilten, alle anderen lassen.
 
 ## Tag 28 (26. Mai 2026, Dienstag) — Polish + Production-Deploy + #131 Phase B + A2A-Architektur-Fix (#155) + #140 Smoke
 
