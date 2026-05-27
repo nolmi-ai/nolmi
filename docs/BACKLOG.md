@@ -817,20 +817,46 @@ Verbleibende Polish-Punkte:
 
 **Update Tag 21 (nach Phase 2A Closure):** Foundation aus Phase 2A für den vollen Polish steht — `w-full max-w-X mx-auto`-Pattern in flex-col-Layouts (gelernt im Tag-21-Layout-Saga, siehe STAND-Lesson) und Container-Width-Hierarchie (`/login` 448px für Auth, Onboarding/Wizard 672px). Beim vollen Polish: Hierarchie nicht brechen, Pattern weiter nutzen für Step-Indicator, Mobile-Responsive, Animationen. Section-Component hat heute optionalen `title` — bleibt verfügbar für künftige Card-Gruppen, ohne in Form-Steps zurückzukommen.
 
-### 122. MCP-Server-Auto-Provisioning im Onboarding
+### 122. MCP-Server-Auto-Provisioning im Onboarding ✅
 
-**Befund Tag 22 (#110 Phase 2B Commit 9):** Preset-Step im Wizard (`examples/skills/<name>`-Pattern-Skills als Multi-Select) aktiviert heute nur Skill-Import via `importSkillFromDir`. Presets mit MCP-Server-Abhängigkeit (Beispiel: `recherche-workflow` referenziert `mcp:hyperbrowser-approval:search_with_bing` + `mcp:hyperbrowser-approval:scrape_webpage` in `requires_tools`) erfordern manuelles MCP-Setup in Settings nach dem Wizard — das Pattern-Skill ist da, aber das Pre-Pass-Tool-Forcing greift ins Leere, solange die referenzierten Tool-Skills (vom MCP-Sync-Pfad) nicht existieren. Card-Hint im Wizard informiert User über den Folgeschritt, schließt die Lücke aber nicht aktiv.
+**Abgeschlossen Tag 29 (27. Mai 2026, Mittwoch), Commit `a3c6b3a` auf `origin/main`.** Onboarding-Friction für MCP-abhängige Presets aufgelöst: Wizard sammelt API-Keys pro `requiresMcpServers`-Eintrag direkt im Preset-Step (Inline-Form unterhalb der Card, Password-Input pro Server), Submit-Backend provisioniert MCP-Server + synct Tool-Skills, Recherche-Workflow funktioniert nach Wizard ohne Settings-Detour.
 
-**Plan:** Preset-Karten erweitern um API-Key-Password-Inputs pro benötigtem MCP-Server (`requiresMcpServers`-Feld aus dem Scanner kommt heute schon mit). Submit-Endpoint:
+**Phase-A-Setzungen umgesetzt:**
+- **Soft-Block-α:** Wenn ein Preset enabled ist und `requiresMcpServers` Keys braucht, ist Submit disabled mit Tooltip + Warn-Hint bis alle Keys gesetzt sind. Backend wird nie mit unvollständigen Preset-Daten gerufen.
+- **Skip-Default:** Presets bleiben standardmäßig unselected. User klickt aktiv an, dann erscheint der Key-Input.
 
-1. Pattern-Skill via `importSkillFromDir` (heute schon)
-2. **NEU:** MCP-Server pro `requiresMcpServers`-Eintrag via `mcpServersRepo.add` + `entry.service.mcpSkillSync.syncOnAdd` anlegen — Spec aus `mcp-servers/<server-name>.json` als Template, `env`-Marker `?` durch User-eingegebenen API-Key ersetzen
-3. Validation: leere API-Keys für selektierte Presets blockieren Submit (oder gelöste UX: Preset-Toggle erfordert API-Key-Eingabe)
+**Reuse statt Re-Bau:**
+- `McpServersRepo.add` (`apps/runtime/src/mcp/repo.ts:90`) + `McpSkillSync.syncOnAdd` (`apps/runtime/src/mcp/skill-sync.ts:60`) 1:1 wie im Settings-Add-Endpoint (`server.ts:1507-1576`)
+- Rollback-Pattern bei Sync-Failure aus `server.ts:1556-1573` (Settings-Add finally-block) gespiegelt
+- `McpServerSpecSchema` aus `_mcp-cli-helpers.ts` für Template-Validation (Twin-agnostische Spec)
+- Card-Inline-API-Key-Form-Pattern aus `McpServerAddModal.tsx:84-189` (Env-Marker-Extraktion + Password-Inputs) auf Wizard-Card adaptiert
 
-**Größe:** M-L · **Priorität:** should · **Aus:** Tag 22 #110 Phase 2B Commit 9
-**Status:** offen, Phase-2C oder Phase-B-Kandidat
+**Schema-Erweiterungen (`packages/shared/src/index.ts`):**
+- `PresetSelectionSchema` (presetId + mcpServerKeys-Record)
+- `PresetActivationResultSchema.mcpServers[]` mit `added`/`skipped`/`failed`-Status (Settings-Path bekommt `failed: API-Key fehlt`)
 
-**Cross-Reference:** `apps/runtime/src/skills/scan-examples-presets.ts:extractMcpServersFromRequiresTools` extrahiert heute schon die MCP-Server-Namen aus `requires_tools`. Für #122 muss die Frontend-Card pro MCP-Server ein Password-Input rendern und Submit-Backend den MCP-Add-Workflow auslösen (analog `McpServerAddModal` aus #87, aber inline statt Modal).
+**Backend-Erweiterungen:**
+- `RuntimeConfig.mcpServersDir` neu (default `WORKSPACE_ROOT/mcp-servers`), in `ServerDeps` durchgereicht
+- `activate-presets.ts` Komplett-Refactor: pro Preset Skill-Import + Schleife über `requiresMcpServers` via `provisionMcpServer`-Helper (Idempotenz, Template-Substitution, Sync mit Rollback)
+- `OnboardingSubmitSchema`: `presets: string[]` → `presetSelections: PresetSelection[]`
+- Settings full-config-PATCH wrappt `body.presets.map(id => ({ presetId: id, mcpServerKeys: {} }))` — bestehendes Settings-Verhalten ohne Auto-Provision
+
+**Frontend-Erweiterungen (`apps/web/app/onboarding/page.tsx`):**
+- State `presetsSelected: string[]` → `presetSelections: Record<id,{enabled,mcpServerKeys}>`
+- PresetCard refaktoriert vom Button-only zu Card-Frame `<div>` mit Header-Button + Inline-Env-Form als Geschwister (sonst nested-input nicht möglich)
+- `useMemo`-`hasMissingKeys` für Soft-Block-α, Submit-Button `disabled` + `title`-Tooltip + Warn-Text
+
+Typecheck 4/4 grün, Husky-Build 4/4 grün (`/onboarding` 6.31 kB → 6.87 kB First Load). **Local-Smoke 4/4 grün:**
+1. **Happy-Path Recherche-Preset** — Test-User → Wizard → Recherche-Preset anklicken → Hyperbrowser-API-Key eingeben → Submit grün. DB-Verify: Twin angelegt, `hyperbrowser-approval`-MCP-Server in `mcp_servers`, **11 Tool-Skills** unter `mcp:hyperbrowser-approval:*` + Recherche-Pattern-Skill — Pre-Pass-Tool-Forcing kann direkt greifen.
+2. **Soft-Block-α** — Preset enabled ohne Key → Submit disabled + Tooltip „API-Key fehlt für ausgewähltes Preset" + Warn-Hint unterm Button. Wizard kommt aus dem Zustand nicht raus, bevor der Key drin ist.
+3. **No-Preset-Path** — Skip-Default unselected → Submit grün, Twin ohne Skills/MCP-Server. Existing-Behavior unverändert.
+4. **Error-Edge Dummy-Key** — ungültiger Key (`invalid-key-test`) → Provisioning succeeds (`listTools` validiert den Key nicht beim Spawn), erst der Tool-Call im Chat failt ehrlich beim ersten Recherche-Versuch. Kein #122-Bug — sondern erwartbares Verhalten der Hyperbrowser-MCP-API-Key-Validation.
+
+**Production-Deploy:** defer auf separaten Block.
+
+**Größe ursprünglich:** M-L. **Final:** ~3.5h netto (Diagnose-First ~30 Min, Backend ~1h, Frontend ~1.5h, Smoke + Doku ~30 Min). **Spur:** Pre-Launch-Phase A Block 4 (Self-Hosting-Polish).
+
+**Cross-Reference:** `apps/runtime/src/skills/scan-examples-presets.ts:extractMcpServersFromRequiresTools` liefert die MCP-Server-Liste aus dem Preset-Frontmatter. Tag-29-Lesson #2 dokumentiert: `requires_tools` ist Pre-Pass-Hint, nicht Tool-Filter — `syncOnAdd` legt alle Tools des MCP-Servers als Skills an, nicht nur die referenzierten. Future Sub-Schritt bei Bedarf: post-Sync `setActive(false)` für Out-of-Scope-Tools.
 
 ### 123. Handle-Editierung im Settings-Wizard
 
