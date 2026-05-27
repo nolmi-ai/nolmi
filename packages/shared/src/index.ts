@@ -554,14 +554,41 @@ export const PresetsListResponseSchema = z.object({
 export type PresetsListResponse = z.infer<typeof PresetsListResponseSchema>;
 
 /**
- * #110 Phase 2B: Result-Item pro Preset im Onboarding-Submit-Response.
- * `imported` = Skill erfolgreich angelegt, `failed` = soft-fail (geloggt,
- * Twin bleibt angelegt), `unknown` = Preset-ID nicht in Scan-Whitelist.
+ * #122: Preset-Auswahl mit API-Keys für requires-MCP-Server. Frontend
+ * sammelt pro selektiertem Preset die Keys für die MCP-Server, die das
+ * Preset braucht. Wenn `requiresMcpServers` leer ist, bleibt `mcpServerKeys`
+ * leer; Settings-Path nutzt das auch (kein API-Key-UI dort) — Provisioning
+ * fällt dann soft, Skill wird aber importiert.
+ */
+export const PresetSelectionSchema = z.object({
+  presetId: z.string(),
+  mcpServerKeys: z.record(z.string(), z.string()),
+});
+export type PresetSelection = z.infer<typeof PresetSelectionSchema>;
+
+/**
+ * #110 Phase 2B + #122: Result-Item pro Preset im Onboarding-Submit-
+ * Response. `imported` = Skill angelegt, `failed` = soft-fail (geloggt,
+ * Twin bleibt), `unknown` = Preset-ID nicht in Scan-Whitelist.
+ *
+ * `mcpServers` (#122): pro Preset-requires-MCP-Server ein Status —
+ *   - `added`: Server angelegt + Tool-Skills via syncOnAdd persistiert
+ *   - `skipped`: Server existierte schon für diesen Twin (Idempotenz)
+ *   - `failed`: Template fehlt, API-Key fehlt, Spawn-Failure, Sync-Failure
  */
 export const PresetActivationResultSchema = z.object({
   id: z.string(),
   status: z.enum(["imported", "failed", "unknown"]),
   reason: z.string().optional(),
+  mcpServers: z
+    .array(
+      z.object({
+        name: z.string(),
+        status: z.enum(["added", "skipped", "failed"]),
+        reason: z.string().optional(),
+      }),
+    )
+    .optional(),
 });
 export type PresetActivationResult = z.infer<typeof PresetActivationResultSchema>;
 

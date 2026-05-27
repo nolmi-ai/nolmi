@@ -44,6 +44,12 @@ export interface RuntimeConfig {
    * Im Container via Dockerfile-COPY nach `/app/examples` (siehe #120).
    */
   examplesDir: string;
+  /**
+   * #122: Wurzel der `mcp-servers/<name>.json`-Templates für Auto-
+   * Provisioning im Wizard. Templates können env-Marker `"?"` enthalten,
+   * die der Wizard zur Submit-Zeit durch User-API-Keys ersetzt.
+   */
+  mcpServersDir: string;
   port: number;
   host: string;
   /**
@@ -120,6 +126,7 @@ export function loadRuntimeConfig(): RuntimeConfig {
     mandatesPath: resolveWorkspacePath(process.env.MANDATES_PATH, "docs/mandates.yaml"),
     migrationsDir: resolve(WORKSPACE_ROOT, "apps/runtime/migrations"),
     examplesDir: resolve(WORKSPACE_ROOT, "examples/skills"),
+    mcpServersDir: resolve(WORKSPACE_ROOT, "mcp-servers"),
     port: parsePort(process.env.RUNTIME_PORT, 4000),
     host: process.env.RUNTIME_HOST?.trim() || "127.0.0.1",
     telegramUsePolling,

@@ -133,6 +133,7 @@ async function main() {
     factsRepo,
     twinMaturityService,
     examplesDir: config.examplesDir,
+    mcpServersDir: config.mcpServersDir,
     telegramConfigsRepo,
     telegramBotRegistry,
     telegramPairingService: pairingService,

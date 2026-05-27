@@ -109,13 +109,19 @@ function WizardInner({ router }: { router: ReturnType<typeof useRouter> }) {
   const [handleStatus, setHandleStatus] = useState<HandleStatus>({ kind: "idle" });
 
   // #110 Phase 2B Commit 9: Preset-Step-State. presetsAvailable wird lazy
-  // beim ersten Eintritt in Step 2 (Presets) geladen; presetsSelected ist
-  // die User-Auswahl, wird im Submit-Payload mitgeschickt.
+  // beim ersten Eintritt in Step 2 (Presets) geladen.
+  // #122: presetSelections hält pro Preset-ID {enabled, mcpServerKeys}.
+  // Wizard sammelt API-Keys für requires_mcp_servers vorab (Soft-Block α
+  // disabled den Submit-Button, solange ein selektiertes Preset einen Key
+  // braucht aber keiner gesetzt ist). Beim Submit werden nur enabled-
+  // Selections gemappt und an presetSelections gesendet.
   const [presetsAvailable, setPresetsAvailable] = useState<Preset[]>([]);
   const [presetsLoading, setPresetsLoading] = useState(false);
   const [presetsError, setPresetsError] = useState<string | null>(null);
   const [presetsLoaded, setPresetsLoaded] = useState(false);
-  const [presetsSelected, setPresetsSelected] = useState<string[]>([]);
+  const [presetSelections, setPresetSelections] = useState<
+    Record<string, { enabled: boolean; mcpServerKeys: Record<string, string> }>
+  >({});
 
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
@@ -152,15 +158,67 @@ function WizardInner({ router }: { router: ReturnType<typeof useRouter> }) {
       .finally(() => setPresetsLoading(false));
   }, [step, presetsLoaded]);
 
-  const togglePreset = (id: string) =>
-    setPresetsSelected((prev) =>
-      prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id],
-    );
+  const togglePreset = (id: string) => {
+    const preset = presetsAvailable.find((p) => p.id === id);
+    setPresetSelections((prev) => {
+      const current = prev[id];
+      const isEnabled = current?.enabled ?? false;
+      // Wenn beim Toggle der mcpServerKeys-Record noch leer ist, Schlüssel
+      // pro requires-Server mit "" initialisieren. Spart das ?? "" in den
+      // Inputs und macht den UI-Reset beim Re-Toggle berechenbar.
+      const keys: Record<string, string> = {
+        ...(current?.mcpServerKeys ?? {}),
+      };
+      if (preset) {
+        for (const server of preset.requiresMcpServers) {
+          if (!(server in keys)) keys[server] = "";
+        }
+      }
+      return {
+        ...prev,
+        [id]: { enabled: !isEnabled, mcpServerKeys: keys },
+      };
+    });
+  };
+
+  const setMcpServerKey = (
+    presetId: string,
+    serverName: string,
+    value: string,
+  ) => {
+    setPresetSelections((prev) => {
+      const current = prev[presetId];
+      const keys = { ...(current?.mcpServerKeys ?? {}), [serverName]: value };
+      return {
+        ...prev,
+        [presetId]: { enabled: current?.enabled ?? false, mcpServerKeys: keys },
+      };
+    });
+  };
+
+  // #122 Soft-Block α: wenn ein Preset enabled ist, das requires_mcp_servers
+  // hat, müssen alle Keys gesetzt sein. Sonst Submit disabled.
+  const hasMissingKeys = useMemo(() => {
+    for (const preset of presetsAvailable) {
+      const sel = presetSelections[preset.id];
+      if (!sel?.enabled) continue;
+      for (const server of preset.requiresMcpServers) {
+        if (!sel.mcpServerKeys[server]?.trim()) return true;
+      }
+    }
+    return false;
+  }, [presetsAvailable, presetSelections]);
 
   async function submit() {
     setSubmitting(true);
     setSubmitError(null);
     try {
+      const payloadSelections = presetsAvailable
+        .filter((p) => presetSelections[p.id]?.enabled)
+        .map((p) => ({
+          presetId: p.id,
+          mcpServerKeys: presetSelections[p.id]?.mcpServerKeys ?? {},
+        }));
       const res = await fetch(`${RUNTIME_URL}/onboarding/submit`, {
         method: "POST",
         credentials: "include",
@@ -168,7 +226,7 @@ function WizardInner({ router }: { router: ReturnType<typeof useRouter> }) {
         body: JSON.stringify({
           persona,
           llmConfig: { provider: llmProvider, model: llmModel, apiKey },
-          presets: presetsSelected,
+          presetSelections: payloadSelections,
         }),
       });
       const body = await res.json().catch(() => ({}));
@@ -305,8 +363,9 @@ function WizardInner({ router }: { router: ReturnType<typeof useRouter> }) {
         {step === 2 && (
           <PresetsBlock
             available={presetsAvailable}
-            selected={presetsSelected}
+            selections={presetSelections}
             onToggle={togglePreset}
+            onMcpServerKeyChange={setMcpServerKey}
             loading={presetsLoading}
             error={presetsError}
           />
@@ -318,9 +377,10 @@ function WizardInner({ router }: { router: ReturnType<typeof useRouter> }) {
             llmModel={llmModel}
             apiKey={apiKey}
             presetsAvailable={presetsAvailable}
-            presetsSelected={presetsSelected}
+            presetSelections={presetSelections}
             submitting={submitting}
             submitError={submitError}
+            hasMissingKeys={hasMissingKeys}
             onSubmit={submit}
           />
         )}
@@ -939,16 +999,23 @@ function LlmConfigBlock({
 // Wizard) nicht Tool-Calls forcen kann. Echtes MCP-Server-Provisioning
 // im Wizard ist #122.
 
+type PresetSelectionsState = Record<
+  string,
+  { enabled: boolean; mcpServerKeys: Record<string, string> }
+>;
+
 function PresetsBlock({
   available,
-  selected,
+  selections,
   onToggle,
+  onMcpServerKeyChange,
   loading,
   error,
 }: {
   available: Preset[];
-  selected: string[];
+  selections: PresetSelectionsState;
   onToggle: (id: string) => void;
+  onMcpServerKeyChange: (presetId: string, serverName: string, value: string) => void;
   loading: boolean;
   error: string | null;
 }) {
@@ -977,17 +1044,25 @@ function PresetsBlock({
     <div className="space-y-4">
       <p className="text-sm text-muted">
         Pattern-Skills aktivieren. Du kannst auch keine wählen — alles ist
-        später in Settings ergänzbar.
+        später in Settings ergänzbar. Presets mit MCP-Server-Abhängigkeit
+        brauchen ihren API-Key direkt hier, wir provisionieren beim Anlegen.
       </p>
       <div className="space-y-3">
-        {available.map((preset) => (
-          <PresetCard
-            key={preset.id}
-            preset={preset}
-            isSelected={selected.includes(preset.id)}
-            onToggle={() => onToggle(preset.id)}
-          />
-        ))}
+        {available.map((preset) => {
+          const sel = selections[preset.id];
+          return (
+            <PresetCard
+              key={preset.id}
+              preset={preset}
+              isSelected={sel?.enabled ?? false}
+              mcpServerKeys={sel?.mcpServerKeys ?? {}}
+              onToggle={() => onToggle(preset.id)}
+              onMcpServerKeyChange={(server, value) =>
+                onMcpServerKeyChange(preset.id, server, value)
+              }
+            />
+          );
+        })}
       </div>
     </div>
   );
@@ -996,45 +1071,74 @@ function PresetsBlock({
 function PresetCard({
   preset,
   isSelected,
+  mcpServerKeys,
   onToggle,
+  onMcpServerKeyChange,
 }: {
   preset: Preset;
   isSelected: boolean;
+  mcpServerKeys: Record<string, string>;
   onToggle: () => void;
+  onMcpServerKeyChange: (serverName: string, value: string) => void;
 }) {
+  const hasMcpDeps = preset.requiresMcpServers.length > 0;
   return (
-    <button
-      type="button"
-      onClick={onToggle}
-      className={`w-full text-left p-4 rounded border transition-colors ${
+    <div
+      className={`rounded border transition-colors ${
         isSelected
           ? "border-accent bg-surface"
           : "border-border bg-surface hover:border-accent"
       }`}
     >
-      <div className="flex items-start justify-between gap-3">
-        <div className="flex-1 min-w-0">
-          <div className="text-sm font-semibold text-text">{preset.name}</div>
-          <div className="text-xs text-muted mt-1">{preset.description}</div>
-          {preset.requiresMcpServers.length > 0 && (
-            <div className="text-xs text-muted italic mt-2">
-              ⚠ Erfordert MCP-Server:{" "}
-              <span className="font-mono not-italic">
-                {preset.requiresMcpServers.join(", ")}
-              </span>
-              . Nach Twin-Anlegen in Settings hinzufügen.
+      <button
+        type="button"
+        onClick={onToggle}
+        className="w-full text-left p-4 focus:outline-none focus:ring-1 focus:ring-accent rounded"
+      >
+        <div className="flex items-start justify-between gap-3">
+          <div className="flex-1 min-w-0">
+            <div className="text-sm font-semibold text-text">{preset.name}</div>
+            <div className="text-xs text-muted mt-1">{preset.description}</div>
+            {hasMcpDeps && (
+              <div className="text-xs text-muted italic mt-2">
+                Provisioniert{" "}
+                <span className="font-mono not-italic">
+                  {preset.requiresMcpServers.join(", ")}
+                </span>{" "}
+                — API-Key{preset.requiresMcpServers.length > 1 ? "s" : ""} unten eintragen.
+              </div>
+            )}
+          </div>
+          <div
+            className={`shrink-0 mt-0.5 text-xs uppercase tracking-wider ${
+              isSelected ? "text-accent" : "text-muted"
+            }`}
+          >
+            {isSelected ? "✓ Aktiv" : "Inaktiv"}
+          </div>
+        </div>
+      </button>
+      {isSelected && hasMcpDeps && (
+        <div className="border-t border-border px-4 py-3 space-y-3">
+          {preset.requiresMcpServers.map((serverName) => (
+            <div key={serverName}>
+              <label className="block text-xs uppercase tracking-wider text-muted mb-1">
+                API-Key für{" "}
+                <span className="font-mono normal-case">{serverName}</span>
+              </label>
+              <input
+                type="password"
+                value={mcpServerKeys[serverName] ?? ""}
+                onChange={(e) => onMcpServerKeyChange(serverName, e.target.value)}
+                autoComplete="off"
+                spellCheck={false}
+                className="w-full bg-bg border border-border rounded px-3 py-2 text-sm text-text font-mono focus:outline-none focus:border-accent"
+              />
             </div>
-          )}
+          ))}
         </div>
-        <div
-          className={`shrink-0 mt-0.5 text-xs uppercase tracking-wider ${
-            isSelected ? "text-accent" : "text-muted"
-          }`}
-        >
-          {isSelected ? "✓ Aktiv" : "Inaktiv"}
-        </div>
-      </div>
-    </button>
+      )}
+    </div>
   );
 }
 
@@ -1046,9 +1150,10 @@ function ReviewBlock({
   llmModel,
   apiKey,
   presetsAvailable,
-  presetsSelected,
+  presetSelections,
   submitting,
   submitError,
+  hasMissingKeys,
   onSubmit,
 }: {
   persona: PersonaState;
@@ -1056,15 +1161,16 @@ function ReviewBlock({
   llmModel: string;
   apiKey: string;
   presetsAvailable: Preset[];
-  presetsSelected: string[];
+  presetSelections: PresetSelectionsState;
   submitting: boolean;
   submitError: string | null;
+  hasMissingKeys: boolean;
   onSubmit: () => void;
 }) {
   const apiKeyMasked = apiKey.length >= 9 ? `${apiKey.slice(0, 4)}…${apiKey.slice(-4)}` : "…";
-  const selectedPresets = presetsSelected
-    .map((id) => presetsAvailable.find((p) => p.id === id))
-    .filter((p): p is Preset => Boolean(p));
+  const selectedPresets = presetsAvailable.filter(
+    (p) => presetSelections[p.id]?.enabled,
+  );
   return (
     <div className="space-y-5">
       {/* #110 Phase 2A: Bridge-Step entfernt; Defensive Hint, dass die
@@ -1112,7 +1218,7 @@ function ReviewBlock({
                 {preset.name}
                 {preset.requiresMcpServers.length > 0 && (
                   <span className="text-muted text-xs ml-2 italic">
-                    (MCP-Setup nötig)
+                    (MCP-Server wird beim Anlegen provisioniert)
                   </span>
                 )}
               </dd>
@@ -1129,11 +1235,22 @@ function ReviewBlock({
 
       <button
         onClick={onSubmit}
-        disabled={submitting}
+        disabled={submitting || hasMissingKeys}
+        title={
+          hasMissingKeys
+            ? "API-Key fehlt für ausgewähltes Preset"
+            : undefined
+        }
         className="w-full px-4 py-3 border border-accent text-accent text-sm rounded disabled:opacity-30 disabled:cursor-not-allowed hover:bg-accent hover:text-bg transition-colors"
       >
         {submitting ? "Wird angelegt…" : "Twin anlegen"}
       </button>
+      {hasMissingKeys && !submitting && (
+        <div className="text-xs text-warn">
+          API-Key fehlt für ein ausgewähltes Preset — Preset-Step zurück und
+          eintragen.
+        </div>
+      )}
     </div>
   );
 }

@@ -63,6 +63,7 @@ import {
 } from "./skills/import-from-dir.js";
 import { scanExamplesPresets } from "./skills/scan-examples-presets.js";
 import { activatePresets } from "./skills/activate-presets.js";
+import { PresetSelectionSchema } from "@twin-lab/shared";
 import type {
   PresetActivationResult,
   Skill,
@@ -132,6 +133,11 @@ export interface ServerDeps {
    * Quelle: `RuntimeConfig.examplesDir`.
    */
   examplesDir: string;
+  /**
+   * #122: Absoluter Pfad zum `mcp-servers/`-Verzeichnis mit JSON-Templates
+   * für Auto-Provisioning im Wizard. Quelle: `RuntimeConfig.mcpServersDir`.
+   */
+  mcpServersDir: string;
   /** #130 Phase 2 — geteilte Instanz mit Boot + BotRegistry. */
   telegramConfigsRepo: TelegramConfigsRepo;
   /** #130 Phase 2 — geteilte Instanz mit Boot für Webhook-Dispatch. */
@@ -624,14 +630,16 @@ const OnboardingSubmitSchema = z.object({
     model: z.string().min(1),
     apiKey: z.string().min(1),
   }),
-  // #110 Phase 2B: optionale Liste von Preset-IDs aus `examples/skills/`.
-  // Backend whiteliste-validiert die IDs zur Submit-Zeit gegen den
-  // Scan-Output (Single-Source-of-Truth examples/skills/-Folder).
-  // Activation ist soft — Failures landen im Response, Twin bleibt
-  // angelegt. MCP-Server-Provisioning ist NICHT Teil dieser Aktivierung
-  // (siehe #122) — Pattern-Skills werden importiert, Tool-Bindings
-  // erfordern manuelles MCP-Setup in Settings.
-  presets: z.array(z.string()).optional().default([]),
+  // #110 Phase 2B + #122: Preset-Auswahl pro selektiertem Preset mit
+  // optionalen API-Keys für `requires_mcp_servers`. Whitelist-Validation
+  // gegen Scan-Output bleibt in activatePresets. Soft-Activation: Failures
+  // landen im Response, Twin bleibt angelegt. Auto-Provisioning der
+  // MCP-Server inkl. Tool-Skill-Sync läuft jetzt direkt im
+  // Onboarding-Submit (#122) — Wizard liefert die Keys vorab.
+  presetSelections: z
+    .array(PresetSelectionSchema)
+    .optional()
+    .default([]),
 });
 
 const ValidateApiKeySchema = z.object({
@@ -703,7 +711,8 @@ function registerOnboardingRoutes(app: FastifyInstance, deps: ServerDeps) {
     if (!parsed.success) {
       return reply.status(400).send({ error: parsed.error.message });
     }
-    const { persona, mandateTemplate, llmConfig, presets } = parsed.data;
+    const { persona, mandateTemplate, llmConfig, presetSelections } =
+      parsed.data;
 
     // 1. Defensive Handle-Check (UNIQUE catched es spätestens, aber 409
     //    früh ist freundlicher).
@@ -795,10 +804,14 @@ function registerOnboardingRoutes(app: FastifyInstance, deps: ServerDeps) {
     try {
       await deps.registry.addTwin(profile.twinId);
       const presetResults = await activatePresets({
-        presetIds: presets,
+        presetSelections,
         twinId: profile.twinId,
+        twinHandle: profile.handle,
         examplesDir: deps.examplesDir,
+        mcpServersDir: deps.mcpServersDir,
         skillRepo: deps.skillRepo,
+        mcpServersRepo: deps.mcpServersRepo,
+        registry: deps.registry,
         logger: app.log,
       });
       return reply.status(201).send({
@@ -1837,11 +1850,22 @@ function registerTwinSettingsRoutes(
             );
           }
         }
+        // Settings-Pfad hat (heute) keine API-Key-UI für requires_mcp_servers
+        // — Selections kommen ohne Keys rein. activate-presets behandelt das
+        // soft: Skill wird importiert, MCP-Provision fällt mit Reason
+        // "API-Key fehlt" auf den existing Settings-MCP-Add-Flow zurück.
         const activated = await activatePresets({
-          presetIds: body.presets,
+          presetSelections: body.presets.map((id) => ({
+            presetId: id,
+            mcpServerKeys: {},
+          })),
           twinId: entry.twinId,
+          twinHandle: entry.handle,
           examplesDir: deps.examplesDir,
+          mcpServersDir: deps.mcpServersDir,
           skillRepo: deps.skillRepo,
+          mcpServersRepo: deps.mcpServersRepo,
+          registry: deps.registry,
           logger: app.log,
         });
         presetResults.push(...activated);
