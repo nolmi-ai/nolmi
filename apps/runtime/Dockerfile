@@ -73,6 +73,12 @@ COPY --from=builder /out ./
 # (#120, Tag 20 Production-Deploy).
 COPY examples /app/examples
 
+# #122: MCP-Server-Templates für Auto-Provisioning im Onboarding-Wizard.
+# Gleiches Pattern wie examples/ — kein Workspace-Member, manueller COPY.
+# Resolved zur Laufzeit via `WORKSPACE_ROOT = resolve(__dirname, "../../..")`
+# in config.ts → `/app` im Container → `/app/mcp-servers`.
+COPY mcp-servers /app/mcp-servers
+
 # Mount-Point fürs Compose-Volume (TWIN_DATABASE_PATH=/data/twin.db). Wird
 # beim ersten Schreibzugriff von better-sqlite3 ohnehin angelegt — explizit
 # anlegen ist nur Doku und schützt vor Permission-Edge-Cases.
