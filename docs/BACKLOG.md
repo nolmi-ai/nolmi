@@ -902,19 +902,17 @@ d) DEPLOYMENT.md (#109) dokumentiert Build-Command explizit
 
 Hinweis: passt thematisch zu #109 DEPLOYMENT.md, kann als Sub-Aktion dort gelöst werden statt eigener Bau.
 
-### 127. .env.example säubern — Phase-1-Legacy-Variables entfernen
+### 127. .env.example säubern — Phase-1-Legacy-Variables entfernen ✅
 
-**Befund Tag 23 (#109-Bau):** `.env.example` enthält noch Phase-1-Markus-only-Mode-Variables:
-- `BRIDGE_URL` (Zeile 43)
-- `BRIDGE_TWIN_HANDLE` (Zeile 44)
-- `BRIDGE_TWIN_TOKEN` (Zeile 45)
+**Abgeschlossen Tag 30 (28. Mai 2026, Donnerstag), gemeinsam mit #129 in einem Commit (Tag 30 Block 1).**
 
-Diese werden in Phase A nicht mehr genutzt (Bridge-Config ist per-Twin in DB seit 2.5.4 — `TWIN_LAB_DEFAULT_BRIDGE_URL` für neue Twins, alles andere im Onboarding-Wizard). Sie verwirren Self-Hoster die sich fragen "muss ich das setzen?".
+**Scope-Korrektur (α, User-bestätigt):** Ursprünglicher Plan war Variable-Delete. Diagnose vor Edit zeigte: `apps/runtime/src/scripts/bootstrap-twin.ts:87-95` liest alle drei Vars (`BRIDGE_URL`, `BRIDGE_TWIN_HANDLE`, `BRIDGE_TWIN_TOKEN`) aktiv und wirft mit klarer Diagnose, wenn `BRIDGE_URL` fehlt. **`bootstrap-twin.ts` ist gewollter File-basierter Power-User-Pfad, nicht deprecated.** Delete hätte den Pfad ohne Vorwarnung gebrochen.
 
-**Fix:** Variables aus `.env.example` entfernen. Code-Pfade vorab prüfen ob noch jemand drauf liest (vermutlich nur Bootstrap-CLI).
+**Statt Delete:** Die drei Vars als „Advanced: File-basierter Twin-Bootstrap (`pnpm twin:bootstrap`)" Block im `.env.example` gruppiert mit klarem Header-Kommentar: „Der normale Self-Hosting-Pfad ist der Onboarding-Wizard; der braucht diese Variablen NICHT, sondern nur `TWIN_LAB_DEFAULT_BRIDGE_URL`." Self-Hoster, der den Wizard nutzt, kann die drei Zeilen ignorieren. Power-User, der File-Bootstrap will, setzt sie weiter wie vorher.
 
-**Größe:** XS · **Priorität:** should · **Aus:** Tag 23 #109-Bau
-**Status:** offen, vor Self-Hosting-Launch
+`TWIN_LAB_DEFAULT_BRIDGE_URL` ist im neuen Block-Layout zuerst (als „Bridge: Wizard-Default") und damit positiv abgegrenzt vom Power-User-Block darunter.
+
+**Größe ursprünglich:** XS. **Final:** ~10 Min (gemeinsam mit #129 in einem Edit-Pass). **Spur:** Pre-Launch-Phase A.
 
 ### 128. Bridge-optional-Mode für Single-Twin-Self-Hosting
 
@@ -935,12 +933,17 @@ Runtime selbst ist Bridge-resilient (Reconnect-Loop ohne Crash für existing Twi
 **Größe:** M-L · **Priorität:** nice · **Aus:** Tag 24 Cookbook-Walkthrough (#109 §9)
 **Status:** offen, Phase-B-Kandidat
 
-### 129. .env.example-Default auf Anthropic switchen
+### 129. .env.example-Default auf Anthropic switchen ✅
 
-README-Quick-Start + Tech-Stack-Story sagen Claude Opus 4.7 als Primary-LLM. `.env.example`-Default ist heute `openai` (Legacy aus früher Multi-Provider-Phase). Switch auf `ACTIVE_PROVIDER=anthropic` + `ANTHROPIC_API_KEY=sk-ant-replace-me` macht Quick-Start friktionslos. OpenAI bleibt als auskommentierter Alternativ-Block in `.env.example`.
+**Abgeschlossen Tag 30 (28. Mai 2026, Donnerstag), gemeinsam mit #127 in einem Commit (Tag 30 Block 1).** `.env.example` Provider-Block umgestellt:
+- `ANTHROPIC_API_KEY=sk-ant-replace-me` aktiv (vorher auskommentiert)
+- `ANTHROPIC_MODEL=claude-opus-4-7` aktiv (vorher auskommentiert)
+- `ACTIVE_PROVIDER=anthropic` (vorher `openai`)
+- `OPENAI_API_KEY` + `OPENAI_MODEL` als auskommentierter Alternativ-Block mit Switch-Anleitung („für Switch hier un-kommentieren, unten ACTIVE_PROVIDER=openai setzen")
 
-**Größe:** XS · **Priorität:** should · **Aus:** #111 Schritt 7 Phase-1.1-Diagnose · **Spur:** Pre-Launch-Phase A (vor Self-Hosting-Launch)
-**Status:** offen
+Quick-Start matched jetzt README + Tech-Stack-Story. Friktionsloser Switch zwischen beiden Providern via 2-Zeilen-Edit.
+
+**Größe ursprünglich:** XS. **Final:** ~5 Min (gemeinsam mit #127). **Spur:** Pre-Launch-Phase A.
 
 ### 130. Telegram-Adapter Stufe 1 (Owner-Only-Bridge)
 

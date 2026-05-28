@@ -1,6 +1,6 @@
 # twin-lab — Stand
 
-**Letztes Update:** 27. Mai 2026, Mittwoch (Tag 29 Block 8 — #122 live in Production, Sub-Block-A-Dockerfile-Fix präventiv via Pre-Flight, Production-Smoke + Cleanup grün)
+**Letztes Update:** 28. Mai 2026, Donnerstag (Tag 30 Block 1 — #129 + #127 .env.example-Klarstellung)
 
 ## Historisches Archiv
 
@@ -35,6 +35,26 @@ A2A-Bridge**. Nicht Computer-Use.
 Inhalte (11 Items in drei Tranchen) unverändert, nur Build-Pfad
 leicht angepasst (#100/#101 vorgezogen, weil Vision-kritisch für
 die Differenzierungs-Story).
+
+## Tag 30 (28. Mai 2026, Donnerstag) — Phase-A-Polish (#129 + #127 + #126)
+
+**Stand Tag 30 Block 1:** Zwei Self-Hoster-Friction-Items in einem Doku-Commit aufgelöst — `.env.example` Provider-Default auf Anthropic (#129) gespiegelt zum README-Quick-Start, Legacy-Bridge-Vars als „Advanced: twin:bootstrap"-Power-User-Block abgegrenzt (#127, Scope-Korrektur gegenüber Original-Plan „löschen"). bootstrap-twin.ts bleibt unverändert (gewollter File-basierter Pfad).
+
+### Block 1 — #129 + #127 .env.example-Klarstellung
+
+| Block | Item | Commit | Aufwand | Was |
+|---|---|---|---|---|
+| Block 1 | #129 Provider-Default Anthropic + #127 Bridge-Vars Power-User-Block | (dieser Commit) | ~15 Min | `.env.example` Provider-Block umgestellt: `ANTHROPIC_API_KEY=sk-ant-replace-me` aktiv, `ANTHROPIC_MODEL=claude-opus-4-7` aktiv, `ACTIVE_PROVIDER=anthropic` (vorher `openai`), OpenAI als auskommentierter Alternativ-Block mit Switch-Anleitung. Bridge-Section neu strukturiert: `TWIN_LAB_DEFAULT_BRIDGE_URL` zuerst als „Wizard-Default" (einzige Bridge-Var im Standard-Self-Hosting-Pfad), `BRIDGE_URL`/`BRIDGE_TWIN_HANDLE`/`BRIDGE_TWIN_TOKEN` darunter als „Advanced: File-basierter Twin-Bootstrap (`pnpm twin:bootstrap`)" mit klarer Wizard-Abgrenzung. **#127 Scope-Korrektur:** ursprünglicher Plan war Var-Delete, real (α) sind die drei Vars von `bootstrap-twin.ts:87-95` aktiv gelesen (wirft mit klarer Diagnose wenn fehlend) — daher als Power-User-Block markiert statt gelöscht, bootstrap-twin.ts bleibt gewollter File-basierter Pfad ohne Deprecation. Diagnose-Befund vorab: Wizard nutzt `TWIN_LAB_DEFAULT_BRIDGE_URL` aus `server.ts`, Legacy-Vars hat sonst keine Leser außer Bootstrap-CLI. 11 Treffer der 4 funktionalen Vars in finalem File — keine accidental-Delete. Reine Doku-Datei-Änderung, kein Code-Pfad angefasst. |
+
+### Tag-30-Outcome-Bilanz
+
+**Item-Closures Tag 30 (laufend):**
+- #129 ✅ Provider-Default auf Anthropic in `.env.example` (Block 1)
+- #127 ✅ Bridge-Vars-Klarstellung in `.env.example` mit Scope-Korrektur (Block 1)
+
+**Neue BACKLOG-Items aus Tag 30:** noch keine.
+
+**Tag-30-Total bis Block 1:** 2 Closures (#129 + #127, beide reine Doku-Datei), 1 Block, ~15 Min Netto.
 
 ## Tag 29 (27. Mai 2026, Mittwoch) — Pre-Launch-Phase A Block 4 Self-Hosting-Polish
 
