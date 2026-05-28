@@ -5,31 +5,33 @@
 @import url("https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@300;400;500;600;700&display=swap");
 
 :root {
-  color-scheme: dark;
+  /* Tavryn-Light Theme (Rebrand-Phase 1, Tag 30). Hart auf Light, kein
+   * Toggle. Phasen-Plan + Token-Begründung: `docs/REBRAND-TAVRYN-STRATEGY.md`. */
+  color-scheme: light;
 
   /* ─── Semantische CSS-Variable-Aliases (UX.1.A.2.B) ─────────────────────
-   * Spiegel der Twin-Lab-Foundation-Tokens aus tailwind.config.js.
+   * Spiegel der Tavryn-Light-Foundation-Tokens aus tailwind.config.js.
    * Zweck: 3rd-Party-Libraries, die KEINE Tailwind-Klassen konsumieren
    * können (sonner-Toaster, später ggf. Radix-Komponenten, …), bekommen
-   * den Twin-Lab-Look über Standard-CSS-Vars statt eigener Theme-APIs.
+   * den Tavryn-Look über Standard-CSS-Vars statt eigener Theme-APIs.
    *
    * Single Source of Truth bleibt tailwind.config.js — diese Vars sind
    * reine Aliases. Bei Änderung dort hier mit-aktualisieren (kurzfristig
    * akzeptable Duplikation, langfristig via Tailwind-v4-@theme-inline
    * oder PostCSS-Plugin auflösbar). */
-  --color-bg-base: #0a0a0a;
-  --color-bg-elevated: #141414;
-  --color-bg-hover: #1f1f1f;
-  --color-border-default: #2a2a2a;
-  --color-text-default: #e8e8e8;
-  --color-text-muted: #666666;
-  --color-success: #4a9e6a;
-  --color-danger: #cc4444;
+  --color-bg-base: #F4F1EA;
+  --color-bg-elevated: #FFFCF6;
+  --color-bg-hover: #ECE8E0;
+  --color-border-default: #D8D3CA;
+  --color-text-default: #111111;
+  --color-text-muted: #6F6A60;
+  --color-success: #1E9B5A;
+  --color-danger: #C8332A;
 }
 
 html, body {
-  background: #0a0a0a;
-  color: #e8e8e8;
+  background: #F4F1EA;
+  color: #111111;
   font-family: "IBM Plex Mono", "Courier New", monospace;
 }
 
@@ -38,8 +40,8 @@ html, body {
 }
 
 ::selection {
-  background: #4a9e6a;
-  color: #0a0a0a;
+  background: #1E9B5A;
+  color: #FFFCF6;
 }
 
 /* ─── Toast als Mini-Modal-Card (UX.1.A.2.C.2) ─────────────────────────

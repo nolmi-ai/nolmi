@@ -1,6 +1,6 @@
 # twin-lab — Stand
 
-**Letztes Update:** 28. Mai 2026, Donnerstag (Tag 30 Block 2 — #126 Build-Guard für NEXT_PUBLIC_RUNTIME_URL im Production-Build)
+**Letztes Update:** 28. Mai 2026, Donnerstag (Tag 30 Block 3 — Rebrand Phase 1 Light-Mode-Switch, Tavryn-Branding-Tokens live im Repo)
 
 ## Historisches Archiv
 
@@ -36,27 +36,30 @@ Inhalte (11 Items in drei Tranchen) unverändert, nur Build-Pfad
 leicht angepasst (#100/#101 vorgezogen, weil Vision-kritisch für
 die Differenzierungs-Story).
 
-## Tag 30 (28. Mai 2026, Donnerstag) — Phase-A-Polish (#129 + #127 + #126)
+## Tag 30 (28. Mai 2026, Donnerstag) — Phase-A-Polish (#129 + #127 + #126) + Rebrand Phase 1 (Light-Mode)
 
-**Stand Tag 30 Block 2:** Drei Self-Hoster-Friction-Items abgehakt — `.env.example`-Klarstellung (#129 + #127, Block 1) und der strukturelle Build-Guard für den `localhost:4000`-im-Client-Bundle-Bug (#126, Block 2). Letzterer hatte dreimal zugeschlagen (Tag 23/28/29), jetzt failt der Production-Build früh und laut, wenn `NEXT_PUBLIC_RUNTIME_URL` fehlt oder auf localhost zeigt — gekoppelt an den existierenden Production-Marker `NEXT_PUBLIC_DEPLOYMENT_LABEL=production`, dev/local-Builds + Husky-Pre-Push bleiben unberührt (no-op).
+**Stand Tag 30 Block 3:** Drei Phase-A-Polish-Items + Rebrand-Phase-1-Start. `.env.example`-Klarstellung (#129 + #127, Block 1) und Build-Guard gegen den `localhost:4000`-im-Client-Bundle-Bug (#126, Block 2, Tag-11-Pattern nach 3-fachem Auftreten). **Block 3 startet den Twin-Lab → Tavryn-Rebrand** mit dem namens-unabhängigen Light-Mode-Switch — Strategy-Doc `docs/REBRAND-TAVRYN-STRATEGY.md` (4 Phasen, Trademark-Gate für Phase 2-4) ist heute im Repo. Phase 1 lebt erstmal **nur im Repo + lokal**, kein Production-Deploy — Tavryn kommt auf separaten Hostinger-VPS (Phase 4 nach Trademark-Klärung).
 
 ### Block 1 — #129 + #127 .env.example-Klarstellung
 
 | Block | Item | Commit | Aufwand | Was |
 |---|---|---|---|---|
 | Block 1 | #129 Provider-Default Anthropic + #127 Bridge-Vars Power-User-Block | `5770f03` | ~15 Min | `.env.example` Provider-Block umgestellt: `ANTHROPIC_API_KEY=sk-ant-replace-me` aktiv, `ANTHROPIC_MODEL=claude-opus-4-7` aktiv, `ACTIVE_PROVIDER=anthropic` (vorher `openai`), OpenAI als auskommentierter Alternativ-Block mit Switch-Anleitung. Bridge-Section neu strukturiert: `TWIN_LAB_DEFAULT_BRIDGE_URL` zuerst als „Wizard-Default" (einzige Bridge-Var im Standard-Self-Hosting-Pfad), `BRIDGE_URL`/`BRIDGE_TWIN_HANDLE`/`BRIDGE_TWIN_TOKEN` darunter als „Advanced: File-basierter Twin-Bootstrap (`pnpm twin:bootstrap`)" mit klarer Wizard-Abgrenzung. **#127 Scope-Korrektur:** ursprünglicher Plan war Var-Delete, real (α) sind die drei Vars von `bootstrap-twin.ts:87-95` aktiv gelesen (wirft mit klarer Diagnose wenn fehlend) — daher als Power-User-Block markiert statt gelöscht, bootstrap-twin.ts bleibt gewollter File-basierter Pfad ohne Deprecation. Diagnose-Befund vorab: Wizard nutzt `TWIN_LAB_DEFAULT_BRIDGE_URL` aus `server.ts`, Legacy-Vars hat sonst keine Leser außer Bootstrap-CLI. 11 Treffer der 4 funktionalen Vars in finalem File — keine accidental-Delete. Reine Doku-Datei-Änderung, kein Code-Pfad angefasst. |
-| Block 2 | #126 Build-Guard für `NEXT_PUBLIC_RUNTIME_URL` im Production-Build | (dieser Commit) | ~30 Min | **Strukturelle Lösung statt Doku-Pflaster** nach dreimaligem `localhost:4000`-im-Client-Bundle-Bug (Tag 23/28/29). Neues Guard-Script `apps/web/scripts/check-build-env.mjs` als prebuild-npm-Hook in `apps/web/package.json`. Guard-Logik gekoppelt an existierenden Production-Marker `NEXT_PUBLIC_DEPLOYMENT_LABEL=production`: wenn Label=production UND (`NEXT_PUBLIC_RUNTIME_URL` fehlt ODER matched `/localhost\|127\.0\.0\.1/`) → exit 1 mit handlungsleitender Fehlermeldung; sonst no-op. Dev/local-Builds + Husky-Pre-Push (das `pnpm -r build` ohne `DEPLOYMENT_LABEL` ausführt) bleiben unberührt. Source-`?? "http://localhost:4000"`-Fallbacks in den 9 page.tsx nicht angefasst (für `pnpm dev` korrekt, Defense-in-Depth). pnpm-Hook-Trigger empirisch verifiziert mit `NEXT_PUBLIC_DEPLOYMENT_LABEL=production pnpm --filter @twin-lab/web build` ohne URL → `ERR_PNPM_RECURSIVE_RUN_FIRST_FAIL`, `next build` startet nicht, `.next/` unangetastet. **5/5-Smokes grün** (Dev/Production-missing/Production-localhost/Production-127.0.0.1/Production-real). Dockerfile-Kommentar Z.41-43 + DEPLOYMENT.md §3.1.2 verweisen auf den Guard. |
+| Block 2 | #126 Build-Guard für `NEXT_PUBLIC_RUNTIME_URL` im Production-Build | `9e6f52d` | ~30 Min | **Strukturelle Lösung statt Doku-Pflaster** nach dreimaligem `localhost:4000`-im-Client-Bundle-Bug (Tag 23/28/29). Neues Guard-Script `apps/web/scripts/check-build-env.mjs` als prebuild-npm-Hook in `apps/web/package.json`. Guard-Logik gekoppelt an existierenden Production-Marker `NEXT_PUBLIC_DEPLOYMENT_LABEL=production`: wenn Label=production UND (`NEXT_PUBLIC_RUNTIME_URL` fehlt ODER matched `/localhost\|127\.0\.0\.1/`) → exit 1 mit handlungsleitender Fehlermeldung; sonst no-op. Dev/local-Builds + Husky-Pre-Push (das `pnpm -r build` ohne `DEPLOYMENT_LABEL` ausführt) bleiben unberührt. Source-`?? "http://localhost:4000"`-Fallbacks in den 9 page.tsx nicht angefasst (für `pnpm dev` korrekt, Defense-in-Depth). pnpm-Hook-Trigger empirisch verifiziert mit `NEXT_PUBLIC_DEPLOYMENT_LABEL=production pnpm --filter @twin-lab/web build` ohne URL → `ERR_PNPM_RECURSIVE_RUN_FIRST_FAIL`, `next build` startet nicht, `.next/` unangetastet. **5/5-Smokes grün** (Dev/Production-missing/Production-localhost/Production-127.0.0.1/Production-real). Dockerfile-Kommentar Z.41-43 + DEPLOYMENT.md §3.1.2 verweisen auf den Guard. |
+| Block 3 | Rebrand Phase 1 — Light-Mode-Switch (Tavryn-Branding) | (dieser Commit) | ~30 Min Bau + ~30 Min Smoke | **Erster Schritt des Twin-Lab → Tavryn-Rebrands.** Namens-**unabhängiger** Theme-Switch — Light-first als visuelle Differenzierung gegen die dark-mode-Konkurrenz (OpenClaw/Hermes/NanoClaw). Hart auf Light, **kein Toggle** (Strategy-Doc §5 S7). Diagnose-Befund vorab bestätigt: Theme sauber zentralisiert in zwei Dateien, Components ohne eigene Hex-Farben (Hardcoded-Grep nur Treffer in `globals.css` selbst). `apps/web/tailwind.config.js`: 8 Token-Werte Dark → Tavryn-Light (`bg #0a0a0a→#F4F1EA`, `surface #141414→#FFFCF6`, `surface-hover #1f1f1f→#ECE8E0` mit invertierter Hover-Logik im Light, `border #2a2a2a→#D8D3CA`, `muted #666666→#6F6A60`, `text #e8e8e8→#111111`, `accent #4a9e6a→#1E9B5A` grün bleibt grün, `warn #cc4444→#C8332A`) + 5 neue additive Status-Tokens (`accent-dark`, `info`, `warning`, `pending`, `success`). `apps/web/app/globals.css`: `color-scheme: dark→light`, 8 CSS-Var-Aliases gespiegelt (für sonner-Toaster), 3 hardcoded Stellen (`html,body` + `::selection`) auf Light-Werte. **Strategy-Doc `docs/REBRAND-TAVRYN-STRATEGY.md`** (heute angelegt, war untracked) im selben Commit mit-committed — 4 Phasen, Trademark-Gate für Phase 2-4, Token-Mapping, Produkt-Narrativ. Typecheck 4/4 grün. **Browser-Smoke alle 7 Haupt-Views grün** (Login, Onboarding, Chat/@markus, Inbox, Settings, Facts, Stream): Kontrast überall lesbar, Status-Farben sichtbar, User-vs-Twin-Bubble-Unterscheidung erhalten, keine Token-Korrekturen nötig. **KEIN Production-Deploy** — Light lebt erstmal nur im Repo + lokal, Tavryn kommt auf separaten Hostinger-VPS (Phase 4 nach Trademark-Klärung). Kein „Twin-Lab"-String angefasst (Phase 2 trademark-gated). |
 
 ### Tag-30-Outcome-Bilanz
 
 **Item-Closures Tag 30 (laufend):**
 - #129 ✅ Provider-Default auf Anthropic in `.env.example` (Block 1, Commit `5770f03`)
 - #127 ✅ Bridge-Vars-Klarstellung in `.env.example` mit Scope-Korrektur (Block 1, Commit `5770f03`)
-- #126 ✅ Build-Guard für `NEXT_PUBLIC_RUNTIME_URL` im Production-Build (Block 2, prebuild-Hook + Guard-Script, 5/5 Smokes grün)
+- #126 ✅ Build-Guard für `NEXT_PUBLIC_RUNTIME_URL` im Production-Build (Block 2, Commit `9e6f52d`, prebuild-Hook + Guard-Script, 5/5 Smokes grün)
+- **Rebrand Phase 1** ✅ Light-Mode-Switch (Block 3, Tavryn-Branding-Tokens live im Repo, Browser-Smoke 7/7 grün, Production-Deploy defer auf Phase 4 / Tavryn-VPS)
 
-**Neue BACKLOG-Items aus Tag 30:** noch keine.
+**Neue BACKLOG-Items aus Tag 30:**
+- **Rebrand-Section** in BACKLOG (4-Phasen-Struktur, Phase 1 ✅, Phase 2-4 trademark-/VPS-gated) — Verweis auf `docs/REBRAND-TAVRYN-STRATEGY.md` als Master-Doku.
 
-**Tag-30-Total bis Block 2:** 3 Closures (#129 + #127 reine Doku, #126 strukturelle Build-Pipeline-Härtung), 2 Blöcke, ~45 Min Netto.
+**Tag-30-Total bis Block 3:** 3 Closures + 1 Rebrand-Phase (1/4), 3 Blöcke, ~1h 45 Min Netto (Block 1 ~15 Min + Block 2 ~30 Min + Block 3 ~60 Min inkl. Browser-Smoke).
 
 **Lessons Tag 30:**
 

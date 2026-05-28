@@ -2555,3 +2555,56 @@ Aktuell 35 `test-*.ts`-Smoke-Scripts in `apps/runtime/src/scripts/` (22 in `pack
 
 **Wert:** vermeidet stille DB-Drift bei künftigen Smokes, dokumentiert die FK-Semantik für jeden, der manuell in die DB greift. Niedriges Risiko, hoher Cleanliness-Impact für die Phase-B-Self-Hosting-Phase wenn externe Owner ihre Test-Twins iterativ wegputzen.
 
+## Rebrand Twin-Lab → Tavryn
+
+**Strategie + Phasen-Plan:** [`docs/REBRAND-TAVRYN-STRATEGY.md`](./REBRAND-TAVRYN-STRATEGY.md) (Tag 30, 28. Mai 2026). Vollständige Mapping-Tabelle, Trademark-Gate, Produkt-Narrativ.
+
+**Gesamt-Status Tag 30:** Phase 1 ✅ live im Repo. Phase 2-4 gated.
+
+### Rebrand-Phase 1 — Light-Mode-Switch ✅ Tag 30 DONE
+
+**Abgeschlossen Tag 30 (28. Mai 2026, Donnerstag), Tag 30 Block 3.** Namens-**unabhängiger** Theme-Switch als visuelle Differenzierung gegen die dark-mode-Konkurrenz (OpenClaw/Hermes/NanoClaw). Hart auf Light, kein Toggle (Strategy-Doc §5 S7).
+
+- `apps/web/tailwind.config.js`: 8 Token-Werte Dark → Tavryn-Light (Mapping-Tabelle in Strategy-Doc §2) + 5 neue additive Status-Tokens (`accent-dark`, `info`, `warning`, `pending`, `success`)
+- `apps/web/app/globals.css`: `color-scheme: light`, 8 CSS-Var-Aliases (für sonner-Toaster), 3 hardcoded Stellen (`html,body` + `::selection`) auf Light-Werte
+- Strategy-Doc `docs/REBRAND-TAVRYN-STRATEGY.md` mit-committed (war vorher untracked)
+- Browser-Smoke 7/7 Haupt-Views grün (Login, Onboarding, Chat, Inbox, Settings, Facts, Stream), Kontrast überall lesbar, User-vs-Twin-Bubble-Unterscheidung erhalten, keine Token-Korrekturen nötig
+- Typecheck + Husky-Build 4/4 grün
+
+**KEIN Production-Deploy** — Light lebt erstmal nur im Repo + lokal, Tavryn kommt auf separaten Hostinger-VPS (Phase 4).
+
+**Spur:** Pre-Launch-Phase A · **Aufwand:** ~1h (Bau + Smoke + Doku).
+
+### Rebrand-Phase 2 — Sichtbarer Name-Rebrand (S, must — Trademark-gated)
+
+**Status:** Offen | Trademark-gated (siehe Strategy-Doc §0) | Aufwand: S
+
+User-facing Strings „Twin-Lab" → „Tavryn" in `apps/web` UI (~19+ tsx: `AppHeader`, `TopNav`, `layout.tsx` Metadata, `/login`, `/onboarding`, EmptyStates, etc.). README/DEPLOYMENT/ROADMAP/BACKLOG Display-Name. HTML `<title>`, OG-Metadata, Favicon-Referenzen. **NICHT:** Env-Vars oder Package-Namen (Phase 3).
+
+**Gate:** Markus klärt Trademark-Risiko vor Bau-Start (professioneller Quick-Search USA/EU/UK, Software-/AI-Klassen) — siehe Strategy-Doc §0 `tavrn.ai`-Kollision.
+
+### Rebrand-Phase 3 — Env/Package-Aliasing (M, must — nach Phase 2 + VPS-Plan)
+
+**Status:** Offen | gated nach Phase 2 + VPS-Plan | Aufwand: M
+
+Am riskantesten — Production-Twins laufen mit `TWIN_LAB_*`-Env-Vars und `@twin-lab/*`-Package-Namen:
+
+- **Env-Vars** `TWIN_LAB_*` → `TAVRYN_*`: Alias-Pattern statt Hard-Break. Code liest neuen + alten als Fallback, Migration-Window, dann alter Name raus.
+- **Package-Namen** `@twin-lab/*` → `@tavryn/*`: Workspace-weiter Rename, Breaking, daher kontrolliert + nach Phase 2.
+- **Docker-Image-Namen**: erst nach finaler Org/Registry-Entscheidung.
+
+Eigenes Sub-Briefing + Smoke gegen Production-Pattern (auf altem VPS) bevor neuer VPS-Deploy.
+
+### Rebrand-Phase 4 — Neuer Tavryn-VPS + Production-Deploy (M-L, must — nach 1-3)
+
+**Status:** Offen | gated nach Phase 1-3 | Aufwand: M-L
+
+Separater Hostinger-VPS (nicht der bestehende `srv1046432`), Domain `tavryn.ai`. Neu-Aufsetz analog DEPLOYMENT.md §9 Cookbook, mit Tavryn-Branding + Light + neuer Domain:
+
+- VPS provisionieren, Domain `tavryn.ai` (+ Subdomains) DNS
+- Traefik + Stack deployen
+- Brand-Assets (Wordmark, Favicon, OG-Image) — Light-first
+- Screenshots neu aufnehmen (Light-Branding) für #112 Landing / #113 Demo
+
+**Markus' parallele Arbeit (außerhalb Pair-Programming):** Trademark-Quick-Search, Domain `tavryn.ai` + VPS bei Hostinger sichern, GitHub-Org / npm-Scope / Social-Handles reservieren.
+
