@@ -41,6 +41,13 @@ RUN pnpm --filter @twin-lab/shared build
 # NEXT_PUBLIC_*-Vars werden zur Build-Zeit ins Client-Bundle inlined.
 # Default lokal, in Production via --build-arg overriden:
 #   docker build --build-arg NEXT_PUBLIC_RUNTIME_URL=https://... ...
+#
+# #126 Build-Guard (apps/web/scripts/check-build-env.mjs, via prebuild-
+# Hook): Wenn DEPLOYMENT_LABEL=production gesetzt ist, MUSS RUNTIME_URL
+# auf eine echte Runtime zeigen (nicht localhost/127.0.0.1). Sonst failt
+# `pnpm --filter @twin-lab/web build` mit exit 1 vor dem Next-Build. Das
+# verhindert den Tag-23/28/29-Bug (localhost im Client-Bundle → Browser-
+# Calls schlagen mit "Failed to fetch" fehl).
 ARG NEXT_PUBLIC_RUNTIME_URL=http://localhost:4000
 ENV NEXT_PUBLIC_RUNTIME_URL=${NEXT_PUBLIC_RUNTIME_URL}
 

@@ -887,20 +887,30 @@ Beide Pages importieren die shared Components. Onboarding-File würde ~1497 → 
 **Größe:** L · **Priorität:** nice · **Aus:** Tag 22 #110 Phase 2B Commit 11B
 **Status:** offen, Phase-2C-Kandidat (kein Phase-A-Blocker — Duplikation funktioniert)
 
-### 126. Build-Time-Validation für NEXT_PUBLIC_* Variables
+### 126. Build-Time-Validation für NEXT_PUBLIC_* Variables ✅
 
-**Befund Tag 23 (22. Mai 2026):** Production-Re-Deploy hat Web mit Default-localhost:4000 ins Client-Bundle gebakt, weil Build-ARG nicht übergeben wurde. Login + alle /twins-Calls failten mit "Failed to fetch" weil Browser localhost:4000 nicht erreichen kann.
+**Abgeschlossen Tag 30 (28. Mai 2026, Donnerstag), Tag 30 Block 2.** Strukturelle Lösung statt Doku-Pflaster nach **dreimaligem Auftreten** des `localhost:4000`-im-Client-Bundle-Bugs (Tag 23 Re-Deploy + Tag 28 Block 13 + Tag 29 Block 7 wäre die Diagnose-Stelle, dort nur per Pre-Flight-Lesson vermieden).
 
-Mitigation-Optionen:
-a) Default leer + Build-Fail wenn nicht gesetzt
-b) Build-Script wrapper das ARGs als Pflicht erzwingt
-c) CI/CD-Pipeline mit fixen ENV-Variables
-d) DEPLOYMENT.md (#109) dokumentiert Build-Command explizit
+**Lösung Option (a)-verfeinert:** Prebuild-npm-Hook mit Guard-Script (`apps/web/scripts/check-build-env.mjs`). Guard koppelt sich an den existierenden Production-Marker `NEXT_PUBLIC_DEPLOYMENT_LABEL=production`:
+- Label = `production` und `NEXT_PUBLIC_RUNTIME_URL` fehlt oder matched `/localhost|127\.0\.0\.1/` → exit 1 mit handlungsleitender Fehlermeldung
+- Sonst (dev, leerer Label, lokaler Build, Husky-Pre-Push) → no-op, localhost-Default erlaubt
 
-**Größe:** S · **Priorität:** should · **Aus:** Tag 23 Production-Re-Deploy
-**Status:** offen, vor Self-Hosting-Launch (Phase A) zu lösen
+**Wiring:** `apps/web/package.json` bekommt `"prebuild": "node scripts/check-build-env.mjs"`. pnpm folgt npm-Hook-Konvention (das existierende `predev` belegt das), Trigger empirisch verifiziert mit `NEXT_PUBLIC_DEPLOYMENT_LABEL=production pnpm --filter @twin-lab/web build` → exit 1 stoppt die Chain **vor** `next build`, `.next/` bleibt unangetastet.
 
-Hinweis: passt thematisch zu #109 DEPLOYMENT.md, kann als Sub-Aktion dort gelöst werden statt eigener Bau.
+**Smoke 5/5 grün** (alle direkt via node):
+1. Dev (kein Label) → exit 0
+2. Production + missing URL → exit 1
+3. Production + localhost:4000 → exit 1
+4. Production + 127.0.0.1:4000 → exit 1
+5. Production + `https://runtime.example.com` → exit 0
+
+Plus Hook-Trigger-Test via `pnpm --filter @twin-lab/web build` mit production-Label ohne URL → pnpm stoppt bei prebuild mit `ERR_PNPM_RECURSIVE_RUN_FIRST_FAIL`, `next build` startet nie.
+
+**Defense-in-Depth:** Source-`?? "http://localhost:4000"`-Fallbacks in den 9 page.tsx **nicht angefasst** — sie sind für `pnpm dev` korrekt und Defense-in-Depth gegen ENV-Resolution-Drift. Guard greift eine Ebene höher (Build-Zeit), Fallback bleibt für Runtime.
+
+**Dockerfile + DEPLOYMENT.md aktualisiert:** Kommentar im Dockerfile vor `ARG NEXT_PUBLIC_RUNTIME_URL` verweist auf den Guard. DEPLOYMENT.md §3.1.2 ergänzt um „Build-Guard (#126)"-Hinweis-Block in der existing localhost-Warnung.
+
+**Größe ursprünglich:** S. **Final:** ~30 Min (Diagnose + Guard + 5 Smokes + Hook-Trigger-Verifikation + Doku). **Spur:** Pre-Launch-Phase A.
 
 ### 127. .env.example säubern — Phase-1-Legacy-Variables entfernen ✅
 

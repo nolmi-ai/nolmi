@@ -225,10 +225,18 @@ Marker.
 > Compose-File greift nur server-side, **nicht** im Browser-
 > JavaScript.
 >
-> Ohne `--build-arg NEXT_PUBLIC_RUNTIME_URL=...` wird der
+> Ohne `--build-arg NEXT_PUBLIC_RUNTIME_URL=...` würde der
 > Dockerfile-Default `http://localhost:4000` ins Bundle gebakt,
-> der Browser versucht localhost zu callen, alle /twins-Requests
-> failen mit "Failed to fetch" beim Login. Siehe §3.3.
+> der Browser localhost callen, alle /twins-Requests mit
+> "Failed to fetch" beim Login failen. Siehe §3.3.
+>
+> **Build-Guard (#126):** Seit Tag 30 verhindert ein prebuild-Hook
+> (`apps/web/scripts/check-build-env.mjs`) genau dieses Szenario.
+> Wenn `NEXT_PUBLIC_DEPLOYMENT_LABEL=production` gesetzt ist
+> (wie in den Build-Commands oben) und `NEXT_PUBLIC_RUNTIME_URL`
+> fehlt oder auf localhost zeigt, failt der Build mit exit 1 und
+> einer handlungsleitenden Fehlermeldung — bevor das fehlerhafte
+> Bundle gebaut wird.
 
 **Bridge — Default vs. eigene:**
 

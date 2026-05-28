@@ -1,6 +1,6 @@
 # twin-lab — Stand
 
-**Letztes Update:** 28. Mai 2026, Donnerstag (Tag 30 Block 1 — #129 + #127 .env.example-Klarstellung)
+**Letztes Update:** 28. Mai 2026, Donnerstag (Tag 30 Block 2 — #126 Build-Guard für NEXT_PUBLIC_RUNTIME_URL im Production-Build)
 
 ## Historisches Archiv
 
@@ -38,23 +38,29 @@ die Differenzierungs-Story).
 
 ## Tag 30 (28. Mai 2026, Donnerstag) — Phase-A-Polish (#129 + #127 + #126)
 
-**Stand Tag 30 Block 1:** Zwei Self-Hoster-Friction-Items in einem Doku-Commit aufgelöst — `.env.example` Provider-Default auf Anthropic (#129) gespiegelt zum README-Quick-Start, Legacy-Bridge-Vars als „Advanced: twin:bootstrap"-Power-User-Block abgegrenzt (#127, Scope-Korrektur gegenüber Original-Plan „löschen"). bootstrap-twin.ts bleibt unverändert (gewollter File-basierter Pfad).
+**Stand Tag 30 Block 2:** Drei Self-Hoster-Friction-Items abgehakt — `.env.example`-Klarstellung (#129 + #127, Block 1) und der strukturelle Build-Guard für den `localhost:4000`-im-Client-Bundle-Bug (#126, Block 2). Letzterer hatte dreimal zugeschlagen (Tag 23/28/29), jetzt failt der Production-Build früh und laut, wenn `NEXT_PUBLIC_RUNTIME_URL` fehlt oder auf localhost zeigt — gekoppelt an den existierenden Production-Marker `NEXT_PUBLIC_DEPLOYMENT_LABEL=production`, dev/local-Builds + Husky-Pre-Push bleiben unberührt (no-op).
 
 ### Block 1 — #129 + #127 .env.example-Klarstellung
 
 | Block | Item | Commit | Aufwand | Was |
 |---|---|---|---|---|
-| Block 1 | #129 Provider-Default Anthropic + #127 Bridge-Vars Power-User-Block | (dieser Commit) | ~15 Min | `.env.example` Provider-Block umgestellt: `ANTHROPIC_API_KEY=sk-ant-replace-me` aktiv, `ANTHROPIC_MODEL=claude-opus-4-7` aktiv, `ACTIVE_PROVIDER=anthropic` (vorher `openai`), OpenAI als auskommentierter Alternativ-Block mit Switch-Anleitung. Bridge-Section neu strukturiert: `TWIN_LAB_DEFAULT_BRIDGE_URL` zuerst als „Wizard-Default" (einzige Bridge-Var im Standard-Self-Hosting-Pfad), `BRIDGE_URL`/`BRIDGE_TWIN_HANDLE`/`BRIDGE_TWIN_TOKEN` darunter als „Advanced: File-basierter Twin-Bootstrap (`pnpm twin:bootstrap`)" mit klarer Wizard-Abgrenzung. **#127 Scope-Korrektur:** ursprünglicher Plan war Var-Delete, real (α) sind die drei Vars von `bootstrap-twin.ts:87-95` aktiv gelesen (wirft mit klarer Diagnose wenn fehlend) — daher als Power-User-Block markiert statt gelöscht, bootstrap-twin.ts bleibt gewollter File-basierter Pfad ohne Deprecation. Diagnose-Befund vorab: Wizard nutzt `TWIN_LAB_DEFAULT_BRIDGE_URL` aus `server.ts`, Legacy-Vars hat sonst keine Leser außer Bootstrap-CLI. 11 Treffer der 4 funktionalen Vars in finalem File — keine accidental-Delete. Reine Doku-Datei-Änderung, kein Code-Pfad angefasst. |
+| Block 1 | #129 Provider-Default Anthropic + #127 Bridge-Vars Power-User-Block | `5770f03` | ~15 Min | `.env.example` Provider-Block umgestellt: `ANTHROPIC_API_KEY=sk-ant-replace-me` aktiv, `ANTHROPIC_MODEL=claude-opus-4-7` aktiv, `ACTIVE_PROVIDER=anthropic` (vorher `openai`), OpenAI als auskommentierter Alternativ-Block mit Switch-Anleitung. Bridge-Section neu strukturiert: `TWIN_LAB_DEFAULT_BRIDGE_URL` zuerst als „Wizard-Default" (einzige Bridge-Var im Standard-Self-Hosting-Pfad), `BRIDGE_URL`/`BRIDGE_TWIN_HANDLE`/`BRIDGE_TWIN_TOKEN` darunter als „Advanced: File-basierter Twin-Bootstrap (`pnpm twin:bootstrap`)" mit klarer Wizard-Abgrenzung. **#127 Scope-Korrektur:** ursprünglicher Plan war Var-Delete, real (α) sind die drei Vars von `bootstrap-twin.ts:87-95` aktiv gelesen (wirft mit klarer Diagnose wenn fehlend) — daher als Power-User-Block markiert statt gelöscht, bootstrap-twin.ts bleibt gewollter File-basierter Pfad ohne Deprecation. Diagnose-Befund vorab: Wizard nutzt `TWIN_LAB_DEFAULT_BRIDGE_URL` aus `server.ts`, Legacy-Vars hat sonst keine Leser außer Bootstrap-CLI. 11 Treffer der 4 funktionalen Vars in finalem File — keine accidental-Delete. Reine Doku-Datei-Änderung, kein Code-Pfad angefasst. |
+| Block 2 | #126 Build-Guard für `NEXT_PUBLIC_RUNTIME_URL` im Production-Build | (dieser Commit) | ~30 Min | **Strukturelle Lösung statt Doku-Pflaster** nach dreimaligem `localhost:4000`-im-Client-Bundle-Bug (Tag 23/28/29). Neues Guard-Script `apps/web/scripts/check-build-env.mjs` als prebuild-npm-Hook in `apps/web/package.json`. Guard-Logik gekoppelt an existierenden Production-Marker `NEXT_PUBLIC_DEPLOYMENT_LABEL=production`: wenn Label=production UND (`NEXT_PUBLIC_RUNTIME_URL` fehlt ODER matched `/localhost\|127\.0\.0\.1/`) → exit 1 mit handlungsleitender Fehlermeldung; sonst no-op. Dev/local-Builds + Husky-Pre-Push (das `pnpm -r build` ohne `DEPLOYMENT_LABEL` ausführt) bleiben unberührt. Source-`?? "http://localhost:4000"`-Fallbacks in den 9 page.tsx nicht angefasst (für `pnpm dev` korrekt, Defense-in-Depth). pnpm-Hook-Trigger empirisch verifiziert mit `NEXT_PUBLIC_DEPLOYMENT_LABEL=production pnpm --filter @twin-lab/web build` ohne URL → `ERR_PNPM_RECURSIVE_RUN_FIRST_FAIL`, `next build` startet nicht, `.next/` unangetastet. **5/5-Smokes grün** (Dev/Production-missing/Production-localhost/Production-127.0.0.1/Production-real). Dockerfile-Kommentar Z.41-43 + DEPLOYMENT.md §3.1.2 verweisen auf den Guard. |
 
 ### Tag-30-Outcome-Bilanz
 
 **Item-Closures Tag 30 (laufend):**
-- #129 ✅ Provider-Default auf Anthropic in `.env.example` (Block 1)
-- #127 ✅ Bridge-Vars-Klarstellung in `.env.example` mit Scope-Korrektur (Block 1)
+- #129 ✅ Provider-Default auf Anthropic in `.env.example` (Block 1, Commit `5770f03`)
+- #127 ✅ Bridge-Vars-Klarstellung in `.env.example` mit Scope-Korrektur (Block 1, Commit `5770f03`)
+- #126 ✅ Build-Guard für `NEXT_PUBLIC_RUNTIME_URL` im Production-Build (Block 2, prebuild-Hook + Guard-Script, 5/5 Smokes grün)
 
 **Neue BACKLOG-Items aus Tag 30:** noch keine.
 
-**Tag-30-Total bis Block 1:** 2 Closures (#129 + #127, beide reine Doku-Datei), 1 Block, ~15 Min Netto.
+**Tag-30-Total bis Block 2:** 3 Closures (#129 + #127 reine Doku, #126 strukturelle Build-Pipeline-Härtung), 2 Blöcke, ~45 Min Netto.
+
+**Lessons Tag 30:**
+
+- **Lesson Tag 30 #1: Strukturelle Lösung gegen wiederkehrende Build-Bugs schlägt Doku-Pflaster.** Der `localhost:4000`-im-Client-Bundle-Bug hat dreimal zugeschlagen (Tag 23 Production-Re-Deploy, Tag 28 Block 13 Build-Arg-Bugfix, Tag 29 Block 7 nur durch Pre-Flight-Lesson vermieden), trotz dokumentierter Warnung in DEPLOYMENT.md. Das ist Tag-11-Lesson-Pattern: wenn ein Failure-Mode wiederholt auftritt, ist Doku alleine nicht genug — die Maschine muss den falschen Pfad mechanisch blockieren. #126 implementiert das als `prebuild`-npm-Hook mit Production-Label-Coupling, sodass Dev-Workflow unberührt bleibt (keine Reibung) aber Production-Builds ohne korrekte ARGs früh und laut failen. **Mini-Mustererkennung:** wenn ein Item zum dritten Mal als „Re-Diagnose und Re-Fix" auf einem STAND-Tag landet, dann ist es Zeit für einen Guard statt eine bessere Doku.
 
 ## Tag 29 (27. Mai 2026, Mittwoch) — Pre-Launch-Phase A Block 4 Self-Hosting-Polish
 
