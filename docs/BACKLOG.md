@@ -2654,7 +2654,11 @@ User-Strings + Phase 3a Env/Package/Cookie + Phase 3b Verzeichnis/Repo).
 
 ### docker/twin-lab-web/ → docker/nolmi/ (Teil von Phase 4)
 
-**Status:** Offen | gehört in Phase 4 (Nolmi-VPS-Setup) | Aufwand: S
+**Status:** ✅ ENTSCHIEDEN Tag 31 (Phase-4-Strategy-Session) | siehe [`docs/PHASE-4-VPS-STRATEGY.md`](./PHASE-4-VPS-STRATEGY.md) §3 (= S2)
+
+**Auflösung:** **ENTFÄLLT als Rename** — Greenfield-VPS `187.124.3.235`, deshalb `/docker/nolmi/` **neu anlegen** statt umbenennen (Container `nolmi-runtime`/`nolmi-web`/`nolmi-bridge`, voller Stack inkl. Bridge). Altes `docker/twin-lab-web/` bleibt unangetastet solange der Bestands-Stack läuft, wird nach Cut-Over + stillem Fenster archiviert/gelöscht (Abschaltungs-Item).
+
+Ursprünglicher Kontext (bleibt zur Historie):
 
 Aktuell: `docker/twin-lab-web/` (mit README + docker-compose.yml +
 Container-Namen `twin-lab-runtime`/`twin-lab-web`/`twin-lab-web-data`)
@@ -2673,7 +2677,11 @@ Beim Phase-4-VPS-Setup auf `srv1712371.hstgr.cloud`:
 
 ### SSH-Alias `github.com-twin-lab` in ~/.ssh/config aktualisieren
 
-**Status:** Offen | lokal beim User | Aufwand: trivial (1 Min)
+**Status:** ✅ ENTSCHIEDEN Tag 31 (Phase-4-Strategy-Session) | siehe [`docs/PHASE-4-VPS-STRATEGY.md`](./PHASE-4-VPS-STRATEGY.md) §3 (= S5)
+
+**Auflösung:** **SSH-Alias fällt weg.** Production zieht das Repo via **HTTPS + Fine-grained PAT** (read-only, nur `nolmi-ai/nolmi`, mit Ablaufdatum) — ein Repo, kein Multi-Identity-Bedarf, kein Deploy-Key. (Cross-Ref dupliziertes Item „SSH-Authentifizierungs-Klärung für Phase 4" unten — gleiche Auflösung.)
+
+Ursprünglicher Kontext (bleibt zur Historie):
 
 Im `~/.ssh/config` existiert ein Host-Alias `github.com-twin-lab` mit
 spezifischem SSH-Key. Wird heute nur für Production-Deploy genutzt
@@ -2683,10 +2691,13 @@ Beim Phase-4-Deploy zu nolmi-ai/nolmi: Alias umbenennen zu
 
 ### Production-VPS srv1046432 Abschaltung (nach Phase 4)
 
-**Status:** Defer | gehört nach erfolgreichem Phase-4-Cut-Over |
-Aufwand: S
+**Status:** ✅ TERMINIERT Tag 31 (Phase-4-Strategy-Session) | siehe [`docs/PHASE-4-VPS-STRATEGY.md`](./PHASE-4-VPS-STRATEGY.md) §3 + §6 (= S7) | Aufwand: S
 
-Nach Phase 4 (Nolmi live auf srv1712371) ist srv1046432 redundant.
+**Auflösung:** **Nicht am Cut-Over-Tag**, sondern nach **1–2 Wochen stillem Verifikations-Fenster** — der alte Stack ist der Rollback (Hot-Standby unter `twin.harwayexperience.com`, ohne DNS-TTL-Wartezeit). Erst danach abschalten. Trigger gegen Rollback z.B. OAuth-Roundtrip-Failure (Encryption-Key-Problem, Bedingung A).
+
+Ursprünglicher Kontext (bleibt zur Historie):
+
+Nach Phase 4 (Nolmi live) ist srv1046432 redundant.
 Schritte:
 1. Cut-Over verifizieren (Nolmi auf nolmi.ai bedient alle 3 Realnutzer
    Markus/Florian/Heiko)
@@ -2699,7 +2710,9 @@ Schritte:
 
 ### Rebrand-Phase 4 — Nolmi-VPS Production-Deploy (M-L, must — nach 1-3, VPS bereits provisioniert)
 
-**Status:** Offen | gated nach Phase 1-3 | Aufwand: M-L | **VPS bereits provisioniert Tag 30/31**
+**Status:** Offen, **Setzungen gelockt Tag 31** | gated nach Phase 1-3 | Aufwand: M-L | **VPS bereits provisioniert Tag 30/31**
+
+**Strategy + Bau-Vorlage:** [`docs/PHASE-4-VPS-STRATEGY.md`](./PHASE-4-VPS-STRATEGY.md) — 7 Setzungen (S1 DB-Migration, S2 voller Stack inkl. Bridge unter `/docker/nolmi/`, S3 Secrets + Encryption-Key-Übernahme, S4 Traefik + BasicAuth, S5 HTTPS-PAT, S6 Parallel-Cut-Over, S7 Hot-Standby-Rollback), zwei Bedingungen (Encryption-Key-Kontinuität + Bridge-Migration), Cut-Over-Sequenz, Rollback-Plan, Bau-Reihenfolge B1–B7. Nächster Bau-Block: **B1** (VPS-Prep + Docker + Traefik).
 
 Separater Hostinger-VPS Frankfurt, Ubuntu 24.04 LTS, IP `187.124.3.235`. Neu-Aufsetz analog DEPLOYMENT.md §9 Cookbook, mit Nolmi-Branding + Light + neuer Domain:
 
@@ -2710,6 +2723,16 @@ Separater Hostinger-VPS Frankfurt, Ubuntu 24.04 LTS, IP `187.124.3.235`. Neu-Auf
 
 **Markus' parallele Arbeit (Stand Tag 31):** ✅ Foundation gesichert (Domain + VPS + GitHub-Org `nolmi-ai` + npm `@nolmi` + PyPI + Docker Hub `nolmi` + Mail-Stack + Trademark-Quick-Search). Verbleibend: Social-Handles + Brand-Assets-Produktion. Details siehe Strategy-Doc §9.
 
+### Pre-Flight Bridge-DB-Inhalt verifizieren (vor Bridge-Re-Registrierung)
+
+**Status:** Offen | Phase-4-Bau-Block B3 | Aufwand: S | siehe [`docs/PHASE-4-VPS-STRATEGY.md`](./PHASE-4-VPS-STRATEGY.md) §4
+
+**Vor** dem Bridge-Block (B4) den Bridge-DB-Inhalt am `apps/bridge`-Source prüfen (Schema + `messages-repo`): Was hält die Bridge-DB an Unersetzlichem **außer** Handle → Token → Routing? 
+- Nur Routing/Registrierung → Re-Registrierung der 3 Twins gegen die frische Nolmi-Bridge ist korrekt (Setzung S2 bestätigt).
+- Relevante A2A-History (nicht runtime-seitig gespiegelt) → S2 nachjustieren (Bridge-DB mitmigrieren statt re-registrieren).
+
+Diagnose-Scan am Source, kein Rate-aus-dem-Kopf (Pattern „Sicht holen vor Aktion", Lessons #45/#64). Ergebnis entscheidet, ob B4 re-registriert oder mitmigriert.
+
 ### Hygiene-Pass Tag 31 Block 5 ✅ DONE
 
 `.gitignore` um DB-Backup-Pattern erweitert. Lokale DB von 6 Test-Twins
@@ -2718,7 +2741,11 @@ Items aus Diagnose entstanden (SSH-Auth-Phase-4, PRAGMA-foreign_keys).
 
 ### SSH-Authentifizierungs-Klärung für Phase 4
 
-**Status:** Defer | gehört zu Phase 4 (Nolmi-VPS-Setup) | Aufwand: 5-15 Min
+**Status:** ✅ ENTSCHIEDEN Tag 31 (Phase-4-Strategy-Session) | siehe [`docs/PHASE-4-VPS-STRATEGY.md`](./PHASE-4-VPS-STRATEGY.md) §3 (= S5)
+
+**Auflösung:** **HTTPS + Fine-grained PAT (read-only)** für VPS-seitige Git-Operationen. Kein SSH-Alias, kein Deploy-Key. Production zieht nur, ein Repo. (Gleiche Auflösung wie Item „SSH-Alias github.com-twin-lab" oben.)
+
+Ursprünglicher Befund (bleibt zur Historie):
 
 **Befund Tag 31 Block 5:** Lokaler `~/.ssh/config` auf MacBook enthält
 nur SSH-Direct-Eintrag für `31.97.78.73` (Production-VPS srv1046432),
