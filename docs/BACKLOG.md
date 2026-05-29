@@ -2712,7 +2712,7 @@ Schritte:
 
 **Status:** Offen, **Setzungen gelockt Tag 31** | gated nach Phase 1-3 | Aufwand: M-L | **VPS bereits provisioniert Tag 30/31**
 
-**Strategy + Bau-Vorlage:** [`docs/PHASE-4-VPS-STRATEGY.md`](./PHASE-4-VPS-STRATEGY.md) — 7 Setzungen (S1 DB-Migration, S2 voller Stack inkl. Bridge unter `/docker/nolmi/`, S3 Secrets + Encryption-Key-Übernahme, S4 Traefik + BasicAuth, S5 HTTPS-PAT, S6 Parallel-Cut-Over, S7 Hot-Standby-Rollback), zwei Bedingungen (Encryption-Key-Kontinuität + Bridge-Migration), Cut-Over-Sequenz, Rollback-Plan, Bau-Reihenfolge B1–B7. Nächster Bau-Block: **B1** (VPS-Prep + Docker + Traefik).
+**Strategy + Bau-Vorlage:** [`docs/PHASE-4-VPS-STRATEGY.md`](./PHASE-4-VPS-STRATEGY.md) — 7 Setzungen (S1 DB-Migration, S2 voller Stack inkl. Bridge unter `/docker/nolmi/` + **Doppel-DB-Migration `twin.db`+`bridge.db`**, S3 Secrets + Encryption-Key-Übernahme, S4 Traefik + BasicAuth, S5 HTTPS-PAT, S6 Parallel-Cut-Over, S7 Hot-Standby-Rollback), zwei Bedingungen (Encryption-Key-Kontinuität + Bridge-Migration), Cut-Over-Sequenz, Rollback-Plan, Bau-Reihenfolge B1–B7. **S2 final Tag 31 Block 8: Bridge-DB-Migration statt Re-Registrierung** (B3-Befund). Nächster Bau-Block: **B1** (VPS-Prep + Docker + Traefik).
 
 Separater Hostinger-VPS Frankfurt, Ubuntu 24.04 LTS, IP `187.124.3.235`. Neu-Aufsetz analog DEPLOYMENT.md §9 Cookbook, mit Nolmi-Branding + Light + neuer Domain:
 
@@ -2727,12 +2727,13 @@ Separater Hostinger-VPS Frankfurt, Ubuntu 24.04 LTS, IP `187.124.3.235`. Neu-Auf
 
 **Status:** ✅ DONE Tag 31 Block 7 | Verdikt + Inventar in [`docs/PHASE-4-VPS-STRATEGY.md`](./PHASE-4-VPS-STRATEGY.md) §4
 
-**Verdikt: S2 im Kern BESTÄTIGT** — Re-Registrierung der 3 Twins gegen die frische Nolmi-Bridge bleibt korrekt, **keine** volle Bridge-DB-Migration nötig. Diagnose-Scan am `apps/bridge`-Source (2 Tabellen) + Runtime-Gegenprobe:
-- `twins` = Klasse A (reine Registry, re-registrierbar).
-- `messages` mit `delivered_at` gesetzt = Klasse B (runtime-seitig in Audits gespiegelt — `receiveBridgeMessage` persistiert Content **vor** dem Ack, das `delivered_at` setzt).
-- `messages` mit `delivered_at IS NULL` (unzugestellte Queue) = **Klasse C, einzige echt bridge-only Menge.**
+**Diagnose-Befund (B3, Commit `64f91e1`):** Bridge hat genau 2 Tabellen + 3-Twin-Datensatz. `twins` = Klasse A (Registry). `messages` mit `delivered_at` gesetzt = Klasse B (runtime-seitig in Audits gespiegelt — `receiveBridgeMessage` persistiert Content **vor** dem Ack, das `delivered_at` setzt). `messages` mit `delivered_at IS NULL` = Klasse C (unzugestellte Queue, einzige echt bridge-only Menge). Symmetrische A2A-View ist bridge-verankert.
 
-**Zwei Auflagen für B4** (in §4 + S2 + §5.2 + §8 eingearbeitet): (1 hart) Freeze-Fenster `COUNT(*) FROM messages WHERE delivered_at IS NULL` = 0 verifizieren, sonst drainen/mitnehmen; (2 Akzeptanz) symmetrische Conversation-View-Historie geht verloren (Content überlebt in lokalen Audits), per S2 als „vermutlich wertlos" akzeptiert. **Struktur-Notiz:** Bridge fehlt im Repo-Compose (nur runtime+web in `docker/twin-lab-web/`), Live-Config/Volume liegen außerhalb des Repos auf srv1046432, DB-Pfad `data/bridge.db`.
+**Verdikt-Verlauf:**
+- **Block 7:** S2 zunächst „im Kern bestätigt" (Re-Registrierung bleibt) mit zwei Auflagen.
+- **✅ Block 8 — S2 KORRIGIERT auf volle Bridge-DB-Migration** (`twin.db` + `bridge.db`, gemeinsamer Freeze-Snapshot, **keine** Re-Registrierung). Grund: (1) Bridge trivial klein → Migration kostet nichts; (2) Re-Register erzwingt einen Token-Writeback in die frisch migrierte `twin.db` (fragilster Cut-Over-Schritt). Migration vermeidet den Writeback (Tokens matchen beidseitig), erhält A2A-View + undelivered-Queue, atomarer Snapshot. Die zwei Block-7-Auflagen sind damit **moot** — ersetzt durch eine reine **Token-Match-Lese-Verifikation** in B4. Details + ADR-Notiz in [`docs/PHASE-4-VPS-STRATEGY.md`](./PHASE-4-VPS-STRATEGY.md) §2/S2 + §4.
+
+**Struktur-Notiz (bleibt gültig):** Bridge fehlt im Repo-Compose (nur runtime+web in `docker/twin-lab-web/`), Live-Config/Volume liegen außerhalb des Repos auf srv1046432, DB-Pfad `data/bridge.db` → B4 muss sie mit-tarballen.
 
 ### Hygiene-Pass Tag 31 Block 5 ✅ DONE
 
