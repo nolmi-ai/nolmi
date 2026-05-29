@@ -1,5 +1,11 @@
 import { z } from "zod";
 
+// ─── ENV-Aliasing-Helper (Rebrand Twin-Lab → Nolmi) ──────────────────────────
+// Re-Export, damit Konsumenten via `@nolmi/shared` ODER `@nolmi/shared/env`
+// importieren können. Der Subpath wird empfohlen, weil Tree-Shaking sauberer
+// bleibt; der Re-Export hier ist Convenience.
+export { getEnv } from "./env.js";
+
 // ─── PERSONA ─────────────────────────────────────────────────────────────────
 //
 // Die Persona definiert, *wer* der Twin ist: Stil, Themen, Tonalität.

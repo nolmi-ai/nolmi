@@ -9,7 +9,7 @@ import {
   type FormEvent,
 } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import type { AuditEntry, FactItem, TwinEvent } from "@twin-lab/shared";
+import type { AuditEntry, FactItem, TwinEvent } from "@nolmi/shared";
 import { ModalWrapper } from "../../components/ModalWrapper";
 import { PageContainer } from "../../components/PageContainer";
 import { RejectReasonModal } from "../../components/RejectReasonModal";

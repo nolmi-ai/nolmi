@@ -1,6 +1,6 @@
 "use client";
 
-import type { AuditEntry, AuditStatus } from "@twin-lab/shared";
+import type { AuditEntry, AuditStatus } from "@nolmi/shared";
 
 // ─── shared template helpers (#99) ───────────────────────────────────────────
 //

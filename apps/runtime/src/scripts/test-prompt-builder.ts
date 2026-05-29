@@ -11,7 +11,7 @@ import {
 // füttern `humanizeFactKey` + `buildFactsBlock` mit handgebauten Inputs und
 // prüfen die Outputs. Schnell und deterministisch.
 //
-// Aufruf: pnpm --filter @twin-lab/runtime test-prompt-builder
+// Aufruf: pnpm --filter @nolmi/runtime test-prompt-builder
 
 async function main() {
   let issues = 0;

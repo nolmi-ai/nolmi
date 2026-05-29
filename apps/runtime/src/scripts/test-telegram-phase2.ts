@@ -30,12 +30,12 @@ import { TwinServiceRegistry } from "../twin-service-registry.js";
 // kein Netzwerk), aber bot.launch() / bot.handleUpdate() werden hier nie
 // gerufen — sonst würde Telegram-API echte Calls erwarten.
 //
-// Voraussetzung: pnpm db:init lief, TWIN_LAB_ENCRYPTION_KEY ist gesetzt,
+// Voraussetzung: pnpm db:init lief, NOLMI_ENCRYPTION_KEY ist gesetzt,
 // der Ziel-Twin existiert in twin_profiles.
 //
 // Aufruf:
-//   pnpm --filter @twin-lab/runtime tsx src/scripts/test-telegram-phase2.ts
-//   pnpm --filter @twin-lab/runtime tsx src/scripts/test-telegram-phase2.ts @markus
+//   pnpm --filter @nolmi/runtime tsx src/scripts/test-telegram-phase2.ts
+//   pnpm --filter @nolmi/runtime tsx src/scripts/test-telegram-phase2.ts @markus
 
 const TWIN_HANDLE_DEFAULT = "@markus";
 const TEST_BOT_TOKEN = "0000000000:AAAA-TEST-TOKEN-DO-NOT-USE-AT-TELEGRAM";

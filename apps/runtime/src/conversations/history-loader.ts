@@ -1,4 +1,4 @@
-import type { AuditEntry, ChatMessage } from "@twin-lab/shared";
+import type { AuditEntry, ChatMessage } from "@nolmi/shared";
 import type { AuditRepository } from "../repository/types.js";
 import type {
   ConversationSummariesRepo,

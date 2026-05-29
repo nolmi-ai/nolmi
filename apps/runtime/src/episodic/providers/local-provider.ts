@@ -1,4 +1,5 @@
 import type { EmbedOptions, EmbeddingProvider } from "./types.js";
+import { getEnv } from "@nolmi/shared/env";
 
 // ─── LOCAL EMBEDDING PROVIDER (3.4.B) ───────────────────────────────────────
 //
@@ -42,7 +43,7 @@ interface PipelineExtractor {
 
 /**
  * Setzt den Modell-Cache-Pfad von `@huggingface/transformers` aus der ENV-
- * Variable `TWIN_LAB_MODEL_CACHE_DIR`.
+ * Variable `NOLMI_MODEL_CACHE_DIR` (Fallback: `TWIN_LAB_MODEL_CACHE_DIR`).
  *
  * Warum eine *eigene* ENV-Variable statt der „üblichen" `HF_HOME` /
  * `TRANSFORMERS_CACHE`: transformers.js 4.2.0 liest **keine** von beiden
@@ -50,7 +51,7 @@ interface PipelineExtractor {
  * `process.env`-Zugriffe). Sein Default ist ein `.cache/`-Ordner *innerhalb
  * des npm-Pakets* in `node_modules` — der bei jedem Docker-Container-Recreate
  * verloren geht und das q8-Modell (~552 MB) neu lädt. Mit gesetztem
- * `TWIN_LAB_MODEL_CACHE_DIR` landet der Cache an einem mountbaren Pfad und
+ * `NOLMI_MODEL_CACHE_DIR` landet der Cache an einem mountbaren Pfad und
  * überlebt Recreates.
  *
  * Ist die Variable nicht (oder leer) gesetzt, bleibt `env.cacheDir`
@@ -61,7 +62,10 @@ interface PipelineExtractor {
  * Modell-Load testbar (`test-model-cache-dir.ts`).
  */
 export function applyModelCacheDir(env: { cacheDir: string | null }): void {
-  const custom = process.env.TWIN_LAB_MODEL_CACHE_DIR?.trim();
+  const custom = getEnv(
+    "NOLMI_MODEL_CACHE_DIR",
+    "TWIN_LAB_MODEL_CACHE_DIR",
+  )?.trim();
   if (custom) {
     env.cacheDir = custom;
   }

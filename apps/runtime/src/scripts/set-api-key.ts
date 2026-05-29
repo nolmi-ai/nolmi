@@ -19,8 +19,8 @@ import type { StoredLlmConfig } from "../llm-config.js";
 // Master-Key und schreibt ihn in `twin_profiles.llm_config`.
 //
 // Aufruf:
-//   pnpm --filter @twin-lab/runtime twin:set-api-key markus
-//   pnpm --filter @twin-lab/runtime twin:set-api-key @markus
+//   pnpm --filter @nolmi/runtime twin:set-api-key markus
+//   pnpm --filter @nolmi/runtime twin:set-api-key @markus
 //
 // Settings-UI nach Update reloaden — sie zeigt dann den neuen maskierten Key.
 // Runtime sieht den neuen Key erst nach Restart (beim Boot wird llm_config
@@ -32,7 +32,7 @@ async function main() {
   if (!rawHandle) {
     throw new Error(
       "Handle fehlt. Nutzung:\n" +
-        "  pnpm --filter @twin-lab/runtime twin:set-api-key <handle>",
+        "  pnpm --filter @nolmi/runtime twin:set-api-key <handle>",
     );
   }
   const handle = rawHandle.startsWith("@") ? rawHandle : `@${rawHandle}`;

@@ -7,7 +7,7 @@ import {
   type MissingDimension,
   type ProgressToNext,
   type TwinStats,
-} from "@twin-lab/shared";
+} from "@nolmi/shared";
 import type { EmbeddingsRepo } from "../episodic/embeddings-repo.js";
 import type { FactsRepo } from "../facts/repo.js";
 

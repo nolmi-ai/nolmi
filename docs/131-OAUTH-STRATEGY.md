@@ -967,7 +967,7 @@ lokaler Pending-Insert. **Entschieden: (A).** Begründung:
 - **Schema additiv:** kein Migration. `audit.input.codexResumeContext`
   ist optionales JSON-Field, Vercel-SDK-Pfad lässt es undefined,
   `AuditMcpToolUseInputShape` (lokal in twin-service.ts) um ein
-  optionales Feld erweitert — `@twin-lab/shared`-`AuditMcpToolUseInputSchema`
+  optionales Feld erweitert — `@nolmi/shared`-`AuditMcpToolUseInputSchema`
   bleibt unverändert (validiert weiter den Kern-Pflichtsatz).
 
 ### Reihenfolge-treue Multi-Tool-Strategie (Option i)
@@ -1102,7 +1102,7 @@ verifiziert + ergänzt:
   nicht den Pause-Pfad. Lesson: bei Smoke mit ambivalenten Tool-Pools
   explizit den Skill-Pfad referenzieren.
 - **TypeScript-Quirk `z.unknown()` ↔ `unknown` optional:** `AuditToolCall.
-  input/output` aus `@twin-lab/shared` via `z.unknown()` mapped auf
+  input/output` aus `@nolmi/shared` via `z.unknown()` mapped auf
   TS-Type `input?: unknown` (implizit optional, weil `undefined` zu
   `unknown` assignable ist). `AuditToolCallSnapshot` musste die
   Optional-Markierung übernehmen.
@@ -2959,7 +2959,7 @@ access_token/refresh_token Klartext).
   `findDecryptedByTwinAndProvider` + `toPublic`).
 - `ServerDeps.oauthTokensRepo` neu, in `index.ts createServer-Call`
   wired (Repo war seit Phase 1 für RefreshService da).
-- `@twin-lab/shared` Schema-Erweiterung: `AuthModeSchema`,
+- `@nolmi/shared` Schema-Erweiterung: `AuthModeSchema`,
   `OAuthTokenPublicSchema`, `SettingsDataResponseSchema.auth`.
 
 ### §w.2 — Phase 5.2 Web-UI (`0468c2b`, Block 28)

@@ -3,7 +3,7 @@ import { resolve } from "node:path";
 import type {
   PresetActivationResult,
   PresetSelection,
-} from "@twin-lab/shared";
+} from "@nolmi/shared";
 import { importSkillFromDir, SkillImportError } from "./import-from-dir.js";
 import { scanExamplesPresets } from "./scan-examples-presets.js";
 import type { SkillRepo } from "./repo.js";

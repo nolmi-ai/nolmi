@@ -2559,7 +2559,7 @@ Aktuell 35 `test-*.ts`-Smoke-Scripts in `apps/runtime/src/scripts/` (22 in `pack
 
 **Strategie + Phasen-Plan:** [`docs/REBRAND-NOLMI-STRATEGY.md`](./REBRAND-NOLMI-STRATEGY.md) (Tag 30 Strategy-Session als „Tavryn" gestartet, Tag 31 auf „Nolmi" finalisiert + Doc umbenannt). Vollständige Mapping-Tabelle, Trademark-Status, Produkt-Narrativ, Operative Foundation §9.
 
-**Gesamt-Status Tag 31:** Phase 1 ✅ live im Repo. Phase 2 ✅ live im Repo (Block 2, 7 Files user-facing Strings). **Trademark-Gate ✅ grün** (USPTO + EUIPO 0 Treffer). Phase 3 entblockt — nächster natürlicher Block. Phase 4 (VPS) bereits provisioniert — wartet auf Setup-Block.
+**Gesamt-Status Tag 31:** Phase 1 ✅ live im Repo. Phase 2 ✅ live im Repo (Block 2, 7 Files user-facing Strings). **Phase 3a** ✅ live im Repo (Block 3, Env/Package/Cookie-Aliasing — getEnv-Helper, 4 Workspace-Packages umbenannt, 124 Imports rewriten, Cookie-Aliasing nolmi-session/twin-lab-session). **Trademark-Gate ✅ grün** (USPTO + EUIPO 0 Treffer). Phase 3b (Verzeichnis-Rename + GitHub-Repo-Move) ist nächster operativer Folge-Block. Phase 4 (VPS) bereits provisioniert — wartet auf Setup-Block.
 
 ### Rebrand-Phase 1 — Light-Mode-Switch ✅ Tag 30 DONE
 
@@ -2610,18 +2610,42 @@ Aktuell 35 `test-*.ts`-Smoke-Scripts in `apps/runtime/src/scripts/` (22 in `pack
 
 **Spur:** Pre-Launch-Phase A · **Aufwand:** ~1h netto (Diagnose ~15 Min, Edits ~25 Min, Smoke ~15 Min, Mini-Justierung + Re-Smoke ~5 Min).
 
-### Rebrand-Phase 3 — Env/Package-Aliasing (M, must — ✅ entblockt, nach Phase 2)
+### Rebrand-Phase 3a — Env/Package/Cookie-Aliasing ✅ Tag 31 DONE
 
-**Status:** Offen | **entblockt Tag 31** | Aufwand: M
+**Abgeschlossen Tag 31 (29. Mai 2026, Freitag), Tag 31 Block 3.** Technische Renames mit Backward-Compat-Aliasing (Env + Cookie) und Hart-Switch (Workspace-Packages, technisch nicht aliasable).
 
-Am riskantesten — Production-Twins laufen mit `TWIN_LAB_*`-Env-Vars und `@twin-lab/*`-Package-Namen:
+**Edits:**
+- **`packages/shared/src/env.ts` (neu):** `getEnv(newName, oldName)`-Helper mit Read-Both, Write-New (eine Stelle), Warn-Once. Subpath-Export `@nolmi/shared/env`. Unit-Smoke `packages/shared/src/env.test.ts` mit 4 Cases (`pnpm --filter @nolmi/shared test:env` → 4/4 OK), tsx als devDep zu shared.
+- **Env-Vars umgestellt** in 21 Files: Production-Read-Pfad (`NOLMI_SESSION_SECRET`, `NOLMI_ENCRYPTION_KEY`, `NOLMI_DEFAULT_BRIDGE_URL`, `NOLMI_MODEL_CACHE_DIR`, `NOLMI_EMBEDDING_{PROVIDER,MODEL,DTYPE,API_KEY}`) via `getEnv` in `apps/runtime/src/auth/session.ts`, `crypto-utils.ts`, `server.ts`, `episodic/providers/factory.ts`, `episodic/providers/local-provider.ts` (manuell, mit Aliasing-Doc-Strings + Error-Message-Hinweisen). Test-Only-Vars (`NOLMI_RUN_LOCAL_RETRIEVAL_TEST`, `NOLMI_SKIP_LOCAL`) + Comments + CLI-Output via stumpfem `sed` in 16 weiteren Files.
+- **4 Workspace-Packages atomar umbenannt:** `@twin-lab/{web,runtime,bridge,shared}` → `@nolmi/{web,runtime,bridge,shared}`. 96 Source-Files + Root-`package.json` (11 Script-Refs) via Sed → 124 Import-Statements rewriten. `grep "@twin-lab/" apps/ packages/` = 0 Treffer.
+- **Cookie-Aliasing:** `SESSION_COOKIE_NAME = "nolmi-session"` + `LEGACY_SESSION_COOKIE_NAME = "twin-lab-session"`. `getSession()` Read-Both, `setSession()` Write-New, `destroySession()` löscht beide aktiv (Erweiterung gegen Briefing — Logout-Pfad braucht aktives Wipe, sonst überschattet Bestands-Legacy-Cookie das Logout). `apps/web/middleware.ts` Konstanten dupliziert (Cross-App-Import vom Runtime strukturell nicht vorgesehen) + Read-Both im Cookie-Presence-Check.
+- **`.env.example`:** Header-Notiz zum 6–12-Monats-Aliasing-Fenster (Hart-Cut ca. Mai 2027) + alle `TWIN_LAB_*`/`@twin-lab/*` auf `NOLMI_*`/`@nolmi/*`.
+- **Live-Docs:** `docs/DEPLOYMENT.md` + `docs/131-OAUTH-STRATEGY.md` Package-Refs mit-rewriten. `docs/archive/*` als historisches Archiv unangetastet.
 
-- **Env-Vars** `TWIN_LAB_*` → `NOLMI_*`: Alias-Pattern statt Hard-Break. Code liest neuen + alten als Fallback, Migration-Window, dann alter Name raus.
-- **Package-Namen** `@twin-lab/*` → `@nolmi/*`: Workspace-weiter Rename (npm-Org `@nolmi` Tag 31 reserviert), Breaking, daher kontrolliert + nach Phase 2.
-- **Docker-Image-Namen**: `nolmi/runtime`, `nolmi/web`, `nolmi/bridge` (Docker-Hub-Namespace = `nolmi`, **nicht** `nolmi-ai` — das ist nur die GitHub-Org).
-- **PyPI-Package** `nolmi` (Tag 31 verifiziert frei, Publishing erst beim ersten Release).
+**Verifikation:**
+- `pnpm install` clean (455 packages) nach `rm -rf` aller `node_modules` (Workspace-Symlinks brauchen frische Resolution)
+- `pnpm typecheck` 4/4 Workspaces grün
+- `pnpm -r build` minus `@nolmi/web` grün (web absichtlich nicht gebaut wegen geteilten `.next/`-Caches mit Dev; Husky pre-push deckt das auf Push-Seite ab)
+- `pnpm --filter @nolmi/shared test:env` 4/4 Cases OK
 
-Eigenes Sub-Briefing + Smoke gegen Production-Pattern (auf altem VPS) bevor neuer VPS-Deploy.
+**KEIN Production-Deploy** — Nolmi-Stack lebt nur im Repo, Production-Twin-Lab (`srv1046432`) unverändert.
+
+**Spur:** Pre-Launch-Phase A · **Aufwand:** ~2h netto (Diagnose ~20 Min, Helper ~15 Min, Env-Edits ~35 Min, Package-Rename ~25 Min, Cookie + middleware ~15 Min, Verifikation ~10 Min, Doku ~25 Min).
+
+### Rebrand-Phase 3b — Verzeichnis-Rename + Repo-Move (S, must — entblockt nach Phase 3a)
+
+**Status:** Offen | **entblockt Tag 31** | Aufwand: S | rein operativ
+
+Dateisystem- und GitHub-seitige Renames, kein Code-Change. Eigener Folge-Block weil rein operativ:
+
+- Lokales Verzeichnis `twin-lab/` → `nolmi/` (Working-Copy, git remote ggf. neu setzen)
+- `gh repo rename` oder GitHub-UI: `markusbaier/twin-lab` → `nolmi-ai/nolmi` (npm/PyPI/Docker bleiben `nolmi` ohne Bindestrich)
+- Docker-Image-Tags `nolmi/runtime`, `nolmi/web`, `nolmi/bridge`
+- README-Links + Badge-URLs nachziehen
+- Optional: PyPI-Publishing-Vorbereitung (erst beim ersten Release relevant)
+
+**Neue Items aus Phase 3a (für später):**
+- **`SESSION_COOKIE_NAME`-Konstante konsolidieren:** heute in `apps/runtime/src/auth/session.ts` (Export) **und** `apps/web/middleware.ts` (Local-Const-Duplikat) gepflegt. Cross-App-Import vom Runtime ins Web ist heute strukturell nicht vorgesehen (Runtime exportiert keine Subpaths). Sauberer Pfad: `@nolmi/shared/auth-cookies` mit beiden Konstanten, beide Apps konsumieren von dort. Aufwand S, nice (Phase 5+).
 
 ### Rebrand-Phase 4 — Nolmi-VPS Production-Deploy (M-L, must — nach 1-3, VPS bereits provisioniert)
 

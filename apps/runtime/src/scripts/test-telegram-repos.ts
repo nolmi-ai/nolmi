@@ -19,12 +19,12 @@ import { TelegramMessagesRepo } from "../telegram/messages-repo.js";
 // Messages mit Test-Präfix; Cleanup am Ende per delete.
 //
 // Voraussetzung: pnpm db:init lief (Migration 024 angewendet),
-// TWIN_LAB_ENCRYPTION_KEY ist gesetzt, der Ziel-Twin existiert in
+// NOLMI_ENCRYPTION_KEY ist gesetzt, der Ziel-Twin existiert in
 // twin_profiles.
 //
 // Aufruf:
-//   pnpm --filter @twin-lab/runtime tsx src/scripts/test-telegram-repos.ts
-//   pnpm --filter @twin-lab/runtime tsx src/scripts/test-telegram-repos.ts @markus
+//   pnpm --filter @nolmi/runtime tsx src/scripts/test-telegram-repos.ts
+//   pnpm --filter @nolmi/runtime tsx src/scripts/test-telegram-repos.ts @markus
 
 const TWIN_HANDLE_DEFAULT = "@markus";
 const TEST_BOT_TOKEN = "0000000000:AAAA-TEST-TOKEN-DO-NOT-USE-AT-TELEGRAM";

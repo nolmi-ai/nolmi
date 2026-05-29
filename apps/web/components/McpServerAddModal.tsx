@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import type {
   McpServerCreateRequest,
   McpServerUiPayload,
-} from "@twin-lab/shared";
+} from "@nolmi/shared";
 import { ModalWrapper } from "./ModalWrapper";
 import { toast } from "../lib/toast";
 

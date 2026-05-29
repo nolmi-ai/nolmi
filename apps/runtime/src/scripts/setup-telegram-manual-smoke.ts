@@ -28,18 +28,18 @@ import { PairingService } from "../telegram/pairing-service.js";
 //   1. BotFather-Token besorgen (auf Telegram an @BotFather: /newbot, ...)
 //   2. Diesen Helper aufrufen — fügt Config ein, generiert Pairing-Code
 //   3. Runtime in Polling-Mode starten (oder neu starten, falls schon laufend):
-//        TELEGRAM_USE_POLLING=true pnpm --filter @twin-lab/runtime dev
+//        TELEGRAM_USE_POLLING=true pnpm --filter @nolmi/runtime dev
 //   4. Auf Telegram an den Bot senden: /start <code>
 //   5. Bot antwortet ✓ Paired — Owner-Telegram-User-ID wird persistiert
 //   6. Nachfolgende Texte: Bot antwortet mit Phase-2-Stub
 //
 // Aufruf:
-//   pnpm --filter @twin-lab/runtime exec tsx \
+//   pnpm --filter @nolmi/runtime exec tsx \
 //     src/scripts/setup-telegram-manual-smoke.ts \
 //     --token 1234:AABBCC... --username my_test_bot [--twin @markus]
 //
 // Cleanup nach dem Test:
-//   pnpm --filter @twin-lab/runtime exec tsx \
+//   pnpm --filter @nolmi/runtime exec tsx \
 //     src/scripts/setup-telegram-manual-smoke.ts --cleanup [--twin @markus]
 
 interface ParsedArgs {
@@ -76,12 +76,12 @@ function printUsage(): void {
 
 USAGE
   Setup:
-    pnpm --filter @twin-lab/runtime exec tsx \\
+    pnpm --filter @nolmi/runtime exec tsx \\
       src/scripts/setup-telegram-manual-smoke.ts \\
       --token <BOT_TOKEN> --username <BOT_USERNAME> [--twin @<handle>]
 
   Cleanup (config + messages weg):
-    pnpm --filter @twin-lab/runtime exec tsx \\
+    pnpm --filter @nolmi/runtime exec tsx \\
       src/scripts/setup-telegram-manual-smoke.ts --cleanup [--twin @<handle>]
 
 FLAGS
@@ -172,7 +172,7 @@ Nächste Schritte:
   1. Runtime in Polling-Mode starten (oder neu starten, falls schon
      laufend — eagerLoadAllBots läuft nur beim Boot):
 
-       TELEGRAM_USE_POLLING=true pnpm --filter @twin-lab/runtime dev
+       TELEGRAM_USE_POLLING=true pnpm --filter @nolmi/runtime dev
 
      Im Boot-Log sollte erscheinen:
        [bot-registry] eager-load: 1/1 Bot(s) registriert (Mode: polling)
@@ -202,7 +202,7 @@ den Code idempotent).
 
 Cleanup nach dem Test:
 
-  pnpm --filter @twin-lab/runtime exec tsx \\
+  pnpm --filter @nolmi/runtime exec tsx \\
     src/scripts/setup-telegram-manual-smoke.ts --cleanup --twin ${profile.handle}
 `);
 

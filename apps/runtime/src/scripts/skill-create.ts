@@ -17,8 +17,8 @@ import {
 // optional script.ts) in die DB des angegebenen Twins.
 //
 // Aufruf:
-//   pnpm --filter @twin-lab/runtime twin:skill-create <handle> <skill-dir>
-//   pnpm --filter @twin-lab/runtime twin:skill-create <handle> <skill-dir> --force
+//   pnpm --filter @nolmi/runtime twin:skill-create <handle> <skill-dir>
+//   pnpm --filter @nolmi/runtime twin:skill-create <handle> <skill-dir> --force
 //
 // Storage-only: script.ts wird unverändert in `skill_ts` abgelegt — kein
 // Compile-Check, keine Linting. Execution kommt mit 3.2 (MCP) oder eigenem
@@ -29,7 +29,7 @@ import {
 
 const USAGE =
   "Nutzung:\n" +
-  "  pnpm --filter @twin-lab/runtime twin:skill-create <handle> <skill-dir> [--force]";
+  "  pnpm --filter @nolmi/runtime twin:skill-create <handle> <skill-dir> [--force]";
 
 async function main() {
   const args = process.argv.slice(2);

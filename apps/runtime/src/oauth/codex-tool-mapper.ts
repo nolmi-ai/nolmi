@@ -1,4 +1,4 @@
-import type { Skill } from "@twin-lab/shared";
+import type { Skill } from "@nolmi/shared";
 
 // ─── CODEX TOOL MAPPER (#131 PHASE 3.3.1.1) ──────────────────────────────────
 //

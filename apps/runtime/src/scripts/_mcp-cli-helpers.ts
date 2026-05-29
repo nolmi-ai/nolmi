@@ -5,7 +5,7 @@ import { z } from "zod";
 import Database from "better-sqlite3";
 import { createInterface } from "node:readline/promises";
 import { stdin as input, stdout as output } from "node:process";
-import type { McpServer } from "@twin-lab/shared";
+import type { McpServer } from "@nolmi/shared";
 import { loadRuntimeConfig } from "../config.js";
 import { loadMasterKey } from "../crypto-utils.js";
 import { TwinProfilesRepo, type TwinProfile } from "../twin-profiles-repo.js";

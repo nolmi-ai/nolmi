@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import type { MemoryHit, MemoryHitTargetType } from "@twin-lab/shared";
+import type { MemoryHit, MemoryHitTargetType } from "@nolmi/shared";
 
 // ─── MemoryHitBadge (#100 / UX.1.A) ──────────────────────────────────────────
 //

@@ -5,7 +5,7 @@ import type {
   McpServerAddInput,
   McpServerUpdateInput,
   McpTransport,
-} from "@twin-lab/shared";
+} from "@nolmi/shared";
 import { decrypt, encrypt } from "../crypto-utils.js";
 
 // ─── MCP-SERVERS REPOSITORY (Phase 3.2.A) ───────────────────────────────────

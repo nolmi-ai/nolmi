@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import type { TwinEvent } from "@twin-lab/shared";
+import type { TwinEvent } from "@nolmi/shared";
 
 // ─── useToolCallStream (#107) ────────────────────────────────────────────────
 //

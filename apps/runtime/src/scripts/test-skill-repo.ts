@@ -1,6 +1,6 @@
 import "dotenv/config";
 import Database from "better-sqlite3";
-import type { SkillManifest } from "@twin-lab/shared";
+import type { SkillManifest } from "@nolmi/shared";
 import { loadRuntimeConfig } from "../config.js";
 import { TwinProfilesRepo } from "../twin-profiles-repo.js";
 import {
@@ -16,8 +16,8 @@ import {
 // folgen in 3.1.F.
 //
 // Aufruf:
-//   pnpm --filter @twin-lab/runtime tsx src/scripts/test-skill-repo.ts
-//   pnpm --filter @twin-lab/runtime tsx src/scripts/test-skill-repo.ts @markus
+//   pnpm --filter @nolmi/runtime tsx src/scripts/test-skill-repo.ts
+//   pnpm --filter @nolmi/runtime tsx src/scripts/test-skill-repo.ts @markus
 //
 // Voraussetzung: pnpm db:init lief (Migration 008 angewendet) und der Ziel-Twin
 // existiert in twin_profiles.

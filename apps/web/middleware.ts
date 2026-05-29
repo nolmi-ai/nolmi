@@ -15,8 +15,20 @@ import { NextResponse, type NextRequest } from "next/server";
 //
 // Protected: /chat/*, /settings, /stream/*, /inbox/*, /account + die
 // Home-Route /.
+//
+// Cookie-Names (Rebrand Tag 31): primärer Cookie ist `nolmi-session`,
+// das alte `twin-lab-session` wird als Fallback akzeptiert, damit
+// Bestandssessions weiterleben. Geschrieben wird ausschließlich der neue
+// Name — destroySession() im Runtime kümmert sich um beide Varianten.
+//
+// Diese Konstanten sind heute hier dupliziert (auch in
+// `apps/runtime/src/auth/session.ts`). Für Edge-Runtime im Web-Workspace
+// ist ein Cross-App-Import vom Runtime nicht strukturell vorgesehen
+// (Runtime exportiert keine Subpaths). Konsolidierung über
+// `@nolmi/shared/auth-cookies` ist als BACKLOG-Item vermerkt.
 
-const SESSION_COOKIE_NAME = "twin-lab-session";
+const SESSION_COOKIE_NAME = "nolmi-session";
+const LEGACY_SESSION_COOKIE_NAME = "twin-lab-session";
 
 const PROTECTED_PREFIXES = ["/chat", "/settings", "/stream", "/inbox", "/account"];
 
@@ -35,7 +47,9 @@ export function middleware(request: NextRequest) {
     );
   if (!needsAuth) return NextResponse.next();
 
-  const hasCookie = request.cookies.has(SESSION_COOKIE_NAME);
+  const hasCookie =
+    request.cookies.has(SESSION_COOKIE_NAME) ||
+    request.cookies.has(LEGACY_SESSION_COOKIE_NAME);
   if (hasCookie) return NextResponse.next();
 
   // Redirect zu /login mit ?next=<original-path>, damit nach Login zurück.

@@ -609,7 +609,7 @@ Verschlüsselung von per-Twin-API-Keys in der DB.
 ```bash
 openssl rand -base64 32
 # oder, wenn das Repo lokal liegt:
-pnpm --filter @twin-lab/runtime key:generate
+pnpm --filter @nolmi/runtime key:generate
 ```
 
 > **Bei Verlust:** alle in der DB verschlüsselten API-Keys
@@ -622,7 +622,7 @@ Cookies. Mindestens 32 Zeichen.
 ```bash
 openssl rand -base64 48
 # oder:
-pnpm --filter @twin-lab/runtime session-secret:generate
+pnpm --filter @nolmi/runtime session-secret:generate
 ```
 
 > **Bei Rotation:** alle aktiven Sessions werden invalidiert,

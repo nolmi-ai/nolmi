@@ -23,10 +23,10 @@ import type {
 // Steps verändern, um den Refresh-Diff zu provozieren.
 //
 // Voraussetzung: pnpm db:init lief (Migration 012 angewendet),
-// TWIN_LAB_ENCRYPTION_KEY gesetzt, Test-Twin (default @markus) existiert.
+// NOLMI_ENCRYPTION_KEY gesetzt, Test-Twin (default @markus) existiert.
 //
 // Aufruf:
-//   pnpm --filter @twin-lab/runtime tsx src/scripts/test-mcp-skill-sync.ts
+//   pnpm --filter @nolmi/runtime tsx src/scripts/test-mcp-skill-sync.ts
 
 const TWIN_HANDLE_DEFAULT = "@markus";
 const TEST_SERVER_NAME = "_test-mcp-sync";

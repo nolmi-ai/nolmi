@@ -4,7 +4,7 @@ import "dotenv/config";
 import Database from "better-sqlite3";
 import { createInterface } from "node:readline/promises";
 import { stdin as input, stdout as output } from "node:process";
-import type { FactConfidence } from "@twin-lab/shared";
+import type { FactConfidence } from "@nolmi/shared";
 import { loadRuntimeConfig } from "../config.js";
 import { TwinProfilesRepo, type TwinProfile } from "../twin-profiles-repo.js";
 import { FactsRepo, type Fact } from "../facts/repo.js";

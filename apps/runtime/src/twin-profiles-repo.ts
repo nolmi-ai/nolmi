@@ -1,5 +1,5 @@
 import type Database from "better-sqlite3";
-import type { Mandate, PersonaInput } from "@twin-lab/shared";
+import type { Mandate, PersonaInput } from "@nolmi/shared";
 import type { StoredLlmConfig } from "./llm-config.js";
 
 // ─── TWIN PROFILES REPOSITORY ────────────────────────────────────────────────

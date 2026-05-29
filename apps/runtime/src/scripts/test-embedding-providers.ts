@@ -12,7 +12,7 @@ import {
 // Zwei Test-Phasen:
 //   Phase 1 — Factory-Logik ohne Modell-Load (schnell, immer)
 //   Phase 2 — LocalEmbeddingProvider mit echtem Modell (langsam, einmalig
-//             pro Maschine wegen Cache, optional via TWIN_LAB_SKIP_LOCAL=1)
+//             pro Maschine wegen Cache, optional via NOLMI_SKIP_LOCAL=1)
 //   Phase 3 — OpenAI/Voyage nur wenn API-Keys gesetzt (sonst skip mit Hinweis)
 //
 // Modell-Load dauert beim ersten Lauf je nach Verbindung mehrere Minuten
@@ -20,15 +20,15 @@ import {
 // oder schneller). Nachfolgende Läufe sind ms aus dem ONNX-Cache.
 //
 // Aufruf:
-//   pnpm --filter @twin-lab/runtime test-embedding-providers
+//   pnpm --filter @nolmi/runtime test-embedding-providers
 
 async function main() {
   let issues = 0;
 
   issues += await runFactoryTests();
 
-  if (process.env.TWIN_LAB_SKIP_LOCAL === "1") {
-    log("\n⊘ LocalEmbeddingProvider-Tests übersprungen (TWIN_LAB_SKIP_LOCAL=1)\n");
+  if (process.env.NOLMI_SKIP_LOCAL === "1") {
+    log("\n⊘ LocalEmbeddingProvider-Tests übersprungen (NOLMI_SKIP_LOCAL=1)\n");
   } else {
     issues += await runLocalProviderTests();
   }
@@ -50,17 +50,17 @@ async function runFactoryTests(): Promise<number> {
   let issues = 0;
   // ENV-Snapshot, damit die Factory-Tests sich nicht gegenseitig stören.
   const snapshot: Record<string, string | undefined> = {
-    TWIN_LAB_EMBEDDING_PROVIDER: process.env.TWIN_LAB_EMBEDDING_PROVIDER,
-    TWIN_LAB_EMBEDDING_API_KEY: process.env.TWIN_LAB_EMBEDDING_API_KEY,
-    TWIN_LAB_EMBEDDING_MODEL: process.env.TWIN_LAB_EMBEDDING_MODEL,
-    TWIN_LAB_EMBEDDING_DTYPE: process.env.TWIN_LAB_EMBEDDING_DTYPE,
+    NOLMI_EMBEDDING_PROVIDER: process.env.NOLMI_EMBEDDING_PROVIDER,
+    NOLMI_EMBEDDING_API_KEY: process.env.NOLMI_EMBEDDING_API_KEY,
+    NOLMI_EMBEDDING_MODEL: process.env.NOLMI_EMBEDDING_MODEL,
+    NOLMI_EMBEDDING_DTYPE: process.env.NOLMI_EMBEDDING_DTYPE,
     OPENAI_API_KEY: process.env.OPENAI_API_KEY,
     VOYAGE_API_KEY: process.env.VOYAGE_API_KEY,
   };
 
   banner("TEST 1.1 — Factory: default = LocalEmbeddingProvider");
   _resetEmbeddingProvider();
-  delete process.env.TWIN_LAB_EMBEDDING_PROVIDER;
+  delete process.env.NOLMI_EMBEDDING_PROVIDER;
   const defaultProvider = getEmbeddingProvider();
   if (!(defaultProvider instanceof LocalEmbeddingProvider)) {
     issues += 1;
@@ -91,8 +91,8 @@ async function runFactoryTests(): Promise<number> {
   banner("TEST 1.4 — Factory: openai ohne Key wirft");
   _resetEmbeddingProvider();
   delete process.env.OPENAI_API_KEY;
-  delete process.env.TWIN_LAB_EMBEDDING_API_KEY;
-  process.env.TWIN_LAB_EMBEDDING_PROVIDER = "openai";
+  delete process.env.NOLMI_EMBEDDING_API_KEY;
+  process.env.NOLMI_EMBEDDING_PROVIDER = "openai";
   let threw = false;
   try {
     getEmbeddingProvider();
@@ -110,8 +110,8 @@ async function runFactoryTests(): Promise<number> {
   banner("TEST 1.5 — Factory: voyage ohne Key wirft");
   _resetEmbeddingProvider();
   delete process.env.VOYAGE_API_KEY;
-  delete process.env.TWIN_LAB_EMBEDDING_API_KEY;
-  process.env.TWIN_LAB_EMBEDDING_PROVIDER = "voyage";
+  delete process.env.NOLMI_EMBEDDING_API_KEY;
+  process.env.NOLMI_EMBEDDING_PROVIDER = "voyage";
   let voyageThrew = false;
   try {
     getEmbeddingProvider();
@@ -127,7 +127,7 @@ async function runFactoryTests(): Promise<number> {
 
   banner("TEST 1.6 — Factory: unbekannter Provider wirft");
   _resetEmbeddingProvider();
-  process.env.TWIN_LAB_EMBEDDING_PROVIDER = "made-up";
+  process.env.NOLMI_EMBEDDING_PROVIDER = "made-up";
   let unknownThrew = false;
   try {
     getEmbeddingProvider();
@@ -143,7 +143,7 @@ async function runFactoryTests(): Promise<number> {
 
   banner("TEST 1.7 — Factory: openai mit dummy Key gibt OpenAI-Instanz");
   _resetEmbeddingProvider();
-  process.env.TWIN_LAB_EMBEDDING_PROVIDER = "openai";
+  process.env.NOLMI_EMBEDDING_PROVIDER = "openai";
   process.env.OPENAI_API_KEY = "sk-dummy-for-test";
   const openaiInstance = getEmbeddingProvider();
   if (!(openaiInstance instanceof OpenAIEmbeddingProvider)) {
@@ -155,7 +155,7 @@ async function runFactoryTests(): Promise<number> {
 
   banner("TEST 1.8 — Factory: voyage mit dummy Key gibt Voyage-Instanz");
   _resetEmbeddingProvider();
-  process.env.TWIN_LAB_EMBEDDING_PROVIDER = "voyage";
+  process.env.NOLMI_EMBEDDING_PROVIDER = "voyage";
   process.env.VOYAGE_API_KEY = "pa-dummy-for-test";
   const voyageInstance = getEmbeddingProvider();
   if (!(voyageInstance instanceof VoyageEmbeddingProvider)) {

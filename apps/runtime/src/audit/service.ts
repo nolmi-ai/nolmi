@@ -1,5 +1,5 @@
 import { nanoid } from "nanoid";
-import type { AuditEntry, AuditStatus } from "@twin-lab/shared";
+import type { AuditEntry, AuditStatus } from "@nolmi/shared";
 import type { AuditRepository } from "../repository/types.js";
 import type { EventBus } from "../events/bus.js";
 

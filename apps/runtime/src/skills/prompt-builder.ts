@@ -1,4 +1,4 @@
-import type { Skill } from "@twin-lab/shared";
+import type { Skill } from "@nolmi/shared";
 
 // ─── SKILLS PROMPT BUILDER ──────────────────────────────────────────────────
 //

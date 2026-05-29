@@ -5,7 +5,7 @@ import {
   SkillManifestSchema,
   type Preset,
   type SkillManifest,
-} from "@twin-lab/shared";
+} from "@nolmi/shared";
 
 // ─── SCAN EXAMPLES-PRESETS ───────────────────────────────────────────────────
 //

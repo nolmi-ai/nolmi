@@ -1,6 +1,6 @@
 import type { FastifyBaseLogger } from "fastify";
 import type Database from "better-sqlite3";
-import type { Persona } from "@twin-lab/shared";
+import type { Persona } from "@nolmi/shared";
 import { TwinProfilesRepo, type TwinProfile } from "./twin-profiles-repo.js";
 import { TwinService } from "./twin-service.js";
 import { AuditService } from "./audit/service.js";
@@ -342,7 +342,7 @@ export class TwinServiceRegistry {
     if (!profile.llmConfig.apiKeyEncrypted) {
       throw new Error(
         `Twin '${profile.handle}' hat keinen apiKeyEncrypted im Profil. ` +
-          `Re-Bootstrap nötig: 'pnpm --filter @twin-lab/runtime twin:bootstrap ${profile.handle.replace(/^@/, "")}'`,
+          `Re-Bootstrap nötig: 'pnpm --filter @nolmi/runtime twin:bootstrap ${profile.handle.replace(/^@/, "")}'`,
       );
     }
     let apiKey: string;
@@ -352,7 +352,7 @@ export class TwinServiceRegistry {
       if (err instanceof EncryptionDecryptError) {
         throw new Error(
           `Twin '${profile.handle}': API-Key konnte nicht entschlüsselt werden — ${err.message}. ` +
-            `Master-Key falsch oder Profil korrupt? Re-Bootstrap mit korrektem TWIN_LAB_ENCRYPTION_KEY.`,
+            `Master-Key falsch oder Profil korrupt? Re-Bootstrap mit korrektem NOLMI_ENCRYPTION_KEY.`,
         );
       }
       throw err;

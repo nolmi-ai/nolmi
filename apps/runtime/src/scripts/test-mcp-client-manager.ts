@@ -30,11 +30,11 @@ const TEST_IDLE_MS = 100;
 // Idle-Timeout-Test setzt MCP_IDLE_TIMEOUT_MS=100ms ganz am Anfang (vor dem
 // Modul-Import), damit der Test in <1s durchläuft statt 5 Minuten zu warten.
 //
-// Voraussetzung: pnpm db:init lief, TWIN_LAB_ENCRYPTION_KEY gesetzt,
+// Voraussetzung: pnpm db:init lief, NOLMI_ENCRYPTION_KEY gesetzt,
 // Test-Twin (default @markus) existiert.
 //
 // Aufruf:
-//   pnpm --filter @twin-lab/runtime tsx src/scripts/test-mcp-client-manager.ts
+//   pnpm --filter @nolmi/runtime tsx src/scripts/test-mcp-client-manager.ts
 
 const TWIN_HANDLE_DEFAULT = "@markus";
 const TEST_SERVER_NAME = "_test-mcp-manager";

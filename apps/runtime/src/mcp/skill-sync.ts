@@ -1,4 +1,4 @@
-import type { McpServer, McpToolDefinition, SkillManifest } from "@twin-lab/shared";
+import type { McpServer, McpToolDefinition, SkillManifest } from "@nolmi/shared";
 import type { McpServersRepo } from "./repo.js";
 import type { McpClientManager } from "./client-manager.js";
 import { SkillAlreadyExistsError, type SkillRepo } from "../skills/repo.js";

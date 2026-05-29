@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import type { MaturityResult } from "@twin-lab/shared";
+import type { MaturityResult } from "@nolmi/shared";
 
 // ─── MaturityDetail (#101 Phase 3) ───────────────────────────────────────────
 //

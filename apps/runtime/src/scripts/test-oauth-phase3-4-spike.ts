@@ -45,7 +45,7 @@ import { CodexSSEParser } from "../oauth/codex-sse-parser.js";
 //   - Reasoning-Items-Mapping als V3 ReasoningPart (würde funktionieren,
 //     aber summary:[] heißt nur leerer text-String — trivial, kein Spike-Wert)
 //
-// Aufruf: pnpm --filter @twin-lab/runtime twin:oauth-phase3-4-spike
+// Aufruf: pnpm --filter @nolmi/runtime twin:oauth-phase3-4-spike
 
 const CODEX_ENDPOINT = "https://chatgpt.com/backend-api/codex/responses";
 const CODEX_AUTH_PATH = path.resolve(os.homedir(), ".codex/auth.json");

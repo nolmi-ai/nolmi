@@ -8,7 +8,7 @@ import type {
   Preset,
   SettingsDataResponse,
   SkillDetailPayload,
-} from "@twin-lab/shared";
+} from "@nolmi/shared";
 import { PageContainer } from "../../components/PageContainer";
 import { MaturityDetail } from "../../components/MaturityDetail";
 import { SkillEditorModal } from "../../components/SkillEditorModal";

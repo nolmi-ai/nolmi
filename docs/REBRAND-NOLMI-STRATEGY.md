@@ -122,17 +122,43 @@ Komplett unabhängig vom Namen — wird in **jedem** Szenario gebraucht, egal wi
 
 **Aufwand:** S, real ~1h netto inkl. Diagnose + Smoke + Mini-Justierung.
 
-### Phase 3 — Technische Renames (✅ ENTBLOCKT Tag 31, mit Kompatibilität)
+### Phase 3 — Technische Renames
 
-Am riskantesten. Erst wenn Phase 2 stabil + neuer VPS steht.
+Aufgeteilt in zwei Blöcke:
 
-**Scope:**
-- **Env-Vars `TWIN_LAB_*`:** Alias-Pattern statt Hard-Break. Code liest neuen Namen (`NOLMI_*`) UND alten (`TWIN_LAB_*`) als Fallback. Migration-Window, dann alter Name raus. **Production-kritisch** — die 3 laufenden Twins nutzen die alten Vars.
-- **Package-Namen `@twin-lab/*` → `@nolmi/*`:** Workspace-weiter Rename (npm-Org `@nolmi` reserviert, siehe §9). Breaking, daher kontrolliert + nach Phase 2.
-- **Docker-Image-Namen:** `nolmi/runtime`, `nolmi/web`, `nolmi/bridge` (Docker-Hub-Namespace = `nolmi`, **nicht** `nolmi-ai` — letzteres ist nur die GitHub-Org-Inkonsistenz).
-- **PyPI-Package** `nolmi` (Account Tag 31 verifiziert, Publishing erst beim ersten Release).
+#### Phase 3a — Env / Package / Cookie ✅ DONE Tag 31 (Block 3)
 
-**Aufwand:** M (Env-Aliasing ist nontrivial, braucht eigenes Sub-Briefing + Smoke gegen Production-Pattern).
+Code-Renames mit Backward-Compat-Aliasing (Env + Cookie) und Hard-Switch (Workspace-Packages, technisch nicht aliasable).
+
+**Scope (abgeschlossen):**
+- **`getEnv`-Helper:** `packages/shared/src/env.ts` + Subpath-Export `@nolmi/shared/env`. Liest neuen Namen, fällt auf alten zurück, warnt einmal pro Prozess pro Var (`warnOnce`). Unit-Smoke (`src/env.test.ts`) prüft 4 Pfade: new-wins / only-old-warns / only-new-silent / both-unset. Lauf via `pnpm --filter @nolmi/shared test:env`.
+- **10 Env-Vars umgestellt:** Production-Read-Pfad (`NOLMI_SESSION_SECRET`, `NOLMI_ENCRYPTION_KEY`, `NOLMI_DEFAULT_BRIDGE_URL`, `NOLMI_MODEL_CACHE_DIR`, `NOLMI_EMBEDDING_{PROVIDER,MODEL,DTYPE,API_KEY}`) via `getEnv`; Test-Only (`NOLMI_RUN_LOCAL_RETRIEVAL_TEST`, `NOLMI_SKIP_LOCAL`) als stumpfer Rename ohne Aliasing.
+- **4 Workspace-Packages atomar umbenannt:** `@twin-lab/{web,runtime,bridge,shared}` → `@nolmi/{web,runtime,bridge,shared}`. 124 Import-Statements + Root-`package.json` Script-Refs mit-rewriten. Aliasing technisch nicht möglich (Workspace-Auflösung über `name`-Feld), daher Hart-Cut.
+- **Cookie-Aliasing:** `SESSION_COOKIE_NAME = "nolmi-session"` (write) + `LEGACY_SESSION_COOKIE_NAME = "twin-lab-session"` (read-fallback). `getSession()` liest beide, `setSession()` schreibt nur den neuen, `destroySession()` löscht beide aktiv (sonst überschattet ein Bestands-Legacy-Cookie das Logout). Web-`middleware.ts` spiegelt die Konstanten lokal — Konsolidierung via `@nolmi/shared/auth-cookies` als Backlog-Item, weil Cross-App-Import vom Runtime nicht strukturell vorgesehen ist.
+- **`.env.example`:** Alle `TWIN_LAB_*` + `@twin-lab/*`-Vorkommen umgestellt, Header-Notiz zum Aliasing-Fenster (6–12 Monate, Hart-Cut Mai 2027).
+
+**Verifikation:**
+- `pnpm install` + `pnpm typecheck` (alle 4 Workspaces) + `pnpm -r build` minus `@nolmi/web` (next-build während Dev korrumpiert geteilten `.next/`) — alles grün.
+- `pnpm --filter @nolmi/shared test:env` 4/4 Cases OK.
+
+**Bewusst NICHT in 3a (operativer Folge-Block 3b):**
+- Verzeichnis-Rename `twin-lab/` → `nolmi/` lokal
+- GitHub-Repo-Move `markusbaier/twin-lab` → `nolmi-ai/nolmi`
+- Docker-Image-Tags Rename
+- Production-Deploy (Nolmi-Stack lebt nur im Repo, Production-Twin-Lab unverändert)
+
+#### Phase 3b — Verzeichnis + Repo (Folge-Block, operativ)
+
+Dateisystem- und GitHub-seitige Renames, kein Code-Change. Eigener Folge-Block weil rein operativ.
+
+**Scope (offen):**
+- Lokales Verzeichnis `twin-lab/` → `nolmi/` (Working-Copy, git remote ggf. neu setzen)
+- `gh repo rename` oder GitHub-UI: `markusbaier/twin-lab` → `nolmi-ai/nolmi` (npm/PyPI/Docker bleiben `nolmi` ohne Bindestrich, siehe §0)
+- Docker-Image-Tags `nolmi/runtime`, `nolmi/web`, `nolmi/bridge`
+- README-Links + Badge-URLs nachziehen
+- Optional: PyPI-Publishing-Vorbereitung (erst beim ersten Release relevant)
+
+**Aufwand:** S (mechanisch).
 
 ### Phase 4 — Nolmi-VPS Production-Deploy (nach 1-3, VPS bereits provisioniert)
 
@@ -151,15 +177,17 @@ Separater Hostinger-VPS (Frankfurt, Ubuntu 24.04 LTS, IP `187.124.3.235`). Neu-A
 ## 4. Phasen-Reihenfolge + Gates (Übersicht)
 
 ```
-Phase 1 (Light-Mode)  ──────────────▶  ✅ DONE Tag 30 (kein Gate)
+Phase 1 (Light-Mode)        ────────▶  ✅ DONE Tag 30 (kein Gate)
                                         │
         [GATE: ✅ Trademark-grün Tag 30/31 (USPTO + EUIPO 0 Treffer)]
                                         │
-Phase 2 (Name sichtbar) ════════════▶  entblockt, ready
+Phase 2 (Name sichtbar)     ════════▶  ✅ DONE Tag 31 (Block 2)
                                         │
-Phase 3 (Env/Package-Aliasing) ═════▶  entblockt, ready (nach Phase 2)
+Phase 3a (Env/Package/Cookie) ══════▶  ✅ DONE Tag 31 (Block 3)
                                         │
-Phase 4 (Nolmi-VPS-Deploy) ═════════▶  VPS bereits provisioniert (Tag 30/31), ready nach 1-3
+Phase 3b (Verzeichnis+Repo) ════════▶  offen, operativer Folge-Block
+                                        │
+Phase 4 (Nolmi-VPS-Deploy)  ════════▶  VPS bereits provisioniert (Tag 30/31), ready nach 3b
 ```
 
 **Parallel (Markus, außerhalb Code) — Stand Tag 31:** ✅ Foundation gesichert (Domain + VPS + GitHub-Org `nolmi-ai` + npm `@nolmi` + PyPI + Docker Hub `nolmi` + Mail-Stack + Trademark-Quick-Search durch — Details §9). Verbleibt: Social-Handles + Brand-Assets-Produktion.
@@ -174,7 +202,7 @@ Phase 4 (Nolmi-VPS-Deploy) ═════════▶  VPS bereits provision
 | S2 | Name = Nolmi (Title Case, Wordmark-first) | ✅ bestätigt Tag 31, Trademark grün |
 | S3 | Separater Hostinger-VPS für Nolmi | ✅ bestätigt + provisioniert Tag 30/31 |
 | S4 | Code-Rebrand erst nach Trademark-Klärung | ✅ Gate offen (Trademark grün Tag 30/31), Code-Rebrand entblockt |
-| S5 | Env-Vars via Alias, kein Hard-Break | Vorschlag, zu bestätigen bei Phase 3 |
+| S5 | Env-Vars via Alias, kein Hard-Break | ✅ umgesetzt Tag 31 Block 3 (`getEnv`-Helper, 6–12 Monate Aliasing-Fenster) |
 | S6 | Phase 1 (Light-Mode) startet sofort, namens-unabhängig | ✅ DONE Tag 30 Block 3 |
 | S7 | Dark-Mode bleibt als Fallback erhalten (nicht gelöscht) | ✅ Tag 30 hart auf Light entschieden (kein Toggle, Phase-B-Item für späteren Toggle) |
 | S8 | GitHub-Org-Name = `nolmi-ai` (mit Bindestrich), npm/PyPI/Docker = `nolmi` — bewusste Inkonsistenz, GitHub-internes Block auf `nolmi` ohne sichtbaren Trademark-Grund, AI-Sektor-Konvention `nolmi-ai` (vgl. `langchain-ai`, `anthropic-ai`) | ✅ akzeptiert Tag 31 |
@@ -228,11 +256,59 @@ Heißt: Block-5-Bau wartet sinnvoll auf Phase 1-2 des Rebrands (Light + Name), s
 | Phase | Aufwand | Gate |
 |---|---|---|
 | 1 — Light-Mode | S-M | kein — ✅ DONE Tag 30 |
-| 2 — Name sichtbar | S | ✅ entblockt Tag 31 (Trademark grün) |
-| 3 — Env/Package | M | ✅ entblockt — nach Phase 2 |
-| 4 — Nolmi-VPS | M-L | nach 1-3 (VPS bereits provisioniert) |
+| 2 — Name sichtbar | S | ✅ DONE Tag 31 Block 2 |
+| 3a — Env/Package/Cookie | M | ✅ DONE Tag 31 Block 3 |
+| 3b — Verzeichnis/Repo | S | entblockt, operativer Folge-Block |
+| 4 — Nolmi-VPS | M-L | nach 3b (VPS bereits provisioniert) |
 
-Phase 1 ist DONE. Phase 2 kann sofort als nächster Block starten. Phase 3 hängt an Phase-2-Stabilität, Phase 4 am operativen Setup-Block.
+Phasen 1–3a sind DONE. Verbleibt 3b (operativ) + 4 (Production-Deploy).
+
+---
+
+## 10. Aliasing-Pattern (wiederverwendbar)
+
+Phase 3a hat ein Pattern etabliert, das für künftige Renames in `nolmi`
+(Tag 31+) als Vorlage dient: **Read-Both, Write-New, Warn-Once,
+Hart-Cut nach Migrations-Fenster.**
+
+### Mechanik
+
+Zentral in `@nolmi/shared/env`:
+
+```ts
+export function getEnv(newName: string, oldName: string): string | undefined {
+  const newValue = process.env[newName];
+  if (newValue !== undefined) return newValue;
+  const oldValue = process.env[oldName];
+  if (oldValue !== undefined) { warnOnce(oldName, newName); return oldValue; }
+  return undefined;
+}
+```
+
+- **Read-Both:** neuer Name gewinnt, alter Name als Fallback
+- **Warn-Once:** pro Prozess-Lifetime einmalige Deprecation-Warning pro Var
+- **Hart-Cut:** nach 6–12 Monaten wird der `oldName`-Parameter entfernt;
+  Call-Sites bleiben unverändert (nur das zweite Argument fällt weg)
+
+### Wo das Pattern greift
+
+| Asset-Typ | Aliasable? | Pattern |
+|---|---|---|
+| Env-Vars | ✅ ja | `getEnv("NOLMI_X", "TWIN_LAB_X")` |
+| Cookies | ✅ ja | `SESSION_COOKIE_NAME` + `LEGACY_SESSION_COOKIE_NAME`, Read-Both im Reader, Write-New im Setter |
+| Workspace-Package-Namen | ❌ nein | atomarer Hart-Switch — pnpm-Workspace-Resolution sieht nur das `name`-Feld |
+| Verzeichnis-Pfade | ❌ nein | git-mv + `cd` neuer Pfad, kein Aliasing möglich |
+| Repo-URLs | ⚠ teilweise | GitHub macht 301-Redirects auf alten URLs, aber kein Aliasing in `git remote` |
+
+### Lifecycle einer Aliasing-Stelle
+
+1. **Bau (Phase 3a, Tag 31, Mai 2026):** `getEnv("NOLMI_X", "TWIN_LAB_X")` rein
+2. **Warn-Phase (6–12 Monate):** Production-Logs zeigen Deprecation-Warnings, User stellt um
+3. **Hart-Cut (ca. Mai 2027):** zweites Argument raus → `getEnv("NOLMI_X")` (oder direktes `process.env.NOLMI_X`)
+4. **Cleanup:** Aliasing-Hinweise in Doc-Strings + `.env.example`-Header
+   entfernen
+
+Wer den Hart-Cut macht, schlägt hier nach.
 
 ---
 

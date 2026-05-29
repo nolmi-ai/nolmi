@@ -6,7 +6,7 @@ import {
   type Skill,
   type SkillManifest,
   type SkillSource,
-} from "@twin-lab/shared";
+} from "@nolmi/shared";
 import type { SkillRepo } from "./repo.js";
 
 // ─── SKILL-IMPORT AUS VERZEICHNIS ────────────────────────────────────────────

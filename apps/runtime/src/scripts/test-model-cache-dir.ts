@@ -4,7 +4,7 @@ import { applyModelCacheDir } from "../episodic/providers/local-provider.js";
 // ─── TEST: MODELL-CACHE-PFAD (3.4.J.1 — Pre-Deploy-Patch) ──────────────────
 //
 // Prüft applyModelCacheDir() — die Funktion, die env.cacheDir von
-// @huggingface/transformers aus TWIN_LAB_MODEL_CACHE_DIR setzt. Reiner
+// @huggingface/transformers aus NOLMI_MODEL_CACHE_DIR setzt. Reiner
 // Unit-Test mit Fake-env-Objekt, KEIN Modell-Load (das ist der Sinn der
 // Auslagerung aus getExtractor()).
 //
@@ -13,16 +13,16 @@ import { applyModelCacheDir } from "../episodic/providers/local-provider.js";
 // (Default: .cache/ in node_modules — überlebt Container-Recreates nicht).
 //
 // Aufruf:
-//   pnpm --filter @twin-lab/runtime test-model-cache-dir
+//   pnpm --filter @nolmi/runtime test-model-cache-dir
 
 function main() {
   let issues = 0;
   // ENV-Snapshot, damit der Test eine evtl. real gesetzte Variable nicht
   // dauerhaft überschreibt.
-  const snapshot = process.env.TWIN_LAB_MODEL_CACHE_DIR;
+  const snapshot = process.env.NOLMI_MODEL_CACHE_DIR;
 
   banner("TEST 1 — ENV nicht gesetzt → env.cacheDir bleibt unverändert");
-  delete process.env.TWIN_LAB_MODEL_CACHE_DIR;
+  delete process.env.NOLMI_MODEL_CACHE_DIR;
   {
     const fakeEnv: { cacheDir: string | null } = {
       cacheDir: "/default/node_modules/.cache",
@@ -37,7 +37,7 @@ function main() {
   }
 
   banner("TEST 2 — ENV gesetzt → env.cacheDir wird übernommen");
-  process.env.TWIN_LAB_MODEL_CACHE_DIR = "/app/data/model-cache";
+  process.env.NOLMI_MODEL_CACHE_DIR = "/app/data/model-cache";
   {
     const fakeEnv: { cacheDir: string | null } = {
       cacheDir: "/default/node_modules/.cache",
@@ -52,8 +52,8 @@ function main() {
   }
 
   // ENV restoren.
-  if (snapshot === undefined) delete process.env.TWIN_LAB_MODEL_CACHE_DIR;
-  else process.env.TWIN_LAB_MODEL_CACHE_DIR = snapshot;
+  if (snapshot === undefined) delete process.env.NOLMI_MODEL_CACHE_DIR;
+  else process.env.NOLMI_MODEL_CACHE_DIR = snapshot;
 
   banner("ZUSAMMENFASSUNG");
   if (issues === 0) {

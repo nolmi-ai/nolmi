@@ -7,7 +7,7 @@ import type {
   MemoryHit,
   Persona,
   Skill,
-} from "@twin-lab/shared";
+} from "@nolmi/shared";
 import {
   generateObject,
   generateText,
@@ -2230,7 +2230,7 @@ function composeOwnerSystemPrompt(parts: {
 
 // 3.2.F: Shape des Pending-Audit-Input für mcp-tool-use. Lokal als Type-
 // Alias, damit der Cast in approveMcpToolUse / reject-Branch lesbar bleibt.
-// Der Persistenz-Schema lebt zentral in `@twin-lab/shared`
+// Der Persistenz-Schema lebt zentral in `@nolmi/shared`
 // (`AuditMcpToolUseInputSchema`); diesen lokalen Shape ziehen wir bewusst
 // nicht aus dem zod-Schema, weil die Inbox-Display-Felder (lastMessage,
 // originalCapability) mitgespeichert werden, ohne den Frontend-Typ zu

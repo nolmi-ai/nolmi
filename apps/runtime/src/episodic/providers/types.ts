@@ -2,7 +2,7 @@
 //
 // Swappable Provider-Abstraktion. Drei Implementierungen liegen in den
 // Schwester-Files (local / openai / voyage), die Factory wählt anhand
-// `TWIN_LAB_EMBEDDING_PROVIDER` aus.
+// `NOLMI_EMBEDDING_PROVIDER` aus.
 //
 // inputType ist Pflicht im Interface — E5-Modelle brauchen einen anderen
 // Text-Prefix für Query vs. Passage, Voyage hat einen separaten API-Param,

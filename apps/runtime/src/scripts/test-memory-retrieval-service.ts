@@ -19,7 +19,7 @@ import type {
 // Embeddings werden mit "ähnlichen" Vektoren (geringe Perturbation) oder
 // "unähnlichen" (random) gespeichert. So sind Search-Hits deterministisch.
 //
-// Echtes E5-Modell wird optional via TWIN_LAB_RUN_LOCAL_RETRIEVAL_TEST=1
+// Echtes E5-Modell wird optional via NOLMI_RUN_LOCAL_RETRIEVAL_TEST=1
 // gegen ein paar deutsche Passages geprüft — das ist der qualitative
 // Test, der bestätigt dass die Pipeline auf realer Embedding-Topologie
 // funktioniert.
@@ -127,11 +127,11 @@ async function main() {
   );
   issues += runEpisodicBlockTest();
 
-  if (process.env.TWIN_LAB_RUN_LOCAL_RETRIEVAL_TEST === "1") {
+  if (process.env.NOLMI_RUN_LOCAL_RETRIEVAL_TEST === "1") {
     issues += await runLocalProviderTest(embeddingsRepo, twinA);
   } else {
     log(
-      "\n⊘ Live-LocalProvider-Test übersprungen (TWIN_LAB_RUN_LOCAL_RETRIEVAL_TEST!=1)",
+      "\n⊘ Live-LocalProvider-Test übersprungen (NOLMI_RUN_LOCAL_RETRIEVAL_TEST!=1)",
     );
   }
 

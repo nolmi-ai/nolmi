@@ -20,7 +20,7 @@ import { loadMasterKey } from "../crypto-utils.js";
 // TWIN_DATABASE_PATH-Override) — kein Docker-Container nötig.
 //
 // Voraussetzungen:
-//   - TWIN_LAB_ENCRYPTION_KEY in .env (sonst EncryptionKeyMissingError)
+//   - NOLMI_ENCRYPTION_KEY in .env (sonst EncryptionKeyMissingError)
 //   - data/twin.db existiert mit applied Migration 025
 //     → pnpm db:init falls noch nicht
 //   - Mindestens ein Twin in twin_profiles (für FK-Reference)
@@ -28,10 +28,10 @@ import { loadMasterKey } from "../crypto-utils.js";
 // Aufruf:
 //   pnpm twin:oauth-phase1-smoke
 //   oder direkt:
-//   pnpm --filter @twin-lab/runtime exec tsx src/scripts/test-oauth-phase1.ts
+//   pnpm --filter @nolmi/runtime exec tsx src/scripts/test-oauth-phase1.ts
 
 // Workspace-Root via __dirname-Walk (script in apps/runtime/src/scripts/).
-// Macht Aufruf via `pnpm --filter @twin-lab/runtime ...` cwd-unabhängig.
+// Macht Aufruf via `pnpm --filter @nolmi/runtime ...` cwd-unabhängig.
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const WORKSPACE_ROOT = path.resolve(__dirname, "../../../..");
 const DB_PATH =

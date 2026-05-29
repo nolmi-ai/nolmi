@@ -15,7 +15,7 @@ import type {
   ChatMessage,
   MemoryHit,
   TwinEvent,
-} from "@twin-lab/shared";
+} from "@nolmi/shared";
 import { ToolPicker } from "./ToolPicker";
 import { EmptyState } from "../../../components/EmptyState";
 import { ModalWrapper } from "../../../components/ModalWrapper";

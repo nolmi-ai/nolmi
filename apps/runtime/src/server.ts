@@ -24,7 +24,7 @@ import {
   type McpServerUiPayload,
   type SkillDetailPayload,
   type TwinToolListItem,
-} from "@twin-lab/shared";
+} from "@nolmi/shared";
 import {
   McpServerAlreadyExistsError,
   McpServerValidationError,
@@ -63,12 +63,13 @@ import {
 } from "./skills/import-from-dir.js";
 import { scanExamplesPresets } from "./skills/scan-examples-presets.js";
 import { activatePresets } from "./skills/activate-presets.js";
-import { PresetSelectionSchema } from "@twin-lab/shared";
+import { PresetSelectionSchema } from "@nolmi/shared";
+import { getEnv } from "@nolmi/shared/env";
 import type {
   PresetActivationResult,
   Skill,
   SkillUiPayload,
-} from "@twin-lab/shared";
+} from "@nolmi/shared";
 import type { ConversationsRepo } from "./conversations/repo.js";
 import {
   mergeAuditIntoBridgeMessages,
@@ -610,7 +611,7 @@ function registerLegacyAliases(
 // 2.5.3 (Backlog #37). Nach Submit muss `pnpm dev` neu gestartet werden,
 // damit der neue Twin live wird.
 
-// #110 Phase 2B Commit 11: PersonaInputSchema lebt jetzt in @twin-lab/shared
+// #110 Phase 2B Commit 11: PersonaInputSchema lebt jetzt in @nolmi/shared
 // (oben in den Imports). Settings-Frontend nutzt das gleiche Schema für
 // Pre-Fill + Update — Single-Source-of-Truth.
 
@@ -838,12 +839,15 @@ function registerOnboardingRoutes(app: FastifyInstance, deps: ServerDeps) {
 
 /**
  * Bridge-URL für neu angelegte Twin-Profile. Production setzt
- * `TWIN_LAB_DEFAULT_BRIDGE_URL` in der `.env` auf die gehostete Bridge,
+ * `NOLMI_DEFAULT_BRIDGE_URL` in der `.env` auf die gehostete Bridge,
  * lokal bleibt sie ungesetzt → Fallback auf den Dev-Bridge-Port.
+ * Aliasing: `TWIN_LAB_DEFAULT_BRIDGE_URL` wird via getEnv noch als
+ * Fallback gelesen (6–12 Monate, dann Hart-Cut).
  */
 function pickBridgeUrlForOnboarding(): string {
   return (
-    process.env.TWIN_LAB_DEFAULT_BRIDGE_URL?.trim() || "http://127.0.0.1:5100"
+    getEnv("NOLMI_DEFAULT_BRIDGE_URL", "TWIN_LAB_DEFAULT_BRIDGE_URL")?.trim() ||
+    "http://127.0.0.1:5100"
   );
 }
 

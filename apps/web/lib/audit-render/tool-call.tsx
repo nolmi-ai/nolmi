@@ -12,7 +12,7 @@ import {
   TextBlock,
   type AuditTemplateProps,
 } from "./shared";
-import type { AuditEntry } from "@twin-lab/shared";
+import type { AuditEntry } from "@nolmi/shared";
 
 // ─── ToolCallTemplate (#99) ──────────────────────────────────────────────────
 //

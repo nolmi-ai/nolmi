@@ -1,4 +1,4 @@
-import type { AuditEntry } from "@twin-lab/shared";
+import type { AuditEntry } from "@nolmi/shared";
 import type { ConversationSummariesRepo } from "../conversations/summaries-repo.js";
 import type { ConversationsRepo } from "../conversations/repo.js";
 import type { EmbeddingsRepo } from "./embeddings-repo.js";

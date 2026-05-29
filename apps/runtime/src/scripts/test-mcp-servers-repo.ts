@@ -21,12 +21,12 @@ import {
 // werden. Cleanup am Ende per remove() — kein Soft-Delete.
 //
 // Voraussetzung: pnpm db:init lief (Migration 011 angewendet),
-// TWIN_LAB_ENCRYPTION_KEY ist gesetzt, der Ziel-Twin existiert in
+// NOLMI_ENCRYPTION_KEY ist gesetzt, der Ziel-Twin existiert in
 // twin_profiles.
 //
 // Aufruf:
-//   pnpm --filter @twin-lab/runtime tsx src/scripts/test-mcp-servers-repo.ts
-//   pnpm --filter @twin-lab/runtime tsx src/scripts/test-mcp-servers-repo.ts @markus
+//   pnpm --filter @nolmi/runtime tsx src/scripts/test-mcp-servers-repo.ts
+//   pnpm --filter @nolmi/runtime tsx src/scripts/test-mcp-servers-repo.ts @markus
 
 const TWIN_HANDLE_DEFAULT = "@markus";
 const SERVER_NAME_NO_ENV = "_test-mcp-everything";

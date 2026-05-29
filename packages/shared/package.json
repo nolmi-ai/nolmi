@@ -1,5 +1,5 @@
 {
-  "name": "@twin-lab/shared",
+  "name": "@nolmi/shared",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -9,6 +9,10 @@
     ".": {
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
+    },
+    "./env": {
+      "types": "./dist/env.d.ts",
+      "default": "./dist/env.js"
     }
   },
   "files": [
@@ -16,12 +20,14 @@
   ],
   "scripts": {
     "build": "tsc",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test:env": "tsx src/env.test.ts"
   },
   "dependencies": {
     "zod": "^3.23.0"
   },
   "devDependencies": {
+    "tsx": "^4.19.0",
     "typescript": "^5.6.0"
   }
 }

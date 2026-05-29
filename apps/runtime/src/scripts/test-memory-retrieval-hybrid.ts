@@ -23,7 +23,7 @@ import type {
 //
 // Mock-Tests für Sanitization, FTS5-Search, RRF-Merge plus die Hybrid-
 // Retrieval-Pipeline (Pre-RRF Filter, Post-RRF Threshold, FTS5-Skip).
-// Live-E5-Vergleich am Ende (TWIN_LAB_RUN_LOCAL_RETRIEVAL_TEST=1) misst
+// Live-E5-Vergleich am Ende (NOLMI_RUN_LOCAL_RETRIEVAL_TEST=1) misst
 // das Anna-Beispiel aus 3.4.E gegen den Hybrid-Pfad.
 
 const EMBEDDING_DIM = 1024;
@@ -111,11 +111,11 @@ async function main() {
   db.close();
 
   // Phase 3 — Live-E5-Vergleich (optional)
-  if (process.env.TWIN_LAB_RUN_LOCAL_RETRIEVAL_TEST === "1") {
+  if (process.env.NOLMI_RUN_LOCAL_RETRIEVAL_TEST === "1") {
     issues += await runLiveAnnaTest();
   } else {
     log(
-      "\n⊘ Live-Anna-Test übersprungen (TWIN_LAB_RUN_LOCAL_RETRIEVAL_TEST!=1)",
+      "\n⊘ Live-Anna-Test übersprungen (NOLMI_RUN_LOCAL_RETRIEVAL_TEST!=1)",
     );
   }
 

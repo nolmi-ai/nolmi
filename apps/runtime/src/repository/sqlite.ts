@@ -1,7 +1,7 @@
 import Database from "better-sqlite3";
 import * as sqliteVec from "sqlite-vec";
 import type { AuditListOpts, AuditRepository, RepositoryBundle } from "./types.js";
-import type { AuditEntry } from "@twin-lab/shared";
+import type { AuditEntry } from "@nolmi/shared";
 
 // ─── SQLITE BUNDLE ───────────────────────────────────────────────────────────
 //

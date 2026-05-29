@@ -1,6 +1,6 @@
 import { generateObject, type LanguageModel } from "ai";
 import { z } from "zod";
-import type { ForcedToolChoice, Skill } from "@twin-lab/shared";
+import type { ForcedToolChoice, Skill } from "@nolmi/shared";
 
 // ─── SKILL PRE-PASS CLASSIFIER (#107) ────────────────────────────────────────
 //

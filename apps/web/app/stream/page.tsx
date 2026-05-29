@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import type { TwinEvent } from "@twin-lab/shared";
+import type { TwinEvent } from "@nolmi/shared";
 import { PageContainer } from "../../components/PageContainer";
 
 const RUNTIME_URL = process.env.NEXT_PUBLIC_RUNTIME_URL ?? "http://localhost:4000";

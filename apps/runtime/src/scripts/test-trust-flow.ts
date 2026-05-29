@@ -1,7 +1,7 @@
 import "dotenv/config";
 import Database from "better-sqlite3";
 import { setTimeout as sleep } from "node:timers/promises";
-import type { AuditEntry } from "@twin-lab/shared";
+import type { AuditEntry } from "@nolmi/shared";
 import { loadRuntimeConfig } from "../config.js";
 import { TwinProfilesRepo } from "../twin-profiles-repo.js";
 import { TrustRepo } from "../trust/trust-repo.js";
@@ -33,8 +33,8 @@ import { createSqliteRepository } from "../repository/index.js";
 // der DB als aktiv stehen, beide Bridge-Streams angeschlossen.
 //
 // Aufruf:
-//   pnpm --filter @twin-lab/runtime trust:test
-//   pnpm --filter @twin-lab/runtime trust:test @markus @florian
+//   pnpm --filter @nolmi/runtime trust:test
+//   pnpm --filter @nolmi/runtime trust:test @markus @florian
 
 const RECEIVER_DEFAULT = "@markus";
 const SENDER_DEFAULT = "@florian";
@@ -69,7 +69,7 @@ async function main() {
   if (!receiver.ownerUserId) {
     throw new Error(
       `Receiver '${receiverHandle}' hat keinen owner_user_id — bitte zuerst ` +
-        `'pnpm --filter @twin-lab/runtime user:create … --assign-twin ${receiverHandle}' laufen lassen.`,
+        `'pnpm --filter @nolmi/runtime user:create … --assign-twin ${receiverHandle}' laufen lassen.`,
     );
   }
 

@@ -27,7 +27,7 @@ import { createCodexProvider } from "../oauth/codex-vercel-provider.js";
 //
 // Aufruf:
 //   pnpm twin:oauth-phase3-spike setup    # @markus → oauth
-//   pnpm --filter @twin-lab/runtime twin:codex-vercel-provider-smoke
+//   pnpm --filter @nolmi/runtime twin:codex-vercel-provider-smoke
 //   pnpm twin:oauth-phase3-spike cleanup  # @markus → api_key
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));

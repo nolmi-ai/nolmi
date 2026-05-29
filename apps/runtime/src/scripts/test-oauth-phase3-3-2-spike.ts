@@ -32,7 +32,7 @@ import path from "node:path";
 // werden kann.
 //
 // Aufruf:
-//   pnpm --filter @twin-lab/runtime twin:oauth-phase3-3-2-spike
+//   pnpm --filter @nolmi/runtime twin:oauth-phase3-3-2-spike
 
 const CODEX_ENDPOINT = "https://chatgpt.com/backend-api/codex/responses";
 const CODEX_AUTH_PATH = path.resolve(os.homedir(), ".codex/auth.json");

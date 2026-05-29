@@ -17,13 +17,13 @@ import { resolveTwinSourcePaths } from "./_twin-source-paths.js";
 // `twin:reload`.
 //
 // Aufruf:
-//   pnpm --filter @twin-lab/runtime twin:reload <handle>
-//   pnpm --filter @twin-lab/runtime twin:reload <handle> --force
+//   pnpm --filter @nolmi/runtime twin:reload <handle>
+//   pnpm --filter @nolmi/runtime twin:reload <handle> --force
 //
 // Beispiele:
-//   pnpm --filter @twin-lab/runtime twin:reload @markus
-//   pnpm --filter @twin-lab/runtime twin:reload markus --force
-//   pnpm --filter @twin-lab/runtime twin:reload @florian --force
+//   pnpm --filter @nolmi/runtime twin:reload @markus
+//   pnpm --filter @nolmi/runtime twin:reload markus --force
+//   pnpm --filter @nolmi/runtime twin:reload @florian --force
 //
 // Restart-Pflicht: Persona und Mandates werden nur beim Twin-Service-Boot
 // gelesen (anders als Skills, die per Chat-Call frisch aus der DB kommen).
@@ -32,7 +32,7 @@ import { resolveTwinSourcePaths } from "./_twin-source-paths.js";
 
 const USAGE =
   "Nutzung:\n" +
-  "  pnpm --filter @twin-lab/runtime twin:reload <handle> [--force]";
+  "  pnpm --filter @nolmi/runtime twin:reload <handle> [--force]";
 
 async function main() {
   const args = process.argv.slice(2);

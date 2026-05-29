@@ -1,7 +1,7 @@
 import "dotenv/config";
 import Database from "better-sqlite3";
 import { nanoid } from "nanoid";
-import type { AuditEntry } from "@twin-lab/shared";
+import type { AuditEntry } from "@nolmi/shared";
 import { loadRuntimeConfig } from "../config.js";
 import { TwinProfilesRepo } from "../twin-profiles-repo.js";
 import { ConversationsRepo } from "../conversations/repo.js";

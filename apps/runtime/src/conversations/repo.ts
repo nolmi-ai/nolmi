@@ -4,7 +4,7 @@ import type {
   Conversation,
   ConversationStartInput,
   ConversationStatus,
-} from "@twin-lab/shared";
+} from "@nolmi/shared";
 
 // ─── CONVERSATIONS REPOSITORY ───────────────────────────────────────────────
 //

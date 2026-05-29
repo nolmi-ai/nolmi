@@ -19,7 +19,7 @@ import { SqliteAuditRepository } from "../repository/sqlite.js";
 // reinen Helper aus conversations/history-loader.ts. Kein TwinService-Mock
 // nötig, weil die Helper pure Funktionen sind.
 //
-// Aufruf: pnpm --filter @twin-lab/runtime test-history-with-summary
+// Aufruf: pnpm --filter @nolmi/runtime test-history-with-summary
 
 const FALLBACK_LIMIT = 20; // entspricht HISTORY_AUDIT_LIMIT im TwinService
 const TWIN_NAME = "Markus Test";

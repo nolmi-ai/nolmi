@@ -12,7 +12,7 @@ import { TwinProfilesRepo } from "../twin-profiles-repo.js";
 // Phase-2-Twins (markus/florian/heiko) zu echten User-Accounts.
 //
 // Aufruf:
-//   pnpm --filter @twin-lab/runtime user:create \
+//   pnpm --filter @nolmi/runtime user:create \
 //     --email markus.baier@harway.de \
 //     --password "<...>" \
 //     --display-name "Markus Johannes Baier" \

@@ -1,6 +1,6 @@
 import { readFile } from "node:fs/promises";
 import { parse as parseYaml } from "yaml";
-import type { Persona } from "@twin-lab/shared";
+import type { Persona } from "@nolmi/shared";
 
 // ─── PERSONA LOADER ──────────────────────────────────────────────────────────
 //

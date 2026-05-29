@@ -1,4 +1,4 @@
-import type { ChatMessage } from "@twin-lab/shared";
+import type { ChatMessage } from "@nolmi/shared";
 import type { FastifyBaseLogger } from "fastify";
 import type {
   TelegramConfigRow,

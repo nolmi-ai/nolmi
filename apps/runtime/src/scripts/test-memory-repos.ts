@@ -18,7 +18,7 @@ import { FactsRepo } from "../facts/repo.js";
 // Ende des Skripts ohne Spuren.
 //
 // Aufruf:
-//   pnpm --filter @twin-lab/runtime test-memory-repos
+//   pnpm --filter @nolmi/runtime test-memory-repos
 
 async function main() {
   const db = new Database(":memory:");

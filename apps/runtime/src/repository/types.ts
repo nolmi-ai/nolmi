@@ -1,5 +1,5 @@
 import type Database from "better-sqlite3";
-import type { AuditEntry } from "@twin-lab/shared";
+import type { AuditEntry } from "@nolmi/shared";
 
 // ─── REPOSITORY-PATTERN ──────────────────────────────────────────────────────
 //

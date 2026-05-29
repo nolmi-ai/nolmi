@@ -548,7 +548,7 @@ function endedConversation(
 
 /**
  * Liest embedding_status direkt aus der Tabelle. Conversations/Summary-Type
- * in @twin-lab/shared kennt das Feld nicht — es ist eine Datenschicht-
+ * in @nolmi/shared kennt das Feld nicht — es ist eine Datenschicht-
  * Erweiterung aus Migration 018. Tests nutzen daher SQL.
  */
 function embeddingStatusOf(

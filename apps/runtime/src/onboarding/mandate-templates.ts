@@ -1,5 +1,5 @@
 import { nanoid } from "nanoid";
-import type { Mandate } from "@twin-lab/shared";
+import type { Mandate } from "@nolmi/shared";
 
 // ─── MANDATE TEMPLATES ───────────────────────────────────────────────────────
 //

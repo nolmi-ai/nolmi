@@ -15,7 +15,7 @@ import { createServer } from "./server.js";
 //   2. Repos & DeliveryHub erzeugen
 //   3. HTTP-Server starten
 //
-// Vor dem ersten Start: `pnpm --filter @twin-lab/bridge db:init` einmal laufen
+// Vor dem ersten Start: `pnpm --filter @nolmi/bridge db:init` einmal laufen
 // lassen, damit die Migrationen durchlaufen.
 
 async function main() {

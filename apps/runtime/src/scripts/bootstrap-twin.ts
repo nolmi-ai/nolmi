@@ -34,7 +34,7 @@ import { resolveTwinSourcePaths } from "./_twin-source-paths.js";
 //   - Bridge-Token ENV  analog
 //   - LLM-Config        per-Twin: <NAME>_LLM_PROVIDER/MODEL/API_KEY/BASE_URL,
 //                       Fallback auf TWIN_LLM_*; API-Key wird AES-256-GCM
-//                       verschlüsselt mit TWIN_LAB_ENCRYPTION_KEY in DB
+//                       verschlüsselt mit NOLMI_ENCRYPTION_KEY in DB
 //                       gespeichert (Plaintext nie in DB).
 //
 // Idempotent: existiert ein Twin mit dem gleichen Handle, werden alle Felder

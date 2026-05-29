@@ -1,4 +1,4 @@
-import type { PersonaInput } from "@twin-lab/shared";
+import type { PersonaInput } from "@nolmi/shared";
 
 // ─── PERSONA-MARKDOWN BUILDER ────────────────────────────────────────────────
 //

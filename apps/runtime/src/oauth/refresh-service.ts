@@ -1,6 +1,6 @@
 import { nanoid } from "nanoid";
 import type { FastifyBaseLogger } from "fastify";
-import type { AuditEntry } from "@twin-lab/shared";
+import type { AuditEntry } from "@nolmi/shared";
 import type { AuditRepository } from "../repository/types.js";
 import { refreshAccessToken } from "./openai-pkce.js";
 import type {

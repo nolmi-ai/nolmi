@@ -1,6 +1,6 @@
 import type Database from "better-sqlite3";
 import { nanoid } from "nanoid";
-import type { Skill, SkillManifest, SkillSource } from "@twin-lab/shared";
+import type { Skill, SkillManifest, SkillSource } from "@nolmi/shared";
 
 // ─── SKILL REPOSITORY ───────────────────────────────────────────────────────
 //

@@ -16,7 +16,7 @@ import {
 // Funktion. Audits werden direkt per SQL eingefügt mit gestaffelten
 // Timestamps, damit das Cursor-Verhalten deterministisch ist.
 //
-// Aufruf: pnpm --filter @twin-lab/runtime test-summary-engine
+// Aufruf: pnpm --filter @nolmi/runtime test-summary-engine
 
 const THRESHOLD = 50; // muss zur Default-Tunable übereinstimmen
 const BATCH_SIZE = 40; // dito

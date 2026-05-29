@@ -2,7 +2,7 @@
 
 import { Fragment, Suspense, useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import type { AuditEntry, ChatMessage, TwinEvent } from "@twin-lab/shared";
+import type { AuditEntry, ChatMessage, TwinEvent } from "@nolmi/shared";
 import { EmptyState } from "../../components/EmptyState";
 import { PageContainer } from "../../components/PageContainer";
 import { RejectReasonModal } from "../../components/RejectReasonModal";

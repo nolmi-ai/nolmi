@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import type { SkillDetailPayload, SkillManifest } from "@twin-lab/shared";
+import type { SkillDetailPayload, SkillManifest } from "@nolmi/shared";
 import { ModalWrapper } from "./ModalWrapper";
 import { toast } from "../lib/toast";
 

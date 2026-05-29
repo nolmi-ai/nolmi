@@ -37,8 +37,8 @@ import { TwinDiaryService } from "../episodic/twin-diary-service.js";
 // Owner-Bypass-Pfad triggern (kein Mandate-Check, kein Pending).
 //
 // Aufruf:
-//   pnpm --filter @twin-lab/runtime tsx src/scripts/test-skill-engine.ts
-//   pnpm --filter @twin-lab/runtime tsx src/scripts/test-skill-engine.ts @florian
+//   pnpm --filter @nolmi/runtime tsx src/scripts/test-skill-engine.ts
+//   pnpm --filter @nolmi/runtime tsx src/scripts/test-skill-engine.ts @florian
 
 const TWIN_HANDLE_DEFAULT = "@markus";
 const SKILL_NAME = "engine-test-workshop-context";

@@ -1,6 +1,6 @@
 import { tool, jsonSchema, type Tool } from "ai";
 import { nanoid } from "nanoid";
-import type { Skill } from "@twin-lab/shared";
+import type { Skill } from "@nolmi/shared";
 import type { McpClientManager } from "./client-manager.js";
 import type { EventBus } from "../events/bus.js";
 

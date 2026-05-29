@@ -1,7 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { parse as parseYaml } from "yaml";
 import { nanoid } from "nanoid";
-import type { Mandate } from "@twin-lab/shared";
+import type { Mandate } from "@nolmi/shared";
 
 // ─── MANDATE LOADER (BOOTSTRAP-ONLY) ─────────────────────────────────────────
 //

@@ -32,7 +32,7 @@ import { EventBus } from "../events/bus.js";
 // MessageRouter mit Mock-TwinService-Registry, Mock-Telegraf-Context.
 //
 // Aufruf:
-//   pnpm --filter @twin-lab/runtime exec tsx \
+//   pnpm --filter @nolmi/runtime exec tsx \
 //     src/scripts/test-telegram-phase3.ts [@markus]
 
 const TWIN_HANDLE_DEFAULT = "@markus";

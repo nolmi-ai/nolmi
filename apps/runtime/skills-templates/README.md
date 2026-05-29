@@ -13,8 +13,8 @@ Jeder Skill ist ein Unterverzeichnis mit:
 ## Import
 
 ```bash
-pnpm --filter @twin-lab/runtime twin:skill-create @<handle> <skill-dir>
-pnpm --filter @twin-lab/runtime twin:skill-create @<handle> <skill-dir> --force
+pnpm --filter @nolmi/runtime twin:skill-create @<handle> <skill-dir>
+pnpm --filter @nolmi/runtime twin:skill-create @<handle> <skill-dir> --force
 ```
 
 `--force` überschreibt einen existierenden Skill (gleicher `name` für gleichen Twin).

@@ -1,5 +1,5 @@
 import { z } from "zod";
-import type { AuditEntry } from "@twin-lab/shared";
+import type { AuditEntry } from "@nolmi/shared";
 import type { FactsRepo, Fact } from "./repo.js";
 import type {
   ConversationSummariesRepo,

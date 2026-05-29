@@ -5,7 +5,7 @@ import {
   CodexStreamParseError,
 } from "../oauth/codex-sse-parser.js";
 import { mapSkillsToCodexTools } from "../oauth/codex-tool-mapper.js";
-import type { Skill } from "@twin-lab/shared";
+import type { Skill } from "@nolmi/shared";
 
 // ─── SMOKE: #131 PHASE 3.1.1 + 3.3.1.1 — CODEX-SSE-PARSER + TOOL-MAPPER ─────
 //

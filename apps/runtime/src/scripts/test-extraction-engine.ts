@@ -21,7 +21,7 @@ import { EventBus } from "../events/bus.js";
 // verifizieren: Skip-Logic für existierende und rejected Facts, Failure-
 // Fallback, leere Ergebnisse, Prompt-Content, Pending-Audit-Erstellung.
 //
-// Aufruf: pnpm --filter @twin-lab/runtime test-extraction-engine
+// Aufruf: pnpm --filter @nolmi/runtime test-extraction-engine
 
 const TWIN_NAME = "Markus Test";
 

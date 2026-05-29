@@ -1,4 +1,4 @@
-import type { AuditEntry, ChatMessage, MemoryHit } from "@twin-lab/shared";
+import type { AuditEntry, ChatMessage, MemoryHit } from "@nolmi/shared";
 
 // ─── audit-render utils (#99) ────────────────────────────────────────────────
 //

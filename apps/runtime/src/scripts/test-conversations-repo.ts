@@ -19,8 +19,8 @@ import {
 // Ziel-Twin existiert in twin_profiles mit gesetztem ownerUserId.
 //
 // Aufruf:
-//   pnpm --filter @twin-lab/runtime tsx src/scripts/test-conversations-repo.ts
-//   pnpm --filter @twin-lab/runtime tsx src/scripts/test-conversations-repo.ts @florian
+//   pnpm --filter @nolmi/runtime tsx src/scripts/test-conversations-repo.ts
+//   pnpm --filter @nolmi/runtime tsx src/scripts/test-conversations-repo.ts @florian
 
 const TWIN_HANDLE_DEFAULT = "@markus";
 const TEST_PARTNER = "@_test-conversations-partner";

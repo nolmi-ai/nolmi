@@ -18,7 +18,7 @@ import type {
   EmbeddingProvider,
   EmbedOptions,
 } from "../episodic/providers/index.js";
-import type { AuditEntry } from "@twin-lab/shared";
+import type { AuditEntry } from "@nolmi/shared";
 
 // ─── TEST: MEMORY-EMBEDDING-SERVICE (Phase 3.4 Sub-Schritt D) ───────────────
 //

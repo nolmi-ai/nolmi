@@ -1,6 +1,6 @@
 import type Database from "better-sqlite3";
 import { nanoid } from "nanoid";
-import type { FactConfidence, FactSource } from "@twin-lab/shared";
+import type { FactConfidence, FactSource } from "@nolmi/shared";
 
 // ─── FACTS REPOSITORY (3.3.A) ────────────────────────────────────────────────
 //
@@ -12,7 +12,7 @@ import type { FactConfidence, FactSource } from "@twin-lab/shared";
 // Sub-Schritt-A liefert Schema + Repo. API-Endpoints (3.3.D), System-Prompt-
 // Integration (3.3.E), LLM-Extraction (3.3.F) und UI (3.3.G) bauen darauf auf.
 //
-// 3.3.F: FactConfidence/FactSource leben jetzt in @twin-lab/shared — die
+// 3.3.F: FactConfidence/FactSource leben jetzt in @nolmi/shared — die
 // Source-of-Truth ist beim Schema, Repo importiert nur den Type.
 
 export type { FactConfidence, FactSource };

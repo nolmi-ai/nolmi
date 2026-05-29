@@ -1,9 +1,12 @@
 import { createCipheriv, createDecipheriv, randomBytes } from "node:crypto";
+import { getEnv } from "@nolmi/shared/env";
 
 // ─── ENCRYPTION UTILS ────────────────────────────────────────────────────────
 //
 // AES-256-GCM für API-Keys in `twin_profiles.llm_config.apiKeyEncrypted`.
-// Master-Key kommt aus `TWIN_LAB_ENCRYPTION_KEY` (Base64-encoded 32 Bytes).
+// Master-Key kommt aus `NOLMI_ENCRYPTION_KEY` (Base64-encoded 32 Bytes).
+// Aliasing: `TWIN_LAB_ENCRYPTION_KEY` wird via getEnv noch als Fallback
+// gelesen (6–12 Monate, dann Hart-Cut).
 //
 // Storage-Format pro Geheimnis:
 //   base64(iv) ":" base64(authTag) ":" base64(ciphertext)
@@ -19,8 +22,8 @@ const SEPARATOR = ":";
 export class EncryptionKeyMissingError extends Error {
   constructor(detail: string) {
     super(
-      `TWIN_LAB_ENCRYPTION_KEY ${detail}.\n` +
-        `Hinweis: 'pnpm --filter @twin-lab/runtime key:generate' erzeugt einen passenden Key.`,
+      `NOLMI_ENCRYPTION_KEY (oder deprecated TWIN_LAB_ENCRYPTION_KEY) ${detail}.\n` +
+        `Hinweis: 'pnpm --filter @nolmi/runtime key:generate' erzeugt einen passenden Key.`,
     );
     this.name = "EncryptionKeyMissingError";
   }
@@ -42,12 +45,13 @@ export function generateMasterKey(): string {
 }
 
 /**
- * Liest TWIN_LAB_ENCRYPTION_KEY, parsed als Base64, validiert auf 32 Bytes.
- * Wirft `EncryptionKeyMissingError` mit klarer Diagnose, wenn fehlend oder
- * falsche Länge — Boot fängt das und exit-1't.
+ * Liest NOLMI_ENCRYPTION_KEY (Fallback: TWIN_LAB_ENCRYPTION_KEY), parsed
+ * als Base64, validiert auf 32 Bytes. Wirft `EncryptionKeyMissingError`
+ * mit klarer Diagnose, wenn fehlend oder falsche Länge — Boot fängt das
+ * und exit-1't.
  */
 export function loadMasterKey(): Buffer {
-  const raw = process.env.TWIN_LAB_ENCRYPTION_KEY?.trim();
+  const raw = getEnv("NOLMI_ENCRYPTION_KEY", "TWIN_LAB_ENCRYPTION_KEY")?.trim();
   if (!raw) {
     throw new EncryptionKeyMissingError("ist nicht in der Umgebung gesetzt");
   }

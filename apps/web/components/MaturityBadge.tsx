@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
-import type { MaturityResult } from "@twin-lab/shared";
+import type { MaturityResult } from "@nolmi/shared";
 
 // ─── MaturityBadge (#101) ────────────────────────────────────────────────────
 //

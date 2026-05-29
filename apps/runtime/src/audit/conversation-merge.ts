@@ -1,4 +1,4 @@
-import type { AuditEntry } from "@twin-lab/shared";
+import type { AuditEntry } from "@nolmi/shared";
 import type { BridgeMessageType } from "../bridge/types.js";
 import type { BridgeMessage } from "../bridge/types.js";
 

@@ -24,7 +24,7 @@ import { TwinDiaryRepo } from "../episodic/twin-diary-repo.js";
 // von sqlite-vec.
 //
 // Aufruf:
-//   pnpm --filter @twin-lab/runtime test-episodic-repos
+//   pnpm --filter @nolmi/runtime test-episodic-repos
 
 const EMBEDDING_DIM = 1024;
 const TEST_MODEL = "Xenova/multilingual-e5-large";
