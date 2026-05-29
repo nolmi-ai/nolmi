@@ -18,6 +18,7 @@ apps/bridge/data/*.db-wal
 *.swo
 data/*.db-shm
 data/*.db-wal
+data/*.db.backup*
 *.tsbuildinfo
 
 # Claude Code lokale Settings (Whitelist + Cache)

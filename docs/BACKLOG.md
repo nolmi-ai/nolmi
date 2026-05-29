@@ -2710,3 +2710,52 @@ Separater Hostinger-VPS Frankfurt, Ubuntu 24.04 LTS, IP `187.124.3.235`. Neu-Auf
 
 **Markus' parallele Arbeit (Stand Tag 31):** ✅ Foundation gesichert (Domain + VPS + GitHub-Org `nolmi-ai` + npm `@nolmi` + PyPI + Docker Hub `nolmi` + Mail-Stack + Trademark-Quick-Search). Verbleibend: Social-Handles + Brand-Assets-Produktion. Details siehe Strategy-Doc §9.
 
+### Hygiene-Pass Tag 31 Block 5 ✅ DONE
+
+`.gitignore` um DB-Backup-Pattern erweitert. Lokale DB von 6 Test-Twins
+bereinigt (jetzt 3 echte: @markus, @florian, @heiko). Zwei neue BACKLOG-
+Items aus Diagnose entstanden (SSH-Auth-Phase-4, PRAGMA-foreign_keys).
+
+### SSH-Authentifizierungs-Klärung für Phase 4
+
+**Status:** Defer | gehört zu Phase 4 (Nolmi-VPS-Setup) | Aufwand: 5-15 Min
+
+**Befund Tag 31 Block 5:** Lokaler `~/.ssh/config` auf MacBook enthält
+nur SSH-Direct-Eintrag für `31.97.78.73` (Production-VPS srv1046432),
+keinen `github.com-twin-lab`-Alias. Der Verweis in
+`docker/twin-lab-web/README.md:25` (`git clone git@github.com-twin-lab:...`)
+ist vermutlich veraltet oder Production-VPS-seitig konfiguriert.
+
+**Beim Phase-4-Setup auf srv1712371:**
+- Entscheidung: HTTPS+Token (wie aktuell vom MacBook aus genutzt) oder
+  SSH-Alias `github.com-nolmi` für VPS-seitige Git-Operationen?
+- Falls SSH-Alias: neuen Eintrag in `~/.ssh/config` des Production-VPS
+  hinzufügen mit dediziertem Key
+
+### PRAGMA foreign_keys in Runtime prüfen — ✅ verifiziert, kein Live-Bug
+
+**Status:** Closed (Befund verifiziert) | technische Hygiene
+
+**Ausgangs-Beobachtung Tag 31 Block 5:** `sqlite3 data/twin.db "PRAGMA foreign_keys;"`
+gibt `0` zurück. Das ist aber **nur** der per-Connection-Default einer
+ad-hoc sqlite3-CLI-Session (SQLite-Default ist OFF), **nicht** der
+Runtime-Zustand — das PRAGMA ist per Connection, nicht persistent.
+
+**Verifikation (`grep -rn "foreign_keys" apps/runtime/src`):** Die
+authoritative Runtime-Connection setzt es: `apps/runtime/src/repository/sqlite.ts:22`
+(`db.pragma("foreign_keys = ON")`, eine DB-Connection pro Runtime mit
+WAL + foreign_keys). Ebenso `init-db.ts:37` und alle CLI-/Test-Helper
+(`_mcp-cli-helpers.ts:78`, `_diary-cli-helpers.ts:45`, `bootstrap-twin.ts:112`, …).
+→ **Im Live-Betrieb werden FK-Constraints durchgesetzt, `ON DELETE CASCADE`
+wirkt.** Deckt sich mit Lesson Tag 29 #4 + #6 (Production-Cascade
+verifiziert).
+
+**Konsequenz:** Kein Bug, kein Action-Item für die Runtime selbst. Die
+einzige Stolperfalle bleibt **manuelle** ad-hoc sqlite3-CLI-Sessions —
+dort `PRAGMA foreign_keys = ON;` als ersten Befehl setzen (für Cleanups
+etc.). Verbleibender Mini-Scope (= Rest von BACKLOG #159): DB-CLI-Cheat-
+Sheet für Smoke-Cleanups.
+
+**Test-Twin-Cleanup Tag 31 Block 5 hat CLI-seitig PRAGMA gesetzt** —
+keine offenen Waisen aus dieser Operation.
+
