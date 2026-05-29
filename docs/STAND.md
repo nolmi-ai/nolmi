@@ -1,6 +1,6 @@
 # twin-lab — Stand
 
-**Letztes Update:** 28. Mai 2026, Donnerstag (Tag 30 Block 3 — Rebrand Phase 1 Light-Mode-Switch, Tavryn-Branding-Tokens live im Repo)
+**Letztes Update:** 29. Mai 2026, Freitag (Tag 31 Start — Doku-Übergang Tavryn → Nolmi, Name finalisiert, Trademark grün, Foundation gesichert)
 
 ## Historisches Archiv
 
@@ -64,6 +64,40 @@ die Differenzierungs-Story).
 **Lessons Tag 30:**
 
 - **Lesson Tag 30 #1: Strukturelle Lösung gegen wiederkehrende Build-Bugs schlägt Doku-Pflaster.** Der `localhost:4000`-im-Client-Bundle-Bug hat dreimal zugeschlagen (Tag 23 Production-Re-Deploy, Tag 28 Block 13 Build-Arg-Bugfix, Tag 29 Block 7 nur durch Pre-Flight-Lesson vermieden), trotz dokumentierter Warnung in DEPLOYMENT.md. Das ist Tag-11-Lesson-Pattern: wenn ein Failure-Mode wiederholt auftritt, ist Doku alleine nicht genug — die Maschine muss den falschen Pfad mechanisch blockieren. #126 implementiert das als `prebuild`-npm-Hook mit Production-Label-Coupling, sodass Dev-Workflow unberührt bleibt (keine Reibung) aber Production-Builds ohne korrekte ARGs früh und laut failen. **Mini-Mustererkennung:** wenn ein Item zum dritten Mal als „Re-Diagnose und Re-Fix" auf einem STAND-Tag landet, dann ist es Zeit für einen Guard statt eine bessere Doku.
+
+**Closing-Note Tag 30 (post-hoc dokumentiert Tag 31):** Der Arbeitstitel „Tavryn" wurde Tag 30/31 final verworfen (`tavrn.ai`-Kollision in §0 des Strategy-Docs). Nach 4 weiteren Iterationen (Aurelun, Brelon, Nerlo — alle aus Codex-Vorschlägen, alle verworfen) wurde Tag 31 **Nolmi** als finaler Name etabliert. Strategy-Doc Tag 31 umbenannt via `git mv`: `REBRAND-TAVRYN-STRATEGY.md` → `REBRAND-NOLMI-STRATEGY.md`. Phase-1-Branding-Tokens (Block 3 dieses Tages) bleiben unverändert gültig — Codex-Branding-Guides für Tavryn/Aurelun/Brelon/Nerlo/Nolmi sind in Hex-Werten identisch, nur die Wordmark hat sich pro Iteration geändert. Trademark-Gate für Phase 2-4 ist Tag 31 grün.
+
+## Tag 31 (29. Mai 2026, Freitag) — Doku-Übergang Tavryn → Nolmi + Foundation gesichert
+
+**Stand Tag 31 Start:** Tag 30 Nachmittag/Abend hat die Namens-Frage final geklärt (Nolmi, Trademark grün) und die komplette operative Foundation für die Marke gesichert. Tag 31 dokumentarischer Übergang: Strategy-Doc + STAND + BACKLOG synchron auf Nolmi-Stand. **Phase 2** (Name-Strings im Code) ist nun entblockt, **Phase 3** (Env/Package-Aliasing) ebenso, **Phase 4** (VPS) braucht nur noch operativen Setup-Block.
+
+### Foundation-Stand (gesichert Tag 30/31)
+
+- Domain `nolmi.ai` + `getnolmi.com` (Hostinger)
+- DNS 5 A-Records grün (apex + app + runtime + bridge + docs → `187.124.3.235`)
+- E-Mail `hello@nolmi.ai` + Aliase `security@` + `founders@`, Forwarding → `markus.baier@harway.de` verifiziert
+- VPS Hostinger Frankfurt, Ubuntu 24.04 LTS, IP `187.124.3.235`
+- npm Org `@nolmi` + 2FA
+- PyPI Account `markusbaier` + 2FA (Package-Name `nolmi` verifiziert frei, Publishing in Phase 3)
+- Docker Hub `nolmi` + 2FA
+- GitHub Org `nolmi-ai` (Bindestrich, AI-Sektor-Konvention `langchain-ai`/`anthropic-ai`)
+
+### Block 1 — Doku-Übergang Tavryn → Nolmi
+
+| Block | Item | Commit | Aufwand | Was |
+|---|---|---|---|---|
+| Block 1 | Strategy-Doc Rename + Inhalts-Refresh + STAND/BACKLOG-Sync | (dieser Commit) | ~30-45 Min | `git mv docs/REBRAND-TAVRYN-STRATEGY.md → REBRAND-NOLMI-STRATEGY.md` (History-Preserve). Inhalts-Edits: Header + §0 Trademark-Status BLOCKIEREND → GRÜN (USPTO + EUIPO 0 Treffer, 5 Namens-Iterationen Tavryn/Aurelun/Brelon/Nerlo/Nolmi dokumentiert), §1 Name + Domain + VPS-Status, §2 Mapping-Spaltenkopf Tavryn-Light → Nolmi-Light (Hex-Werte identisch — historische Stabilität dokumentiert), §3 Phase-2-Status entblockt + Phase-3 mit `@nolmi/*`-Paketen + `nolmi/runtime`-Images + Phase-4-VPS bereits provisioniert, §4 ASCII-Gate-Label aktualisiert, §5 S2/S4 entblockt + neue S8 `nolmi-ai`-Inkonsistenz akzeptiert + S7 Toggle entschieden, §6 Nolmi-Leitsatz „Aktive Erinnerung unter Owner-Kontrolle" als Subsection-Eröffner (komplementiert das Drei-Stufen-Narrativ), §7 Marketing-Items auf Nolmi, §8 Aufwand-Tabelle Gate-Status aktualisiert, **neue §9 Operative Foundation Status** (Domain + DNS + VPS + Mail + 4 Namespaces + bewusste GitHub-Inkonsistenz), §Verweis Branding-Guide-Doc-Name aktualisiert. STAND: Tag-30-Closing-Note (post-hoc Erklärung der Namens-Verwerfung + Branding-Token-Stabilität) + neue Tag-31-Section + Lesson Tag 31 #1. BACKLOG: Rebrand-Section auf Nolmi, Phase-2 + Phase-3 entblockt, Phase-4 VPS-Status. **Kein Code-Change** — reine Doku, Phase 2 (Name-Strings im Code) als nächster Block separat. |
+
+### Tag-31-Outcome-Bilanz
+
+**Item-Closures Tag 31 (laufend):**
+- Doku-Übergang Tavryn → Nolmi ✅ (Strategy-Doc Rename + Inhalts-Refresh + STAND + BACKLOG synchron)
+
+**Tag-31-Total bis Block 1:** 1 Doku-Block, ~30-45 Min Netto. Kein Code-Change, kein Production-Touch.
+
+**Lessons Tag 31:**
+
+- **Lesson Tag 31 #1: Reality-Check vor jedem Namens-Reservieren — GitHub-Reservierung als Hard-Gate, separat von Trademark.** Tag 30/31 hat fünf Namens-Iterationen durchlaufen (Tavryn → Aurelun → Brelon → Nerlo → Nolmi). Die Verwerfungs-Gründe waren unterschiedlich: Tavryn an einer phonetisch-zu-nahen Trademark (`tavrn.ai`), Aurelun an einem Markennamens-Cluster (Aurelio/Aureum/AureliaX), Brelon an einer aktiven BREV-Anmeldung, Nerlo an einer belegten GitHub-Org. **GitHub hat einen eigenen Reservierungs-Mechanismus**, der unabhängig von USPTO/EUIPO/`.ai`-TLD ist und erst beim Anlege-Versuch sichtbar wird. Für Nolmi konkret: USPTO + EUIPO sauber, npm/PyPI/Docker frei — aber GitHub-Org `nolmi` intern reserviert ohne sichtbaren Trademark-Grund (Support-Anfrage Tag 30 gestartet, Tag 30 Abend gestoppt wegen Form-Routing-Sackgasse und niedriger Erfolgswahrscheinlichkeit). Lösung: AI-Sektor-Konvention `nolmi-ai` (vgl. `langchain-ai`, `anthropic-ai`) — bewusste Inkonsistenz mit `nolmi` als npm/PyPI/Docker-Namespace (siehe Strategy-Doc §0 + S8 + Lesson dokumentiert in §9). **Pattern für künftige Marken-Sicherungen:** Trademark-Quick-Search ist nur **eine** Säule. Vor Domain-Kauf zusätzlich (a) GitHub-Org-Verfügbarkeit, (b) npm/PyPI/Docker-Namespace, (c) Phonetic-Cluster-Check via Web-Suche prüfen. Ein Punkt rot heißt nicht „Name verbrannt", aber er heißt „bewusste Setzung treffen, ob Inkonsistenz akzeptiert wird, statt blind Domain zu kaufen". Vier Iterationen vor Nolmi hätten mit dieser Checkliste teilweise früher abgebrochen werden können.
 
 ## Tag 29 (27. Mai 2026, Mittwoch) — Pre-Launch-Phase A Block 4 Self-Hosting-Polish
 
