@@ -192,14 +192,26 @@ Das `DEPLOYMENT.md` §9-Cookbook ist im Body noch **durchgehend twin-lab**: Repo
 
 **Phase-4-Begleit-Item:** Cookbook auf `nolmi-ai/nolmi` + `nolmi.ai` + `/docker/nolmi/` + `nolmi-*`-Images umschreiben. Sinnvoll **während** B1/B2 (man liest das Cookbook ohnehin Schritt für Schritt durch) oder als B7-Cleanup. Kein Blocker für den Deploy selbst.
 
+### Cookbook-Bug-Fixes aus B1 (Tag 31 Block 9, am echten VPS gefunden)
+
+B1 (VPS-Prep + Docker + Traefik auf `187.124.3.235`) hat drei Stellen aufgedeckt, an denen das §9.x-Cookbook gegen **aktuelle Docker-Versionen** bricht. Das sind keine Nolmi-Rename-Kosmetik, sondern harte technische Fixes, die **jeden** Self-Hoster mit aktuellem Docker treffen — gehören in den Cookbook-Rewrite mit aufgenommen.
+
+**Befund 1 (HART) — Traefik v3.0 bricht mit Docker 29+:** Das §9.3-Cookbook pinnt `traefik:v3.0`. Docker 29 hob die minimale API-Version an (min 1.44); Traefik <v3.6 pinnt clientseitig API 1.24 → `"client version 1.24 is too old"`, der Docker-Provider lädt nie, keine Router, keine Certs. Der Container läuft trotzdem als `Up` (**stiller Fehler**, nur im Log sichtbar). **FIX:** Image-Tag auf `traefik:v3.6` (v3.6 brachte Docker-API-Auto-Negotiation). Quelle: `traefik/traefik#12253`, offiziell adressiert. Cookbook-§9.3 muss **v3.6+** pinnen.
+
+**Befund 2 (MITTEL) — geteiltes Netz als `external`, nicht compose-managed:** §9.3 legt `traefik-proxy` via `docker network create` an **und** deklariert es in der Traefik-Compose ohne `external: true`. Compose v5 verweigert dann (`"network ... found but has incorrect label com.docker.compose.network"`). **FIX:** Netz einmal manuell anlegen, **alle** Stacks (Traefik + in B2 der Nolmi-Stack) referenzieren es als `networks: traefik-proxy: external: true`. Das ist ohnehin das kanonische Multi-Stack-Pattern.
+
+**Befund 3 (PROZESS-LESSON) — Verify-Outputs einzeln, nicht als Sammel-Paste:** Ein als Block gepasteter `reboot` + nachfolgende Verify-Befehle laufen noch auf der **sterbenden** Session durch → liefern Pre-Reboot-Zustand (alter Kernel, alte Logs), der wertlos ist. **Lesson:** zustandsändernde Befehle (`reboot`, `recreate`) einzeln, Verify **nach** bestätigtem Reconnect. Gehört als Runbook-Hinweis in den §9.2-Reboot-Schritt.
+
+> **Meta-Lesson — „Up" ist kein Funktionsbeweis.** Traefik lief in B1 als `Up`, während es nacheinander (a) gar nicht gestartet war (`docker ps` leer), (b) den Provider nicht erreichte (1.24-Fehler), (c) potenziell crash-loopte. Verifikation muss am **Verhalten** hängen — `curl → 301`, `restarts=0`, Provider-Log — nicht am Container-`Status`. Status-Grün hätte den Fehler erst in B2 als „Certs kommen nicht" hochkommen lassen: viel teurer zu diagnostizieren. (Cross-Ref STAND Lesson Tag 31 #3.)
+
 ---
 
 ## 8. Bau-Reihenfolge (Vorschlag, je eigener committeter Block)
 
 | Block | Inhalt | Setzung/§ |
 |---|---|---|
-| **B1** | VPS-Prep + Docker + Traefik | S4 / S5 |
-| **B2** | Stack-Build + `.env` + BasicAuth — **`nolmi-bridge`-Volume als Restore-Ziel schneiden** (kein leeres Volume + Register, §4) | S3 / S4 |
+| **B1** | VPS-Prep + Docker + Traefik | S4 / S5 — **✅ DONE Tag 31 Block 9** (Docker 29.5.2 + Compose v5.1.4, Traefik **v3.6**, UFW 22/80/443, HTTP→HTTPS-301 verifiziert; 3 Cookbook-Bugs §7) |
+| **B2** | Stack-Build + `.env` + BasicAuth — **`nolmi-bridge`-Volume als Restore-Ziel schneiden** (kein leeres Volume + Register, §4) — Netz als `external: true` referenzieren (§7-Befund 2) | S3 / S4 |
 | **B3** | Pre-Flight Bridge-DB-Check | §4 — **✅ DONE Tag 31 Block 7** (führte zur S2-Korrektur Block 8) |
 | **B4** | **Doppel-DB-Migration** (`twin.db` + `bridge.db`, gemeinsamer Freeze-Snapshot) + Token-Match-Verify | S1 / S2 |
 | **B5** | Smoke + 3-Twin-Verifikation | §5.2 |

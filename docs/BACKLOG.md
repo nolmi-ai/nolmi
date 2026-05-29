@@ -2712,7 +2712,7 @@ Schritte:
 
 **Status:** Offen, **Setzungen gelockt Tag 31** | gated nach Phase 1-3 | Aufwand: M-L | **VPS bereits provisioniert Tag 30/31**
 
-**Strategy + Bau-Vorlage:** [`docs/PHASE-4-VPS-STRATEGY.md`](./PHASE-4-VPS-STRATEGY.md) — 7 Setzungen (S1 DB-Migration, S2 voller Stack inkl. Bridge unter `/docker/nolmi/` + **Doppel-DB-Migration `twin.db`+`bridge.db`**, S3 Secrets + Encryption-Key-Übernahme, S4 Traefik + BasicAuth, S5 HTTPS-PAT, S6 Parallel-Cut-Over, S7 Hot-Standby-Rollback), zwei Bedingungen (Encryption-Key-Kontinuität + Bridge-Migration), Cut-Over-Sequenz, Rollback-Plan, Bau-Reihenfolge B1–B7. **S2 final Tag 31 Block 8: Bridge-DB-Migration statt Re-Registrierung** (B3-Befund). Nächster Bau-Block: **B1** (VPS-Prep + Docker + Traefik).
+**Strategy + Bau-Vorlage:** [`docs/PHASE-4-VPS-STRATEGY.md`](./PHASE-4-VPS-STRATEGY.md) — 7 Setzungen (S1 DB-Migration, S2 voller Stack inkl. Bridge unter `/docker/nolmi/` + **Doppel-DB-Migration `twin.db`+`bridge.db`**, S3 Secrets + Encryption-Key-Übernahme, S4 Traefik + BasicAuth, S5 HTTPS-PAT, S6 Parallel-Cut-Over, S7 Hot-Standby-Rollback), zwei Bedingungen (Encryption-Key-Kontinuität + Bridge-Migration), Cut-Over-Sequenz, Rollback-Plan, Bau-Reihenfolge B1–B7. **S2 final Tag 31 Block 8: Bridge-DB-Migration statt Re-Registrierung** (B3-Befund). **B1 ✅ DONE Tag 31 Block 9** (VPS-Prep + Docker 29.5.2 + Traefik v3.6 auf `187.124.3.235`, HTTP→HTTPS-301 verifiziert; 3 Cookbook-Bugs für aktuelles Docker in §7 dokumentiert). Nächster Bau-Block: **B2** (Stack-Build + `.env` + BasicAuth).
 
 Separater Hostinger-VPS Frankfurt, Ubuntu 24.04 LTS, IP `187.124.3.235`. Neu-Aufsetz analog DEPLOYMENT.md §9 Cookbook, mit Nolmi-Branding + Light + neuer Domain:
 
