@@ -60,6 +60,9 @@ EXPOSE 5100
 
 # Wichtig: im Container muss BRIDGE_HOST=0.0.0.0 gesetzt werden, sonst hört
 # die Bridge nur auf localhost (Default 127.0.0.1) und ist von außerhalb des
-# Containers nicht erreichbar. Erstinit der DB läuft separat:
-#   docker run … node dist/scripts/init-db.js
-CMD ["node", "dist/index.js"]
+# Containers nicht erreichbar. Auto-init-db vor dem Boot (Runtime-Pattern,
+# apps/runtime/Dockerfile): init-db.js ist idempotent (schema_migrations-
+# Tracker + CREATE TABLE IF NOT EXISTS), läuft also auf leerem (B2) UND
+# restored (B4) Volume gefahrlos — und beseitigt das "no such table: twins"
+# beim Boot gegen ein frisches Volume. `exec` reicht SIGTERM sauber an Node.
+CMD ["sh", "-c", "node dist/scripts/init-db.js && exec node dist/index.js"]

@@ -170,7 +170,7 @@ Der Scan findet als regulären Bestand nur Klasse (A) + (B) plus eine schmale Kl
 
 ## 5. Cut-Over-Sequenz (geordnet)
 
-1. **Neuen Stack hochfahren** auf `187.124.3.235` mit migrierter Runtime-DB (Key übernommen, Bedingung A), hinter BasicAuth (S4). Alter Stack läuft weiter unter `twin.harwayexperience.com`.
+1. **Neuen Stack hochfahren** auf `187.124.3.235` mit migrierter Runtime-DB (Key übernommen, Bedingung A), hinter BasicAuth (S4). Alter Stack läuft weiter unter `twin.harwayexperience.com`. (Sowohl `nolmi-runtime` als auch `nolmi-bridge` führen ihr `init-db` per CMD beim Boot aus — idempotent, also auf dem restored Volume ein No-op-Bestätigungslauf; **kein** manueller Init-Schritt nötig, Tag 31 Block 12.)
 2. **Verifikation** — 4-stufiger §6-Smoke + alle 3 Twins: Login, Memory da, **OAuth-Roundtrip** (= praktischer Beweis, dass der Encryption-Key korrekt übernommen wurde), **A2A ohne Re-Registrierung: erster A2A-Hop pro Twin ohne 401** (= Token-Match aus migrierter `bridge.db` praktisch bewiesen, vgl. §4-B4-Verifikation).
 3. **Freeze-Fenster** — angekündigt (abends, keine neuen Messages auf alt) → finaler **Doppel-Tarball beider DBs** (`twin.db` + `bridge.db`) aus demselben Moment → Einspielen → Cut. Bei 3 Usern ist **kein** kontinuierlicher Sync nötig, nur dieses eine Delta-frei-Fenster gegen Split-Brain. (Die in Block 7 erwogene undelivered-Queue-Leer-Prüfung entfällt — die Queue migriert mit der `bridge.db` mit, §4.)
 4. **User-Umzug** — die 3 User auf `app.nolmi.ai` umziehen (einmal neu einloggen, neue Domain).
@@ -226,7 +226,7 @@ B1 (VPS-Prep + Docker + Traefik auf `187.124.3.235`) hat drei Stellen aufgedeckt
 - **Traefik zweiter Resolver `le-staging`** mit **separatem `acme-staging.json`** (eigene Datei, sonst vermischt Staging-/Prod-Certs) — B2 nutzt Staging (`ACME_RESOLVER=le-staging`), B4 flippt auf `le`.
 - **`htpasswd`-Datei** neben der Compose erzeugen (`htpasswd -nbB <user> <pass> > /docker/nolmi/htpasswd`) — BasicAuth-Mount.
 - **Wegwerf-Secrets** generieren (`openssl rand -hex 32` für Encryption-Key + Register-Token; B2-Mechanik, in B4 ersetzt durch echten Key vom alten VPS, Bedingung A).
-- **Bridge-init-db auf leerem Volume** einmalig: `docker compose run --rm nolmi-bridge node dist/scripts/init-db.js` (Bridge-CMD macht kein Auto-Init, anders als die Runtime).
+- ~~Bridge-init-db auf leerem Volume einmalig~~ → **✅ erledigt Tag 31 Block 12** (Bridge-CMD macht jetzt Auto-init-db wie die Runtime, idempotent — kein manueller Schritt mehr nötig, auf leerem B2- wie restored B4-Volume).
 
 Jeder Block ist abgeschlossen verifizierbar; B3 (Pre-Flight) hat die gelockte S2 begründet **gekippt** (Re-Register → Bridge-DB-Migration), bevor B4 baut — genau der Zweck eines Pre-Flights.
 

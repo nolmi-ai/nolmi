@@ -28,8 +28,8 @@ name: nolmi
 #     Package-NAMEN umbenannt, nicht die Dockerfile-Filter) → vor `docker build`
 #     auf @nolmi/* ziehen, sonst bricht der Build. Eigenes Code-TODO, §7/§8.
 #   - htpasswd-Datei neben dieser Compose erzeugen (htpasswd -nbB user pass > htpasswd).
-#   - Bridge-init-db auf leerem Volume (B2) einmal laufen lassen, CMD macht es
-#     nicht: docker compose run --rm nolmi-bridge node dist/scripts/init-db.js
+#   - Bridge-Schema: kein manueller Schritt nötig — nolmi-bridge führt ihr
+#     init-db per CMD beim Boot aus (idempotent, wie die Runtime; Tag 31 B12).
 #   - Traefik braucht den Resolver aus ${ACME_RESOLVER}; in B2 le-staging
 #     (separater acme-staging.json), in B4 Flip auf le.
 #
@@ -80,7 +80,7 @@ services:
       - traefik-proxy
       - nolmi-internal
     volumes:
-      # Bridge-DB. Leer in B2 (init-db separat, siehe Runbook-Notiz oben),
+      # Bridge-DB. Leer in B2 (Schema legt die CMD per Auto-init-db an),
       # Restore-Ziel der bridge.db-Migration in B4.
       - nolmi-bridge-data:/data
     environment:
