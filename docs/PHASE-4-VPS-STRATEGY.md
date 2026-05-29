@@ -211,7 +211,7 @@ B1 (VPS-Prep + Docker + Traefik auf `187.124.3.235`) hat drei Stellen aufgedeckt
 | Block | Inhalt | Setzung/§ |
 |---|---|---|
 | **B1** | VPS-Prep + Docker + Traefik | S4 / S5 — **✅ DONE Tag 31 Block 9** (Docker 29.5.2 + Compose v5.1.4, Traefik **v3.6**, UFW 22/80/443, HTTP→HTTPS-301 verifiziert; 3 Cookbook-Bugs §7) |
-| **B2** | Stack-Build + `.env` + BasicAuth — **`nolmi-bridge`-Volume als Restore-Ziel schneiden** (kein leeres Volume + Register, §4) — Netz als `external: true` referenzieren (§7-Befund 2) | S3 / S4 |
+| **B2** | Stack-Build + `.env` + BasicAuth — **Compose autoret in [`docker/nolmi/`](../docker/nolmi/)** (3 Services inkl. Bridge, `external`-Netz §7-Befund 2, Staging-ACME-Default, BasicAuth same-bring-up; `compose config` grün Tag 31 Block 10, **noch nicht deployed**) | S3 / S4 |
 | **B3** | Pre-Flight Bridge-DB-Check | §4 — **✅ DONE Tag 31 Block 7** (führte zur S2-Korrektur Block 8) |
 | **B4** | **Doppel-DB-Migration** (`twin.db` + `bridge.db`, gemeinsamer Freeze-Snapshot) + Token-Match-Verify | S1 / S2 |
 | **B5** | Smoke + 3-Twin-Verifikation | §5.2 |
@@ -219,6 +219,14 @@ B1 (VPS-Prep + Docker + Traefik auf `187.124.3.235`) hat drei Stellen aufgedeckt
 | **B7** | Nach Fenster: `srv1046432`-Abschaltung + Cookbook-Rewrite | S7 / §7 |
 
 **B4-Notiz:** `bridge.db` liegt auf `srv1046432` unter `data/bridge.db` in einem eigenen Volume **außerhalb** des Repo-Compose (B3-Strukturbefund) — B4 muss sie dort lokalisieren und mit-tarballen.
+
+**B2-Runbook-TODOs (auf dem VPS, NICHT im Repo — die Compose ist nur die Code-Hälfte von B2):**
+- **Dockerfile-pnpm-Filter auf `@nolmi/*` ziehen** (Befund B2-Diagnose): alle drei Dockerfiles (`apps/{runtime,web,bridge}/Dockerfile`) filtern noch `@twin-lab/{runtime,web,bridge,shared}` — Phase 3a hat nur die Package-Namen umbenannt, nicht die Dockerfile-Filter. **`docker build` bricht sonst.** Eigenes Code-TODO (gehört in den §7-Cookbook-/Rename-Scope), vor dem ersten Build erledigen.
+- **Drei Images bauen** aus Repo-Root (Tags `nolmi-runtime/-bridge/-web:latest`); Web mit `--build-arg NEXT_PUBLIC_RUNTIME_URL=https://runtime.nolmi.ai --build-arg NEXT_PUBLIC_DEPLOYMENT_LABEL=production` (sonst localhost im Bundle, #126).
+- **Traefik zweiter Resolver `le-staging`** mit **separatem `acme-staging.json`** (eigene Datei, sonst vermischt Staging-/Prod-Certs) — B2 nutzt Staging (`ACME_RESOLVER=le-staging`), B4 flippt auf `le`.
+- **`htpasswd`-Datei** neben der Compose erzeugen (`htpasswd -nbB <user> <pass> > /docker/nolmi/htpasswd`) — BasicAuth-Mount.
+- **Wegwerf-Secrets** generieren (`openssl rand -hex 32` für Encryption-Key + Register-Token; B2-Mechanik, in B4 ersetzt durch echten Key vom alten VPS, Bedingung A).
+- **Bridge-init-db auf leerem Volume** einmalig: `docker compose run --rm nolmi-bridge node dist/scripts/init-db.js` (Bridge-CMD macht kein Auto-Init, anders als die Runtime).
 
 Jeder Block ist abgeschlossen verifizierbar; B3 (Pre-Flight) hat die gelockte S2 begründet **gekippt** (Re-Register → Bridge-DB-Migration), bevor B4 baut — genau der Zweck eines Pre-Flights.
 

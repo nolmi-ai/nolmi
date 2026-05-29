@@ -1,0 +1,149 @@
+name: nolmi
+
+# ─── NOLMI PRODUCTION-STACK (Phase 4, Bau-Block B2) ────────────────────────────
+#
+# Drei Services: nolmi-runtime (Fastify :4000), nolmi-web (Next :3000),
+# nolmi-bridge (A2A-Router :5100). Spiegelt das Base-Pattern aus
+# docker/twin-lab-web/, erweitert um die Bridge als eigenen Service (S2 der
+# PHASE-4-VPS-STRATEGY: voller Stack inkl. Bridge, souveräne Plattform).
+#
+# IMAGE-PATTERN (wie Base): Images werden separat via `docker build` aus dem
+# Repo-Root gebaut und hier per Tag referenziert — NICHT build:-Block (der
+# Build-Kontext `../..` würde an der VPS-Symlink-Konvention scheitern,
+# vgl. B1-Lesson zu relativen Pfaden bei Symlink-Compose). Build-Commands:
+#
+#   docker build -t nolmi-runtime:latest -f apps/runtime/Dockerfile .
+#   docker build -t nolmi-bridge:latest  -f apps/bridge/Dockerfile  .
+#   docker build -t nolmi-web:latest     -f apps/web/Dockerfile . \
+#     --build-arg NEXT_PUBLIC_RUNTIME_URL=https://runtime.nolmi.ai \
+#     --build-arg NEXT_PUBLIC_DEPLOYMENT_LABEL=production
+#
+# ⚠ Die Web-Build-ARGs sind PFLICHT (B1-Cookbook-Befund #126): ohne sie landet
+#   localhost:4000 im Client-Bundle → Browser-Calls schlagen fehl. Der
+#   Build-Guard (apps/web/scripts/check-build-env.mjs) failt den Build, wenn
+#   DEPLOYMENT_LABEL=production gesetzt ist und RUNTIME_URL auf localhost zeigt.
+#
+# ⚠ RUNBOOK-VORAUSSETZUNGEN (NICHT im Repo, B2-Runbook auf dem VPS):
+#   - Dockerfile-pnpm-Filter zeigen noch auf @twin-lab/* (Phase 3a hat nur die
+#     Package-NAMEN umbenannt, nicht die Dockerfile-Filter) → vor `docker build`
+#     auf @nolmi/* ziehen, sonst bricht der Build. Eigenes Code-TODO, §7/§8.
+#   - htpasswd-Datei neben dieser Compose erzeugen (htpasswd -nbB user pass > htpasswd).
+#   - Bridge-init-db auf leerem Volume (B2) einmal laufen lassen, CMD macht es
+#     nicht: docker compose run --rm nolmi-bridge node dist/scripts/init-db.js
+#   - Traefik braucht den Resolver aus ${ACME_RESOLVER}; in B2 le-staging
+#     (separater acme-staging.json), in B4 Flip auf le.
+#
+# VOLUMES sind in B2 LEER (Mechanik-Validierung mit Wegwerf-Secrets). In B4
+# werden sie zu RESTORE-ZIELEN der Doppel-DB-Migration (twin.db + bridge.db
+# aus gemeinsamem Freeze-Snapshot, S2/§4 final).
+
+services:
+  nolmi-runtime:
+    image: nolmi-runtime:latest
+    container_name: nolmi-runtime
+    restart: unless-stopped
+    networks:
+      - traefik-proxy
+      - nolmi-internal
+    volumes:
+      - nolmi-runtime-data:/data
+    environment:
+      - NODE_ENV=production
+      - RUNTIME_HOST=0.0.0.0
+      - RUNTIME_PORT=4000
+      - TWIN_DATABASE_PATH=/data/twin.db
+      - NOLMI_ENCRYPTION_KEY=${NOLMI_ENCRYPTION_KEY}
+      - NOLMI_SESSION_SECRET=${NOLMI_SESSION_SECRET}
+      - SESSION_COOKIE_DOMAIN=${SESSION_COOKIE_DOMAIN:-}
+      - SESSION_COOKIE_SECURE=${SESSION_COOKIE_SECURE:-false}
+      # Interner Container-Hop zur Bridge — NICHT bridge.nolmi.ai (S4:
+      # Hairpin-NAT-Vermeidung, Calls bleiben im nolmi-internal-Netz).
+      - NOLMI_DEFAULT_BRIDGE_URL=http://nolmi-bridge:5100
+      - BRIDGE_REGISTER_TOKEN=${BRIDGE_REGISTER_TOKEN}
+      - ACTIVE_PROVIDER=${ACTIVE_PROVIDER:-anthropic}
+      - TELEGRAM_USE_POLLING=${TELEGRAM_USE_POLLING:-false}
+      - RUNTIME_PUBLIC_URL=${RUNTIME_PUBLIC_URL:-}
+    labels:
+      - "traefik.enable=true"
+      - "traefik.docker.network=traefik-proxy"
+      - "traefik.http.routers.nolmi-runtime.rule=Host(`runtime.nolmi.ai`)"
+      - "traefik.http.routers.nolmi-runtime.entrypoints=websecure"
+      - "traefik.http.routers.nolmi-runtime.tls=true"
+      - "traefik.http.routers.nolmi-runtime.tls.certresolver=${ACME_RESOLVER}"
+      - "traefik.http.services.nolmi-runtime.loadbalancer.server.port=4000"
+
+  nolmi-bridge:
+    image: nolmi-bridge:latest
+    container_name: nolmi-bridge
+    restart: unless-stopped
+    networks:
+      - traefik-proxy
+      - nolmi-internal
+    volumes:
+      # Bridge-DB. Leer in B2 (init-db separat, siehe Runbook-Notiz oben),
+      # Restore-Ziel der bridge.db-Migration in B4.
+      - nolmi-bridge-data:/data
+    environment:
+      - NODE_ENV=production
+      - BRIDGE_HOST=0.0.0.0
+      - BRIDGE_PORT=5100
+      - BRIDGE_DATABASE_PATH=/data/bridge.db
+      - BRIDGE_REGISTER_TOKEN=${BRIDGE_REGISTER_TOKEN}
+    labels:
+      - "traefik.enable=true"
+      - "traefik.docker.network=traefik-proxy"
+      - "traefik.http.routers.nolmi-bridge.rule=Host(`bridge.nolmi.ai`)"
+      - "traefik.http.routers.nolmi-bridge.entrypoints=websecure"
+      - "traefik.http.routers.nolmi-bridge.tls=true"
+      - "traefik.http.routers.nolmi-bridge.tls.certresolver=${ACME_RESOLVER}"
+      - "traefik.http.services.nolmi-bridge.loadbalancer.server.port=5100"
+
+  nolmi-web:
+    image: nolmi-web:latest
+    container_name: nolmi-web
+    restart: unless-stopped
+    depends_on:
+      - nolmi-runtime
+    networks:
+      - traefik-proxy
+      - nolmi-internal
+    volumes:
+      # htpasswd für BasicAuth (read-only). Datei wird im B2-Runbook auf dem
+      # VPS erzeugt (htpasswd -nbB) und liegt neben dieser Compose.
+      - ./htpasswd:/htpasswd:ro
+    environment:
+      - NODE_ENV=production
+      - PORT=3000
+      - HOSTNAME=0.0.0.0
+      # NEXT_PUBLIC_* sind zur BUILD-Zeit ins Bundle inlined (siehe Header) —
+      # diese Runtime-Zeile ist nur Konsistenz/Doku, der Wert kommt aus dem Build-ARG.
+      - NEXT_PUBLIC_RUNTIME_URL=https://runtime.nolmi.ai
+    labels:
+      - "traefik.enable=true"
+      - "traefik.docker.network=traefik-proxy"
+      - "traefik.http.routers.nolmi-web.rule=Host(`app.nolmi.ai`)"
+      - "traefik.http.routers.nolmi-web.entrypoints=websecure"
+      - "traefik.http.routers.nolmi-web.tls=true"
+      - "traefik.http.routers.nolmi-web.tls.certresolver=${ACME_RESOLVER}"
+      - "traefik.http.services.nolmi-web.loadbalancer.server.port=3000"
+      # BasicAuth-Middleware — Randbedingung: kein offenes Signup-Fenster,
+      # solange die Signup-Allowlist fehlt. NUR auf nolmi-web (app.nolmi.ai).
+      # runtime/bridge sind API-Endpunkte mit eigenem Token-Auth.
+      - "traefik.http.middlewares.nolmi-auth.basicauth.usersfile=/htpasswd"
+      - "traefik.http.routers.nolmi-web.middlewares=nolmi-auth"
+
+networks:
+  # Geteiltes Proxy-Netz — extern angelegt (B1: docker network create
+  # traefik-proxy), von Traefik UND diesem Stack referenziert. NICHT
+  # compose-managed (B1-Befund 2: Compose v5 verweigert sonst wegen Label).
+  traefik-proxy:
+    external: true
+  # Stack-internes Netz für Container-zu-Container (Runtime↔Bridge-Hop).
+  nolmi-internal:
+    driver: bridge
+
+volumes:
+  nolmi-runtime-data:
+    name: nolmi-runtime-data
+  nolmi-bridge-data:
+    name: nolmi-bridge-data

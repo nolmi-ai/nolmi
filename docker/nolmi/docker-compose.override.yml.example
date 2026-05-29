@@ -1,0 +1,44 @@
+# Production-Override für docker/nolmi/docker-compose.yml.
+#
+# Vorlage. Kopiere zu `docker-compose.override.yml` neben der docker-compose.yml
+# (typischerweise /docker/nolmi/), passe an, committe es NICHT zurück ins Repo.
+#
+# Compose lädt `docker-compose.override.yml` automatisch zusätzlich. Settings
+# hier ergänzen/überschreiben die Basis aus dem Repo.
+#
+# Drei Use-Cases (analog zum Base-Stack docker/twin-lab-web/):
+# 1. Live-Mounts für docs/ und mcp-servers/ — twin:reload-CLI greift auf
+#    aktuellen Repo-Stand zu, ohne Image-Rebuild
+# 2. Modell-Cache-Volume (Phase 3.4 Episodic-Memory) — ~550 MB Modell
+#    überlebt Container-Recreates
+# 3. Absolute Bind-Mount-Pfade — relative Pfade klappen nicht, wenn
+#    docker-compose.yml ein Symlink ist (empfohlenes Setup, B1-Lesson)
+#
+# Pfad-Konvention (gespiegelt von Base, /docker/twin-lab-web/ → /docker/nolmi/):
+#   /docker/nolmi/
+#     ├── docker-compose.yml          → Symlink auf repo/docker/nolmi/...
+#     ├── docker-compose.override.yml ← diese Datei, angepasst kopiert
+#     ├── .env                        → Production-Secrets (B4: echter Key)
+#     ├── htpasswd                    → BasicAuth-Users (B2-Runbook erzeugt)
+#     ├── repo/                       → git clone (HTTPS + Fine-grained PAT, S5)
+#     └── model-cache/                → Bind-Mount für Modell-Cache
+
+services:
+  nolmi-runtime:
+    environment:
+      # Phase 3.4 Episodic-Memory: Pfad für lokalen Embedding-Modell-Cache.
+      # @huggingface/transformers ignoriert HF_HOME/TRANSFORMERS_CACHE — diese
+      # eigene Var ist nötig, damit der Cache nicht in node_modules landet
+      # (würde bei Container-Recreate weggeworfen). Aliased von TWIN_LAB_*.
+      - NOLMI_MODEL_CACHE_DIR=/app/data/model-cache
+
+    volumes:
+      # Live-Mount der docs/ aus dem geklonten Repo, read-only.
+      - /docker/nolmi/repo/docs:/app/docs:ro
+
+      # Live-Mount der mcp-servers/-Definitionen, read-only.
+      - /docker/nolmi/repo/mcp-servers:/app/mcp-servers:ro
+
+      # Modell-Cache-Bind-Mount (per SSH inspizierbar, separat backup-bar;
+      # Cache ist regenerierbar, DB nicht).
+      - /docker/nolmi/model-cache:/app/data/model-cache
