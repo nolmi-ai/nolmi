@@ -5,7 +5,7 @@
 #   docker build -t twin-lab-runtime -f apps/runtime/Dockerfile .
 #
 # Pattern 1:1 von apps/bridge/Dockerfile übernommen, nur Filter-Targets
-# wechseln und @twin-lab/shared mitkopieren (Runtime nutzt es als
+# wechseln und @nolmi/shared mitkopieren (Runtime nutzt es als
 # Workspace-Dep — Bridge nicht). Abweichung: Base-Image ist hier
 # node:20-slim statt -alpine (sqlite-vec braucht glibc, siehe Stage 1).
 
@@ -34,27 +34,27 @@ COPY pnpm-workspace.yaml pnpm-lock.yaml package.json tsconfig.base.json ./
 COPY apps/runtime/package.json apps/runtime/
 COPY packages/shared/package.json packages/shared/
 
-# `...` hängt transitive Workspace-Deps an (hier: @twin-lab/shared).
-RUN pnpm install --frozen-lockfile --filter @twin-lab/runtime...
+# `...` hängt transitive Workspace-Deps an (hier: @nolmi/shared).
+RUN pnpm install --frozen-lockfile --filter @nolmi/runtime...
 
 # Sources kopieren und bauen (shared muss vor runtime kompiliert werden,
 # pnpm ordnet das via Topologie selbst).
 COPY apps/runtime apps/runtime
 COPY packages/shared packages/shared
 
-# shared explizit vor Runtime bauen — Runtime importiert @twin-lab/shared,
+# shared explizit vor Runtime bauen — Runtime importiert @nolmi/shared,
 # dessen package.json zeigt main/exports auf dist/index.js. Ohne diesen
 # Schritt wirft `node dist/index.js` zur Laufzeit ERR_UNKNOWN_FILE_EXTENSION,
 # weil pnpm deploy zwar die Source-TS materialisiert, aber Node sie nicht
 # laden kann.
-RUN pnpm --filter @twin-lab/shared build
-RUN pnpm --filter @twin-lab/runtime build
+RUN pnpm --filter @nolmi/shared build
+RUN pnpm --filter @nolmi/runtime build
 
 # `pnpm deploy` materialisiert ein deploybares Verzeichnis ohne pnpm-Symlinks:
 # flaches node_modules (nur prod-Deps), plus alle Files aus apps/runtime/
 # (dist/, migrations/, package.json). shared kommt mit dist/ rein, weil
 # packages/shared/package.json files: ["dist"] gesetzt hat.
-RUN pnpm deploy --filter @twin-lab/runtime --prod /out
+RUN pnpm deploy --filter @nolmi/runtime --prod /out
 
 
 # ─── Stage 2: Runner ────────────────────────────────────────────────────────

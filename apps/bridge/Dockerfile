@@ -29,21 +29,21 @@ COPY pnpm-workspace.yaml pnpm-lock.yaml package.json tsconfig.base.json ./
 COPY apps/bridge/package.json apps/bridge/
 COPY packages/shared/package.json packages/shared/
 
-# Bridge importiert @twin-lab/shared nicht, aber pnpm-Workspace-Resolution
+# Bridge importiert @nolmi/shared nicht, aber pnpm-Workspace-Resolution
 # braucht die Manifeste aller deklarierten Workspaces. Das `...` hängt
 # transitive Dependencies der Bridge an, alles andere wird ausgelassen.
-RUN pnpm install --frozen-lockfile --filter @twin-lab/bridge...
+RUN pnpm install --frozen-lockfile --filter @nolmi/bridge...
 
 # Sources kopieren und Bridge bauen
 COPY apps/bridge apps/bridge
 COPY packages/shared packages/shared
 
-RUN pnpm --filter @twin-lab/bridge build
+RUN pnpm --filter @nolmi/bridge build
 
 # `pnpm deploy` materialisiert ein deploybares Verzeichnis ohne pnpm-Symlinks:
 # flaches node_modules (nur prod-Deps), plus alle Files aus apps/bridge/
 # (dist/, migrations/, package.json).
-RUN pnpm deploy --filter @twin-lab/bridge --prod /out
+RUN pnpm deploy --filter @nolmi/bridge --prod /out
 
 
 # ─── Stage 2: Runner ────────────────────────────────────────────────────────

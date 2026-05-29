@@ -35,7 +35,7 @@ data
 .idea
 
 # Andere Apps des Monorepo: Runtime braucht weder Web-Frontend noch Bridge
-# im Image. @twin-lab/shared wird über packages/shared mitgenommen.
+# im Image. @nolmi/shared wird über packages/shared mitgenommen.
 apps/web
 apps/bridge
 

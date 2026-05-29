@@ -221,7 +221,7 @@ B1 (VPS-Prep + Docker + Traefik auf `187.124.3.235`) hat drei Stellen aufgedeckt
 **B4-Notiz:** `bridge.db` liegt auf `srv1046432` unter `data/bridge.db` in einem eigenen Volume **außerhalb** des Repo-Compose (B3-Strukturbefund) — B4 muss sie dort lokalisieren und mit-tarballen.
 
 **B2-Runbook-TODOs (auf dem VPS, NICHT im Repo — die Compose ist nur die Code-Hälfte von B2):**
-- **Dockerfile-pnpm-Filter auf `@nolmi/*` ziehen** (Befund B2-Diagnose): alle drei Dockerfiles (`apps/{runtime,web,bridge}/Dockerfile`) filtern noch `@twin-lab/{runtime,web,bridge,shared}` — Phase 3a hat nur die Package-Namen umbenannt, nicht die Dockerfile-Filter. **`docker build` bricht sonst.** Eigenes Code-TODO (gehört in den §7-Cookbook-/Rename-Scope), vor dem ersten Build erledigen.
+- ~~Dockerfile-pnpm-Filter auf `@nolmi/*` ziehen~~ → **✅ erledigt im Repo Tag 31 Block 11** (Phase-3a-Nachzügler, Commit-SHA siehe STAND). `docker build` ist damit entblockt.
 - **Drei Images bauen** aus Repo-Root (Tags `nolmi-runtime/-bridge/-web:latest`); Web mit `--build-arg NEXT_PUBLIC_RUNTIME_URL=https://runtime.nolmi.ai --build-arg NEXT_PUBLIC_DEPLOYMENT_LABEL=production` (sonst localhost im Bundle, #126).
 - **Traefik zweiter Resolver `le-staging`** mit **separatem `acme-staging.json`** (eigene Datei, sonst vermischt Staging-/Prod-Certs) — B2 nutzt Staging (`ACME_RESOLVER=le-staging`), B4 flippt auf `le`.
 - **`htpasswd`-Datei** neben der Compose erzeugen (`htpasswd -nbB <user> <pass> > /docker/nolmi/htpasswd`) — BasicAuth-Mount.

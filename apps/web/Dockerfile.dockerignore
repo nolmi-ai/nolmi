@@ -31,7 +31,7 @@ data
 .idea
 
 # Andere Apps des Monorepo: Web braucht weder Runtime noch Bridge im Build-
-# Context. @twin-lab/shared kommt über packages/shared.
+# Context. @nolmi/shared kommt über packages/shared.
 apps/runtime
 apps/bridge
 

@@ -2620,6 +2620,8 @@ Aktuell 35 `test-*.ts`-Smoke-Scripts in `apps/runtime/src/scripts/` (22 in `pack
 
 **Abgeschlossen Tag 31 (29. Mai 2026, Freitag), Tag 31 Block 3.** Technische Renames mit Backward-Compat-Aliasing (Env + Cookie) und Hart-Switch (Workspace-Packages, technisch nicht aliasable).
 
+**Nachzügler Tag 31 Block 11:** Die `apps/{runtime,web,bridge}/Dockerfile`-pnpm-Filter (`@twin-lab/*`) wurden in Phase 3a übersehen — von der B2-Prep-Diagnose aufgedeckt, in Block 11 auf `@nolmi/*` nachgezogen (latent, da der Bestand nur dank Image-Cache baute; entblockt den B2-from-scratch-Build).
+
 **Edits:**
 - **`packages/shared/src/env.ts` (neu):** `getEnv(newName, oldName)`-Helper mit Read-Both, Write-New (eine Stelle), Warn-Once. Subpath-Export `@nolmi/shared/env`. Unit-Smoke `packages/shared/src/env.test.ts` mit 4 Cases (`pnpm --filter @nolmi/shared test:env` → 4/4 OK), tsx als devDep zu shared.
 - **Env-Vars umgestellt** in 21 Files: Production-Read-Pfad (`NOLMI_SESSION_SECRET`, `NOLMI_ENCRYPTION_KEY`, `NOLMI_DEFAULT_BRIDGE_URL`, `NOLMI_MODEL_CACHE_DIR`, `NOLMI_EMBEDDING_{PROVIDER,MODEL,DTYPE,API_KEY}`) via `getEnv` in `apps/runtime/src/auth/session.ts`, `crypto-utils.ts`, `server.ts`, `episodic/providers/factory.ts`, `episodic/providers/local-provider.ts` (manuell, mit Aliasing-Doc-Strings + Error-Message-Hinweisen). Test-Only-Vars (`NOLMI_RUN_LOCAL_RETRIEVAL_TEST`, `NOLMI_SKIP_LOCAL`) + Comments + CLI-Output via stumpfem `sed` in 16 weiteren Files.
