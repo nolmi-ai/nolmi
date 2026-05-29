@@ -19,7 +19,6 @@
 #     ├── docker-compose.yml          → Symlink auf repo/docker/nolmi/...
 #     ├── docker-compose.override.yml ← diese Datei, angepasst kopiert
 #     ├── .env                        → Production-Secrets (B4: echter Key)
-#     ├── htpasswd                    → BasicAuth-Users (B2-Runbook erzeugt)
 #     ├── repo/                       → git clone (HTTPS + Fine-grained PAT, S5)
 #     └── model-cache/                → Bind-Mount für Modell-Cache
 

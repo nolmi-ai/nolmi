@@ -204,6 +204,18 @@ B1 (VPS-Prep + Docker + Traefik auf `187.124.3.235`) hat drei Stellen aufgedeckt
 
 > **Meta-Lesson — „Up" ist kein Funktionsbeweis.** Traefik lief in B1 als `Up`, während es nacheinander (a) gar nicht gestartet war (`docker ps` leer), (b) den Provider nicht erreichte (1.24-Fehler), (c) potenziell crash-loopte. Verifikation muss am **Verhalten** hängen — `curl → 301`, `restarts=0`, Provider-Log — nicht am Container-`Status`. Status-Grün hätte den Fehler erst in B2 als „Certs kommen nicht" hochkommen lassen: viel teurer zu diagnostizieren. (Cross-Ref STAND Lesson Tag 31 #3.)
 
+### Cookbook-Bug-Fixes aus B2 (Tag 31 Block 13, am echten VPS gefunden)
+
+B2 (3-Service-Stack-Bring-up auf Staging) hat vier weitere Stellen aufgedeckt — zwei bereits per eigenem Commit im Repo gelöst, drei neue für den Cookbook-Rewrite:
+
+**B2-Befund 1 (HART) — htpasswd am falschen Service:** Das §9.6-Cookbook mountet die htpasswd-Datei an den **web**-Service. BasicAuth wird aber von **Traefik** ausgewertet, nicht vom web-Container → die Datei muss im **Traefik**-Container liegen. Bei einem getrennten Traefik-Stack (eigenes `/docker/traefik/`, wie hier) bricht der web-Mount: Traefik meldet `"open /htpasswd: no such file"`, der Router mit der kaputten Middleware aktiviert nicht sauber, die App liefert **404 statt 401**. **FIX (VPS verifiziert: app→401 + `www-authenticate`-Header):** htpasswd in den Traefik-Stack mounten (`./htpasswd:/htpasswd:ro` in der Traefik-Compose, Datei unter `/docker/traefik/htpasswd`); die Middleware-**Labels** bleiben am web-Service. Im Repo nachgezogen (Tag 31 Block 13): der irreführende htpasswd-Mount wurde aus `docker/nolmi/docker-compose.yml` (`nolmi-web`) entfernt, Labels + Klarstellungs-Kommentar bleiben. Cookbook-§9.6 muss das für getrennte Traefik-Setups klarstellen.
+
+**B2-Befund 2 (MITTEL) — `RUNTIME_PUBLIC_URL` ist Pflicht bei `TELEGRAM_USE_POLLING=false`:** Die Runtime **crash-loopt** beim Boot ohne `RUNTIME_PUBLIC_URL`, wenn Polling aus ist (= Production-Default, Webhook-Modus braucht eine öffentliche URL für die Telegram-Webhook-Registrierung). **FIX:** `.env` setzt `RUNTIME_PUBLIC_URL=https://runtime.<domain>` (echter Wert, **kein** Wegwerf — bleibt in B4). `.env.example` muss `RUNTIME_PUBLIC_URL` als **Pflicht-bei-Webhook** markieren (heute steht es als optional/leer da).
+
+**B2-Befund 3 (META-LESSON) — alte Logs als aktuell fehlgelesen:** `tail`/`grep` über Container-Logs zeigt die letzten **passenden** Zeilen, nicht die **neuesten** Ereignisse. Die Diagnose hat mehrfach auf veralteten `ERR`-Zeilen aufgesetzt, die längst von einem Recreate überholt waren. **Lesson:** bei Log-Diagnose **immer** `--since <zeit>` nutzen + Zeitstempel gegen „jetzt" prüfen, nie nacktes `tail`/`grep` nach einem Recreate. (Verwandt mit dem B1-Reboot-Befund + STAND Lesson Tag 31 #4.)
+
+**Bereits per eigenem Commit gelöst (in B2-Prep/-Diagnose entdeckt):** (a) Dockerfile-pnpm-Filter `@twin-lab/*` → `@nolmi/*` (Tag 31 Block 11, entblockt `docker build`); (b) Bridge-Auto-init-db in der CMD (Tag 31 Block 12, Runtime-Symmetrie, kein manueller Init mehr).
+
 ---
 
 ## 8. Bau-Reihenfolge (Vorschlag, je eigener committeter Block)
@@ -211,7 +223,7 @@ B1 (VPS-Prep + Docker + Traefik auf `187.124.3.235`) hat drei Stellen aufgedeckt
 | Block | Inhalt | Setzung/§ |
 |---|---|---|
 | **B1** | VPS-Prep + Docker + Traefik | S4 / S5 — **✅ DONE Tag 31 Block 9** (Docker 29.5.2 + Compose v5.1.4, Traefik **v3.6**, UFW 22/80/443, HTTP→HTTPS-301 verifiziert; 3 Cookbook-Bugs §7) |
-| **B2** | Stack-Build + `.env` + BasicAuth — **Compose autoret in [`docker/nolmi/`](../docker/nolmi/)** (3 Services inkl. Bridge, `external`-Netz §7-Befund 2, Staging-ACME-Default, BasicAuth same-bring-up; `compose config` grün Tag 31 Block 10, **noch nicht deployed**) | S3 / S4 |
+| **B2** | Stack-Build + `.env` + BasicAuth — Compose in [`docker/nolmi/`](../docker/nolmi/) (3 Services inkl. Bridge); **✅ auf Staging grün Tag 31 Block 13** (3-Service-Stack up, Staging-Certs app/runtime/bridge.nolmi.ai, BasicAuth app→401; 4 Cookbook-Befunde §7). Verbleibend: **Flip auf `le`-Prod** (recreate + Trusted-Cert-Verify) | S3 / S4 |
 | **B3** | Pre-Flight Bridge-DB-Check | §4 — **✅ DONE Tag 31 Block 7** (führte zur S2-Korrektur Block 8) |
 | **B4** | **Doppel-DB-Migration** (`twin.db` + `bridge.db`, gemeinsamer Freeze-Snapshot) + Token-Match-Verify | S1 / S2 |
 | **B5** | Smoke + 3-Twin-Verifikation | §5.2 |
@@ -221,12 +233,13 @@ B1 (VPS-Prep + Docker + Traefik auf `187.124.3.235`) hat drei Stellen aufgedeckt
 **B4-Notiz:** `bridge.db` liegt auf `srv1046432` unter `data/bridge.db` in einem eigenen Volume **außerhalb** des Repo-Compose (B3-Strukturbefund) — B4 muss sie dort lokalisieren und mit-tarballen.
 
 **B2-Runbook-TODOs (auf dem VPS, NICHT im Repo — die Compose ist nur die Code-Hälfte von B2):**
-- ~~Dockerfile-pnpm-Filter auf `@nolmi/*` ziehen~~ → **✅ erledigt im Repo Tag 31 Block 11** (Phase-3a-Nachzügler, Commit-SHA siehe STAND). `docker build` ist damit entblockt.
-- **Drei Images bauen** aus Repo-Root (Tags `nolmi-runtime/-bridge/-web:latest`); Web mit `--build-arg NEXT_PUBLIC_RUNTIME_URL=https://runtime.nolmi.ai --build-arg NEXT_PUBLIC_DEPLOYMENT_LABEL=production` (sonst localhost im Bundle, #126).
-- **Traefik zweiter Resolver `le-staging`** mit **separatem `acme-staging.json`** (eigene Datei, sonst vermischt Staging-/Prod-Certs) — B2 nutzt Staging (`ACME_RESOLVER=le-staging`), B4 flippt auf `le`.
-- **`htpasswd`-Datei** neben der Compose erzeugen (`htpasswd -nbB <user> <pass> > /docker/nolmi/htpasswd`) — BasicAuth-Mount.
-- **Wegwerf-Secrets** generieren (`openssl rand -hex 32` für Encryption-Key + Register-Token; B2-Mechanik, in B4 ersetzt durch echten Key vom alten VPS, Bedingung A).
-- ~~Bridge-init-db auf leerem Volume einmalig~~ → **✅ erledigt Tag 31 Block 12** (Bridge-CMD macht jetzt Auto-init-db wie die Runtime, idempotent — kein manueller Schritt mehr nötig, auf leerem B2- wie restored B4-Volume).
+- ~~Dockerfile-pnpm-Filter auf `@nolmi/*` ziehen~~ → **✅ erledigt im Repo Tag 31 Block 11** (Phase-3a-Nachzügler). `docker build` entblockt.
+- ~~Bridge-init-db auf leerem Volume einmalig~~ → **✅ erledigt Tag 31 Block 12** (Bridge-CMD Auto-init, idempotent, leeres B2- wie restored B4-Volume).
+- ~~`htpasswd`-Datei + Mount~~ → **✅ erledigt Tag 31 Block 13** (gehört in den **Traefik**-Stack `/docker/traefik/htpasswd:/htpasswd:ro`, nicht an web — B2-Befund 1 §7; Repo-Mount aus `nolmi-web` entfernt). Datei auf dem VPS via `htpasswd -nbB <user> <pass>` erzeugen.
+- ~~Wegwerf-Secrets~~ → **✅ erledigt B2** (`openssl rand -hex 32` für Encryption-Key + Register-Token; in B4 ersetzt durch echten Key vom alten VPS, Bedingung A).
+- **Drei Images bauen** aus Repo-Root (Tags `nolmi-runtime/-bridge/-web:latest`); Web mit `--build-arg NEXT_PUBLIC_RUNTIME_URL=https://runtime.nolmi.ai --build-arg NEXT_PUBLIC_DEPLOYMENT_LABEL=production` (sonst localhost im Bundle, #126). — ✅ in B2 gebaut.
+
+**B2 auf Staging vollständig grün (Tag 31 Block 13):** 3-Service-Stack up, Staging-Certs über `app/runtime/bridge.nolmi.ai`, Bridge selbstheilend (init-db), Runtime initialisiert, BasicAuth aktiv (app→401 + `www-authenticate`). Verbleibend für den **Flip auf Prod** (eigener Schritt): `ACME_RESOLVER=le` setzen + recreate + Trusted-Cert-Verify (echtes Let's-Encrypt-Zertifikat statt Staging-CA).
 
 Jeder Block ist abgeschlossen verifizierbar; B3 (Pre-Flight) hat die gelockte S2 begründet **gekippt** (Re-Register → Bridge-DB-Migration), bevor B4 baut — genau der Zweck eines Pre-Flights.
 

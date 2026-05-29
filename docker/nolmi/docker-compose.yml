@@ -27,7 +27,9 @@ name: nolmi
 #   - Dockerfile-pnpm-Filter zeigen noch auf @twin-lab/* (Phase 3a hat nur die
 #     Package-NAMEN umbenannt, nicht die Dockerfile-Filter) → vor `docker build`
 #     auf @nolmi/* ziehen, sonst bricht der Build. Eigenes Code-TODO, §7/§8.
-#   - htpasswd-Datei neben dieser Compose erzeugen (htpasswd -nbB user pass > htpasswd).
+#   - htpasswd-Datei im TRAEFIK-Stack erzeugen + mounten (/docker/traefik/htpasswd
+#     → /htpasswd im Traefik-Container), NICHT hier — BasicAuth wertet Traefik aus
+#     (§7 B2-Befund 1). Hier stehen nur die Middleware-Labels am nolmi-web.
 #   - Bridge-Schema: kein manueller Schritt nötig — nolmi-bridge führt ihr
 #     init-db per CMD beim Boot aus (idempotent, wie die Runtime; Tag 31 B12).
 #   - Traefik braucht den Resolver aus ${ACME_RESOLVER}; in B2 le-staging
@@ -107,10 +109,6 @@ services:
     networks:
       - traefik-proxy
       - nolmi-internal
-    volumes:
-      # htpasswd für BasicAuth (read-only). Datei wird im B2-Runbook auf dem
-      # VPS erzeugt (htpasswd -nbB) und liegt neben dieser Compose.
-      - ./htpasswd:/htpasswd:ro
     environment:
       - NODE_ENV=production
       - PORT=3000
@@ -129,6 +127,13 @@ services:
       # BasicAuth-Middleware — Randbedingung: kein offenes Signup-Fenster,
       # solange die Signup-Allowlist fehlt. NUR auf nolmi-web (app.nolmi.ai).
       # runtime/bridge sind API-Endpunkte mit eigenem Token-Auth.
+      #
+      # Die htpasswd-Datei wird vom TRAEFIK-Stack bereitgestellt
+      # (/docker/traefik/htpasswd → /htpasswd im Traefik-Container), NICHT hier
+      # gemountet — BasicAuth wird von Traefik ausgewertet, nicht vom
+      # web-Container. Ein Mount an nolmi-web würde Traefik nicht erreichen
+      # (eigener Container) → "open /htpasswd: no such file", Router 404 statt
+      # 401. Siehe PHASE-4-VPS-STRATEGY §7 B2-Befund 1.
       - "traefik.http.middlewares.nolmi-auth.basicauth.usersfile=/htpasswd"
       - "traefik.http.routers.nolmi-web.middlewares=nolmi-auth"
 
