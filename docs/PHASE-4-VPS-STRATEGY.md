@@ -204,15 +204,17 @@ B1 (VPS-Prep + Docker + Traefik auf `187.124.3.235`) hat drei Stellen aufgedeckt
 
 > **Meta-Lesson — „Up" ist kein Funktionsbeweis.** Traefik lief in B1 als `Up`, während es nacheinander (a) gar nicht gestartet war (`docker ps` leer), (b) den Provider nicht erreichte (1.24-Fehler), (c) potenziell crash-loopte. Verifikation muss am **Verhalten** hängen — `curl → 301`, `restarts=0`, Provider-Log — nicht am Container-`Status`. Status-Grün hätte den Fehler erst in B2 als „Certs kommen nicht" hochkommen lassen: viel teurer zu diagnostizieren. (Cross-Ref STAND Lesson Tag 31 #3.)
 
-### Cookbook-Bug-Fixes aus B2 (Tag 31 Block 13, am echten VPS gefunden)
+### Cookbook-Bug-Fixes aus B2 (Tag 31 Block 13–14, am echten VPS gefunden)
 
-B2 (3-Service-Stack-Bring-up auf Staging) hat vier weitere Stellen aufgedeckt — zwei bereits per eigenem Commit im Repo gelöst, drei neue für den Cookbook-Rewrite:
+B2 (3-Service-Stack-Bring-up auf Staging + Prod-Cert-Flip) hat sechs Stellen aufgedeckt — zwei bereits per eigenem Commit im Repo gelöst, vier neue für den Cookbook-Rewrite (Befund 1–3 beim Staging-Bring-up, Befund 4 beim Prod-Flip):
 
 **B2-Befund 1 (HART) — htpasswd am falschen Service:** Das §9.6-Cookbook mountet die htpasswd-Datei an den **web**-Service. BasicAuth wird aber von **Traefik** ausgewertet, nicht vom web-Container → die Datei muss im **Traefik**-Container liegen. Bei einem getrennten Traefik-Stack (eigenes `/docker/traefik/`, wie hier) bricht der web-Mount: Traefik meldet `"open /htpasswd: no such file"`, der Router mit der kaputten Middleware aktiviert nicht sauber, die App liefert **404 statt 401**. **FIX (VPS verifiziert: app→401 + `www-authenticate`-Header):** htpasswd in den Traefik-Stack mounten (`./htpasswd:/htpasswd:ro` in der Traefik-Compose, Datei unter `/docker/traefik/htpasswd`); die Middleware-**Labels** bleiben am web-Service. Im Repo nachgezogen (Tag 31 Block 13): der irreführende htpasswd-Mount wurde aus `docker/nolmi/docker-compose.yml` (`nolmi-web`) entfernt, Labels + Klarstellungs-Kommentar bleiben. Cookbook-§9.6 muss das für getrennte Traefik-Setups klarstellen.
 
 **B2-Befund 2 (MITTEL) — `RUNTIME_PUBLIC_URL` ist Pflicht bei `TELEGRAM_USE_POLLING=false`:** Die Runtime **crash-loopt** beim Boot ohne `RUNTIME_PUBLIC_URL`, wenn Polling aus ist (= Production-Default, Webhook-Modus braucht eine öffentliche URL für die Telegram-Webhook-Registrierung). **FIX:** `.env` setzt `RUNTIME_PUBLIC_URL=https://runtime.<domain>` (echter Wert, **kein** Wegwerf — bleibt in B4). `.env.example` muss `RUNTIME_PUBLIC_URL` als **Pflicht-bei-Webhook** markieren (heute steht es als optional/leer da).
 
 **B2-Befund 3 (META-LESSON) — alte Logs als aktuell fehlgelesen:** `tail`/`grep` über Container-Logs zeigt die letzten **passenden** Zeilen, nicht die **neuesten** Ereignisse. Die Diagnose hat mehrfach auf veralteten `ERR`-Zeilen aufgesetzt, die längst von einem Recreate überholt waren. **Lesson:** bei Log-Diagnose **immer** `--since <zeit>` nutzen + Zeitstempel gegen „jetzt" prüfen, nie nacktes `tail`/`grep` nach einem Recreate. (Verwandt mit dem B1-Reboot-Befund + STAND Lesson Tag 31 #4.)
+
+**B2-Befund 4 (MITTEL/HART) — Resolver-Wechsel zieht keine neuen Certs, solange die Domain im alten Resolver-Store liegt:** Beim Staging→Prod-Flip (`ACME_RESOLVER` `le-staging` → `le`) lieferte Traefik **weiter die Staging-Certs**, obwohl das `tls.certresolver`-Label korrekt auf `le` stand und der Prod-`acme.json` leer war. Traefik matcht vorhandene Certs primär nach **Domain**, nicht nach Resolver — fand `app/runtime/bridge.nolmi.ai` im `acme-staging.json` und sah keinen Bezugsbedarf. **Symptom:** `TLS-verify=20` (untrusted), HTTP `000`, ACME-Log leer (kein `le`-Bezugsversuch). **FIX (VPS verifiziert):** `acme-staging.json` leeren (`> file` + `chmod 600`) + Traefik-Restart + einen Request pro Host als Bezugs-Trigger → Prod-Certs in ~30–90 s gezogen. **Final-Verify:** Issuer `Let's Encrypt CN=YR2` (kein STAGING) über alle drei Hosts, `TLS-verify=0`. **Cookbook-Konsequenz:** Wer eine Staging-zuerst-Strategie fährt (empfohlen, schützt die Prod-Rate-Limits), muss beim Flip den **Staging-Store leeren** — sonst bleibt Staging „kleben". Alternativ: Staging nur mit separatem Hostnamen testen. §9.3/§9.5-Cookbook sollte den Flip-Schritt **inkl. Store-Reset** dokumentieren.
 
 **Bereits per eigenem Commit gelöst (in B2-Prep/-Diagnose entdeckt):** (a) Dockerfile-pnpm-Filter `@twin-lab/*` → `@nolmi/*` (Tag 31 Block 11, entblockt `docker build`); (b) Bridge-Auto-init-db in der CMD (Tag 31 Block 12, Runtime-Symmetrie, kein manueller Init mehr).
 
@@ -223,14 +225,16 @@ B2 (3-Service-Stack-Bring-up auf Staging) hat vier weitere Stellen aufgedeckt �
 | Block | Inhalt | Setzung/§ |
 |---|---|---|
 | **B1** | VPS-Prep + Docker + Traefik | S4 / S5 — **✅ DONE Tag 31 Block 9** (Docker 29.5.2 + Compose v5.1.4, Traefik **v3.6**, UFW 22/80/443, HTTP→HTTPS-301 verifiziert; 3 Cookbook-Bugs §7) |
-| **B2** | Stack-Build + `.env` + BasicAuth — Compose in [`docker/nolmi/`](../docker/nolmi/) (3 Services inkl. Bridge); **✅ auf Staging grün Tag 31 Block 13** (3-Service-Stack up, Staging-Certs app/runtime/bridge.nolmi.ai, BasicAuth app→401; 4 Cookbook-Befunde §7). Verbleibend: **Flip auf `le`-Prod** (recreate + Trusted-Cert-Verify) | S3 / S4 |
+| **B2** | Stack-Build + `.env` + BasicAuth — Compose in [`docker/nolmi/`](../docker/nolmi/) (3 Services inkl. Bridge) | S3 / S4 — **✅ DONE (Prod) Tag 31 Block 14** (3-Service-Stack up, **Prod-Certs** `Let's Encrypt CN=YR2` über app/runtime/bridge.nolmi.ai, `TLS-verify=0`, app→401/BasicAuth, runtime/bridge→404; 4 Cookbook-Befunde §7) |
 | **B3** | Pre-Flight Bridge-DB-Check | §4 — **✅ DONE Tag 31 Block 7** (führte zur S2-Korrektur Block 8) |
-| **B4** | **Doppel-DB-Migration** (`twin.db` + `bridge.db`, gemeinsamer Freeze-Snapshot) + Token-Match-Verify | S1 / S2 |
+| **B4** ← **nächster Block** | **Doppel-DB-Migration** (`twin.db` + `bridge.db`, gemeinsamer Freeze-Snapshot) + Token-Match-Verify | S1 / S2 |
 | **B5** | Smoke + 3-Twin-Verifikation | §5.2 |
 | **B6** | Cut-Over (Freeze: Doppel-Tarball beider DBs, §5.3) | §5.3–4 |
 | **B7** | Nach Fenster: `srv1046432`-Abschaltung + Cookbook-Rewrite | S7 / §7 |
 
 **B4-Notiz:** `bridge.db` liegt auf `srv1046432` unter `data/bridge.db` in einem eigenen Volume **außerhalb** des Repo-Compose (B3-Strukturbefund) — B4 muss sie dort lokalisieren und mit-tarballen.
+
+**B4-Vormerkung (Volumes + Certs):** Vor B4 wird der Stack gestoppt und die **Wegwerf-Volumes** (`nolmi-runtime-data`, `nolmi-bridge-data`) durch die migrierten DBs ersetzt (Restore-Ziel). Die **ACME-Certs** (`acme.json`) bleiben dabei **unberührt** — kein erneuter Cert-Bezug nötig, da die Domains (`app/runtime/bridge.nolmi.ai`) gleich bleiben. Auch der Encryption-Key wird hier von Wegwerf auf den **echten Key vom alten VPS** umgestellt (Bedingung A).
 
 **B2-Runbook-TODOs (auf dem VPS, NICHT im Repo — die Compose ist nur die Code-Hälfte von B2):**
 - ~~Dockerfile-pnpm-Filter auf `@nolmi/*` ziehen~~ → **✅ erledigt im Repo Tag 31 Block 11** (Phase-3a-Nachzügler). `docker build` entblockt.
@@ -239,7 +243,7 @@ B2 (3-Service-Stack-Bring-up auf Staging) hat vier weitere Stellen aufgedeckt �
 - ~~Wegwerf-Secrets~~ → **✅ erledigt B2** (`openssl rand -hex 32` für Encryption-Key + Register-Token; in B4 ersetzt durch echten Key vom alten VPS, Bedingung A).
 - **Drei Images bauen** aus Repo-Root (Tags `nolmi-runtime/-bridge/-web:latest`); Web mit `--build-arg NEXT_PUBLIC_RUNTIME_URL=https://runtime.nolmi.ai --build-arg NEXT_PUBLIC_DEPLOYMENT_LABEL=production` (sonst localhost im Bundle, #126). — ✅ in B2 gebaut.
 
-**B2 auf Staging vollständig grün (Tag 31 Block 13):** 3-Service-Stack up, Staging-Certs über `app/runtime/bridge.nolmi.ai`, Bridge selbstheilend (init-db), Runtime initialisiert, BasicAuth aktiv (app→401 + `www-authenticate`). Verbleibend für den **Flip auf Prod** (eigener Schritt): `ACME_RESOLVER=le` setzen + recreate + Trusted-Cert-Verify (echtes Let's-Encrypt-Zertifikat statt Staging-CA).
+**B2 vollständig abgeschlossen (Tag 31 Block 14, Prod-Certs):** 3-Service-Stack up, **Prod-Zertifikate** (`Let's Encrypt CN=YR2`, kein STAGING) über `app/runtime/bridge.nolmi.ai`, `TLS-verify=0`, Bridge selbstheilend (init-db), Runtime initialisiert, BasicAuth aktiv (app→401 + `www-authenticate`; runtime/bridge→404, kein `/`-Router = korrekt). Der Flip `le-staging`→`le` griff erst nach dem Resolver-Store-Reset (§7 B2-Befund 4). Der Stack läuft damit end-to-end auf echter Infra mit vertrauten Certs — auf **Wegwerf-Secrets + leeren Volumes**, Production (`srv1046432`) unberührt. Nächster Block: **B4** (Doppel-DB-Migration).
 
 Jeder Block ist abgeschlossen verifizierbar; B3 (Pre-Flight) hat die gelockte S2 begründet **gekippt** (Re-Register → Bridge-DB-Migration), bevor B4 baut — genau der Zweck eines Pre-Flights.
 
