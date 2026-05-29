@@ -147,18 +147,42 @@ Code-Renames mit Backward-Compat-Aliasing (Env + Cookie) und Hard-Switch (Worksp
 - Docker-Image-Tags Rename
 - Production-Deploy (Nolmi-Stack lebt nur im Repo, Production-Twin-Lab unverändert)
 
-#### Phase 3b — Verzeichnis + Repo (Folge-Block, operativ)
+#### Phase 3b — Verzeichnis-Rename + GitHub-Repo-Move (S, must) ✅ DONE Tag 31
 
-Dateisystem- und GitHub-seitige Renames, kein Code-Change. Eigener Folge-Block weil rein operativ.
+**Abgeschlossen Tag 31 (29. Mai 2026, Freitag), Block 4.** Operative
+Closure der Code-Rebrand-Pipeline.
 
-**Scope (offen):**
-- Lokales Verzeichnis `twin-lab/` → `nolmi/` (Working-Copy, git remote ggf. neu setzen)
-- `gh repo rename` oder GitHub-UI: `markusbaier/twin-lab` → `nolmi-ai/nolmi` (npm/PyPI/Docker bleiben `nolmi` ohne Bindestrich, siehe §0)
-- Docker-Image-Tags `nolmi/runtime`, `nolmi/web`, `nolmi/bridge`
-- README-Links + Badge-URLs nachziehen
-- Optional: PyPI-Publishing-Vorbereitung (erst beim ersten Release relevant)
+Durchgeführt:
+- GitHub-Repo `markusbaier/twin-lab` → `markusbaier/nolmi` umbenannt
+  (Settings → General → Rename)
+- GitHub-Repo-Transfer zu Org `nolmi-ai` durchgeführt (Settings → Danger
+  Zone → Transfer ownership). Ziel: `nolmi-ai/nolmi`.
+- Lokales Verzeichnis-Rename: `mv /Users/mjb/Visual Studio/twin-lab/
+  /Users/mjb/Visual Studio/nolmi/`
+- Git-Remote umgestellt: `git remote set-url origin
+  https://github.com/nolmi-ai/nolmi.git`
+- Smoke verifiziert: `pnpm dev` boot sauber im neuen Pfad, 9 Twins
+  geladen, Bridge-Connection grün, Chat-Flow (POST /twins/@markus/chat)
+  responseTime 11.9s — LLM-Call durch.
+- Root-`package.json`-Metadaten auf Nolmi-Stand (name + description +
+  author.email + repository.url + bugs.url + homepage)
+- `.gitignore` Hygiene: `.claude/` ergänzt
 
-**Aufwand:** S (mechanisch).
+**Bewusst unverändert (Phase-4-Material):**
+- `docker/twin-lab-web/` (Verzeichnis + README.md + docker-compose.yml +
+  Container-Namen `twin-lab-runtime`/`twin-lab-web`/`twin-lab-web-data`):
+  Production-Stack auf VPS `srv1046432` läuft mit dieser Konfig.
+  Rename-Pflicht entsteht erst beim Phase-4-VPS-Setup auf
+  `srv1712371.hstgr.cloud` — dort wird ein neues `docker/nolmi/`-
+  Verzeichnis angelegt, das alte `docker/twin-lab-web/` wird mit
+  Phase 4 archiviert oder gelöscht.
+- SSH-Alias `github.com-twin-lab` in `~/.ssh/config` (lokal beim
+  User): wird beim Phase-4-Deploy mit aktualisiert
+- BACKLOG-Item: "Production-VPS srv1046432 abschalten nach Phase 4 ist
+  live"
+
+**Phase 4 ist der nächste natürliche Block** (Nolmi-VPS-Setup auf
+`srv1712371.hstgr.cloud`).
 
 ### Phase 4 — Nolmi-VPS Production-Deploy (nach 1-3, VPS bereits provisioniert)
 

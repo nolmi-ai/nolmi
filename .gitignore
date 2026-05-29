@@ -19,3 +19,6 @@ apps/bridge/data/*.db-wal
 data/*.db-shm
 data/*.db-wal
 *.tsbuildinfo
+
+# Claude Code lokale Settings (Whitelist + Cache)
+.claude/

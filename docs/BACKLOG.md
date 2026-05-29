@@ -2555,11 +2555,17 @@ Aktuell 35 `test-*.ts`-Smoke-Scripts in `apps/runtime/src/scripts/` (22 in `pack
 
 **Wert:** vermeidet stille DB-Drift bei künftigen Smokes, dokumentiert die FK-Semantik für jeden, der manuell in die DB greift. Niedriges Risiko, hoher Cleanliness-Impact für die Phase-B-Self-Hosting-Phase wenn externe Owner ihre Test-Twins iterativ wegputzen.
 
-## Rebrand Twin-Lab → Nolmi
+## Rebrand Twin-Lab → Nolmi ✅ Tag 30+31
 
 **Strategie + Phasen-Plan:** [`docs/REBRAND-NOLMI-STRATEGY.md`](./REBRAND-NOLMI-STRATEGY.md) (Tag 30 Strategy-Session als „Tavryn" gestartet, Tag 31 auf „Nolmi" finalisiert + Doc umbenannt). Vollständige Mapping-Tabelle, Trademark-Status, Produkt-Narrativ, Operative Foundation §9.
 
-**Gesamt-Status Tag 31:** Phase 1 ✅ live im Repo. Phase 2 ✅ live im Repo (Block 2, 7 Files user-facing Strings). **Phase 3a** ✅ live im Repo (Block 3, Env/Package/Cookie-Aliasing — getEnv-Helper, 4 Workspace-Packages umbenannt, 124 Imports rewriten, Cookie-Aliasing nolmi-session/twin-lab-session). **Trademark-Gate ✅ grün** (USPTO + EUIPO 0 Treffer). Phase 3b (Verzeichnis-Rename + GitHub-Repo-Move) ist nächster operativer Folge-Block. Phase 4 (VPS) bereits provisioniert — wartet auf Setup-Block.
+- Phase 1 ✅ Light-Mode-Switch (Tag 30 Block 3, Commit 58766de)
+- Phase 2 ✅ User-Strings (Tag 31 Block 2, Commit f6ebd61)
+- Phase 3a ✅ Env/Package/Cookie (Tag 31 Block 3, Commit e746446)
+- Phase 3b ✅ Verzeichnis-Rename + GitHub-Repo (Tag 31 Block 4, dieser Commit)
+- Phase 4 ⏳ Nolmi-VPS-Setup (offen, eigener Block-würdig)
+
+**Code-Rebrand abgeschlossen** (Phase 1 Light-Mode + Phase 2 User-Strings + Phase 3a Env/Package/Cookie + Phase 3b Verzeichnis/Repo). **Trademark-Gate ✅ grün** (USPTO + EUIPO 0 Treffer). Phase 4 (Production-Deploy auf Nolmi-VPS) ist der natürliche nächste Schritt.
 
 ### Rebrand-Phase 1 — Light-Mode-Switch ✅ Tag 30 DONE
 
@@ -2632,17 +2638,61 @@ Aktuell 35 `test-*.ts`-Smoke-Scripts in `apps/runtime/src/scripts/` (22 in `pack
 
 **Spur:** Pre-Launch-Phase A · **Aufwand:** ~2h netto (Diagnose ~20 Min, Helper ~15 Min, Env-Edits ~35 Min, Package-Rename ~25 Min, Cookie + middleware ~15 Min, Verifikation ~10 Min, Doku ~25 Min).
 
-### Rebrand-Phase 3b — Verzeichnis-Rename + Repo-Move (S, must — entblockt nach Phase 3a)
+### Rebrand-Phase 3b — Verzeichnis-Rename + GitHub-Repo-Move ✅ Tag 31 DONE
 
-**Status:** Offen | **entblockt Tag 31** | Aufwand: S | rein operativ
+**Abgeschlossen Tag 31 Block 4.** Siehe Strategy-Doc §3 Phase 3b +
+STAND Tag 31 Block 4.
 
-Dateisystem- und GitHub-seitige Renames, kein Code-Change. Eigener Folge-Block weil rein operativ:
+Phase-3b-Outcome:
+- GitHub: nolmi-ai/nolmi
+- Lokal: /Users/mjb/Visual Studio/nolmi/
+- Root-package.json auf Nolmi-Stand
+- .gitignore um .claude/ ergänzt
 
-- Lokales Verzeichnis `twin-lab/` → `nolmi/` (Working-Copy, git remote ggf. neu setzen)
-- `gh repo rename` oder GitHub-UI: `markusbaier/twin-lab` → `nolmi-ai/nolmi` (npm/PyPI/Docker bleiben `nolmi` ohne Bindestrich)
-- Docker-Image-Tags `nolmi/runtime`, `nolmi/web`, `nolmi/bridge`
-- README-Links + Badge-URLs nachziehen
-- Optional: PyPI-Publishing-Vorbereitung (erst beim ersten Release relevant)
+**Code-Rebrand vollständig abgeschlossen** (Phase 1 Light-Mode + Phase 2
+User-Strings + Phase 3a Env/Package/Cookie + Phase 3b Verzeichnis/Repo).
+
+### docker/twin-lab-web/ → docker/nolmi/ (Teil von Phase 4)
+
+**Status:** Offen | gehört in Phase 4 (Nolmi-VPS-Setup) | Aufwand: S
+
+Aktuell: `docker/twin-lab-web/` (mit README + docker-compose.yml +
+Container-Namen `twin-lab-runtime`/`twin-lab-web`/`twin-lab-web-data`)
+konfiguriert den Production-Stack auf VPS `srv1046432`. Solange dieser
+Stack live ist, bleibt die Config unverändert (Code-Live-Sync).
+
+Beim Phase-4-VPS-Setup auf `srv1712371.hstgr.cloud`:
+1. Neues Verzeichnis `docker/nolmi/` anlegen mit Nolmi-spezifischer
+   Compose-Config (Container `nolmi-runtime`, `nolmi-web`, `nolmi-data`-
+   Volume, Bridge auf `srv1712371`)
+2. Production-Deploy auf srv1712371 mit neuer Config
+3. Smoke verifizieren auf nolmi.ai
+4. Nach erfolgreicher Migration: `docker/twin-lab-web/` archivieren
+   oder löschen (Production-VPS srv1046432 abschalten ist eigener
+   Step)
+
+### SSH-Alias `github.com-twin-lab` in ~/.ssh/config aktualisieren
+
+**Status:** Offen | lokal beim User | Aufwand: trivial (1 Min)
+
+Im `~/.ssh/config` existiert ein Host-Alias `github.com-twin-lab` mit
+spezifischem SSH-Key. Wird heute nur für Production-Deploy genutzt
+(`git clone git@github.com-twin-lab:markusbaier/twin-lab.git repo`).
+Beim Phase-4-Deploy zu nolmi-ai/nolmi: Alias umbenennen zu
+`github.com-nolmi` oder als zweiten Alias parallel anlegen.
+
+### Production-VPS srv1046432 Abschaltung (nach Phase 4)
+
+**Status:** Defer | gehört nach erfolgreichem Phase-4-Cut-Over |
+Aufwand: S
+
+Nach Phase 4 (Nolmi live auf srv1712371) ist srv1046432 redundant.
+Schritte:
+1. Cut-Over verifizieren (Nolmi auf nolmi.ai bedient alle 3 Realnutzer
+   Markus/Florian/Heiko)
+2. DB-Backup von srv1046432 als Archiv ziehen
+3. VPS srv1046432 herunterfahren
+4. Falls Hostinger-Mietkosten: VPS-Vertrag kündigen
 
 **Neue Items aus Phase 3a (für später):**
 - **`SESSION_COOKIE_NAME`-Konstante konsolidieren:** heute in `apps/runtime/src/auth/session.ts` (Export) **und** `apps/web/middleware.ts` (Local-Const-Duplikat) gepflegt. Cross-App-Import vom Runtime ins Web ist heute strukturell nicht vorgesehen (Runtime exportiert keine Subpaths). Sauberer Pfad: `@nolmi/shared/auth-cookies` mit beiden Konstanten, beide Apps konsumieren von dort. Aufwand S, nice (Phase 5+).
