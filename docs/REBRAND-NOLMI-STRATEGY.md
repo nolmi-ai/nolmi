@@ -99,18 +99,28 @@ Komplett unabhängig vom Namen — wird in **jedem** Szenario gebraucht, egal wi
 
 **Aufwand:** S-M (1 Sub-Block Bau + 1 Smoke-Welle). Architektur-Glücksfall macht es kleiner als gedacht.
 
-### Phase 2 — Sichtbarer Name-Rebrand (✅ ENTBLOCKT Tag 31 — Trademark-Status grün)
+### Phase 2 — Sichtbarer Name-Rebrand ✅ DONE Tag 31 (Block 2)
 
-§0-Gate erledigt (Tag 30/31 USPTO + EUIPO 0 Treffer). User-facing Strings Twin-Lab → Nolmi.
+§0-Gate erledigt (Tag 30/31 USPTO + EUIPO 0 Treffer). Phase 2 Tag 31 Block 2 abgeschlossen — 7 Files (4× `apps/web` + 3× `docs/`-Headlines/Intros), Browser-Smoke 7/7 grün, Cmd+F „Twin-Lab" pro Page = 0 Treffer.
 
-**Scope:**
-- ~19+ tsx Strings (`AppHeader`, `TopNav`, `layout.tsx` Metadata, `login`, `onboarding`, EmptyStates, etc.)
-- README, DEPLOYMENT, ROADMAP, BACKLOG Display-Name (keine Mischbotschaften)
-- HTML `<title>`, OG-Metadata, Favicon-Referenzen
-- GitHub-Repo-URL-Hinweise: künftig `nolmi-ai/<repo>` (Org-Bindestrich, siehe §0-Inkonsistenz)
-- **NICHT:** Env-Vars, Package-Namen (das ist Phase 3)
+**Scope (abgeschlossen):**
+- `apps/web/app/layout.tsx` HTML `<title>` + `<meta name="description">` auf Nolmi-Leitsatz
+- `apps/web/app/login/page.tsx` h1
+- `apps/web/components/AppHeader.tsx` Brand-Link
+- `apps/web/components/FooterMeta.tsx` Fallback (Mini-Justierung nach Smoke-Befund)
+- `README.md` H1 + What/Why-Sections + 2 Pre-Launch-Tagline-Zeilen
+- `docs/DEPLOYMENT.md` H1 + Intro + 2 Display-Stellen
+- `docs/ROADMAP.md` H1
 
-**Aufwand:** S (mechanisch, aber sorgfältig — keine Stelle übersehen).
+**Bewusst NICHT (verschoben auf Phase 3):**
+- Session-Cookie-Name `twin-lab-session` (würde Live-Sessions invalidieren)
+- `@twin-lab/shared`-Imports (Workspace-Package-Rename)
+- Docker-Container-Namen + Pfade
+- Repo-URL `markusbaier/twin-lab.git` + `cd twin-lab` in README — Repo-Rename gehört zur Org-Migration `nolmi-ai`
+- Code-Kommentare (interne historische Notizen, nicht user-visible)
+- OG-Metadata + Favicon-Referenzen (gehört zu Phase 4 Brand-Assets)
+
+**Aufwand:** S, real ~1h netto inkl. Diagnose + Smoke + Mini-Justierung.
 
 ### Phase 3 — Technische Renames (✅ ENTBLOCKT Tag 31, mit Kompatibilität)
 

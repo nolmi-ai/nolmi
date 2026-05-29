@@ -1,4 +1,4 @@
-# Twin-Lab
+# Nolmi
 
 **Self-hosted AI twins that remember, have personality, and talk to each other.**
 
@@ -16,9 +16,9 @@
 
 ---
 
-## What is Twin-Lab
+## What is Nolmi
 
-Twin-Lab is a self-hosted platform for personal AI twins. Unlike chat assistants
+Nolmi is a self-hosted platform for personal AI twins. Unlike chat assistants
 that forget you between sessions, each twin carries persistent memory, an
 individual persona, and the ability to communicate with other twins on the same
 instance — yours or someone else's.
@@ -26,7 +26,7 @@ instance — yours or someone else's.
 You run it on your own server. Your conversations, your API keys, your data
 stay with you.
 
-## Why Twin-Lab
+## Why Nolmi
 
 - **🧠 Memory depth** — twins remember conversations across sessions, surface
   relevant context automatically, and reach a "maturity" the longer they're used
@@ -97,7 +97,7 @@ see **[docs/DEPLOYMENT.md](docs/DEPLOYMENT.md)**.
 
 ## Status & Beta
 
-Twin-Lab is in **Pre-Launch Phase A** (self-hosting). It's stable enough to use
+Nolmi is in **Pre-Launch Phase A** (self-hosting). It's stable enough to use
 daily but not yet hardened for public deployment.
 
 **Works today**
@@ -128,7 +128,7 @@ See [docs/ROADMAP.md](docs/ROADMAP.md) for the full roadmap.
 
 ## Roadmap
 
-Twin-Lab is currently in **Pre-Launch Phase A** — self-hosting launch.
+Nolmi is currently in **Pre-Launch Phase A** — self-hosting launch.
 **Phase B** brings SaaS-hosting and mobile integration. See
 [docs/ROADMAP.md](docs/ROADMAP.md) for details.
 

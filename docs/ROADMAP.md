@@ -1,4 +1,4 @@
-# twin-lab Roadmap
+# Nolmi Roadmap
 
 Stand: 12. Mai 2026 Nachmittag, nach Phase 3.3 in Production deployed plus Vision-Session plus Strategie-Session vor Phase 3.4.
 

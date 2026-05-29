@@ -37,7 +37,7 @@ export function AppHeader() {
        * weit weg vom Brand und visuell entkoppelt. */}
       <div className="flex items-center gap-8">
         <Link href="/" className="text-text font-semibold tracking-tight">
-          twin-lab
+          Nolmi
         </Link>
         <Suspense fallback={<span className="text-xs text-muted">nav…</span>}>
           <TopNav />

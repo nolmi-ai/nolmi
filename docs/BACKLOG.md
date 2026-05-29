@@ -2559,7 +2559,7 @@ Aktuell 35 `test-*.ts`-Smoke-Scripts in `apps/runtime/src/scripts/` (22 in `pack
 
 **Strategie + Phasen-Plan:** [`docs/REBRAND-NOLMI-STRATEGY.md`](./REBRAND-NOLMI-STRATEGY.md) (Tag 30 Strategy-Session als „Tavryn" gestartet, Tag 31 auf „Nolmi" finalisiert + Doc umbenannt). Vollständige Mapping-Tabelle, Trademark-Status, Produkt-Narrativ, Operative Foundation §9.
 
-**Gesamt-Status Tag 31:** Phase 1 ✅ live im Repo. **Trademark-Gate ✅ grün** (USPTO + EUIPO 0 Treffer). Phase 2 + 3 entblockt. Phase 4 (VPS) bereits provisioniert — wartet auf Setup-Block.
+**Gesamt-Status Tag 31:** Phase 1 ✅ live im Repo. Phase 2 ✅ live im Repo (Block 2, 7 Files user-facing Strings). **Trademark-Gate ✅ grün** (USPTO + EUIPO 0 Treffer). Phase 3 entblockt — nächster natürlicher Block. Phase 4 (VPS) bereits provisioniert — wartet auf Setup-Block.
 
 ### Rebrand-Phase 1 — Light-Mode-Switch ✅ Tag 30 DONE
 
@@ -2575,13 +2575,40 @@ Aktuell 35 `test-*.ts`-Smoke-Scripts in `apps/runtime/src/scripts/` (22 in `pack
 
 **Spur:** Pre-Launch-Phase A · **Aufwand:** ~1h (Bau + Smoke + Doku).
 
-### Rebrand-Phase 2 — Sichtbarer Name-Rebrand (S, must — ✅ entblockt Tag 31)
+### Rebrand-Phase 2 — Sichtbarer Name-Rebrand ✅ Tag 31 DONE
 
-**Status:** Offen | **entblockt Tag 31** (Trademark grün) | Aufwand: S
+**Abgeschlossen Tag 31 (29. Mai 2026, Freitag), Tag 31 Block 2.** User-facing Wordmark „Twin-Lab" → „Nolmi" im Code + minimaler Doku-Refresh (kein voller README-Rewrite — der gehört zu Block-5-Marketing-Vorbereitung).
 
-User-facing Strings „Twin-Lab" → „Nolmi" in `apps/web` UI (~19+ tsx: `AppHeader`, `TopNav`, `layout.tsx` Metadata, `/login`, `/onboarding`, EmptyStates, etc.). README/DEPLOYMENT/ROADMAP/BACKLOG Display-Name. HTML `<title>`, OG-Metadata, Favicon-Referenzen. GitHub-Repo-URLs auf `nolmi-ai/<repo>` (siehe Strategy-Doc §0-Inkonsistenz). **NICHT:** Env-Vars oder Package-Namen (Phase 3).
+**Edits (7 Files):**
+- `apps/web/app/layout.tsx` — HTML `<title>` „twin-lab" → „Nolmi" + `<meta name="description">` auf Nolmi-Leitsatz „Aktive Erinnerung unter Owner-Kontrolle. Vertrauenswürdige digitale Repräsentation, die mich versteht — aber nicht unkontrolliert für mich handelt."
+- `apps/web/app/login/page.tsx` — h1 Brand
+- `apps/web/components/AppHeader.tsx` — Brand-Link
+- `apps/web/components/FooterMeta.tsx` — Fallback `multi-twin` → `Nolmi` (Mini-Justierung nach Smoke-Befund — Architektur-Begriff war außerhalb des initialen Twin-Lab-Scans, las sich inkonsistent zur Header-Marke)
+- `README.md` — H1 + What/Why-Sections + 2 Pre-Launch-Tagline-Zeilen. Repo-URLs (`markusbaier/twin-lab.git`, `cd twin-lab`) unverändert per Phase-3-Scope.
+- `docs/DEPLOYMENT.md` — H1 + 2 Intro-Zeilen + 2 Display-Stellen in Bridge-Section + glibc-Fix-Hinweis
+- `docs/ROADMAP.md` — H1
 
-**Gate:** ✅ erledigt Tag 30/31 (professioneller Trademark-Quick-Search USPTO + EUIPO 0 Treffer, 5 Namens-Iterationen durchlaufen, Nolmi finalisiert).
+**Bewusst NICHT angefasst (Phase-3-Territory oder per Setzungen):**
+- `apps/web/middleware.ts:19` `SESSION_COOKIE_NAME = "twin-lab-session"` — Cookie-Rename würde laufende User-Sessions invalidieren (Force-Logout); Phase 3 + ggf. Migration-Window
+- Alle `from "@twin-lab/shared"`-Imports — Phase 3 Workspace-Package-Rename
+- CSS-Klassen `.twin-toast`, `.twin-toast-title`, `.twin-toast-close` etc. — S2, interne Implementierungs-Details
+- Code-Kommentare mit „Twin-Lab" in 6 Files (`chat/[handle]/page.tsx:1857`, `globals.css:90`, `EmptyState.tsx:9`, `MemoryHitBadge.tsx:19`, `RejectReasonModal.tsx:132`, `Tabs.tsx:22`, `tool-display.ts:31`) — interne historische Notizen, nicht user-visible
+- Strategy-Docs (`REBRAND-NOLMI-STRATEGY.md`, `BLOCK-5-STRATEGY.md`, `130-TELEGRAM-STRATEGY.md`, `131-OAUTH-STRATEGY.md`) — historische Genauigkeit
+- Docker-Container-Namen (`twin-lab-web`, `twin-lab-runtime`, `twin-lab-bridge`) + Pfade (`/docker/twin-lab-web/`) — Phase 3 Repo-/Container-Rename
+- `apps/web/styles/DESIGN-AUDIT.md` — internes Design-System-Doc
+- `docs/STAND.md` + `docs/BACKLOG.md` Pre-Tag-31-Inhalt — historische Genauigkeit
+
+**Verifikation:**
+- Typecheck 4/4 grün
+- Browser-Smoke 7/7 Haupt-Views grün (Login, Onboarding, Chat/@markus, Inbox, Settings, Facts, Stream)
+- Header überall „Nolmi", Browser-Tab-Title „Nolmi", `<meta name="description">` mit Leitsatz via Devtools verifiziert
+- Footer dynamisch („1 Twin aktiv · läuft lokal") + Fallback-Refresh nach Mini-Justierung
+- **Cmd+F „Twin-Lab"/„twin-lab"/„TwinLab" pro Page = 0 Treffer** (DOM-Sauberkeit verifiziert)
+- „Twin"-Konzept-Wort (Twin-Profil, Twin-Reife, Twin-Service, `twin_*`-IDs) unverändert per S1
+
+**KEIN Production-Deploy** — Nolmi-Deploy kommt in Phase 4 auf separatem Hostinger-VPS (Frankfurt, Ubuntu 24.04 LTS, IP `187.124.3.235`). Bestehender Twin-Lab-Production-Stack (`srv1046432`) wird **nicht** in-place rebrandet.
+
+**Spur:** Pre-Launch-Phase A · **Aufwand:** ~1h netto (Diagnose ~15 Min, Edits ~25 Min, Smoke ~15 Min, Mini-Justierung + Re-Smoke ~5 Min).
 
 ### Rebrand-Phase 3 — Env/Package-Aliasing (M, must — ✅ entblockt, nach Phase 2)
 

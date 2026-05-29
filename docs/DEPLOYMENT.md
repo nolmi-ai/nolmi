@@ -1,16 +1,16 @@
-# DEPLOYMENT — Twin-Lab Self-Hosting
+# DEPLOYMENT — Nolmi Self-Hosting
 
 > **Status:** §1–§9 voll-ausgebaut (Tag 23 + Tag 24). Original-
 > Skelett hatte §3 (First-Time), §5 (ENV), §6 (Updates — jetzt
 > in §3 konsolidiert), §7 (Smoke) TODO; §8 Backup und §9 Plain-
 > Docker+Traefik-Cookbook sind Tag-24-Neuzugänge.
 
-Diese Anleitung beschreibt das Self-Hosting-Setup von Twin-Lab auf
+Diese Anleitung beschreibt das Self-Hosting-Setup von Nolmi auf
 einem Linux-VPS mit Docker. Sie ergänzt das knappere Setup-README
 unter `docker/twin-lab-web/README.md`, das die initiale Production-
 Sequenz für den Haupt-Maintainer dokumentiert.
 
-Twin-Lab läuft als Multi-Container-Setup hinter einem Traefik-Proxy:
+Nolmi läuft als Multi-Container-Setup hinter einem Traefik-Proxy:
 Web (Next.js), Runtime (Fastify + SQLite), Bridge (Agent-to-Agent-
 Kommunikation). Die Drei-Service-Architektur ist im Repo-Root unter
 `docs/ARCHITECTURE.md` (TODO) beschrieben.
@@ -103,7 +103,7 @@ Traefik kümmert sich um Let's Encrypt-Zertifikate automatisch.
 
 ### Bridge
 
-Twin-Lab geht davon aus, dass der Bridge-Service erreichbar ist —
+Nolmi geht davon aus, dass der Bridge-Service erreichbar ist —
 entweder lokal (für Single-Twin-Setups) oder als separater Container
 mit eigener Domain (für Multi-Twin-Setups mit A2A-Kommunikation).
 
@@ -1075,7 +1075,7 @@ node_modules/sqlite-vec-linux-x64/vec0.so
 Wenn die Ausgabe `Error relocating ... symbol not found` zeigt: das
 ist musl-vs-glibc.
 
-**Fix:** Base-Image auf glibc-basiert wechseln. Twin-Lab nutzt
+**Fix:** Base-Image auf glibc-basiert wechseln. Nolmi nutzt
 default `node:20-slim` (Debian, glibc). Wenn du das geändert hast,
 zurück auf `slim` oder `bookworm` (Debian) oder eine andere glibc-
 Distro wechseln. **Nicht** `alpine` oder andere musl-Distros.

@@ -5,8 +5,9 @@ import { AppHeader } from "../components/AppHeader";
 import { AppFooter } from "../components/AppFooter";
 
 export const metadata = {
-  title: "twin-lab",
-  description: "Persönlicher AI-Twin — Phase 1 Lab",
+  title: "Nolmi",
+  description:
+    "Aktive Erinnerung unter Owner-Kontrolle. Vertrauenswürdige digitale Repräsentation, die mich versteht — aber nicht unkontrolliert für mich handelt.",
 };
 
 export default function RootLayout({ children }: { children: ReactNode }) {
