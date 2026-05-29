@@ -63,7 +63,13 @@ Begründung:
 - **Souveräne Plattform** — Nolmi hängt an keiner Fremd-Domain mehr; `bridge.nolmi.ai` ist DNS-grün (§0).
 - **Greenfield = direkt richtig anlegen** — kein `docker/twin-lab-web/` → `docker/nolmi/`-Rename nötig (siehe §3); das neue Verzeichnis wird sauber als `/docker/nolmi/` angelegt, Container-Namen `nolmi-runtime` / `nolmi-web` / `nolmi-bridge`.
 
-**Bridge-State-Entscheidung:** Runtime-`twin.db` **migrieren** (wertvoll, S1). Die 3 Twins gegen die **frische** Nolmi-Bridge **NEU REGISTRIEREN** (billig, spart Bridge-DB-Migration). A2A-In-Transit-History geht dabei verloren — vermutlich wertlos gegenüber den Runtime-seitigen Audit-/Conversation-Records, die ohnehin migriert werden. **ABHÄNGIG VON PRE-FLIGHT §4** — die Annahme „Bridge-DB hält nichts Unersetzliches außer Routing" wird vor dem Bridge-Block verifiziert, nicht angenommen.
+**Bridge-State-Entscheidung:** Runtime-`twin.db` **migrieren** (wertvoll, S1). Die 3 Twins gegen die **frische** Nolmi-Bridge **NEU REGISTRIEREN** (billig, spart Bridge-DB-Migration).
+
+**✅ PRE-FLIGHT §4 verifiziert Tag 31 Block 7 — S2 im Kern bestätigt, mit zwei Auflagen:**
+- **(Hart, B4/Freeze)** Vor dem finalen Cut die **unzugestellte Message-Queue** prüfen: `SELECT COUNT(*) FROM messages WHERE delivered_at IS NULL` muss **0** sein. Das ist die **einzige** echt bridge-only Datenmenge (Klasse C, siehe §4) — eine noch nicht ge-ackte Message ist runtime-seitig noch **nicht** als Audit gespiegelt. Bei >0: Empfänger online bringen + Zustellung abwarten (drainen) **oder** die betroffenen Rows selektiv mitnehmen, bevor die alte Bridge-DB verworfen wird. Im Freeze-Fenster (keine neuen Messages) ist die Queue erwartbar leer — aber **verifizieren, nicht annehmen**.
+- **(Akzeptanz)** Verwerfen der `messages`-Tabelle = Verlust der **symmetrischen A2A-Conversation-View-Historie** (die `GET /messages/conversation`-Ansicht ist bridge-verankert). Der **Content** überlebt in den lokalen Audit-Logs beider Twins (Re-Konstruktion möglich), aber die bridge-gespeiste View zeigt für Alt-Konversationen leer. Per S2-Setzung als „vermutlich wertlos" **akzeptiert**; optionaler selektiver `messages`-Export, falls History-Display erhalten bleiben soll.
+
+**Re-Registrierungs-Detail (B4):** `register` vergibt **neue** `api_token`s — der runtime-seitig gespeicherte Bridge-Token pro Twin muss entsprechend aktualisiert werden (sonst 401 gegen die neue Bridge).
 
 ### S3 — Secrets → **`.env`-File auf VPS** (wie Bestand), kein Vault
 
@@ -117,15 +123,36 @@ Das alte `docker/twin-lab-web/` im Repo bleibt unangetastet, solange der Bestand
 
 ---
 
-## 4. Offene Pre-Flight-Verifikation (vor Bridge-Block)
+## 4. Pre-Flight-Verifikation — ✅ verifiziert Tag 31 Block 7 (Commit `<dieser>`)
 
-**Bevor** S2 (Bridge-Re-Registrierung) gebaut wird: den **Bridge-DB-Inhalt am `apps/bridge`-Source** prüfen (Schema + `messages-repo`).
+**Frage:** Hält die Bridge-DB irgendetwas Unersetzliches **außer** Handle → Token → Routing?
 
-**Frage:** Was hält die Bridge-DB an Unersetzlichem **außer** Handle → Token → Routing?
-- **Wenn nur Routing/Registrierung** → Re-Registrierung der 3 Twins ist korrekt (S2-Annahme bestätigt).
-- **Wenn relevante A2A-History** (z.B. Konversations-Records, die nicht runtime-seitig gespiegelt sind) → Setzung S2 **nachjustieren**: Bridge-DB mitmigrieren statt re-registrieren.
+**Methode:** Diagnose-Scan am `apps/bridge`-Source (Schema `migrations/001_init.sql` + `002_message_type.sql`, `messages-repo.ts`, `twins-repo.ts`, `server.ts`) + Gegenprobe am Runtime-Source (`twin-service.ts#receiveBridgeMessage`, `audit/conversation-merge.ts`). Kein Rate-aus-dem-Kopf (Pattern „Sicht holen vor Aktion", BACKLOG-Lessons #45/#64).
 
-Das ist ein **Diagnose-Scan am Source**, kein Rate-aus-dem-Kopf — konsistent mit dem „Sicht holen vor Aktion"-Pattern (BACKLOG-Lessons #45/#64). Eigener Bau-Block B3 (§8), eigenes BACKLOG-Item.
+### Tabellen-Inventar (vollständig — die Bridge hat genau 2 Tabellen)
+
+| Tabelle | Klasse | Was sie hält | Begründung |
+|---|---|---|---|
+| `twins` | **A** | `handle`, `display_name`, `api_token`, `registered_at`, `last_seen_at` — reine Registry/Routing | Durch Re-Registrierung neu erzeugbar. Einzige Folge: neue `api_token`s (Re-Reg-Detail in S2). |
+| `messages` mit `delivered_at` **gesetzt** | **B** | zugestellte A2A-Messages (Content + Typ + `in_reply_to`) | **Runtime-seitig gespiegelt:** `receiveBridgeMessage` schreibt für **jede** empfangene Message ein Audit mit vollem `content` (`twin-service.ts:847–946`), und der `safeAck` an die Bridge (→ setzt `delivered_at`) läuft **nach** dem Audit-Write. ⇒ Ein gesetztes `delivered_at` **garantiert**, dass die Message in den lokalen Audits beider Seiten liegt. Bridge-Kopie redundant. |
+| `messages` mit `delivered_at IS NULL` | **C** | **unzugestellte Queue** (Offline-Empfänger, noch nicht ge-ackt) | Bridge-**only**: noch nicht empfangen ⇒ noch **kein** Runtime-Audit. Nicht aus Re-Registrierung wiederherstellbar. **Einzige echte Klasse-(C)-Menge.** |
+
+**Quer dazu — die symmetrische Conversation-VIEW:** `GET /messages/conversation` (`server.ts:236`) liest `messages.listConversation` direkt aus der Bridge-DB; `conversation-merge.ts` deklariert die Bridge-Messages explizit als „Source-of-Truth für den symmetrischen Conversation-Verlauf" und reichert sie nur mit lokalen Audit-Feldern an. ⇒ Verwirft man die `messages`-Tabelle, zeigt die A2A-Conversation-**View** für Alt-Konversationen leer. Der **Content** bleibt in den lokalen Audits (Klasse B, rekonstruierbar), nur die bridge-verankerte Display-Sequenz geht verloren.
+
+### Verdikt — **S2 im Kern BESTÄTIGT, mit zwei Auflagen**
+
+Der Scan findet **nur** Klasse (A) + (B) als regulären Bestand. Die Bridge-DB hält **kein** runtime-unabhängiges Produktgut an Konversations-**Content** — alles Zugestellte ist beidseitig in den Audits gespiegelt. ⇒ **Re-Registrierung statt voller Bridge-DB-Migration bleibt korrekt** (keine S2-Umkehr).
+
+Zwei präzise Auflagen (in S2 eingearbeitet, in §5/§8 nachgezogen):
+
+1. **(Hart, im Freeze-Fenster)** Die unzugestellte Queue ist die einzige Klasse-(C)-Menge. Vor dem finalen Cut: `SELECT COUNT(*) FROM messages WHERE delivered_at IS NULL` auf der alten Bridge-DB prüfen — muss **0** sein. Bei >0: drainen (Empfänger online → ack) oder die Rows selektiv mitnehmen. Erwartbar leer im Freeze, aber **verifizieren**.
+2. **(Akzeptanz)** A2A-Conversation-View-Historie geht verloren (Content überlebt in Audits). Per S2 als „vermutlich wertlos" akzeptiert; optionaler `messages`-Export, falls die Display-Historie erhalten bleiben soll.
+
+### Notizen für B4 (Bridge-Block)
+
+- **Bridge-DB-Pfad:** `data/bridge.db`, override via env `BRIDGE_DATABASE_PATH` (`apps/bridge/src/index.ts:25`). better-sqlite3, eine Instanz pro Prozess.
+- **⚠ Bridge ist NICHT im Repo-Compose:** `docker/twin-lab-web/docker-compose.yml` definiert nur `runtime` + `web` (Volume `twin-lab-web-data`). Die **Live-Bridge auf `srv1046432` hat eigene Deploy-Config + Volume außerhalb des Repos** — B1/B4 müssen sie dort lokalisieren (Volume-Name + DB-File). Der neue `/docker/nolmi/`-Stack nimmt die Bridge per S2 ohnehin als Service mit auf (heute fehlt sie im Compose).
+- **Re-Reg vergibt neue `api_token`s** → runtime-seitiger Bridge-Token pro Twin aktualisieren (sonst 401).
 
 ---
 
@@ -133,7 +160,7 @@ Das ist ein **Diagnose-Scan am Source**, kein Rate-aus-dem-Kopf — konsistent m
 
 1. **Neuen Stack hochfahren** auf `187.124.3.235` mit migrierter Runtime-DB (Key übernommen, Bedingung A), hinter BasicAuth (S4). Alter Stack läuft weiter unter `twin.harwayexperience.com`.
 2. **Verifikation** — 4-stufiger §6-Smoke + alle 3 Twins: Login, Memory da, **OAuth-Roundtrip** (= praktischer Beweis, dass der Encryption-Key korrekt übernommen wurde), A2A nach Re-Registrierung.
-3. **Freeze-Fenster** — angekündigt (abends, keine neuen Messages auf alt) → finaler Tarball → Einspielen → Cut. Bei 3 Usern ist **kein** kontinuierlicher Sync nötig, nur dieses eine Delta-frei-Fenster gegen Split-Brain.
+3. **Freeze-Fenster** — angekündigt (abends, keine neuen Messages auf alt). **Pflicht-Check vor dem Cut (§4-Auflage 1):** unzugestellte Bridge-Queue leer — `SELECT COUNT(*) FROM messages WHERE delivered_at IS NULL` = 0 auf der alten Bridge-DB; bei >0 drainen/mitnehmen. Dann finaler Tarball → Einspielen → Cut. Bei 3 Usern ist **kein** kontinuierlicher Sync nötig, nur dieses eine Delta-frei-Fenster gegen Split-Brain.
 4. **User-Umzug** — die 3 User auf `app.nolmi.ai` umziehen (einmal neu einloggen, neue Domain).
 
 ---
@@ -161,13 +188,13 @@ Das `DEPLOYMENT.md` §9-Cookbook ist im Body noch **durchgehend twin-lab**: Repo
 |---|---|---|
 | **B1** | VPS-Prep + Docker + Traefik | S4 / S5 |
 | **B2** | Stack-Build + `.env` + BasicAuth | S3 / S4 |
-| **B3** | Pre-Flight Bridge-DB-Check | §4 |
-| **B4** | DB-Migration + Bridge-Re-Registrierung | S1 / S2 |
+| **B3** | Pre-Flight Bridge-DB-Check | §4 — **✅ DONE Tag 31 Block 7** (S2 bestätigt + 2 Auflagen) |
+| **B4** | DB-Migration + Bridge-Re-Registrierung (Token-Update + Undelivered-Queue-Check, §4) | S1 / S2 |
 | **B5** | Smoke + 3-Twin-Verifikation | §5.2 |
-| **B6** | Cut-Over | §5.3–4 |
+| **B6** | Cut-Over (Freeze: Queue-leer-Check §5.3) | §5.3–4 |
 | **B7** | Nach Fenster: `srv1046432`-Abschaltung + Cookbook-Rewrite | S7 / §7 |
 
-Jeder Block ist abgeschlossen verifizierbar; B3 (Pre-Flight) kann das Setzungs-Bild von S2 nachjustieren, bevor B4 baut.
+Jeder Block ist abgeschlossen verifizierbar; B3 (Pre-Flight) hat das Setzungs-Bild von S2 bestätigt + um zwei Auflagen präzisiert, bevor B4 baut.
 
 ---
 

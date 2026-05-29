@@ -2723,15 +2723,16 @@ Separater Hostinger-VPS Frankfurt, Ubuntu 24.04 LTS, IP `187.124.3.235`. Neu-Auf
 
 **Markus' parallele Arbeit (Stand Tag 31):** ✅ Foundation gesichert (Domain + VPS + GitHub-Org `nolmi-ai` + npm `@nolmi` + PyPI + Docker Hub `nolmi` + Mail-Stack + Trademark-Quick-Search). Verbleibend: Social-Handles + Brand-Assets-Produktion. Details siehe Strategy-Doc §9.
 
-### Pre-Flight Bridge-DB-Inhalt verifizieren (vor Bridge-Re-Registrierung)
+### Pre-Flight Bridge-DB-Inhalt verifizieren (vor Bridge-Re-Registrierung) — ✅ Tag 31 Block 7 DONE
 
-**Status:** Offen | Phase-4-Bau-Block B3 | Aufwand: S | siehe [`docs/PHASE-4-VPS-STRATEGY.md`](./PHASE-4-VPS-STRATEGY.md) §4
+**Status:** ✅ DONE Tag 31 Block 7 | Verdikt + Inventar in [`docs/PHASE-4-VPS-STRATEGY.md`](./PHASE-4-VPS-STRATEGY.md) §4
 
-**Vor** dem Bridge-Block (B4) den Bridge-DB-Inhalt am `apps/bridge`-Source prüfen (Schema + `messages-repo`): Was hält die Bridge-DB an Unersetzlichem **außer** Handle → Token → Routing? 
-- Nur Routing/Registrierung → Re-Registrierung der 3 Twins gegen die frische Nolmi-Bridge ist korrekt (Setzung S2 bestätigt).
-- Relevante A2A-History (nicht runtime-seitig gespiegelt) → S2 nachjustieren (Bridge-DB mitmigrieren statt re-registrieren).
+**Verdikt: S2 im Kern BESTÄTIGT** — Re-Registrierung der 3 Twins gegen die frische Nolmi-Bridge bleibt korrekt, **keine** volle Bridge-DB-Migration nötig. Diagnose-Scan am `apps/bridge`-Source (2 Tabellen) + Runtime-Gegenprobe:
+- `twins` = Klasse A (reine Registry, re-registrierbar).
+- `messages` mit `delivered_at` gesetzt = Klasse B (runtime-seitig in Audits gespiegelt — `receiveBridgeMessage` persistiert Content **vor** dem Ack, das `delivered_at` setzt).
+- `messages` mit `delivered_at IS NULL` (unzugestellte Queue) = **Klasse C, einzige echt bridge-only Menge.**
 
-Diagnose-Scan am Source, kein Rate-aus-dem-Kopf (Pattern „Sicht holen vor Aktion", Lessons #45/#64). Ergebnis entscheidet, ob B4 re-registriert oder mitmigriert.
+**Zwei Auflagen für B4** (in §4 + S2 + §5.2 + §8 eingearbeitet): (1 hart) Freeze-Fenster `COUNT(*) FROM messages WHERE delivered_at IS NULL` = 0 verifizieren, sonst drainen/mitnehmen; (2 Akzeptanz) symmetrische Conversation-View-Historie geht verloren (Content überlebt in lokalen Audits), per S2 als „vermutlich wertlos" akzeptiert. **Struktur-Notiz:** Bridge fehlt im Repo-Compose (nur runtime+web in `docker/twin-lab-web/`), Live-Config/Volume liegen außerhalb des Repos auf srv1046432, DB-Pfad `data/bridge.db`.
 
 ### Hygiene-Pass Tag 31 Block 5 ✅ DONE
 
