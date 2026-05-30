@@ -1,0 +1,122 @@
+name: nolmi
+
+# ─── NOLMI SINGLE-HOST-STACK (Distribution Etappe 2.3) ─────────────────────────
+#
+# Self-Hosting OHNE TLS/Domain — erreichbar auf localhost bzw. der Server-IP.
+# Bewusst die SCHLANKE Variante neben dem Production-Stack (docker-compose.yml,
+# der Traefik + ACME + BasicAuth voraussetzt). Unterschiede zum Prod-Stack:
+#   - KEIN traefik-proxy-Netz, KEINE Traefik-Labels, KEIN TLS/ACME, KEIN htpasswd.
+#   - Ports direkt auf den Host gemappt: Web :3000, Runtime :4000, Bridge :5100.
+#   - `build:`-Blöcke statt vorgebauter Image-Tags — ein `docker compose up
+#     --build` baut den ganzen Stack aus dem frischen Clone (Build-Kontext
+#     `../..` = Repo-Root; der Symlink-Vorbehalt des Prod-Stacks gilt hier nicht,
+#     weil der Single-Host-Pfad ein normaler Clone ist).
+#
+# TLS/Domain (HTTPS, app.<domain>) = Distribution Schritt 3b (Traefik), NICHT hier.
+#
+# Secrets + Host kommen aus docker/nolmi/.env (von install/install.sh erzeugt).
+# Aus dieser Verzeichnis-Ebene gestartet (`cd docker/nolmi && docker compose
+# -f docker-compose.single-host.yml ...`) lädt Compose die .env automatisch.
+
+services:
+  nolmi-runtime:
+    build:
+      context: ../..
+      dockerfile: apps/runtime/Dockerfile
+    image: nolmi-runtime:single-host
+    container_name: nolmi-runtime
+    restart: unless-stopped
+    ports:
+      # Direkt erreichbar — der Browser spricht den Runtime DIREKT an
+      # (NEXT_PUBLIC_RUNTIME_URL), nicht über die Web-App. Auf einem
+      # öffentlichen VPS ist :4000 damit von außen offen (Single-Host-Modell
+      # ohne Reverse-Proxy; TLS/Schutz kommt mit 3b).
+      - "4000:4000"
+    networks:
+      - nolmi-internal
+    volumes:
+      - nolmi-runtime-data:/data
+    environment:
+      - NODE_ENV=production
+      - RUNTIME_HOST=0.0.0.0
+      - RUNTIME_PORT=4000
+      - TWIN_DATABASE_PATH=/data/twin.db
+      - NOLMI_ENCRYPTION_KEY=${NOLMI_ENCRYPTION_KEY}
+      - NOLMI_SESSION_SECRET=${NOLMI_SESSION_SECRET}
+      # Kein TLS → Session-Cookie darf NICHT `Secure` sein, sonst sendet der
+      # Browser ihn über http nicht und Login schlägt fehl. Keine Domain →
+      # Host-only-Cookie.
+      - SESSION_COOKIE_DOMAIN=
+      - SESSION_COOKIE_SECURE=false
+      # Interner Container-Hop zur Bridge (kein Hairpin über die Host-IP).
+      - NOLMI_DEFAULT_BRIDGE_URL=http://nolmi-bridge:5100
+      - BRIDGE_REGISTER_TOKEN=${BRIDGE_REGISTER_TOKEN}
+      - ACTIVE_PROVIDER=${ACTIVE_PROVIDER:-anthropic}
+      # Single-Host-Default: Telegram-Polling AN → RUNTIME_PUBLIC_URL darf leer
+      # bleiben (sonst Crash-Loop im Webhook-Modus, §7 B2-Befund 2).
+      - TELEGRAM_USE_POLLING=${TELEGRAM_USE_POLLING:-true}
+      - RUNTIME_PUBLIC_URL=${RUNTIME_PUBLIC_URL:-}
+    # DB-Migration läuft idempotent im Container-CMD beim Boot (init-db.js) —
+    # kein manueller db:init nötig.
+
+  nolmi-bridge:
+    build:
+      context: ../..
+      dockerfile: apps/bridge/Dockerfile
+    image: nolmi-bridge:single-host
+    container_name: nolmi-bridge
+    restart: unless-stopped
+    ports:
+      # Damit ein Single-Host auch seine EIGENE Bridge fahren kann (andere
+      # Twins via twin:bind-bridge anbinden). Reine Solo-Twins brauchen das
+      # nicht — der Port schadet aber nicht (Register ist token-geschützt).
+      - "5100:5100"
+    networks:
+      - nolmi-internal
+    volumes:
+      - nolmi-bridge-data:/data
+    environment:
+      - NODE_ENV=production
+      - BRIDGE_HOST=0.0.0.0
+      - BRIDGE_PORT=5100
+      - BRIDGE_DATABASE_PATH=/data/bridge.db
+      - BRIDGE_REGISTER_TOKEN=${BRIDGE_REGISTER_TOKEN}
+    # Auto-init-db idempotent im CMD (wie Runtime).
+
+  nolmi-web:
+    build:
+      context: ../..
+      dockerfile: apps/web/Dockerfile
+      args:
+        # #126: Browser spricht den Runtime direkt an — diese URL wird zur
+        # BUILD-Zeit ins Client-Bundle inlined. Muss die Adresse sein, unter
+        # der der Browser den Server erreicht (localhost ODER http://<server-ip>).
+        NEXT_PUBLIC_RUNTIME_URL: ${NEXT_PUBLIC_RUNTIME_URL:-http://localhost:4000}
+        # Bewusst NICHT "production" → der #126-Build-Guard bleibt no-op und
+        # erlaubt eine localhost/IP-Runtime-URL (Single-Host hat keine Domain).
+        NEXT_PUBLIC_DEPLOYMENT_LABEL: self-host
+    image: nolmi-web:single-host
+    container_name: nolmi-web
+    restart: unless-stopped
+    depends_on:
+      - nolmi-runtime
+    ports:
+      - "3000:3000"
+    networks:
+      - nolmi-internal
+    environment:
+      - NODE_ENV=production
+      - PORT=3000
+      - HOSTNAME=0.0.0.0
+      # Konsistenz/Doku — der wirksame Wert kommt aus dem Build-ARG oben.
+      - NEXT_PUBLIC_RUNTIME_URL=${NEXT_PUBLIC_RUNTIME_URL:-http://localhost:4000}
+
+networks:
+  nolmi-internal:
+    driver: bridge
+
+volumes:
+  nolmi-runtime-data:
+    name: nolmi-runtime-data
+  nolmi-bridge-data:
+    name: nolmi-bridge-data

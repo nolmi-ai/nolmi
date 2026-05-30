@@ -1019,6 +1019,23 @@ Keine Migration (Spalte existiert). **End-to-End verifiziert:** api_key (@floria
 
 **Verbleibend (später):** UI-Re-Bind-Knopf in Settings (zweite Tür — heute CLI-only, weil Neustart-Erfordernis UI-Re-Bind ohne Live-Reload entwertet); Umbinden bereits gebundener Twins (eigener Fall); Live-Re-Init ohne Neustart (`setBridgeClient`-Pfad).
 
+### Single-Host One-Liner-Install-Skript (ohne TLS) ✅
+
+**Status:** **DONE** (Distribution Etappe 2.3, Block 26, gebaut + statisch validiert; Frische-Test separat) | **Größe M** | One-Liner-Install, Single-Host-Tür
+
+**Phase-A-Befund:** Der vorhandene `docker/nolmi/docker-compose.yml` ist der **Production-Stack** (Traefik `external`-Netz, TLS-certresolver, htpasswd) → nicht Single-Host-tauglich, **separate Traefik-freie Variante** nötig. DB-Init läuft **automatisch** im Container-CMD (idempotent, Runtime + Bridge) → kein manueller `db:init`. Alle Dockerfiles nutzen schon `@nolmi/*`-Filter (B2-Runbook-„@twin-lab"-Hinweis stale). `loadMasterKey` verlangt 32-Byte-base64 → `openssl rand -base64 32` ist format-gleicher Drop-in (Host-node für die Generatoren nicht nötig).
+
+**Umsetzung:**
+- `docker/nolmi/docker-compose.single-host.yml` — 3 Services, `build:`-Blöcke (Kontext `../..`), Ports 3000/4000/5100 direkt, internes Netz, **kein** Traefik/TLS/htpasswd. `SESSION_COOKIE_SECURE=false` (Login über http), `TELEGRAM_USE_POLLING=true` (kein Webhook-Crash-Loop), Web-Build-Args `NEXT_PUBLIC_RUNTIME_URL`/`DEPLOYMENT_LABEL=self-host`.
+- `install/install.sh` — `set -euo pipefail`, 7 Schritte (OS/Tools → Docker prüfen/+apt-install → Repo klonen-oder-nutzen → `.env` mit `openssl`-Secrets **idempotent, nie geloggt, umask 077** → `up --build -d` → DB-Init-Hinweis → Übergabe an `twin:onboard` via `docker compose exec`). ENV-konfigurierbar (`NOLMI_HOST` für VPS-IP etc.).
+- `install/README.md` — lokal vs. VPS, Ports/Sichtbarkeit, TLS=3b.
+
+**§7-Cookbook-Befunde adressiert (Single-Host-relevant):** B2-Befund 2 (Telegram-Polling-Default) + #126 (Web-Build-Arg). Traefik-Befunde (B1-1/2, B2-1/4) explizit auf 3b verschoben.
+
+**Verifiziert (statisch):** `bash -n` Syntax grün; `docker compose -f …single-host.yml config` VALID (3 Services). **NICHT ausgeführt** — Frische-Test läuft separat im isolierten Wegwerf-Container (Markus, srv1046432). **KEIN Production-Deploy.**
+
+**Verbleibend:** **Schritt 3b** (Production/TLS: Traefik + ACME + Domain + BasicAuth — der bestehende `docker-compose.yml`); Update-Mechanismus (git pull + rebuild / Image-Tag-Bump); optional Docker-Auto-Install auch für non-apt-Linux.
+
 ### 129. .env.example-Default auf Anthropic switchen ✅
 
 **Abgeschlossen Tag 30 (28. Mai 2026, Donnerstag), gemeinsam mit #127 in einem Commit (Tag 30 Block 1).** `.env.example` Provider-Block umgestellt:
