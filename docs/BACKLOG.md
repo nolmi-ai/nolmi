@@ -2707,6 +2707,17 @@ Beim Phase-4-Deploy zu nolmi-ai/nolmi: Alias umbenennen zu
 2. VPS srv1046432 herunterfahren
 3. Falls Hostinger-Mietkosten: VPS-Vertrag kündigen
 
+### PAT-Rotation + Git-History-Secret-Scan — Release-Gate für Open-Source-Self-Hosting
+
+**Status:** **OFFEN** | **Größe S** | **Priorität: must-vor-Release** (Blocker für `Repo public`) | siehe [`docs/DISTRIBUTION-STRATEGY.md`](./DISTRIBUTION-STRATEGY.md) §5a
+
+Ein öffentliches Repo veröffentlicht die **komplette Git-History**, nicht nur den HEAD-Stand. Der für den VPS-Repo-Klon ausgestellte **Fine-grained PAT** (read-only, `nolmi-ai/nolmi`, S5) wurde im Chat-Kontext gepostet und liegt **potenziell in History/Commits/Notizen** — in öffentlicher History wäre er sofort kompromittiert. **Vor dem Öffnen des Repos (Distribution Etappe 3):**
+1. **PAT rotieren** — alten Token bei GitHub widerrufen, neuen ausstellen (entwertet den alten unabhängig davon, wo er liegt)
+2. **History-Secret-Scan** über die **volle** History (`gitleaks`/`trufflehog`) — PATs, Keys, `.env`-Leaks; bei Treffer History-Rewrite (`git filter-repo`) **vor** dem Öffnen
+3. Erst dann `Repo public`
+
+Kein Hygiene-Nice-to-have, sondern hartes Release-Gate. Aus Distribution-Session Tag 31 (Block 19).
+
 **Neue Items aus Phase 3a (für später):**
 - **`SESSION_COOKIE_NAME`-Konstante konsolidieren:** heute in `apps/runtime/src/auth/session.ts` (Export) **und** `apps/web/middleware.ts` (Local-Const-Duplikat) gepflegt. Cross-App-Import vom Runtime ins Web ist heute strukturell nicht vorgesehen (Runtime exportiert keine Subpaths). Sauberer Pfad: `@nolmi/shared/auth-cookies` mit beiden Konstanten, beide Apps konsumieren von dort. Aufwand S, nice (Phase 5+).
 

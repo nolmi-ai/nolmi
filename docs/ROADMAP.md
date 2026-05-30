@@ -28,6 +28,20 @@ Ein Item kann auf einer Feature-Phase liegen, einer UX-Stufe dienen und einen Vi
 
 ---
 
+## ▶ Aktive Arbeits-Achse: Distribution — Nolmi als Produkt für andere
+
+**Strategie gelockt Tag 31, Bau noch nicht begonnen.** Vollständig: [`docs/DISTRIBUTION-STRATEGY.md`](./DISTRIBUTION-STRATEGY.md).
+
+Der Schritt von „läuft für mich" zu **„ist ein Produkt für andere"** — quer zu den Feature-Phasen, baut auf dem Infrastruktur-Meilenstein auf. **Ein Produkt, zwei Betriebsmodi:** Self-Hosting via GitHub (One-Liner-Install, wie OpenClaw/Hermes) + Managed via `nolmi.ai`.
+
+**Fünf Setzungen (D1–D5):** D1 Self-Hosting zuerst, Managed zweiter Strang · D2 API-Key-Default, OAuth nur self-hosted + manuelle Allowlist (Liability-Lehre aus dem Anthropic-OpenClaw-Block) · D3 Bridge optional (standalone → eigene → fremde Bridge; Föderation bleibt Produkt-Phase 4) · D4 Phase 2.5 reicht für Allowlist-Gruppe, Fremden-Apparat vertagt, Sofort-Schritt Tenant-Isolations-Audit · D5 Gratis-Closed-Beta jetzt, kommerziell-Managed als bewusst offene spätere Tür.
+
+**Bau-Sequenz:** Etappe 0 Diagnosen (read-only: Bridge-Abhängigkeitstiefe, Isolations-Audit, Onboarding-Stand) → Etappe 1 Bridge-Optionalität (die eine Architektur-Arbeit) → Etappe 2 Distribution-Layer (One-Liner-Install = Phase-4-B1/B2 + 6 Cookbook-Befunde automatisiert, CLI-Onboarding, `auth_mode`-Flag, Update-Mechanismus) → Etappe 3 Release. **Release-Gates:** secret-freie Git-History (PAT-Rotation + History-Scan — Blocker) + Lizenz (MIT).
+
+**Differenzierung:** Solo-Twin auf OpenClaw/Hermes-Niveau (Einstieg) + **A2A-Bridge als Alleinstellung** (kein Solo-Agent hat das).
+
+---
+
 # ══ ACHSE 1 — Engineering / Feature-Phasen ══
 
 ## Wo wir stehen
@@ -175,14 +189,15 @@ Nicht hier dupliziert — **Source of Truth: `docs/TWIN-VISION.md` Block 3+4.** 
 
 ## Was als Nächstes konkret kommt
 
-Die offene Front (ohne Priorisierung — das ist die **nächste Entscheidung**, siehe unten):
+Die offene Front:
 
-- **(a) Öffentlicher Launch** — Launch-Quartett #112 (Landing) / #113 (Demo) / #114 (Posts) / #115 (Timing). Das einzige real offene Stück von Pre-Launch-Phase A.
+- **▶ (0) Distribution — Nolmi als Produkt für andere** — die jetzt **priorisierte Achse** (Strategie gelockt, siehe Block oben + [`docs/DISTRIBUTION-STRATEGY.md`](./DISTRIBUTION-STRATEGY.md)). Nächster konkreter Schritt: die read-only Etappe-0-Diagnosen (Bridge-Abhängigkeitstiefe, Tenant-Isolations-Audit, Onboarding-Stand). Geht dem öffentlichen Launch (a) und der Produkt-Phase-4-Föderation (b) **voran** — Self-Hosting-Verpackung + Bridge-Optionalität sind Voraussetzung dafür, dass „Launch" überhaupt etwas Verteilbares meint.
+- **(a) Öffentlicher Launch** — Launch-Quartett #112 (Landing) / #113 (Demo) / #114 (Posts) / #115 (Timing). Setzt auf der Distribution-Verpackung auf.
 - **(b) Multi-Channel / Föderation (Phase 4)** — WhatsApp (4.2), Public-Mode + Beziehungs-Modell (4.3), Föderation (4.4), A2A-Adapter (4.5); Telegram-Vollausbau (4.1 Stufe 2/3).
 - **(c) UX-Welle 2 / Stufe 2 (Casual-User)** — eigene Strategie-Session ausstehend; Persona-/Mandate-Editor-UI offen.
 - **(d) Vision-Patterns (langfristig)** — die acht Reifungs-Pfade auf der 3.4-Foundation, plus 3.6 Procedural/Dream in Phase B.
 
-> **Nächste Entscheidung (offen, hier bewusst nicht vorweggenommen):** Richtungs-Priorisierung — **Launch zuerst** (a) vs. **Multi-Channel-Tiefe zuerst** (b) vs. **Casual-User-UX zuerst** (c). Wird in der nächsten Strategie-Besprechung gesetzt.
+> **Bewusst offen (nicht vorweggenommen):** Distribution ist als nächste Achse priorisiert, aber die **kommerzielle Tür (D5)** — ob/wann `nolmi.ai` von Closed-Beta zu bezahltem Managed-Angebot wird — bleibt offen und entscheidet sich an der Resonanz des Self-Hosting-Release, nicht vorab. Ebenso bleibt die Reihenfolge **innerhalb** der Restfront (a/b/c/d nach Distribution) eine spätere Entscheidung.
 
 ---
 
@@ -209,4 +224,5 @@ Die offene Front (ohne Priorisierung — das ist die **nächste Entscheidung**, 
 - `docs/UX-STRATEGY.md` — Achse 2 (UX-Reifung)
 - `docs/TWIN-VISION.md` — Achse 3 (Vision-Patterns + ethische Leitplanken)
 - `docs/REBRAND-NOLMI-STRATEGY.md` + `docs/PHASE-4-VPS-STRATEGY.md` — Infrastruktur-Meilenstein
+- `docs/DISTRIBUTION-STRATEGY.md` — Distribution (Setzungen D1–D5, Bau-Etappen, Release-Gates)
 - `docs/131-OAUTH-STRATEGY.md` — OAuth (#131) Voll-Doku
