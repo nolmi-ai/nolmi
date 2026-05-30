@@ -949,7 +949,8 @@ Runtime selbst ist Bridge-resilient (Reconnect-Loop ohne Crash für existing Twi
 - ✅ Chat-UI: A2A-Liste + „Neue Konversation" ausgeblendet bei `profile.bridge.url == null` (Inbox-Tab bleibt — Tool/Mandate-Approvals sind bridge-unabhängig)
 
 **Verbleibend (Distribution Etappe 2 / D3-Re-Bind):**
-- ✅ `twin:bootstrap` setzt `owner_user_id` jetzt via `OWNER_EMAIL`-Lookup (Etappe 2.1, eigenes Item unten DONE) — **Release-Blocker behoben**. Verbleibend: interaktive User-Anlage + Owner-Zuweisung im CLI-Onboarding-Flow koppeln (Etappe 2.2).
+- ✅ `twin:bootstrap` setzt `owner_user_id` jetzt via `OWNER_EMAIL`-Lookup (Etappe 2.1, eigenes Item unten DONE) — **Release-Blocker behoben**.
+- ✅ CLI-Onboarding Weg A / Opt 3 (Etappe 2.2, eigenes Item unten DONE): `pnpm twin:onboard` legt den ersten User an, der Web-Wizard erstellt den Twin (setzt Owner korrekt). **Zwei gleichwertige Türen** erreicht. Verbleibend: Weg B (durchgehendes Terminal-Onboarding inkl. Persona/Key) später.
 - Onboarding-**Wizard**-Submit-Branch: Solo-Twin via Web anlegen (heute verlangt der Wizard noch eine Bridge — `server.ts` Onboarding-Submit)
 - Settings „Bridge nachträglich einhängen"-Section (Re-Bind Stufe 1→2/3, D3)
 - Production-Deploy der Migration 026 (separat, mit Backup)
@@ -974,7 +975,21 @@ Keine Schema-Änderung nötig (`owner_user_id` existiert seit Migration 026, nul
 
 **Lokal verifiziert (Verhalten, Wegwerf-Twin `@solo2`, danach entfernt):** (1) bootstrap mit `OWNER_EMAIL=markus.baier@harway.de` (ohne `BRIDGE_URL`) → DB-Check `owner_user_id = user_GnAgLosIQsW1ymQu` (≠ NULL); (2) owner-gescopte Switcher-Query (`list({ ownerUserId })`, identisch zur `GET /twins`-Filterung `profile.ownerUserId === user.userId` in `server.ts:250`) liefert `@solo2` → **erscheint im Switcher ohne manuelles UPDATE**; Registry-Boot lädt `@solo2` eager. (3) Gegenprobe ohne `OWNER_EMAIL` → `WARN`-Zeile + Owner NULL. (4) Fehler-Pfad `OWNER_EMAIL` ohne User → harter Fehler mit `user:create`-Hinweis.
 
-**Onboarding-Kopplung (User-Anlage + Owner-Zuweisung im interaktiven Flow)** bleibt als Etappe-2-Schritt-2 offen — `user:create --assign-twin` deckt den manuellen Pfad heute schon ab; der Release-Blocker (Twin nach Install unsichtbar) ist mit diesem Fix weg.
+**Onboarding-Kopplung (User-Anlage + Owner-Zuweisung im interaktiven Flow)** → erledigt in **Etappe 2.2 (Block 23)** via Weg A / Opt 3, siehe eigenes Item unten.
+
+### CLI-Onboarding Weg A / Opt 3 (twin:onboard legt ersten User, Wizard macht Twin) ✅
+
+**Status:** **DONE** (Distribution Etappe 2.2, Block 23, lokal end-to-end verifiziert) | **Größe S** | zweite Tür neben Web-Wizard (#110)
+
+**Phase-A-Befund (die kritische Frage „kann der Wizard einen vorhandenen Twin aufgreifen?"):** **Nein.** `POST /onboarding/submit` macht immer `INSERT` eines neuen Twins und wirft **409 bei existierendem Handle** (`server.ts:723`), registriert immer auf der Bridge. Und ein Owner, der **schon einen Twin besitzt, landet nie im Wizard** — `/chat` leitet zu `/chat/<handle>`, der Wizard erscheint nur bei 0 owned Twins (`chat/page.tsx:38`). Zusatz: `bootstrap-twin` ist nicht „minimal" — Persona-Files + LLM-Key sind Pflicht, der Twin ist nach Bootstrap schon vollständig. Würde das CLI einen Twin bootstrappen, gäbe es im Wizard ein **409 oder einen Doppel-Twin**.
+
+**Entscheidung (Markus, Opt 3):** Das CLI deckt nur die echte Terminal-/UI-Lücke ab — den **ersten User** anlegen (keine öffentliche Signup-Seite, nur `/login`; ohne Login kein Wizard-Zugang). Den Twin macht der Web-Wizard (Persona+LLM-Key+Presets im UI, Owner korrekt gesetzt — `server.ts:791`, A3 verifiziert). Web-Wizard **unangetastet**.
+
+**Umsetzung:** `pnpm twin:onboard` (`apps/runtime/src/scripts/onboard.ts`) — interaktiv E-Mail (`readLine`) + Passwort+Bestätigung (`readSecret`, kein Echo) + optionaler Anzeigename → `UsersRepo.create` (bcrypt cost 12). Idempotent (existierender User → „logge dich ein", kein Doppel-Anlegen). Übergabe-Meldung an Tür 2. `readSecret`/`readLine` nach `scripts/_prompt-helpers.ts` extrahiert (DRY beim zweiten Aufruf; `set-api-key.ts` nutzt den shared Baustein).
+
+**End-to-End lokal verifiziert** (Wegwerf-User `test-onboard@local.dev` + Twin `@onboardtest`, restlos entfernt): onboard→User (Hash `$2a$12$`); Login→`GET /twins`=`[]` (Wizard-Trigger); `submit`→201; **DB owner_user_id = neuer User, genau 1 Twin (kein Doppel)**; Switcher zeigt ihn; Direct-Chat HTTP 200 mit echter LLM-Antwort. Kein 409, kein manuelles UPDATE. **KEIN Production-Deploy.**
+
+**Weg B (offen, später):** durchgehendes Terminal-Onboarding inkl. Persona/LLM-Key im CLI — bräuchte einen „vorhandenen Twin ergänzen"-Pfad im Wizard ODER einen Stub-Twin-Modus im Bootstrap. Opt 3 verbaut das nicht.
 
 ### 129. .env.example-Default auf Anthropic switchen ✅
 
