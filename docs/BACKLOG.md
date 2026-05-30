@@ -1021,7 +1021,7 @@ Keine Migration (Spalte existiert). **End-to-End verifiziert:** api_key (@floria
 
 ### Single-Host One-Liner-Install-Skript (ohne TLS) ✅
 
-**Status:** **DONE** (Distribution Etappe 2.3, Block 26, gebaut + statisch validiert; Frische-Test separat) | **Größe M** | One-Liner-Install, Single-Host-Tür
+**Status:** **DONE** (Distribution Etappe 2.3, Block 26 gebaut + Block 27 **am Verhalten verifiziert** — Frische-Test von Null bestanden) | **Größe M** | One-Liner-Install, Single-Host-Tür
 
 **Phase-A-Befund:** Der vorhandene `docker/nolmi/docker-compose.yml` ist der **Production-Stack** (Traefik `external`-Netz, TLS-certresolver, htpasswd) → nicht Single-Host-tauglich, **separate Traefik-freie Variante** nötig. DB-Init läuft **automatisch** im Container-CMD (idempotent, Runtime + Bridge) → kein manueller `db:init`. Alle Dockerfiles nutzen schon `@nolmi/*`-Filter (B2-Runbook-„@twin-lab"-Hinweis stale). `loadMasterKey` verlangt 32-Byte-base64 → `openssl rand -base64 32` ist format-gleicher Drop-in (Host-node für die Generatoren nicht nötig).
 
@@ -1032,7 +1032,9 @@ Keine Migration (Spalte existiert). **End-to-End verifiziert:** api_key (@floria
 
 **§7-Cookbook-Befunde adressiert (Single-Host-relevant):** B2-Befund 2 (Telegram-Polling-Default) + #126 (Web-Build-Arg). Traefik-Befunde (B1-1/2, B2-1/4) explizit auf 3b verschoben.
 
-**Verifiziert (statisch):** `bash -n` Syntax grün; `docker compose -f …single-host.yml config` VALID (3 Services). **NICHT ausgeführt** — Frische-Test läuft separat im isolierten Wegwerf-Container (Markus, srv1046432). **KEIN Production-Deploy.**
+**Verifiziert (statisch, Block 26):** `bash -n` Syntax grün; `docker compose -f …single-host.yml config` VALID (3 Services).
+
+**Verifiziert (am Verhalten, Block 27 — Frische-Test von Null):** echter Lauf in einem isolierten `docker:dind`-Wegwerf-Container (srv1046432, getrennt vom Standby, danach restlos entfernt). Code **credential-frei** rein via `git archive` + stdin-tar → **Mode 1** („Im Repo ausgeführt", kein Clone/PAT). **7/7 Skript-Schritte grün** (Build aller 3 Images ~115 s, out-of-the-box, keine stale `@twin-lab`-Referenz; `.env`-Secrets via `openssl` nicht geloggt). **3 Container Up** (kein Restart-Loop). Runtime sauber: **alle 26 Migrationen frisch inkl. 026 im `foreign_keys_off`-Modus auf LEERER DB** (Nebenbefund: FK-Cascade-sicherer Runner-Tweak läuft auch auf frischer Wiese), Onboarding-only/0 Twins, :4000, **kein `EADDRINUSE`, kein Telegram-Crash-Loop**. Isolation gehalten (Standby + alle srv1046432-Stacks unberührt). Bewusst nicht im dind getestet: `twin:onboard`+Browser (2.2 schon end-to-end) + externer Port-Zugang. **KEIN Production-Deploy.**
 
 **Verbleibend:** **Schritt 3b** (Production/TLS: Traefik + ACME + Domain + BasicAuth — der bestehende `docker-compose.yml`); Update-Mechanismus (git pull + rebuild / Image-Tag-Bump); optional Docker-Auto-Install auch für non-apt-Linux.
 
