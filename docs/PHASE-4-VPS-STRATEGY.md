@@ -170,10 +170,30 @@ Der Scan findet als regulären Bestand nur Klasse (A) + (B) plus eine schmale Kl
 
 ## 5. Cut-Over-Sequenz (geordnet)
 
-1. **Neuen Stack hochfahren** auf `187.124.3.235` mit migrierter Runtime-DB (Key übernommen, Bedingung A), hinter BasicAuth (S4). Alter Stack läuft weiter unter `twin.harwayexperience.com`. (Sowohl `nolmi-runtime` als auch `nolmi-bridge` führen ihr `init-db` per CMD beim Boot aus — idempotent, also auf dem restored Volume ein No-op-Bestätigungslauf; **kein** manueller Init-Schritt nötig, Tag 31 Block 12.)
+1. **Neuen Stack hochfahren** auf `187.124.3.235` mit migrierter Runtime-DB (Key übernommen, Bedingung A), hinter BasicAuth (S4). **Vor dem Runtime-Start die zwei Post-Restore-Pflicht-Sweeps fahren** (B6-Befund 1+2 unten — `bridge_url`-Rewrite + Geist-Twin-Delete). Alter Stack läuft weiter unter `twin.harwayexperience.com`. (Sowohl `nolmi-runtime` als auch `nolmi-bridge` führen ihr `init-db` per CMD beim Boot aus — idempotent, also auf dem restored Volume ein No-op-Bestätigungslauf; **kein** manueller Init-Schritt nötig, Tag 31 Block 12.)
 2. **Verifikation** — 4-stufiger §6-Smoke + alle 3 Twins: Login, Memory da, **OAuth-Roundtrip** (= praktischer Beweis, dass der Encryption-Key korrekt übernommen wurde), **A2A ohne Re-Registrierung: erster A2A-Hop pro Twin ohne 401** (= Token-Match aus migrierter `bridge.db` praktisch bewiesen, vgl. §4-B4-Verifikation).
 3. **Freeze-Fenster** — angekündigt (abends, keine neuen Messages auf alt) → finaler **Doppel-Tarball beider DBs** (`twin.db` + `bridge.db`) aus demselben Moment → Einspielen → Cut. Bei 3 Usern ist **kein** kontinuierlicher Sync nötig, nur dieses eine Delta-frei-Fenster gegen Split-Brain. (Die in Block 7 erwogene undelivered-Queue-Leer-Prüfung entfällt — die Queue migriert mit der `bridge.db` mit, §4.)
 4. **User-Umzug** — die 3 User auf `app.nolmi.ai` umziehen (einmal neu einloggen, neue Domain).
+
+### B4 ✅ verifiziert auf Backup-Kopie (Tag 31 Block 15) — Mechanik-Beweis ohne Freeze
+
+Die Doppel-DB-Migration wurde **ohne** Production-Freeze auf einer §8.3-Backup-Kopie (twin.db + bridge.db aus demselben Moment, Off-Site auf Mac) durchgespielt — der Stack-Mechanik-Beweis, Production lief unterdessen weiter. **Verifiziert am Verhalten:** Bedingung A (kein GCM-Fehler, Secrets entschlüsselt, `sk-a…jAAA`, oauth-refresh läuft → `NOLMI_ENCRYPTION_KEY` byte-genau vom alten `TWIN_LAB_ENCRYPTION_KEY`); S2-Token-Match `bridge_token`==`api_token` byte-gleich für @markus/@florian/@heiko (kein 401, kein Writeback — S2-Korrektur Block 8 bestätigt); A2A-Stream `[bridge:stream] verbunden` ×3 gegen `nolmi-bridge:5100` (nach `bridge_url`-Fix, B6-Befund 1); Bridge-Auto-init idempotent gegen restored Volume (0 neu, 2 skipped).
+
+**Der echte Cut-Over (B6) fährt denselben Ablauf MIT Freeze + delta-frei + den zwei Post-Restore-Pflicht-Sweeps unten.**
+
+### Post-Restore-Pflicht-Schritte für B6 (nach Volume-Restore, VOR Runtime-Start, je mit DB-Backup davor)
+
+**B6-Befund 1 (PFLICHT) — Stale-Infra-Reference-Sweep nach Doppel-DB-Migration:** Die migrierte `twin.db` trägt `srv1046432`-Ära-Werte. **Bestätigt betroffen:** `twin_profiles.bridge_url` (3 Twins → `http://twin-lab-bridge:5100`, muss `http://nolmi-bridge:5100`). Der per-Twin-DB-Wert ist **autoritativ** und sticht `NOLMI_DEFAULT_BRIDGE_URL` — die Env greift nur bei Onboarding-**Neuanlagen** (`pickBridgeUrlForOnboarding`, `server.ts:847`), **nicht** für Bestands-Twins. **FIX (gegen migrierte twin.db, Backup davor):**
+```sql
+UPDATE twin_profiles SET bridge_url='http://nolmi-bridge:5100' WHERE bridge_url LIKE '%twin-lab-bridge%';
+```
+Sweep-Kandidaten in B4 gegengeprüft und **sauber/leer**: `mcp_servers.url`, `telegram_configs`. In B6 **erneut** read-only sweepen, bevor das `UPDATE` läuft, falls bis dahin neue Werte dazukamen.
+
+**B6-Befund 2 (PFLICHT) — verwaister Bridge-Twin `@test122prod`:** Die `bridge.db` hält **4** registrierte Twins, die `twin.db` nur **3** Profile (@markus/@florian/@heiko). Der vierte, `@test122prod`, ist ein Test-Twin **nur** in der Bridge-DB ohne Runtime-Profil — aus dem Tag-29-Production-Smoke (#122), von der Tag-31-Hygiene (nur lokale DB) **nie** aus der Production-Bridge entfernt. Routet ins Leere (harmlos), aber gehört beim Cut-Over aus der migrierten `bridge.db` bereinigt, sonst lebt er dauerhaft im Nolmi-Stack. **FIX (gegen migrierte bridge.db, Backup davor):**
+```sql
+DELETE FROM twins WHERE handle='@test122prod';
+```
+**Generalisierung:** vor dem Löschen `SELECT handle FROM twins` gegen die 3 echten Twins abgleichen — die Production-Bridge-DB auf **weitere** Test-/Geist-Twins prüfen, nicht nur diesen einen.
 
 ---
 
@@ -227,9 +247,9 @@ B2 (3-Service-Stack-Bring-up auf Staging + Prod-Cert-Flip) hat sechs Stellen auf
 | **B1** | VPS-Prep + Docker + Traefik | S4 / S5 — **✅ DONE Tag 31 Block 9** (Docker 29.5.2 + Compose v5.1.4, Traefik **v3.6**, UFW 22/80/443, HTTP→HTTPS-301 verifiziert; 3 Cookbook-Bugs §7) |
 | **B2** | Stack-Build + `.env` + BasicAuth — Compose in [`docker/nolmi/`](../docker/nolmi/) (3 Services inkl. Bridge) | S3 / S4 — **✅ DONE (Prod) Tag 31 Block 14** (3-Service-Stack up, **Prod-Certs** `Let's Encrypt CN=YR2` über app/runtime/bridge.nolmi.ai, `TLS-verify=0`, app→401/BasicAuth, runtime/bridge→404; 4 Cookbook-Befunde §7) |
 | **B3** | Pre-Flight Bridge-DB-Check | §4 — **✅ DONE Tag 31 Block 7** (führte zur S2-Korrektur Block 8) |
-| **B4** ← **nächster Block** | **Doppel-DB-Migration** (`twin.db` + `bridge.db`, gemeinsamer Freeze-Snapshot) + Token-Match-Verify | S1 / S2 |
-| **B5** | Smoke + 3-Twin-Verifikation | §5.2 |
-| **B6** | Cut-Over (Freeze: Doppel-Tarball beider DBs, §5.3) | §5.3–4 |
+| **B4** | **Doppel-DB-Migration** (`twin.db` + `bridge.db`, gemeinsamer Snapshot) + Token-Match-Verify | S1 / S2 — **✅ DONE Tag 31 Block 15** (auf Backup-Kopie ohne Freeze: Bedingung A kein GCM-Fehler, S2-Token-Match 3/3 byte-gleich, A2A-Stream ×3 gegen nolmi-bridge; 2 B6-Pflicht-Sweeps §5) |
+| **B5** ← **nächster Block** | Smoke + 3-Twin-Verifikation | §5.2 |
+| **B6** | Cut-Over (Freeze: Doppel-Tarball beider DBs §5.3 + Post-Restore-Sweeps §5) | §5.3–4 |
 | **B7** | Nach Fenster: `srv1046432`-Abschaltung + Cookbook-Rewrite | S7 / §7 |
 
 **B4-Notiz:** `bridge.db` liegt auf `srv1046432` unter `data/bridge.db` in einem eigenen Volume **außerhalb** des Repo-Compose (B3-Strukturbefund) — B4 muss sie dort lokalisieren und mit-tarballen.
@@ -243,7 +263,7 @@ B2 (3-Service-Stack-Bring-up auf Staging + Prod-Cert-Flip) hat sechs Stellen auf
 - ~~Wegwerf-Secrets~~ → **✅ erledigt B2** (`openssl rand -hex 32` für Encryption-Key + Register-Token; in B4 ersetzt durch echten Key vom alten VPS, Bedingung A).
 - **Drei Images bauen** aus Repo-Root (Tags `nolmi-runtime/-bridge/-web:latest`); Web mit `--build-arg NEXT_PUBLIC_RUNTIME_URL=https://runtime.nolmi.ai --build-arg NEXT_PUBLIC_DEPLOYMENT_LABEL=production` (sonst localhost im Bundle, #126). — ✅ in B2 gebaut.
 
-**B2 vollständig abgeschlossen (Tag 31 Block 14, Prod-Certs):** 3-Service-Stack up, **Prod-Zertifikate** (`Let's Encrypt CN=YR2`, kein STAGING) über `app/runtime/bridge.nolmi.ai`, `TLS-verify=0`, Bridge selbstheilend (init-db), Runtime initialisiert, BasicAuth aktiv (app→401 + `www-authenticate`; runtime/bridge→404, kein `/`-Router = korrekt). Der Flip `le-staging`→`le` griff erst nach dem Resolver-Store-Reset (§7 B2-Befund 4). Der Stack läuft damit end-to-end auf echter Infra mit vertrauten Certs — auf **Wegwerf-Secrets + leeren Volumes**, Production (`srv1046432`) unberührt. Nächster Block: **B4** (Doppel-DB-Migration).
+**B2 vollständig abgeschlossen (Tag 31 Block 14, Prod-Certs):** 3-Service-Stack up, **Prod-Zertifikate** (`Let's Encrypt CN=YR2`, kein STAGING) über `app/runtime/bridge.nolmi.ai`, `TLS-verify=0`, Bridge selbstheilend (init-db), Runtime initialisiert, BasicAuth aktiv (app→401 + `www-authenticate`; runtime/bridge→404, kein `/`-Router = korrekt). Der Flip `le-staging`→`le` griff erst nach dem Resolver-Store-Reset (§7 B2-Befund 4). Der Stack läuft damit end-to-end auf echter Infra mit vertrauten Certs — auf **Wegwerf-Secrets + leeren Volumes**, Production (`srv1046432`) unberührt. **B4** (Doppel-DB-Migration) ist seit Block 15 auf einer Backup-Kopie verifiziert (§5); nächster Block: **B5/B6** (Smoke + Cut-Over mit Freeze).
 
 Jeder Block ist abgeschlossen verifizierbar; B3 (Pre-Flight) hat die gelockte S2 begründet **gekippt** (Re-Register → Bridge-DB-Migration), bevor B4 baut — genau der Zweck eines Pre-Flights.
 
