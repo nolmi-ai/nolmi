@@ -2691,21 +2691,21 @@ spezifischem SSH-Key. Wird heute nur für Production-Deploy genutzt
 Beim Phase-4-Deploy zu nolmi-ai/nolmi: Alias umbenennen zu
 `github.com-nolmi` oder als zweiten Alias parallel anlegen.
 
-### Production-VPS srv1046432 Abschaltung (nach Phase 4)
+### Alten Stack srv1046432 abschalten — einzige offene Phase-4-Restaktion
 
-**Status:** ✅ TERMINIERT Tag 31 (Phase-4-Strategy-Session) | siehe [`docs/PHASE-4-VPS-STRATEGY.md`](./PHASE-4-VPS-STRATEGY.md) §3 + §6 (= S7) | Aufwand: S
+**Status:** **OFFEN** (S) | bewusst offen gehalten nach B6-Cut-Over (Tag 31 Block 17) | siehe [`docs/PHASE-4-VPS-STRATEGY.md`](./PHASE-4-VPS-STRATEGY.md) §6 + S7
 
-**Auflösung:** **Nicht am Cut-Over-Tag**, sondern nach **1–2 Wochen stillem Verifikations-Fenster** — der alte Stack ist der Rollback (Hot-Standby unter `twin.harwayexperience.com`, ohne DNS-TTL-Wartezeit). Erst danach abschalten. Trigger gegen Rollback z.B. OAuth-Roundtrip-Failure (Encryption-Key-Problem, Bedingung A).
+**Stand Tag 31 Block 17:** Nolmi ist produktiv auf `187.124.3.235`, Phase 4 (B1–B6) abgeschlossen. Der alte Stack `srv1046432` (`twin.harwayexperience.com`) **bleibt Hot-Standby** und wird **nicht** mit-abgeschaltet — Markus' echte @markus-Daten liegen dort in nicht-reproduzierbarem Zustand, also ist das Standby-Netz gerade jetzt (frisch produktiv) am wertvollsten. Abschaltung ist eine **spätere Einzelentscheidung**, nach stabilem Nolmi-Prod-Fenster.
 
-Ursprünglicher Kontext (bleibt zur Historie):
+**Vor der Abschaltung (Voraussetzungen):**
+1. Gewohnheit/Bookmarks auf `app.nolmi.ai` umgestellt (versehentliches Weitertesten auf `twin.harwayexperience.com` vermeiden)
+2. Optional: alte Domain auf „umgezogen"-Redirect — **ohne** den Standby-Stack zu killen
+3. Nolmi-Prod über ein stilles Fenster stabil bestätigt
 
-Nach Phase 4 (Nolmi live) ist srv1046432 redundant.
-Schritte:
-1. Cut-Over verifizieren (Nolmi auf nolmi.ai bedient alle 3 Realnutzer
-   Markus/Florian/Heiko)
-2. DB-Backup von srv1046432 als Archiv ziehen
-3. VPS srv1046432 herunterfahren
-4. Falls Hostinger-Mietkosten: VPS-Vertrag kündigen
+**Abschalt-Schritte (wenn entschieden):**
+1. DB-Backup von srv1046432 als Archiv ziehen
+2. VPS srv1046432 herunterfahren
+3. Falls Hostinger-Mietkosten: VPS-Vertrag kündigen
 
 **Neue Items aus Phase 3a (für später):**
 - **`SESSION_COOKIE_NAME`-Konstante konsolidieren:** heute in `apps/runtime/src/auth/session.ts` (Export) **und** `apps/web/middleware.ts` (Local-Const-Duplikat) gepflegt. Cross-App-Import vom Runtime ins Web ist heute strukturell nicht vorgesehen (Runtime exportiert keine Subpaths). Sauberer Pfad: `@nolmi/shared/auth-cookies` mit beiden Konstanten, beide Apps konsumieren von dort. Aufwand S, nice (Phase 5+).
@@ -2714,7 +2714,7 @@ Schritte:
 
 **Status:** Offen, **Setzungen gelockt Tag 31** | gated nach Phase 1-3 | Aufwand: M-L | **VPS bereits provisioniert Tag 30/31**
 
-**Strategy + Bau-Vorlage:** [`docs/PHASE-4-VPS-STRATEGY.md`](./PHASE-4-VPS-STRATEGY.md) — 7 Setzungen (S1 DB-Migration, S2 voller Stack inkl. Bridge unter `/docker/nolmi/` + **Doppel-DB-Migration `twin.db`+`bridge.db`**, S3 Secrets + Encryption-Key-Übernahme, S4 Traefik + BasicAuth, S5 HTTPS-PAT, S6 Parallel-Cut-Over, S7 Hot-Standby-Rollback), zwei Bedingungen (Encryption-Key-Kontinuität + Bridge-Migration), Cut-Over-Sequenz, Rollback-Plan, Bau-Reihenfolge B1–B7. **S2 final Tag 31 Block 8: Bridge-DB-Migration statt Re-Registrierung** (B3-Befund). **B1 ✅ DONE Tag 31 Block 9** (VPS-Prep + Docker 29.5.2 + Traefik v3.6 auf `187.124.3.235`; 3 Cookbook-Bugs §7). **B2 ✅ DONE (Prod) Tag 31 Block 14** (3-Service-Stack up, **Prod-Certs** `Let's Encrypt CN=YR2` über app/runtime/bridge.nolmi.ai, `TLS-verify=0`, Bridge selbstheilend, BasicAuth app→401, runtime/bridge→404; 4 Cookbook-Befunde §7; Repo-Fixes Block 11/12/13: Dockerfile-Filter, Bridge-Auto-init, htpasswd-Mount-Konsistenz; Prod-Cert-Flip griff erst nach Resolver-Store-Reset, §7 B2-4). **B4 ✅ DONE Tag 31 Block 15** (Doppel-DB-Migration auf Backup-Kopie verifiziert, ohne Production-Freeze: Bedingung A kein GCM-Fehler + Secrets entschlüsselt, S2-Token-Match `bridge_token`==`api_token` 3/3 byte-gleich, A2A-Stream ×3 gegen nolmi-bridge; 2 B6-Pflicht-Befunde §5: Stale-`bridge_url`-Sweep + Geist-Twin `@test122prod`). **B5 ✅ DONE Tag 31 Block 16** (Smoke 4/4 auf migriertem Stack: Container/Health, Migration intakt, Bedingung A end-to-end (Chat-Turn beantwortet), S2 end-to-end (A2A-Roundtrip @markus→@florian, kein 401), alle 3 §7-Fallen negativ). **Phase-4-Stand: B1 ✅ + B2 ✅ + B3 ✅ + B4 ✅ + B5 ✅.** Nächster und letzter Bau-Block vor Go-Live: **B6** (Cut-Over mit echtem Freeze + Post-Restore-Sweeps) — gated nur durch Freeze-Fenster-Koordination mit Florian/Heiko.
+**Strategy + Bau-Vorlage:** [`docs/PHASE-4-VPS-STRATEGY.md`](./PHASE-4-VPS-STRATEGY.md) — 7 Setzungen (S1 DB-Migration, S2 voller Stack inkl. Bridge unter `/docker/nolmi/` + **Doppel-DB-Migration `twin.db`+`bridge.db`**, S3 Secrets + Encryption-Key-Übernahme, S4 Traefik + BasicAuth, S5 HTTPS-PAT, S6 Parallel-Cut-Over, S7 Hot-Standby-Rollback), zwei Bedingungen (Encryption-Key-Kontinuität + Bridge-Migration), Cut-Over-Sequenz, Rollback-Plan, Bau-Reihenfolge B1–B7. **S2 final Tag 31 Block 8: Bridge-DB-Migration statt Re-Registrierung** (B3-Befund). **B1 ✅ DONE Tag 31 Block 9** (VPS-Prep + Docker 29.5.2 + Traefik v3.6 auf `187.124.3.235`; 3 Cookbook-Bugs §7). **B2 ✅ DONE (Prod) Tag 31 Block 14** (3-Service-Stack up, **Prod-Certs** `Let's Encrypt CN=YR2` über app/runtime/bridge.nolmi.ai, `TLS-verify=0`, Bridge selbstheilend, BasicAuth app→401, runtime/bridge→404; 4 Cookbook-Befunde §7; Repo-Fixes Block 11/12/13: Dockerfile-Filter, Bridge-Auto-init, htpasswd-Mount-Konsistenz; Prod-Cert-Flip griff erst nach Resolver-Store-Reset, §7 B2-4). **B4 ✅ DONE Tag 31 Block 15** (Doppel-DB-Migration auf Backup-Kopie verifiziert, ohne Production-Freeze: Bedingung A kein GCM-Fehler + Secrets entschlüsselt, S2-Token-Match `bridge_token`==`api_token` 3/3 byte-gleich, A2A-Stream ×3 gegen nolmi-bridge; 2 B6-Pflicht-Befunde §5: Stale-`bridge_url`-Sweep + Geist-Twin `@test122prod`). **B5 ✅ DONE Tag 31 Block 16** (Smoke 4/4 auf migriertem Stack: Container/Health, Migration intakt, Bedingung A end-to-end (Chat-Turn beantwortet), S2 end-to-end (A2A-Roundtrip @markus→@florian, kein 401), alle 3 §7-Fallen negativ). **B6 ✅ DONE (reduziert) Tag 31 Block 17** (Cut-Over im Single-User-Test-Kontext — nur Markus nutzt, @florian/@heiko Test-Twins → kein Dritt-Freeze/Re-Sync nötig; Geist-Twin `@test122prod` aus bridge.db gelöscht, Backup davor; Cut-Over-Entscheidung getroffen). **✅ PHASE 4 ABGESCHLOSSEN — Nolmi produktiv auf `187.124.3.235` (B1–B6).** Komplette Rebrand→Deploy-Pipeline (Phase 1+2+3a+3b+4) im Ziel. Einzige Restaktion: alter Stack `srv1046432` abschalten — bewusst offen gehalten (Hot-Standby, S7), siehe Item unten.
 
 Separater Hostinger-VPS Frankfurt, Ubuntu 24.04 LTS, IP `187.124.3.235`. Neu-Aufsetz analog DEPLOYMENT.md §9 Cookbook, mit Nolmi-Branding + Light + neuer Domain:
 

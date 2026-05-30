@@ -109,9 +109,13 @@ Interne Container-zu-Container-Calls via Container-Name (Hairpin-NAT-Vermeidung,
 
 Neuer Stack läuft vollständig hoch und wird verifiziert, **während** der alte weiterläuft. Erst nach grünem Smoke kommt ein kurzes angekündigtes Freeze-Fenster für das finale Delta. Sequenz siehe §5.
 
-### S7 — Rollback → **alter Stack IST der Rollback** (1–2 Wochen Hot-Standby)
+> **Cut-Over real (Tag 31 Block 17) — reduzierter Umfang im Single-User-Test-Kontext:** Markus' Entscheidung — @florian/@heiko sind **Test-Twins, nur Markus nutzt das System**. Damit entfiel der koordinierte Dritt-Freeze **und** das finale Re-Sync/Delta-Tarball: es gab kein erhaltenswertes Delta seit dem 06:39-Backup (nur Test-Geplänkel auf dem alten Stack). Der B5-verifizierte migrierte Stand **ist** der Produktivstand. **Der oben/§5.3 beschriebene Freeze-/Re-Sync-Pfad bleibt dokumentiert** — er ist der korrekte Ablauf für einen echten Mehr-Nutzer-Cut-Over, hier nur kontextbedingt nicht nötig.
 
-`srv1046432` bleibt 1–2 Wochen unter `twin.harwayexperience.com` als Hot-Standby. Rollback = „wieder die alte Domain benutzen", ohne DNS-TTL-Wartezeit. Abschaltung erst nach stillem Verifikations-Fenster (Details §6). Das **terminiert** das hängende Abschaltungs-Item (§3).
+### S7 — Rollback → **alter Stack IST der Rollback** (Hot-Standby)
+
+`srv1046432` bleibt unter `twin.harwayexperience.com` als Hot-Standby. Rollback = „wieder die alte Domain benutzen", ohne DNS-TTL-Wartezeit. Abschaltung erst nach stillem Verifikations-Fenster (Details §6).
+
+> **Stand Tag 31 Block 17:** Nolmi ist produktiv, der Standby **bleibt aktiv** — Markus' echte @markus-Daten liegen dort in nicht-reproduzierbarem Zustand, also ist das Standby-Netz **jetzt** (frisch produktiv) am wertvollsten. Die Abschaltung ist bewusst eine **spätere Einzelentscheidung** (nicht Pflichtteil des Cut), als BACKLOG-Item geführt. Das hängende Abschaltungs-Item (§3) bleibt damit offen statt terminiert.
 
 ---
 
@@ -183,17 +187,17 @@ Die Doppel-DB-Migration wurde **ohne** Production-Freeze auf einer §8.3-Backup-
 
 ### Post-Restore-Pflicht-Schritte für B6 (nach Volume-Restore, VOR Runtime-Start, je mit DB-Backup davor)
 
-**B6-Befund 1 (PFLICHT) — Stale-Infra-Reference-Sweep nach Doppel-DB-Migration:** Die migrierte `twin.db` trägt `srv1046432`-Ära-Werte. **Bestätigt betroffen:** `twin_profiles.bridge_url` (3 Twins → `http://twin-lab-bridge:5100`, muss `http://nolmi-bridge:5100`). Der per-Twin-DB-Wert ist **autoritativ** und sticht `NOLMI_DEFAULT_BRIDGE_URL` — die Env greift nur bei Onboarding-**Neuanlagen** (`pickBridgeUrlForOnboarding`, `server.ts:847`), **nicht** für Bestands-Twins. **FIX (gegen migrierte twin.db, Backup davor):**
+**B6-Befund 1 (PFLICHT) — Stale-Infra-Reference-Sweep nach Doppel-DB-Migration — ✅ erledigt (in B4, Block 15):** Die migrierte `twin.db` trägt `srv1046432`-Ära-Werte. **Bestätigt betroffen:** `twin_profiles.bridge_url` (3 Twins → `http://twin-lab-bridge:5100`, muss `http://nolmi-bridge:5100`). **Der `UPDATE` lief bereits im B4-Probelauf** und ist in der B5-UI sichtbar (`Bridge=http://nolmi-bridge:5100`) — beim echten Cut-Over (Block 17) war dieser Sweep damit schon abgehakt. Der per-Twin-DB-Wert ist **autoritativ** und sticht `NOLMI_DEFAULT_BRIDGE_URL` — die Env greift nur bei Onboarding-**Neuanlagen** (`pickBridgeUrlForOnboarding`, `server.ts:847`), **nicht** für Bestands-Twins. **FIX (gegen migrierte twin.db, Backup davor):**
 ```sql
 UPDATE twin_profiles SET bridge_url='http://nolmi-bridge:5100' WHERE bridge_url LIKE '%twin-lab-bridge%';
 ```
 Sweep-Kandidaten in B4 gegengeprüft und **sauber/leer**: `mcp_servers.url`, `telegram_configs`. In B6 **erneut** read-only sweepen, bevor das `UPDATE` läuft, falls bis dahin neue Werte dazukamen.
 
-**B6-Befund 2 (PFLICHT) — verwaister Bridge-Twin `@test122prod`:** Die `bridge.db` hält **4** registrierte Twins, die `twin.db` nur **3** Profile (@markus/@florian/@heiko). Der vierte, `@test122prod`, ist ein Test-Twin **nur** in der Bridge-DB ohne Runtime-Profil — aus dem Tag-29-Production-Smoke (#122), von der Tag-31-Hygiene (nur lokale DB) **nie** aus der Production-Bridge entfernt. Routet ins Leere (harmlos), aber gehört beim Cut-Over aus der migrierten `bridge.db` bereinigt, sonst lebt er dauerhaft im Nolmi-Stack. **FIX (gegen migrierte bridge.db, Backup davor):**
+**B6-Befund 2 (PFLICHT) — verwaister Bridge-Twin `@test122prod` — ✅ erledigt (Cut-Over, Block 17):** Die `bridge.db` hielt **4** registrierte Twins, die `twin.db` nur **3** Profile (@markus/@florian/@heiko). Der vierte, `@test122prod`, war ein Test-Twin **nur** in der Bridge-DB ohne Runtime-Profil — aus dem Tag-29-Production-Smoke (#122), von der Tag-31-Hygiene (nur lokale DB) **nie** aus der Production-Bridge entfernt. **FIX durchgeführt (gegen migrierte bridge.db, Backup `bridge-db-pre-ghostdelete` davor):**
 ```sql
 DELETE FROM twins WHERE handle='@test122prod';
 ```
-**Generalisierung:** vor dem Löschen `SELECT handle FROM twins` gegen die 3 echten Twins abgleichen — die Production-Bridge-DB auf **weitere** Test-/Geist-Twins prüfen, nicht nur diesen einen.
+Vor-Delete-`SELECT` bestätigte exakt 4 Handles, nach Delete exakt die 3 echten — **gelöscht: 1**. **Generalisierung (angewandt):** vor dem Löschen `SELECT handle FROM twins` gegen die 3 echten Twins abgeglichen — die Bridge-DB auf **weitere** Geist-Twins geprüft, es gab nur diesen einen.
 
 ---
 
@@ -203,6 +207,8 @@ DELETE FROM twins WHERE handle='@test122prod';
 - **Vor dem Cut** frisches Volume-Backup **beider** Stacks.
 - **Trigger-Kriterien** für sofortigen Rollback: z.B. OAuth-Roundtrip failt → das deutet auf ein Encryption-Key-Problem (Bedingung A verletzt) → sofort zurück auf den alten Stack, Diagnose offline.
 - **Erst nach dem stillen Fenster:** `srv1046432` abschalten (S7 + Abschaltungs-Item).
+
+> **Stand Tag 31 Block 17 (Cut-Over erfolgt, reduziert):** Nolmi produktiv, Standby **aktiv**. Der reduzierte Cut (nur Markus nutzt, Test-Twins) ändert am Rollback-Plan nichts — der alte Stack ist weiter der Sicherheitsanker. Abschaltung bleibt bewusst offen (BACKLOG-Item), gerade weil der Standby jetzt am wertvollsten ist.
 
 ---
 
@@ -249,8 +255,8 @@ B2 (3-Service-Stack-Bring-up auf Staging + Prod-Cert-Flip) hat sechs Stellen auf
 | **B3** | Pre-Flight Bridge-DB-Check | §4 — **✅ DONE Tag 31 Block 7** (führte zur S2-Korrektur Block 8) |
 | **B4** | **Doppel-DB-Migration** (`twin.db` + `bridge.db`, gemeinsamer Snapshot) + Token-Match-Verify | S1 / S2 — **✅ DONE Tag 31 Block 15** (auf Backup-Kopie ohne Freeze: Bedingung A kein GCM-Fehler, S2-Token-Match 3/3 byte-gleich, A2A-Stream ×3 gegen nolmi-bridge; 2 B6-Pflicht-Sweeps §5) |
 | **B5** | Smoke + 3-Twin-Verifikation | §5.2 — **✅ DONE Tag 31 Block 16** (Smoke 4/4 auf migrierten Kopie-Daten: Bedingung A end-to-end/Chat-Turn, S2 end-to-end/A2A-Roundtrip kein 401, alle §7-Fallen negativ) |
-| **B6** ← **nächster und letzter Bau-Block** | Cut-Over (Freeze: Doppel-Tarball beider DBs §5.3 + Post-Restore-Sweeps §5) | §5.3–4 |
-| **B7** | Nach Fenster: `srv1046432`-Abschaltung + Cookbook-Rewrite | S7 / §7 |
+| **B6** | Cut-Over (Post-Restore-Sweeps §5) | §5.3–4 — **✅ DONE (reduziert) Tag 31 Block 17** (Single-User-Test-Kontext: kein Dritt-Freeze/Re-Sync nötig; Geist-Twin `@test122prod` aus bridge.db gelöscht; Cut-Over-Entscheidung — Nolmi produktiv) |
+| **B7** | `srv1046432`-Abschaltung + Cookbook-Rewrite | S7 / §7 — **offen** (Abschaltung bewusst spätere Einzelentscheidung, BACKLOG-Item; Standby bleibt aktiv) |
 
 **B4-Notiz:** `bridge.db` liegt auf `srv1046432` unter `data/bridge.db` in einem eigenen Volume **außerhalb** des Repo-Compose (B3-Strukturbefund) — B4 muss sie dort lokalisieren und mit-tarballen.
 
@@ -266,6 +272,8 @@ B2 (3-Service-Stack-Bring-up auf Staging + Prod-Cert-Flip) hat sechs Stellen auf
 **B2 vollständig abgeschlossen (Tag 31 Block 14, Prod-Certs):** 3-Service-Stack up, **Prod-Zertifikate** (`Let's Encrypt CN=YR2`, kein STAGING) über `app/runtime/bridge.nolmi.ai`, `TLS-verify=0`, Bridge selbstheilend (init-db), Runtime initialisiert, BasicAuth aktiv (app→401 + `www-authenticate`; runtime/bridge→404, kein `/`-Router = korrekt). Der Flip `le-staging`→`le` griff erst nach dem Resolver-Store-Reset (§7 B2-Befund 4). Der Stack läuft damit end-to-end auf echter Infra mit vertrauten Certs — auf **Wegwerf-Secrets + leeren Volumes**, Production (`srv1046432`) unberührt. **B4** (Doppel-DB-Migration) ist seit Block 15 auf einer Backup-Kopie verifiziert (§5); nächster Block: **B5/B6** (Smoke + Cut-Over mit Freeze).
 
 Jeder Block ist abgeschlossen verifizierbar; B3 (Pre-Flight) hat die gelockte S2 begründet **gekippt** (Re-Register → Bridge-DB-Migration), bevor B4 baut — genau der Zweck eines Pre-Flights.
+
+**Phase-4-Closure (Tag 31 Block 17):** B1–B6 ✅ — **Nolmi ist produktiv** auf `187.124.3.235` mit vertrauten Prod-Certs, BasicAuth, migrierten Echtdaten (byte-genauer Encryption-Key) und 3 Twins. Der Cut-Over lief im reduzierten Single-User-Test-Umfang (nur Markus nutzt; @florian/@heiko Test-Twins) — kein koordinierter Freeze, kein finaler Re-Sync (kein erhaltenswertes Delta seit dem 06:39-Backup); der B5-verifizierte Stand **ist** der Produktivstand. Verbleibend nur **B7** (alter Stack `srv1046432`): bleibt Hot-Standby, Abschaltung als spätere Einzelentscheidung (BACKLOG). Cookbook-Rewrite (§7) ebenfalls noch offen.
 
 ---
 
