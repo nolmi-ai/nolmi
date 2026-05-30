@@ -278,7 +278,7 @@ Heute: `h-[calc(100vh-65px)]` in ChatLayout setzt voraus, dass AppHeader exakt 6
 **Größe:** S · **Priorität:** nice · **Aus:** UX-Iteration 3. Mai (Layout-Fix)
 
 ### 55. Mobile-Layout für Chat-Page (Sidebar-Toggle/Collapse) — NEU 3. Mai 2026 nachmittags
-Heute: Chat-Layout fest auf Desktop-Breite optimiert. Sidebar w-72 (288px) belegt auf Mobile fast die halbe Bildschirmbreite, Conversation wird sehr eng. Plus: Top-Nav mit Brand + 3 Tabs + Switcher + Avatar nebeneinander bricht bei <768px. Lösung: Sidebar als Off-Canvas-Drawer mit Toggle-Button, Top-Nav mit Hamburger-Menü oder Tabs als Bottom-Nav. Pattern wie WhatsApp-Web oder Slack-Mobile. Vorbedingung: Visual-Design-Iteration (#59).
+Heute: Chat-Layout fest auf Desktop-Breite optimiert. Sidebar w-72 (288px) belegt auf Mobile fast die halbe Bildschirmbreite, Conversation wird sehr eng. Plus: Top-Nav mit Brand + 3 Tabs + Switcher + Avatar nebeneinander bricht bei <768px. Lösung: Sidebar als Off-Canvas-Drawer mit Toggle-Button, Top-Nav mit Hamburger-Menü oder Tabs als Bottom-Nav. Pattern wie WhatsApp-Web oder Slack-Mobile. Vorbedingung: Visual-Design-Iteration (#58). *(Nummern-Fix Tag 31: hier stand fälschlich „#59" — gemeint ist das Visual-Design-Item #58. Die Nummer #59 ist vergeben für „Bridge-Auth `/messages/:id/sender` securen" — erledigt, siehe Lessons-Sektion, Commit `8783d97`.)*
 **Größe:** L · **Priorität:** should · **Aus:** UX-Iteration 3. Mai (Layout-Fix Caveat)
 **Stufe:** 0 → 1 · **Spur:** UX-Reifung
 
@@ -1294,7 +1294,7 @@ Pragmatisch: schriftlich + 60-s-GIF reicht für Launch.
 Konkrete Drafts vorbereiten, nicht spontan launchen.
 
 - **Twitter-Thread (5–8 Tweets):** Story-Bogen „Why I built this", Differenzierungs-Story, Screenshots, Quick-Start-Link
-- **Hacker-News-Submission:** „Show HN: Twin-Lab — [tagline]". Title-Optimization, Body mit Context, Quick-Start-Link
+- **Hacker-News-Submission:** „Show HN: Nolmi — [tagline]". Title-Optimization, Body mit Context, Quick-Start-Link
 - **Reddit:** evtl. r/LocalLLaMA, r/SelfHosted, r/MachineLearning. Subreddit-Auswahl strategisch
 - **Discord/Slack-Communities:** AI-Engineer-Discord, Anthropic-Discord, etc.
 
