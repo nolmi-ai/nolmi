@@ -940,8 +940,18 @@ Runtime selbst ist Bridge-resilient (Reconnect-Loop ohne Crash für existing Twi
 - A2A-Features (Send-To-Twin, Inbox) UI blendet aus wenn Twin ohne Bridge-Config
 - Nachträglich Bridge-Anbindung: Settings-Page bekommt "Bridge einhängen"-Section
 
-**Größe:** M-L · **Priorität:** nice · **Aus:** Tag 24 Cookbook-Walkthrough (#109 §9)
-**Status:** offen, Phase-B-Kandidat
+**Größe:** M-L · **Priorität:** nice → **must (Distribution D3)** · **Aus:** Tag 24 Cookbook-Walkthrough (#109 §9)
+**Status:** 🟡 **TEILWEISE — Distribution Etappe 1 (Tag 31 Block 20), lokal verifiziert.** Der Runtime-/CLI-/Chat-Kern ist gebaut:
+- ✅ Schema: Migration 026 `bridge_url`/`bridge_token` nullable (FK-Cascade-sicher via Runner-`foreign_keys_off`-Opt-in)
+- ✅ Registry-Boot-Guard: Solo-Twin ohne Bridge-Client/Stream, kein Reconnect-Loop, Boot-Log „Solo-Modus"
+- ✅ A2A graceful: `BridgeDisabledError` → HTTP 409 `bridge_disabled` statt Crash; conversations-Routen solo-sicher
+- ✅ `bootstrap-twin` ohne `BRIDGE_URL` → Solo-Twin (Handle `@<name>`, bridge NULL, keine Registrierung)
+- ✅ Chat-UI: A2A-Liste + „Neue Konversation" ausgeblendet bei `profile.bridge.url == null` (Inbox-Tab bleibt — Tool/Mandate-Approvals sind bridge-unabhängig)
+
+**Verbleibend (Distribution Etappe 2 / D3-Re-Bind):**
+- Onboarding-**Wizard**-Submit-Branch: Solo-Twin via Web anlegen (heute verlangt der Wizard noch eine Bridge — `server.ts` Onboarding-Submit)
+- Settings „Bridge nachträglich einhängen"-Section (Re-Bind Stufe 1→2/3, D3)
+- Production-Deploy der Migration 026 (separat, mit Backup)
 
 ### 129. .env.example-Default auf Anthropic switchen ✅
 

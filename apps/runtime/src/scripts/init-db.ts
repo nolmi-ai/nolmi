@@ -68,6 +68,46 @@ async function main() {
 
     const path = resolve(config.migrationsDir, file);
     const sql = readFileSync(path, "utf-8");
+
+    // Sonderfall — Table-Rebuilds an Tabellen mit EINGEHENDEN FK (z.B.
+    // twin_profiles ← 11× ON DELETE CASCADE): ein `DROP TABLE` unter
+    // foreign_keys=ON würde via impliziten Parent-DELETE alle Kind-Zeilen
+    // kaskadiert löschen. Die offizielle SQLite-Prozedur verlangt deshalb
+    // foreign_keys=OFF VOR der Transaktion (in offener Tx ist das Pragma ein
+    // No-op). Eine Migration opt-in't dazu via Magic-Comment in Zeile 1.
+    // Verifiziert: an dieser Stelle ist keine Transaktion offen (das einzige
+    // BEGIN ist per-Migration weiter unten), also greift das OFF-Pragma.
+    // Ohne Marker: der bestehende Pfad unten läuft byte-identisch wie zuvor.
+    const needsFkOff = /^\s*--\s*nolmi:foreign_keys_off\b/m.test(sql);
+    if (needsFkOff) {
+      db.pragma("foreign_keys = OFF"); // außerhalb Tx → greift
+      db.exec("BEGIN");
+      try {
+        db.exec(sql); // 12-Schritt-Rebuild im Migrations-SQL
+        // foreign_key_check INNERHALB der Tx, VOR COMMIT — der Kern-Schutz:
+        // beweist, dass der Rebuild keine verwaisten FK in den 11 Kind-
+        // Tabellen hinterlassen hat. Verletzung → ROLLBACK, kein Commit.
+        const violations = db.pragma("foreign_key_check") as unknown[];
+        if (Array.isArray(violations) && violations.length > 0) {
+          throw new Error(
+            `foreign_key_check fand ${violations.length} Verletzung(en) — Rebuild abgebrochen`,
+          );
+        }
+        markApplied.run(file, Date.now());
+        db.exec("COMMIT");
+        db.pragma("foreign_keys = ON"); // nach COMMIT wiederherstellen
+        console.log(`[db:init] ${file} angewendet (foreign_keys_off-Modus)`);
+        appliedCount++;
+      } catch (err) {
+        db.exec("ROLLBACK");
+        db.pragma("foreign_keys = ON"); // auch im Fehlerfall zurücksetzen
+        throw new Error(
+          `Migration ${file} fehlgeschlagen: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
+      continue;
+    }
+
     db.exec("BEGIN");
     try {
       db.exec(sql);
@@ -82,6 +122,11 @@ async function main() {
       );
     }
   }
+
+  // Ergänzung 2 (Gürtel + Hosenträger): unbedingt FK wieder auf ON, falls ein
+  // foreign_keys_off-Lauf den Prozess in einem Zustand verließe, in dem das
+  // Pragma nicht zurückgesetzt wurde. Im Normalfall ist es bereits ON.
+  db.pragma("foreign_keys = ON");
 
   if (skippedCount > 0) {
     console.log(`[db:init] ${skippedCount} Migration(en) bereits angewendet (skipped)`);

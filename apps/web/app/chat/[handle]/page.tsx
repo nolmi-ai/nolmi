@@ -188,6 +188,10 @@ function ChatLayout({ handle }: { handle: string }) {
   // /facts/extract verlangt eine echte conversationId). null wenn frisch
   // gemountet ohne bisherige Audits — Extract-Button bleibt dann disabled.
   const [directChatConvId, setDirectChatConvId] = useState<string | null>(null);
+  // Distribution Etappe 1: A2A-UI nur zeigen, wenn der Twin eine Bridge hat.
+  // Default true → kein Flackern für Bridge-Twins; der Profile-Fetch setzt
+  // false für Solo-Twins (bridge.url == null).
+  const [hasBridge, setHasBridge] = useState(true);
 
   const loadConversations = useCallback(async () => {
     try {
@@ -223,6 +227,23 @@ function ChatLayout({ handle }: { handle: string }) {
     loadConversations();
     loadTrusts();
   }, [loadConversations, loadTrusts]);
+
+  // Distribution Etappe 1: Bridge-Status pro Twin aus dem Profil ableiten.
+  useEffect(() => {
+    let cancelled = false;
+    fetch(`${RUNTIME_URL}/twins/${handle}/profile`, { credentials: "include" })
+      .then((res) => (res.ok ? res.json() : Promise.reject(`HTTP ${res.status}`)))
+      .then((body: { bridge?: { url: string | null } }) => {
+        if (!cancelled) setHasBridge(body.bridge?.url != null);
+      })
+      .catch(() => {
+        // Profil-Fetch nice-to-have für das A2A-Gating — bei Fehler bleibt
+        // der Default (true), kein Blocker für den Direct-Chat.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [handle]);
 
   // SSE: live updates wenn neue Replies reinkommen.
   useEffect(() => {
@@ -274,6 +295,7 @@ function ChatLayout({ handle }: { handle: string }) {
         onSelect={setSelection}
         onNew={() => setShowNewModal(true)}
         sidebarError={error}
+        hasBridge={hasBridge}
       />
 
       <section className="flex-1 flex flex-col min-w-0 min-h-0">
@@ -682,6 +704,7 @@ function Sidebar({
   onSelect,
   onNew,
   sidebarError,
+  hasBridge,
 }: {
   handle: string;
   conversations: ConversationItem[];
@@ -689,6 +712,8 @@ function Sidebar({
   onSelect: (s: Selection) => void;
   onNew: () => void;
   sidebarError: string | null;
+  /** Distribution Etappe 1: Solo-Twin (keine Bridge) → A2A-Block ausblenden. */
+  hasBridge: boolean;
 }) {
   return (
     // Drei vertikale Slots — Höhen exakt parallel zum Conversation-Bereich:
@@ -717,7 +742,11 @@ function Sidebar({
           <div className="text-xs text-muted">Direct-Chat ({handle})</div>
         </button>
 
-        {conversations.length === 0 ? (
+        {!hasBridge ? (
+          <div className="text-xs text-muted px-3 py-3">
+            Solo-Modus — keine Bridge. A2A-Konversationen sind aus.
+          </div>
+        ) : conversations.length === 0 ? (
           <div className="text-xs text-muted px-3 py-3">
             Noch keine A2A-Konversationen.
           </div>
@@ -766,14 +795,16 @@ function Sidebar({
         )}
       </div>
 
-      <div className="h-20 px-3 border-t border-border flex items-center flex-shrink-0">
-        <button
-          onClick={onNew}
-          className="w-full px-3 py-2 text-sm border border-accent text-accent rounded hover:bg-accent hover:text-bg transition-colors"
-        >
-          + Neue Konversation
-        </button>
-      </div>
+      {hasBridge && (
+        <div className="h-20 px-3 border-t border-border flex items-center flex-shrink-0">
+          <button
+            onClick={onNew}
+            className="w-full px-3 py-2 text-sm border border-accent text-accent rounded hover:bg-accent hover:text-bg transition-colors"
+          >
+            + Neue Konversation
+          </button>
+        </div>
+      )}
     </aside>
   );
 }

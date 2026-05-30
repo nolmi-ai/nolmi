@@ -34,8 +34,12 @@ export interface TwinProfile {
   personaInputJson: PersonaInput | null;
   mandates: Mandate[];
   llmConfig: StoredLlmConfig;
-  bridgeUrl: string;
-  bridgeToken: string;
+  /**
+   * Distribution Etappe 1 (Migration 026): NULL für Solo-Twins ohne A2A-Bridge.
+   * Beide zusammen gesetzt = Bridge-Modus; beide NULL = Solo-Modus.
+   */
+  bridgeUrl: string | null;
+  bridgeToken: string | null;
   ownerUserId: string | null;
   createdAt: number;
   updatedAt: number;
@@ -63,8 +67,8 @@ interface TwinProfileRow {
   persona_input_json: string | null;
   mandates_json: string;
   llm_config: string;
-  bridge_url: string;
-  bridge_token: string;
+  bridge_url: string | null;
+  bridge_token: string | null;
   owner_user_id: string | null;
   created_at: number;
   updated_at: number;

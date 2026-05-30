@@ -23,6 +23,21 @@ export class BridgeError extends Error {
   }
 }
 
+/**
+ * Distribution Etappe 1: ein Solo-Twin (ohne A2A-Bridge) hat eine A2A-Aktion
+ * angefragt. Typisierter Fehler statt nacktem `throw new Error` — die Routen
+ * fangen ihn ab und antworten strukturiert (HTTP 409 `code: bridge_disabled`)
+ * statt mit einem kryptischen 500. Für fremde Self-Hoster ist die klare
+ * "im Solo-Modus ist A2A aus"-Meldung wichtiger als ein Crash.
+ */
+export class BridgeDisabledError extends Error {
+  public readonly reason = "bridge_disabled" as const;
+  constructor(capability: string) {
+    super(`A2A nicht verfügbar (Solo-Modus, keine Bridge): ${capability}`);
+    this.name = "BridgeDisabledError";
+  }
+}
+
 export class BridgeClient {
   constructor(
     private readonly config: BridgeConfig,

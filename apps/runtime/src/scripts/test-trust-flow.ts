@@ -81,6 +81,11 @@ async function main() {
   log("");
 
   // BridgeClient mit Sender-Token (Florian schickt aus Florians Identität).
+  // A2A-Test setzt einen Bridge-Twin voraus (Distribution Etappe 1: bridgeUrl
+  // ist seit Migration 026 nullable — hier hart erwartet).
+  if (!sender.bridgeUrl || !sender.bridgeToken) {
+    throw new Error("test-trust-flow braucht einen Bridge-Twin (bridge_url/token gesetzt)");
+  }
   const senderBridge = new BridgeClient({
     url: sender.bridgeUrl,
     handle: sender.handle,

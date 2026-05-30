@@ -68,8 +68,13 @@ export interface RegistryEntry {
   };
   service: TwinService;
   bus: EventBus;
-  bridgeClient: BridgeClient;
-  bridgeStream: BridgeStream;
+  /**
+   * Distribution Etappe 1: NULL für Solo-Twins (twin_profiles.bridge_url NULL).
+   * Boot konstruiert Client/Stream nur bei vorhandener Bridge-Konfig — alle
+   * Bridge-Pfade (Inbox-Sync, Stream-Connect, A2A-Send) prüfen auf null.
+   */
+  bridgeClient: BridgeClient | null;
+  bridgeStream: BridgeStream | null;
 }
 
 export interface TwinSummary {
@@ -205,38 +210,42 @@ export class TwinServiceRegistry {
       deps.mcpClientFactory ?? defaultMcpClientFactory,
     );
 
-    // Inbox-Sync analog zu {@link startBridges} — Sync-Fehler sind nicht
-    // tödlich, der Stream übernimmt Catch-up.
-    let synced = 0;
-    try {
-      const inbox = await entry.bridgeClient.getInbox();
-      for (const msg of inbox) {
-        await entry.service.receiveBridgeMessage(msg);
-        synced++;
+    // Distribution Etappe 1: Solo-Twin (keine Bridge) → kein Inbox-Sync/Connect.
+    if (entry.bridgeClient && entry.bridgeStream) {
+      // Inbox-Sync analog zu {@link startBridges} — Sync-Fehler sind nicht
+      // tödlich, der Stream übernimmt Catch-up.
+      let synced = 0;
+      try {
+        const inbox = await entry.bridgeClient.getInbox();
+        for (const msg of inbox) {
+          await entry.service.receiveBridgeMessage(msg);
+          synced++;
+        }
+        deps.logger.info(
+          { handle: entry.handle, synced },
+          "[registry] Inbox-Sync nach Hot-Load",
+        );
+      } catch (err) {
+        deps.logger.error(
+          { err, handle: entry.handle },
+          "[registry] Inbox-Sync nach Hot-Load fehlgeschlagen — Stream übernimmt Catch-up",
+        );
       }
-      deps.logger.info(
-        { handle: entry.handle, synced },
-        "[registry] Inbox-Sync nach Hot-Load",
-      );
-    } catch (err) {
-      deps.logger.error(
-        { err, handle: entry.handle },
-        "[registry] Inbox-Sync nach Hot-Load fehlgeschlagen — Stream übernimmt Catch-up",
-      );
+      entry.bridgeStream.connect();
     }
 
-    entry.bridgeStream.connect();
-
-    // Erst nach erfolgreichem buildEntry + Stream-Connect in Map eintragen,
-    // damit Konsumenten keinen halb-aufgebauten Twin sehen.
+    // Erst nach erfolgreichem buildEntry (+ ggf. Stream-Connect) in Map
+    // eintragen, damit Konsumenten keinen halb-aufgebauten Twin sehen.
     this.entries.set(profile.handle, entry);
     deps.logger.info(
       { handle: profile.handle, twinId },
       `[registry] Twin ${profile.handle} hot-loaded`,
     );
     deps.logger.info(
-      { handle: profile.handle },
-      `[registry] Bridge-Connection für ${profile.handle} aktiv`,
+      { handle: profile.handle, bridge: !!entry.bridgeClient },
+      entry.bridgeClient
+        ? `[registry] Bridge-Connection für ${profile.handle} aktiv`
+        : `[registry] ${profile.handle} im Solo-Modus (keine Bridge)`,
     );
   }
 
@@ -247,6 +256,13 @@ export class TwinServiceRegistry {
    */
   async startBridges(logger: FastifyBaseLogger): Promise<void> {
     for (const entry of this.entries.values()) {
+      // Distribution Etappe 1: Solo-Twin ohne Bridge — kein Inbox-Sync, kein
+      // Stream-Connect, kein Reconnect-Loop. Eine klare Boot-Zeile statt
+      // stillem Überspringen.
+      if (!entry.bridgeClient || !entry.bridgeStream) {
+        console.log(`[boot] ${entry.handle}: Solo-Modus (keine Bridge)`);
+        continue;
+      }
       let synced = 0;
       try {
         const inbox = await entry.bridgeClient.getInbox();
@@ -288,7 +304,7 @@ export class TwinServiceRegistry {
     await Promise.all(
       [...this.entries.values()].map(async (entry) => {
         try {
-          entry.bridgeStream.disconnect();
+          entry.bridgeStream?.disconnect(); // Solo-Twin: kein Stream
         } catch (err) {
           console.error(`[shutdown] ${entry.handle} disconnect:`, err);
         }
@@ -376,12 +392,20 @@ export class TwinServiceRegistry {
     const classifierModel = createLlmClient(classifierLlmConfig);
     const classifierModelLabel = formatLlmLabel(classifierLlmConfig);
 
-    const bridgeConfig: BridgeConfig = {
-      url: profile.bridgeUrl,
-      handle: profile.handle,
-      token: profile.bridgeToken,
-    };
-    const bridgeClient = new BridgeClient(bridgeConfig, logger);
+    // Distribution Etappe 1: Solo-Twin (bridge_url/token NULL) → kein Client,
+    // kein Stream. Beide nur konstruieren, wenn die Bridge-Konfig vollständig
+    // ist. Der Send-Path + alle Bridge-Endpunkte prüfen auf null.
+    const hasBridge = !!(profile.bridgeUrl && profile.bridgeToken);
+    const bridgeConfig: BridgeConfig | null = hasBridge
+      ? {
+          url: profile.bridgeUrl!,
+          handle: profile.handle,
+          token: profile.bridgeToken!,
+        }
+      : null;
+    const bridgeClient: BridgeClient | null = bridgeConfig
+      ? new BridgeClient(bridgeConfig, logger)
+      : null;
 
     // 3.3.B/E + 3.4.D: Repos pro Twin ad-hoc auf der geteilten db-Connection
     // bauen. Alle zustandslos, also kein Pool-Effekt zwischen Twins — wir
@@ -442,18 +466,20 @@ export class TwinServiceRegistry {
       oauthRefreshService: this.deps!.oauthRefreshService,
     });
 
-    const bridgeStream = new BridgeStream(
-      bridgeConfig,
-      (msg) => {
-        service.receiveBridgeMessage(msg).catch((err) => {
-          logger.error(
-            { err, messageId: msg.id, handle: profile.handle },
-            "[bridge:stream] receive fehlgeschlagen",
-          );
-        });
-      },
-      logger,
-    );
+    const bridgeStream: BridgeStream | null = bridgeConfig
+      ? new BridgeStream(
+          bridgeConfig,
+          (msg) => {
+            service.receiveBridgeMessage(msg).catch((err) => {
+              logger.error(
+                { err, messageId: msg.id, handle: profile.handle },
+                "[bridge:stream] receive fehlgeschlagen",
+              );
+            });
+          },
+          logger,
+        )
+      : null;
 
     return {
       twinId: profile.twinId,

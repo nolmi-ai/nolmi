@@ -75,7 +75,8 @@ import {
   mergeAuditIntoBridgeMessages,
   type MergedMessage,
 } from "./audit/conversation-merge.js";
-import { BridgeClient } from "./bridge/client.js";
+import { BridgeClient, BridgeDisabledError } from "./bridge/client.js";
+import type { BridgeMessage } from "./bridge/types.js";
 import type { TelegramConfigsRepo } from "./telegram/configs-repo.js";
 import type { TelegramBotRegistry } from "./telegram/bot-registry.js";
 import type { PairingService } from "./telegram/pairing-service.js";
@@ -215,8 +216,10 @@ export async function createServer(deps: ServerDeps) {
         apiKeySource: entry.llmDisplay.apiKeySource,
       },
       bridge: {
+        // Distribution Etappe 1: Solo-Twin → url/tokenMasked NULL. Das Frontend
+        // blendet A2A-Features aus, wenn url == null.
         url: p.bridgeUrl,
-        tokenMasked: maskToken(p.bridgeToken),
+        tokenMasked: p.bridgeToken ? maskToken(p.bridgeToken) : null,
       },
       mandatesCount: p.mandates.length,
       isActive: p.isActive,
@@ -2224,20 +2227,21 @@ function registerConversationRoutes(
       if (!ctx) return;
       const { entry } = ctx;
 
-      const bridgeClient = bridgeClientFor(entry);
       let bridgePartners = new Map<string, { lastAt: string }>();
       let displayNames: Map<string, string> | null = null;
 
-      // Bridge-Down → wir liefern leere Liste statt 502, damit die UI nicht
-      // beim ersten Render bricht. UI soll error-tolerant sein; Owner sieht
-      // dann halt keine Conversations, kann aber settings + Direct-Chat
-      // weiter benutzen.
-      try {
-        const allMessages = await fetchAllBridgeConversations(entry, bridgeClient);
-        bridgePartners = aggregateBridgePartners(allMessages, entry.handle);
-        displayNames = await fetchBridgeDisplayNames(entry).catch(() => null);
-      } catch (err) {
-        request.log.warn({ err }, "[conversations] Bridge-Fetch fehlgeschlagen");
+      // Distribution Etappe 1: Solo-Twin (keine Bridge) → kein Bridge-Fetch,
+      // nur lokale Conversations (für einen reinen Solo-Twin leer). Sonst:
+      // Bridge-Down → leere Liste statt 502, damit die UI nicht bricht.
+      if (entry.profile.bridgeUrl && entry.profile.bridgeToken) {
+        const bridgeClient = bridgeClientFor(entry);
+        try {
+          const allMessages = await fetchAllBridgeConversations(entry, bridgeClient);
+          bridgePartners = aggregateBridgePartners(allMessages, entry.handle);
+          displayNames = await fetchBridgeDisplayNames(entry).catch(() => null);
+        } catch (err) {
+          request.log.warn({ err }, "[conversations] Bridge-Fetch fehlgeschlagen");
+        }
       }
 
       // Unread-Count: lokale reply-received-Audits, die noch kein read_at
@@ -2305,9 +2309,17 @@ function registerConversationRoutes(
       // dort die Truth-Source. Bridge-Call würde mit „Bridge nicht
       // erreichbar" fehlschlagen, weil es für die Self-Reference keinen
       // gültigen Bridge-Endpoint gibt. A2A-Pfad fragt Bridge wie bisher.
-      const bridgeClient = bridgeClientFor(entry);
-      let bridgeMessages: Awaited<ReturnType<typeof bridgeClient.getConversationMessages>> = [];
+      let bridgeMessages: BridgeMessage[] = [];
       if (!isDirectChat) {
+        // Distribution Etappe 1: A2A-Thread braucht eine Bridge. Solo-Twin →
+        // sauberes 409 statt Crash (UI blendet A2A für Solo-Twins ohnehin aus).
+        if (!entry.profile.bridgeUrl || !entry.profile.bridgeToken) {
+          return reply.status(409).send({
+            error: "A2A im Solo-Modus nicht verfügbar (keine Bridge konfiguriert).",
+            code: "bridge_disabled",
+          });
+        }
+        const bridgeClient = bridgeClientFor(entry);
         try {
           bridgeMessages = await bridgeClient.getConversationMessages(partner);
         } catch (err) {
@@ -2468,6 +2480,15 @@ function registerConversationRoutes(
         return reply.status(400).send({ error: "Selbst-Senden nicht erlaubt" });
       }
 
+      // Distribution Etappe 1: Solo-Twin (keine Bridge) → A2A-Send sauber
+      // ablehnen statt über die Bridge-Handle-Validation zu stolpern.
+      if (!entry.profile.bridgeUrl || !entry.profile.bridgeToken) {
+        return reply.status(409).send({
+          error: "A2A im Solo-Modus nicht verfügbar (keine Bridge konfiguriert).",
+          code: "bridge_disabled",
+        });
+      }
+
       // Bridge-Handle-Validation, gleicher Pfad wie bei Trust-Add. Verhindert
       // Tippfehler-Sends an nicht existierende Empfänger.
       const knownHandles = await fetchBridgeHandles(entry).catch(() => null);
@@ -2507,6 +2528,11 @@ function registerConversationRoutes(
  * stateless, der Aufruf ist günstig.
  */
 function bridgeClientFor(entry: RegistryEntry): BridgeClient {
+  // Distribution Etappe 1: Solo-Twin (bridge_url/token NULL) hat keinen
+  // gültigen Bridge-Endpoint. Typisierter Fehler → Caller fangen ihn ab.
+  if (!entry.profile.bridgeUrl || !entry.profile.bridgeToken) {
+    throw new BridgeDisabledError("bridge-client");
+  }
   return new BridgeClient({
     url: entry.profile.bridgeUrl,
     handle: entry.handle,
@@ -2582,6 +2608,9 @@ function countUnreadRepliesByPartner(audits: AuditEntry[]): Map<string, number> 
  * Bei Bridge-Down: Caller fängt das und liefert null zurück.
  */
 async function fetchBridgeDisplayNames(entry: RegistryEntry): Promise<Map<string, string>> {
+  if (!entry.profile.bridgeUrl || !entry.profile.bridgeToken) {
+    throw new BridgeDisabledError("bridge-display-names");
+  }
   const url = `${entry.profile.bridgeUrl}/twins`;
   const res = await fetch(url, {
     method: "GET",
@@ -2604,6 +2633,9 @@ async function fetchBridgeDisplayNames(entry: RegistryEntry): Promise<Map<string
  * Returns ein Set von normalisierten Handle-Strings (lowercase).
  */
 async function fetchBridgeHandles(entry: RegistryEntry): Promise<Set<string>> {
+  if (!entry.profile.bridgeUrl || !entry.profile.bridgeToken) {
+    throw new BridgeDisabledError("bridge-handles");
+  }
   const url = `${entry.profile.bridgeUrl}/twins`;
   const res = await fetch(url, {
     method: "GET",

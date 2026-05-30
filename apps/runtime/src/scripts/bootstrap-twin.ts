@@ -87,22 +87,37 @@ async function main() {
     name === "markus" ? "BRIDGE_TWIN_HANDLE" : `BRIDGE_${name.toUpperCase()}_HANDLE`;
   const bridgeTokenVar =
     name === "markus" ? "BRIDGE_TWIN_TOKEN" : `BRIDGE_${name.toUpperCase()}_TOKEN`;
-  const bridgeUrl = process.env.BRIDGE_URL?.trim();
-  const handle = process.env[bridgeHandleVar]?.trim();
-  const bridgeToken = process.env[bridgeTokenVar]?.trim();
-
-  if (!bridgeUrl) {
-    throw new Error("BRIDGE_URL ist nicht gesetzt — siehe .env");
-  }
-  if (!handle) {
-    throw new Error(
-      `${bridgeHandleVar} ist nicht gesetzt — Bridge-Handle für '${name}' fehlt in .env`,
-    );
-  }
-  if (!bridgeToken) {
-    throw new Error(
-      `${bridgeTokenVar} ist nicht gesetzt — Bridge-Token für '${name}' fehlt in .env ` +
-        `(registriere via /twins/register an der Bridge)`,
+  // Distribution Etappe 1: Bridge ist optional. Ohne BRIDGE_URL legt bootstrap
+  // einen SOLO-TWIN an (bridge_url/token NULL, keine A2A-Registrierung) —
+  // Handle dann aus dem Twin-Namen (@<name>). Mit BRIDGE_URL: voller A2A-Twin
+  // wie bisher (Handle + Token aus den Bridge-ENVs Pflicht).
+  const bridgeUrlEnv = process.env.BRIDGE_URL?.trim();
+  let handle: string;
+  let bridgeUrl: string | null;
+  let bridgeToken: string | null;
+  if (bridgeUrlEnv) {
+    const envHandle = process.env[bridgeHandleVar]?.trim();
+    const envToken = process.env[bridgeTokenVar]?.trim();
+    if (!envHandle) {
+      throw new Error(
+        `${bridgeHandleVar} ist nicht gesetzt — Bridge-Handle für '${name}' fehlt in .env`,
+      );
+    }
+    if (!envToken) {
+      throw new Error(
+        `${bridgeTokenVar} ist nicht gesetzt — Bridge-Token für '${name}' fehlt in .env ` +
+          `(registriere via /twins/register an der Bridge)`,
+      );
+    }
+    handle = envHandle;
+    bridgeUrl = bridgeUrlEnv;
+    bridgeToken = envToken;
+  } else {
+    handle = `@${name}`;
+    bridgeUrl = null;
+    bridgeToken = null;
+    console.log(
+      `[bootstrap] BRIDGE_URL nicht gesetzt — Solo-Twin ${handle} (keine Bridge, keine A2A-Registrierung)`,
     );
   }
 
@@ -152,7 +167,7 @@ async function main() {
       `              Mandates: ${mandates.length}\n` +
       `              Provider: ${formatLlmLabel(llmConfig)}\n` +
       `              API-Key:  ${maskApiKey(llmConfig.apiKey)} (verschlüsselt)\n` +
-      `              Bridge:   ${bridgeUrl}`,
+      `              Bridge:   ${bridgeUrl ?? "Solo-Modus (keine Bridge)"}`,
   );
 }
 

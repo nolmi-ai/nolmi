@@ -175,7 +175,7 @@ async function main() {
     console.log(
       `[boot] ${t.handle}: LLM=${entry.llmDisplay.label}, ` +
         `API-Key=${entry.llmDisplay.apiKeyMasked}, ` +
-        `Bridge=${entry.profile.bridgeUrl}`,
+        `Bridge=${entry.profile.bridgeUrl ?? "Solo-Modus (keine Bridge)"}`,
     );
   }
 

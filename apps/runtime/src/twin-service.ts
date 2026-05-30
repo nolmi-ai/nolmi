@@ -22,7 +22,7 @@ import { checkMandate } from "./mandates/service.js";
 import { AuditService } from "./audit/service.js";
 import type { EventBus } from "./events/bus.js";
 import type { BridgeClient } from "./bridge/client.js";
-import { BridgeError } from "./bridge/client.js";
+import { BridgeError, BridgeDisabledError } from "./bridge/client.js";
 import type { BridgeMessage } from "./bridge/types.js";
 import type { TrustRepo } from "./trust/trust-repo.js";
 import type { SkillRepo } from "./skills/repo.js";
@@ -780,7 +780,7 @@ export class TwinService {
     content: string;
   }): Promise<{ messageId: string; auditId: string; sentAt: string }> {
     if (!this.deps.bridgeClient) {
-      throw new Error("Bridge-Modus ist nicht aktiv — owner-direct-send nicht möglich");
+      throw new BridgeDisabledError("owner-direct-send");
     }
     const sentAt = new Date().toISOString();
     const audit = await this.deps.audit.start({
@@ -1434,7 +1434,7 @@ export class TwinService {
 
   private async approveTwinSend(entry: AuditEntry, persona: Persona): Promise<ApproveResult> {
     if (!this.deps.bridgeClient) {
-      throw new Error("Bridge-Modus ist nicht aktiv — send_to_twin nicht möglich");
+      throw new BridgeDisabledError("send_to_twin");
     }
     const targetHandle = (entry.input as { targetHandle?: string }).targetHandle;
     if (!targetHandle) {
@@ -1477,7 +1477,7 @@ export class TwinService {
     persona: Persona,
   ): Promise<ApproveResult> {
     if (!this.deps.bridgeClient) {
-      throw new Error("Bridge-Modus ist nicht aktiv — respond_to_twin_message nicht möglich");
+      throw new BridgeDisabledError("respond_to_twin_message");
     }
     const input = entry.input as {
       bridgeMessageId?: string;
