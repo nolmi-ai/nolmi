@@ -23,6 +23,12 @@ export async function registerHandleOnBridge(opts: {
   bridgeUrl: string;
   handle: string;
   displayName: string;
+  /**
+   * Distribution Etappe 2.4b: expliziter Register-Token (CLI-Re-Bind an die
+   * eigene Bridge — der Owner kennt das Token). Wenn nicht gesetzt, Fallback
+   * auf `BRIDGE_REGISTER_TOKEN` aus der ENV (unveränderter Onboarding-Pfad).
+   */
+  registerToken?: string;
 }): Promise<{ token: string }> {
   const url = `${opts.bridgeUrl.replace(/\/$/, "")}/twins/register`;
   // BRIDGE_REGISTER_TOKEN ist seit #60 Pflicht für /twins/register. Trim
@@ -32,7 +38,8 @@ export async function registerHandleOnBridge(opts: {
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
   };
-  const registerToken = process.env.BRIDGE_REGISTER_TOKEN?.trim();
+  const registerToken =
+    opts.registerToken?.trim() || process.env.BRIDGE_REGISTER_TOKEN?.trim();
   if (registerToken) {
     headers["X-Register-Token"] = registerToken;
   }

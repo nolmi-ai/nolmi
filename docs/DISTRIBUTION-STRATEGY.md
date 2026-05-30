@@ -51,9 +51,9 @@ Die A2A-Bridge ist heute faktisch Voraussetzung (Twins registrieren sich, Boot e
 - Schema NULL-fähig machen, wo heute eine Bridge-Referenz hart erwartet wird (`bridge_url`/`bridge_token` optional).
 - **Boot-Guard:** Runtime bootet sauber ohne Bridge (kein Crash, klare Log-Zeile „kein Bridge-Modus").
 - **A2A-UI-Toleranz:** die Web-UI zeigt A2A-Features ausgegraut/abwesend statt zu brechen, wenn keine Bridge da ist.
-- **Re-Bind:** ein Twin kann nachträglich an eine Bridge gebunden werden (Stufe 1 → 2/3).
+- **Re-Bind:** ein Twin kann nachträglich an eine Bridge gebunden werden (Stufe 1 → 2/3). **✅ Etappe 2.4b (Block 25):** CLI `twin:bind-bridge <@handle> --bridge-url <url> [--register-token …]` bindet einen Solo-Twin (bridge_url NULL) an die **eigene** Bridge (Owner kennt das Register-Token). Nutzt den vorhandenen `registerHandleOnBridge`-Mechanismus; registriert ZUERST an der Bridge, schreibt bridge_url/token ERST nach Erfolg (atomar — Fehlerfall lässt den Twin Solo). Re-Bind greift nach **Runtime-Neustart** (Boot-Guard baut den BridgeClient/Stream beim Twin-Load; kein Live-Re-Init). Nur solo→bound (kein Umbinden), `auth_mode` unberührt. UI-Knopf in Settings als spätere zweite Tür notiert (Neustart-Erfordernis macht UI-Re-Bind ohne Live-Reload wenig sinnvoll). Lokal verifiziert.
 
-**Ausdrücklich NICHT in D3:** offene Föderation mit Fremd-Vertrauen (mehrere Bridges sprechen, Trust über Bridge-Grenzen) — das ist **Produkt-Phase 4** (Multi-Channel/Föderation, ROADMAP-Achse 1), nicht Distribution.
+**Ausdrücklich NICHT in D3:** offene Föderation mit Fremd-Vertrauen (mehrere Bridges sprechen, Trust über Bridge-Grenzen) — das ist **Produkt-Phase 4** (Multi-Channel/Föderation, ROADMAP-Achse 1), nicht Distribution. **2.4b deckt nur die EIGENE Bridge ab** (Owner hat Register-Token); fremde Bridge / Fremd-Trust bleibt Phase 4.
 
 ### D4 — Phase 2.5 reicht für die Allowlist-Gruppe; Fremden-Apparat vertagt
 
@@ -82,7 +82,7 @@ Bevor irgendetwas gebaut wird — Sicht holen (Pattern aus den Phase-4-Lessons #
 
 Entkopplung + Boot-Guard + A2A-UI-Toleranz. Die Diagnose D-1 ergab: **Guard, kein durchziehender Umbau** (der Kern-Wertpfad war schon bridge-frei). Umgesetzt (Commit `6c6032f`): Migration 026 (`bridge_url`/`bridge_token` nullable, FK-Cascade-sicher via Runner-`foreign_keys_off`-Opt-in), Registry-Boot-Guard, A2A graceful (`BridgeDisabledError` → HTTP 409 `bridge_disabled`), Chat-UI-Toleranz, `bootstrap-twin` Solo-Pfad. **Lokal 4/4 am Verhalten verifiziert** (Solo-Twin `@solo`: Boot „Solo-Modus"/kein Reconnect-Loop · Direct-Chat end-to-end ohne Bridge → 200 · UI blendet A2A aus · A2A-Send → 409; Bridge-Twin-Regression intakt).
 
-**Verbleibend aus Etappe 1 (→ Etappe 2):** Re-Bind (Bridge nachträglich einhängen, Stufe 1→2/3) + Onboarding-Wizard-Solo-Pfad + Production-Deploy der Migration 026.
+**Verbleibend aus Etappe 1 (→ Etappe 2):** ~~Re-Bind~~ ✅ (Etappe 2.4b, CLI `twin:bind-bridge`, eigene Bridge) + Onboarding-Wizard-Solo-Pfad + Production-Deploy der Migration 026. UI-Re-Bind-Knopf (zweite Tür) + Umbinden bereits gebundener Twins als spätere Sub-Punkte.
 
 ### Etappe 2 — Distribution-Layer
 

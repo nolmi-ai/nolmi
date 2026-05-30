@@ -953,7 +953,7 @@ Runtime selbst ist Bridge-resilient (Reconnect-Loop ohne Crash für existing Twi
 - ✅ CLI-Onboarding Weg A / Opt 3 (Etappe 2.2, eigenes Item unten DONE): `pnpm twin:onboard` legt den ersten User an, der Web-Wizard erstellt den Twin (setzt Owner korrekt). **Zwei gleichwertige Türen** erreicht. Verbleibend: Weg B (durchgehendes Terminal-Onboarding inkl. Persona/Key) später.
 - ✅ `auth_mode`-Durchsetzung (D2, Etappe 2.4a, eigenes Item unten DONE): OAuth nur bei `auth_mode='oauth'`, zwei-Ebenen-Gate (CLI + UI), Allowlist nur via Admin-CLI `twin:auth-mode`, kein Self-Service.
 - Onboarding-**Wizard**-Submit-Branch: Solo-Twin via Web anlegen (heute verlangt der Wizard noch eine Bridge — `server.ts` Onboarding-Submit)
-- Settings „Bridge nachträglich einhängen"-Section (Re-Bind Stufe 1→2/3, D3)
+- ✅ Re-Bind Solo→Bound (D3 Stufe 1→2, Etappe 2.4b, eigenes Item unten DONE): CLI `twin:bind-bridge` an die eigene Bridge. Verbleibend: UI-Re-Bind-Knopf (zweite Tür) + Umbinden bereits gebundener Twins + Fremd-Bridge/Föderation (Phase 4).
 - Production-Deploy der Migration 026 (separat, mit Backup)
 
 ### twin:bootstrap setzt keinen owner_user_id — Solo-Twin ownerlos + im Switcher unsichtbar ✅
@@ -1006,6 +1006,18 @@ Keine Schema-Änderung nötig (`owner_user_id` existiert seit Migration 026, nul
 Keine Migration (Spalte existiert). **End-to-End verifiziert:** api_key (@florian) → Login abgelehnt; oauth (@markus) → Gate passt (Regression, kein Mode-Change); Allowlist→Login→Revoke-Flow auf Wegwerf-`@authtest`; `settings-data` mode spiegelt DB; `PATCH /full-config {authMode:oauth}` → wirkungslos (Feld ignoriert); api_key-Chat grün. **KEIN Production-Deploy.**
 
 **Verbleibend (optional, später):** Managed-Mode-Policy `auth_mode_default` falls nolmi.ai je einen anderen Default als `api_key` bräuchte (heute global `api_key`-Default ausreichend).
+
+### Re-Bind Solo-Twin an eigene Bridge (D3 Stufe 1→2) ✅
+
+**Status:** **DONE** (Distribution Etappe 2.4b, Block 25, lokal end-to-end verifiziert) | **Größe S** | D3-Setzung, CLI-only
+
+**Phase-A-Befund:** `registerHandleOnBridge` (`onboarding/bridge-register.ts`) ist der vorhandene Register-Mechanismus (POST `/twins/register`, `BridgeRegisterError(status)` für 409/401), standalone + wiederverwendbar (nicht bootstrap-wired). **Kein Live-Re-Init:** `addTwin` no-op bei geladenem Twin, kein `setBridgeClient`; `buildEntry` baut den BridgeClient nur bei `bridgeUrl && bridgeToken` beim Boot → Re-Bind greift erst nach **Runtime-Neustart**. `auth_mode` orthogonal (update() patcht nur bridge-Felder).
+
+**Umsetzung:** neuer CLI `twin:bind-bridge <@handle> --bridge-url <url> [--register-token …]` (`scripts/bind-bridge.ts`). `registerHandleOnBridge` um optionalen `registerToken`-Param erweitert (backward-compat, Fallback ENV). Ablauf: solo-Validierung (kein Umbinden) → Register ZUERST → bridge_url/token ERST nach Erfolg (atomar, Fehlerfall lässt Solo) → Neustart-Hinweis. **Scope-Grenze (D3):** nur EIGENE Bridge (Owner kennt Register-Token); Fremd-Bridge/Föderation = Phase 4.
+
+**End-to-End verifiziert** (Wegwerf-@bindtest, restlos entfernt): Solo 409 → Re-Bind (bridge_url/token gesetzt, Bridge-DB registriert) → Neustart `[bridge:stream] verbunden` → A2A-Send **201** statt 409. Fehlerfälle (falsches Token 401, unerreichbare Bridge) → bridge_url bleibt NULL. Already-bound-Guard lehnt ab. @markus-Regression intakt, `auth_mode` unberührt. **KEIN Production-Deploy.**
+
+**Verbleibend (später):** UI-Re-Bind-Knopf in Settings (zweite Tür — heute CLI-only, weil Neustart-Erfordernis UI-Re-Bind ohne Live-Reload entwertet); Umbinden bereits gebundener Twins (eigener Fall); Live-Re-Init ohne Neustart (`setBridgeClient`-Pfad).
 
 ### 129. .env.example-Default auf Anthropic switchen ✅
 
