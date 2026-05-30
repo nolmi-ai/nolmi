@@ -951,6 +951,7 @@ Runtime selbst ist Bridge-resilient (Reconnect-Loop ohne Crash für existing Twi
 **Verbleibend (Distribution Etappe 2 / D3-Re-Bind):**
 - ✅ `twin:bootstrap` setzt `owner_user_id` jetzt via `OWNER_EMAIL`-Lookup (Etappe 2.1, eigenes Item unten DONE) — **Release-Blocker behoben**.
 - ✅ CLI-Onboarding Weg A / Opt 3 (Etappe 2.2, eigenes Item unten DONE): `pnpm twin:onboard` legt den ersten User an, der Web-Wizard erstellt den Twin (setzt Owner korrekt). **Zwei gleichwertige Türen** erreicht. Verbleibend: Weg B (durchgehendes Terminal-Onboarding inkl. Persona/Key) später.
+- ✅ `auth_mode`-Durchsetzung (D2, Etappe 2.4a, eigenes Item unten DONE): OAuth nur bei `auth_mode='oauth'`, zwei-Ebenen-Gate (CLI + UI), Allowlist nur via Admin-CLI `twin:auth-mode`, kein Self-Service.
 - Onboarding-**Wizard**-Submit-Branch: Solo-Twin via Web anlegen (heute verlangt der Wizard noch eine Bridge — `server.ts` Onboarding-Submit)
 - Settings „Bridge nachträglich einhängen"-Section (Re-Bind Stufe 1→2/3, D3)
 - Production-Deploy der Migration 026 (separat, mit Backup)
@@ -990,6 +991,21 @@ Keine Schema-Änderung nötig (`owner_user_id` existiert seit Migration 026, nul
 **End-to-End lokal verifiziert** (Wegwerf-User `test-onboard@local.dev` + Twin `@onboardtest`, restlos entfernt): onboard→User (Hash `$2a$12$`); Login→`GET /twins`=`[]` (Wizard-Trigger); `submit`→201; **DB owner_user_id = neuer User, genau 1 Twin (kein Doppel)**; Switcher zeigt ihn; Direct-Chat HTTP 200 mit echter LLM-Antwort. Kein 409, kein manuelles UPDATE. **KEIN Production-Deploy.**
 
 **Weg B (offen, später):** durchgehendes Terminal-Onboarding inkl. Persona/LLM-Key im CLI — bräuchte einen „vorhandenen Twin ergänzen"-Pfad im Wizard ODER einen Stub-Twin-Modus im Bootstrap. Opt 3 verbaut das nicht.
+
+### auth_mode-Durchsetzung (D2): OAuth nur bei auth_mode='oauth', kein Self-Service ✅
+
+**Status:** **DONE** (Distribution Etappe 2.4a, Block 24, lokal end-to-end verifiziert) | **Größe S** | D2-Setzung
+
+**Phase-A-Befund (war auth_mode tot/gegated/lückenhaft?):** **lückenhaft.** Das Flag war LIVE für die Send-Path-Provider-Wahl (`twin-service.ts:1758`), aber der OAuth-**Start** nicht gegated: Settings-UI bot `api_key`-Twins einen „OAuth aktivieren"-Button (`settings/page.tsx:1374`), und `twin:oauth-login` schaltete jeden Twin selbst auf `oauth` (`cli-oauth-login.ts:378`) statt eine Vorbedingung zu prüfen. **Keine** HTTP-User-Route ändert `auth_mode` (`/full-config`-Schema kennt das Feld nicht; `setAuthMode` nur im CLI) → keine echte HTTP-Self-Service-Lücke, nur UI-Button + ungegateter CLI.
+
+**Fix (zwei Ebenen, weil UI-only umgehbar):**
+1. **CLI-Gate** (`cli-oauth-login.ts`): `twin:oauth-login` lehnt hart ab, wenn `auth_mode != 'oauth'` (klare D2-Meldung). Kein Self-Grant mehr — das abschließende `setAuthMode('oauth')` ist nur noch idempotente Bestätigung.
+2. **UI-Gate** (`settings/page.tsx`): `api_key`-Zweig zeigt nur Status, keinen Aktivieren-Button. oauth-Zweig (Re-Login) unverändert.
+3. **Admin-CLI** `twin:auth-mode <@handle> [oauth|api_key]` (`scripts/set-auth-mode.ts`, Shell-only): die manuelle Allowlist, getrennt vom Login. Anzeige-Modus ohne Mode-Arg.
+
+Keine Migration (Spalte existiert). **End-to-End verifiziert:** api_key (@florian) → Login abgelehnt; oauth (@markus) → Gate passt (Regression, kein Mode-Change); Allowlist→Login→Revoke-Flow auf Wegwerf-`@authtest`; `settings-data` mode spiegelt DB; `PATCH /full-config {authMode:oauth}` → wirkungslos (Feld ignoriert); api_key-Chat grün. **KEIN Production-Deploy.**
+
+**Verbleibend (optional, später):** Managed-Mode-Policy `auth_mode_default` falls nolmi.ai je einen anderen Default als `api_key` bräuchte (heute global `api_key`-Default ausreichend).
 
 ### 129. .env.example-Default auf Anthropic switchen ✅
 

@@ -318,12 +318,24 @@ async function main(): Promise<void> {
       `aktueller authMode=${twin.authMode})`,
   );
 
-  if (twin.authMode === "oauth") {
-    console.log(
-      `⚠️  Twin ${twin.handle} ist bereits im OAuth-Mode — ` +
-        `Re-Login schreibt Token neu.\n`,
+  // D2-Gate (Distribution Etappe 2.4a): OAuth-Login NUR für vorab allowlistete
+  // Twins. `auth_mode='oauth'` ist die manuelle Allowlist-Markierung — dieser
+  // Login SETZT sie nicht selbst (kein Self-Grant), sie muss vorher vom Admin
+  // via `pnpm twin:auth-mode <@handle> oauth` (oder DB) gesetzt sein. Ein
+  // api_key-Twin wird hier hart abgelehnt; das UI-Gate (Settings bietet bei
+  // api_key keinen OAuth-Pfad) wäre allein umgehbar, deshalb zusätzlich hier.
+  if (twin.authMode !== "oauth") {
+    throw new Error(
+      `OAuth ist für ${twin.handle} nicht freigeschaltet (auth_mode='${twin.authMode}').\n` +
+        `  D2-Policy: OAuth nur self-hosted + manuelle Allowlist, kein Self-Service.\n` +
+        `  Admin-Schritt: 'pnpm twin:auth-mode ${twin.handle} oauth' setzen, dann erneut twin:oauth-login.`,
     );
   }
+
+  console.log(
+    `ℹ️  Twin ${twin.handle} ist allowlistet (OAuth-Mode) — ` +
+      `Re-Login schreibt Token neu.\n`,
+  );
 
   let token: CodexToken;
   if (authJsonPath !== null) {
@@ -375,6 +387,10 @@ async function main(): Promise<void> {
     expiresAt,
     accountId: token.accountId,
   });
+  // Idempotent: das D2-Gate oben garantiert authMode==='oauth', dieser Aufruf
+  // bestätigt den Mode nur (kein Self-Grant — Allowlisting läuft separat über
+  // twin:auth-mode). Bleibt stehen als Gürtel-und-Hosenträger gegen eine
+  // inkonsistente DB-Row (oauth-Token ohne gesetzten Mode).
   profilesRepo.setAuthMode(twin.twinId, "oauth");
 
   console.log(

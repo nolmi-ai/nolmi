@@ -1368,16 +1368,13 @@ function AuthRowContent({
   onActivate: () => void;
 }) {
   if (auth.mode === "api_key") {
+    // D2 (Distribution Etappe 2.4a): kein Self-Service-OAuth. Bei api_key zeigt
+    // die UI nur den Status, KEINEN Aktivieren-Pfad — OAuth ist Allowlist-only
+    // (Admin via `twin:auth-mode`). Der CLI-Login lehnt api_key-Twins ohnehin
+    // ab, das hier ist das UI-Gate (beide Ebenen, weil UI-only umgehbar wäre).
     return (
       <div className="flex items-center gap-3">
         <span className="text-text">API-Key</span>
-        <button
-          type="button"
-          onClick={onActivate}
-          className="text-xs text-accent hover:underline"
-        >
-          OAuth aktivieren
-        </button>
       </div>
     );
   }
