@@ -941,7 +941,7 @@ Runtime selbst ist Bridge-resilient (Reconnect-Loop ohne Crash für existing Twi
 - Nachträglich Bridge-Anbindung: Settings-Page bekommt "Bridge einhängen"-Section
 
 **Größe:** M-L · **Priorität:** nice → **must (Distribution D3)** · **Aus:** Tag 24 Cookbook-Walkthrough (#109 §9)
-**Status:** 🟡 **TEILWEISE — Distribution Etappe 1 (Tag 31 Block 20), lokal verifiziert.** Der Runtime-/CLI-/Chat-Kern ist gebaut:
+**Status:** 🟢 **Etappe-1-Kern ✅ DONE + lokal am Verhalten verifiziert (Tag 31 Block 20+21).** Der Runtime-/CLI-/Chat-Kern ist gebaut **und 4/4 verhaltens-verifiziert** (Solo-Twin `@solo`: Boot „Solo-Modus"/kein Reconnect-Loop · Direct-Chat end-to-end ohne Bridge → LLM-Antwort/200 · UI blendet A2A aus · A2A-Send → HTTP 409 `bridge_disabled`; Bridge-Twin-Regression intakt):
 - ✅ Schema: Migration 026 `bridge_url`/`bridge_token` nullable (FK-Cascade-sicher via Runner-`foreign_keys_off`-Opt-in)
 - ✅ Registry-Boot-Guard: Solo-Twin ohne Bridge-Client/Stream, kein Reconnect-Loop, Boot-Log „Solo-Modus"
 - ✅ A2A graceful: `BridgeDisabledError` → HTTP 409 `bridge_disabled` statt Crash; conversations-Routen solo-sicher
@@ -949,9 +949,22 @@ Runtime selbst ist Bridge-resilient (Reconnect-Loop ohne Crash für existing Twi
 - ✅ Chat-UI: A2A-Liste + „Neue Konversation" ausgeblendet bei `profile.bridge.url == null` (Inbox-Tab bleibt — Tool/Mandate-Approvals sind bridge-unabhängig)
 
 **Verbleibend (Distribution Etappe 2 / D3-Re-Bind):**
+- `twin:bootstrap` setzt keinen `owner_user_id` → Solo-Twin ownerlos + im Switcher unsichtbar (siehe eigenes Item unten) — **Release-Blocker**, gehört ins CLI-Onboarding
 - Onboarding-**Wizard**-Submit-Branch: Solo-Twin via Web anlegen (heute verlangt der Wizard noch eine Bridge — `server.ts` Onboarding-Submit)
 - Settings „Bridge nachträglich einhängen"-Section (Re-Bind Stufe 1→2/3, D3)
 - Production-Deploy der Migration 026 (separat, mit Backup)
+
+### twin:bootstrap setzt keinen owner_user_id — Solo-Twin ownerlos + im Switcher unsichtbar
+
+**Status:** **OFFEN** | **Größe S** | **Priorität: must-vor-Self-Hosting-Release** | Distribution Etappe 2 (CLI-Onboarding) | Befund Tag 31 Block 21
+
+`twin:bootstrap` legt Twins mit `owner_user_id = NULL` an. Bei den Bestands-Bridge-Twins fiel das nie auf (sie bekamen ihren Owner über den Onboarding-Wizard bzw. die User-Migration). Der Distribution-Etappe-1-Smoke mit dem Solo-Twin `@solo` machte die Lücke sichtbar: der frisch ge-bootstrappte Solo-Twin war **im Twin-Switcher unsichtbar** (die `/twins`-Liste ist owner-gescoped), bis ein manuelles `UPDATE twin_profiles SET owner_user_id=… WHERE handle='@solo'` + **Runtime-Neustart** (Owner-Zuordnung wird beim Boot in der Registry gecached) ihn dem eingeloggten User zuwies.
+
+**Kein Solo-Pfad-Bug** — der Solo-Modus selbst (Boot/Chat/UI/A2A-409) funktioniert lückenlos (4/4 verifiziert, #128). Vorbestehende Bootstrap-Lücke, die der Solo-Modus nur exponiert hat.
+
+**Warum Release-Blocker:** Ein frischer Self-Hoster würde nach `twin:bootstrap` (One-Liner-Install-Pfad) **seinen eigenen Twin nicht sehen** → die Installation wirkt kaputt.
+
+**Fix (Etappe 2):** CLI-Onboarding koppelt **User-Anlage + Twin-Owner-Zuweisung** — `twin:bootstrap` sollte `owner_user_id` setzen (via Arg/Env oder im interaktiven Flow), sodass der angelegte Twin sofort dem Owner gehört. (`bootstrap-twin.ts` setzt heute `ownerUserId: null` im Insert.)
 
 ### 129. .env.example-Default auf Anthropic switchen ✅
 

@@ -76,14 +76,16 @@ Bevor irgendetwas gebaut wird — Sicht holen (Pattern aus den Phase-4-Lessons #
 - **Tenant-Isolations-Audit (D4)** — ist jede Query owner-scoped? Liste der DB-Zugriffspfade, je „scoped / nicht scoped / unklar".
 - **Onboarding-Stand (#110)** — was kann der Wizard heute web-only vs. was braucht den CLI-Pfad? Bestimmt, wie viel CLI-Onboarding Etappe 2 bauen muss.
 
-### Etappe 1 — Bridge-Optionalität (D3)
+### Etappe 1 — Bridge-Optionalität (D3) — ✅ Kern gebaut + verifiziert (Tag 31 Block 20+21)
 
-Entkopplung + Boot-Guard + A2A-UI-Toleranz + Re-Bind. **Größe diagnose-abhängig** (Ergebnis Etappe 0 bestimmt sie). Die eine echte Architektur-Arbeit der Distribution.
+Entkopplung + Boot-Guard + A2A-UI-Toleranz. Die Diagnose D-1 ergab: **Guard, kein durchziehender Umbau** (der Kern-Wertpfad war schon bridge-frei). Umgesetzt (Commit `6c6032f`): Migration 026 (`bridge_url`/`bridge_token` nullable, FK-Cascade-sicher via Runner-`foreign_keys_off`-Opt-in), Registry-Boot-Guard, A2A graceful (`BridgeDisabledError` → HTTP 409 `bridge_disabled`), Chat-UI-Toleranz, `bootstrap-twin` Solo-Pfad. **Lokal 4/4 am Verhalten verifiziert** (Solo-Twin `@solo`: Boot „Solo-Modus"/kein Reconnect-Loop · Direct-Chat end-to-end ohne Bridge → 200 · UI blendet A2A aus · A2A-Send → 409; Bridge-Twin-Regression intakt).
+
+**Verbleibend aus Etappe 1 (→ Etappe 2):** Re-Bind (Bridge nachträglich einhängen, Stufe 1→2/3) + Onboarding-Wizard-Solo-Pfad + Production-Deploy der Migration 026.
 
 ### Etappe 2 — Distribution-Layer
 
 - **One-Liner-Install** — Automatisierung von Phase-4-B1+B2 (VPS-Prep + Docker + Traefik + Stack-Build) **mit den 6 Cookbook-Befunden bereits eingebaut** (Traefik v3.6, Netz `external`, htpasswd am Traefik-Stack, `RUNTIME_PUBLIC_URL`-Pflicht, Resolver-Store-Reset, Bridge-Auto-init — siehe `PHASE-4-VPS-STRATEGY.md` §7). Der Install-Script ist faktisch das Cookbook als Code.
-- **CLI-Onboarding** — Twin-Anlage ohne Web-UI für Self-Hoster (Lücken aus Etappe-0-#110-Diagnose).
+- **CLI-Onboarding** — Twin-Anlage ohne Web-UI für Self-Hoster (Lücken aus Etappe-0-#110-Diagnose). **⚠ Release-Blocker-Sub-Punkt (Befund Block 21):** `twin:bootstrap` setzt heute **keinen `owner_user_id`** → ein frisch ge-bootstrappter Twin ist ownerlos und im Twin-Switcher unsichtbar (owner-gescopte `/twins`-Liste). CLI-Onboarding muss **User-Anlage + Twin-Owner-Zuweisung koppeln**. BACKLOG-Item (must-vor-Release).
 - **`auth_mode`-Flag (D2)** — `api_key_only`-Default + UI-Gate.
 - **Update-Mechanismus** — wie ein Self-Hoster eine neue Version zieht (git pull + rebuild, oder Image-Tag-Bump).
 
