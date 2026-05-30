@@ -12,6 +12,7 @@ import {
 } from "../llm-config.js";
 import { encrypt, loadMasterKey, maskApiKey } from "../crypto-utils.js";
 import { TwinProfilesRepo, type TwinProfile } from "../twin-profiles-repo.js";
+import { UsersRepo } from "../auth/users-repo.js";
 import { resolveTwinSourcePaths } from "./_twin-source-paths.js";
 
 // ─── BOOTSTRAP TWIN ──────────────────────────────────────────────────────────
@@ -23,6 +24,15 @@ import { resolveTwinSourcePaths } from "./_twin-source-paths.js";
 //   pnpm twin:bootstrap            → Default 'markus'
 //   pnpm twin:bootstrap markus
 //   pnpm twin:bootstrap florian
+//
+// Owner (Distribution Etappe 2.1): Ein frisch gebootstrappter Twin braucht
+// einen owner_user_id, sonst ist er im owner-gescopten Twin-Switcher unsichtbar
+// (Release-Blocker). Owner wird über ENV gesetzt, bevorzugt per E-Mail:
+//   - OWNER_EMAIL=<x@y.z>  → via UsersRepo.findByEmail() zur user_id aufgelöst.
+//                            Trifft die E-Mail keinen User → harter Fehler
+//                            (kein stiller NULL-Fallback), Hinweis auf user:create.
+//   - OWNER_USER_ID=user_<...> → direkte ID (für Skripte/Tests), falls bekannt.
+//   - Kein Owner gesetzt → deutliche WARN-Zeile (Twin bleibt unsichtbar).
 //
 // Konvention pro Twin-Name `<n>`:
 //   - Persona-MD:       n='markus' → docs/persona.md
@@ -127,6 +137,28 @@ async function main() {
   db.pragma("foreign_keys = ON");
   const repo = new TwinProfilesRepo(db);
 
+  // 6b. Owner auflösen (Distribution Etappe 2.1) — bevorzugt E-Mail, Fallback
+  // direkte ID. `ownerProvided` unterscheidet "explizit gesetzt" von "fehlt",
+  // damit ein UPDATE ohne Owner-ENV den bestehenden Owner NICHT auf NULL zieht.
+  const ownerEmailEnv = process.env.OWNER_EMAIL?.trim();
+  const ownerUserIdEnv = process.env.OWNER_USER_ID?.trim();
+  let ownerUserId: string | null = null;
+  const ownerProvided = Boolean(ownerEmailEnv || ownerUserIdEnv);
+  if (ownerEmailEnv) {
+    const usersRepo = new UsersRepo(db);
+    const user = usersRepo.findByEmail(ownerEmailEnv);
+    if (!user) {
+      db.close();
+      throw new Error(
+        `Kein User mit E-Mail '${ownerEmailEnv}' — erst anlegen via ` +
+          `'pnpm --filter @nolmi/runtime user:create --email ${ownerEmailEnv} --password <pw>'.`,
+      );
+    }
+    ownerUserId = user.userId;
+  } else if (ownerUserIdEnv) {
+    ownerUserId = ownerUserIdEnv;
+  }
+
   // 7. Upsert
   const existing = repo.findByHandle(handle);
   let result: TwinProfile;
@@ -141,6 +173,9 @@ async function main() {
       llmConfig: storedLlmConfig,
       bridgeUrl,
       bridgeToken,
+      // Nur überschreiben, wenn explizit ein Owner übergeben wurde — sonst
+      // bestehende Zuordnung erhalten (kein Reset auf NULL).
+      ...(ownerProvided ? { ownerUserId } : {}),
       isActive: true,
     });
   } else {
@@ -154,12 +189,21 @@ async function main() {
       llmConfig: storedLlmConfig,
       bridgeUrl,
       bridgeToken,
-      ownerUserId: null,
+      ownerUserId,
       isActive: true,
     });
   }
 
   db.close();
+
+  // Kein-Owner-Warnung: Twin ohne owner_user_id ist im owner-gescopten
+  // Switcher unsichtbar. Greift, wenn der resultierende Twin NULL-Owner hat.
+  if (!result.ownerUserId) {
+    console.warn(
+      `[bootstrap] WARN: kein Owner gesetzt — Twin ${handle} wird im Twin-Switcher ` +
+        `unsichtbar sein. Setze OWNER_EMAIL=<deine-login-mail> (oder OWNER_USER_ID=).`,
+    );
+  }
 
   console.log(
     `[bootstrap] ${action} Twin ${handle}\n` +
@@ -167,7 +211,8 @@ async function main() {
       `              Mandates: ${mandates.length}\n` +
       `              Provider: ${formatLlmLabel(llmConfig)}\n` +
       `              API-Key:  ${maskApiKey(llmConfig.apiKey)} (verschlüsselt)\n` +
-      `              Bridge:   ${bridgeUrl ?? "Solo-Modus (keine Bridge)"}`,
+      `              Bridge:   ${bridgeUrl ?? "Solo-Modus (keine Bridge)"}\n` +
+      `              Owner:    ${result.ownerUserId ?? "(keiner — Switcher-unsichtbar)"}`,
   );
 }
 

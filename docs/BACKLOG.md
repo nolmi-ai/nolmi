@@ -949,14 +949,14 @@ Runtime selbst ist Bridge-resilient (Reconnect-Loop ohne Crash für existing Twi
 - ✅ Chat-UI: A2A-Liste + „Neue Konversation" ausgeblendet bei `profile.bridge.url == null` (Inbox-Tab bleibt — Tool/Mandate-Approvals sind bridge-unabhängig)
 
 **Verbleibend (Distribution Etappe 2 / D3-Re-Bind):**
-- `twin:bootstrap` setzt keinen `owner_user_id` → Solo-Twin ownerlos + im Switcher unsichtbar (siehe eigenes Item unten) — **Release-Blocker**, gehört ins CLI-Onboarding
+- ✅ `twin:bootstrap` setzt `owner_user_id` jetzt via `OWNER_EMAIL`-Lookup (Etappe 2.1, eigenes Item unten DONE) — **Release-Blocker behoben**. Verbleibend: interaktive User-Anlage + Owner-Zuweisung im CLI-Onboarding-Flow koppeln (Etappe 2.2).
 - Onboarding-**Wizard**-Submit-Branch: Solo-Twin via Web anlegen (heute verlangt der Wizard noch eine Bridge — `server.ts` Onboarding-Submit)
 - Settings „Bridge nachträglich einhängen"-Section (Re-Bind Stufe 1→2/3, D3)
 - Production-Deploy der Migration 026 (separat, mit Backup)
 
-### twin:bootstrap setzt keinen owner_user_id — Solo-Twin ownerlos + im Switcher unsichtbar
+### twin:bootstrap setzt keinen owner_user_id — Solo-Twin ownerlos + im Switcher unsichtbar ✅
 
-**Status:** **OFFEN** | **Größe S** | **Priorität: must-vor-Self-Hosting-Release** | Distribution Etappe 2 (CLI-Onboarding) | Befund Tag 31 Block 21
+**Status:** **DONE** (Distribution Etappe 2.1, lokal verifiziert) | **Größe S** | **Priorität war: must-vor-Self-Hosting-Release** | Befund Tag 31 Block 21, behoben Tag 31 Block 22
 
 `twin:bootstrap` legt Twins mit `owner_user_id = NULL` an. Bei den Bestands-Bridge-Twins fiel das nie auf (sie bekamen ihren Owner über den Onboarding-Wizard bzw. die User-Migration). Der Distribution-Etappe-1-Smoke mit dem Solo-Twin `@solo` machte die Lücke sichtbar: der frisch ge-bootstrappte Solo-Twin war **im Twin-Switcher unsichtbar** (die `/twins`-Liste ist owner-gescoped), bis ein manuelles `UPDATE twin_profiles SET owner_user_id=… WHERE handle='@solo'` + **Runtime-Neustart** (Owner-Zuordnung wird beim Boot in der Registry gecached) ihn dem eingeloggten User zuwies.
 
@@ -964,7 +964,17 @@ Runtime selbst ist Bridge-resilient (Reconnect-Loop ohne Crash für existing Twi
 
 **Warum Release-Blocker:** Ein frischer Self-Hoster würde nach `twin:bootstrap` (One-Liner-Install-Pfad) **seinen eigenen Twin nicht sehen** → die Installation wirkt kaputt.
 
-**Fix (Etappe 2):** CLI-Onboarding koppelt **User-Anlage + Twin-Owner-Zuweisung** — `twin:bootstrap` sollte `owner_user_id` setzen (via Arg/Env oder im interaktiven Flow), sodass der angelegte Twin sofort dem Owner gehört. (`bootstrap-twin.ts` setzt heute `ownerUserId: null` im Insert.)
+**Fix (umgesetzt, Etappe 2.1):** `bootstrap-twin.ts` löst den Owner jetzt aus ENV auf, **bevorzugt E-Mail-basiert**:
+- `OWNER_EMAIL=<x@y.z>` → via `UsersRepo.findByEmail()` zur `user_id` aufgelöst, `owner_user_id` gesetzt. Trifft die E-Mail keinen User → **harter Fehler** (kein stiller NULL-Fallback), Hinweis auf `user:create`.
+- `OWNER_USER_ID=user_<…>` → direkte ID als Fallback (Skripte/Tests).
+- **Kein Owner gesetzt → deutliche `WARN`-Zeile** ("Twin wird im Switcher unsichtbar sein, setze OWNER_EMAIL") statt stillschweigend NULL — die Lücke kann nie wieder lautlos passieren.
+- UPDATE-Pfad überschreibt `owner_user_id` nur, wenn explizit ein Owner übergeben wurde (kein Reset einer bestehenden Zuordnung auf NULL).
+
+Keine Schema-Änderung nötig (`owner_user_id` existiert seit Migration 026, nullable).
+
+**Lokal verifiziert (Verhalten, Wegwerf-Twin `@solo2`, danach entfernt):** (1) bootstrap mit `OWNER_EMAIL=markus.baier@harway.de` (ohne `BRIDGE_URL`) → DB-Check `owner_user_id = user_GnAgLosIQsW1ymQu` (≠ NULL); (2) owner-gescopte Switcher-Query (`list({ ownerUserId })`, identisch zur `GET /twins`-Filterung `profile.ownerUserId === user.userId` in `server.ts:250`) liefert `@solo2` → **erscheint im Switcher ohne manuelles UPDATE**; Registry-Boot lädt `@solo2` eager. (3) Gegenprobe ohne `OWNER_EMAIL` → `WARN`-Zeile + Owner NULL. (4) Fehler-Pfad `OWNER_EMAIL` ohne User → harter Fehler mit `user:create`-Hinweis.
+
+**Onboarding-Kopplung (User-Anlage + Owner-Zuweisung im interaktiven Flow)** bleibt als Etappe-2-Schritt-2 offen — `user:create --assign-twin` deckt den manuellen Pfad heute schon ab; der Release-Blocker (Twin nach Install unsichtbar) ist mit diesem Fix weg.
 
 ### 129. .env.example-Default auf Anthropic switchen ✅
 
