@@ -152,6 +152,83 @@ services:
       - "traefik.http.middlewares.nolmi-auth.basicauth.usersfile=/htpasswd"
       - "traefik.http.routers.nolmi-web.middlewares=nolmi-auth"
 
+  # ─── APEX-PLATZHALTER (nackte Domain nolmi.ai) ──────────────────────────────
+  # Schließt das Apex-404: ein winziger Static-Container, ISOLIERT von der
+  # Next-App/Auth/BasicAuth. Serviert eine minimale Platzhalter-Seite (NICHT die
+  # volle Launch-Landing #112). HTML kommt inline über `configs.content` (unten)
+  # → kein Bind-Mount (vermeidet den Symlink-Compose-Relativpfad-Vorbehalt),
+  # kein Custom-Build.
+  #
+  # ⚠ KEIN nolmi-auth-Middleware-Label hier — BasicAuth ist per-Router. Weglassen
+  #   = öffentlich. Die Apex-Seite MUSS ohne Passwort-Prompt erreichbar sein;
+  #   app.nolmi.ai bleibt geschützt (dessen Router behält das Label). www ist
+  #   NICHT abgedeckt (kein A-Record, out of scope).
+  #
+  # ⚠ ACME: Der Apex-Host braucht ein EIGENES Let's-Encrypt-Cert. In Production
+  #   (le aktiv) wird es beim ersten Request automatisch gezogen. Beim nächsten
+  #   Staging→Prod-Flip muss nolmi.ai beim Cert-Trigger MITLAUFEN —
+  #   install/tls-promote.sh triggert/verifiziert den Apex bereits mit (Host-Liste
+  #   inkl. ${DOMAIN}).
+  nolmi-apex:
+    image: nginx:alpine
+    container_name: nolmi-apex
+    restart: unless-stopped
+    networks:
+      - traefik-proxy
+      - nolmi-internal
+    configs:
+      - source: nolmi-apex-index
+        target: /usr/share/nginx/html/index.html
+    labels:
+      - "traefik.enable=true"
+      - "traefik.docker.network=traefik-proxy"
+      # NACKTE Apex — Host ohne Subdomain.
+      - "traefik.http.routers.nolmi-apex.rule=Host(`${DOMAIN:-nolmi.ai}`)"
+      - "traefik.http.routers.nolmi-apex.entrypoints=websecure"
+      - "traefik.http.routers.nolmi-apex.tls=true"
+      - "traefik.http.routers.nolmi-apex.tls.certresolver=${ACME_RESOLVER}"
+      - "traefik.http.services.nolmi-apex.loadbalancer.server.port=80"
+      # BEWUSST KEIN .middlewares=nolmi-auth → öffentlich, kein BasicAuth.
+
+configs:
+  # Minimale Platzhalter-Seite für die Apex-Domain. ${DOMAIN}-interpoliert →
+  # Link zeigt auf die richtige App-Subdomain. Volle Landing = #112 (Going Public).
+  nolmi-apex-index:
+    content: |
+      <!doctype html>
+      <html lang="de">
+      <head>
+        <meta charset="utf-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <title>Nolmi</title>
+        <style>
+          :root { color-scheme: light; }
+          html, body { height: 100%; margin: 0; }
+          body {
+            display: flex; align-items: center; justify-content: center;
+            min-height: 100vh; padding: 2rem; box-sizing: border-box;
+            font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+            background: #F4F1EA; color: #111111;
+          }
+          main { text-align: center; max-width: 30rem; }
+          h1 { font-size: 2.5rem; font-weight: 600; letter-spacing: -0.02em; margin: 0 0 0.75rem; }
+          p { font-size: 1.05rem; line-height: 1.6; color: #6F6A60; margin: 0 0 1.75rem; }
+          a {
+            display: inline-block; padding: 0.6rem 1.3rem; border-radius: 0.5rem;
+            background: #1E9B5A; color: #ffffff; text-decoration: none; font-weight: 500;
+          }
+          a:hover { background: #18814A; }
+        </style>
+      </head>
+      <body>
+        <main>
+          <h1>Nolmi</h1>
+          <p>Die öffentliche Seite folgt — die Anwendung läuft unter app.${DOMAIN:-nolmi.ai}.</p>
+          <a href="https://app.${DOMAIN:-nolmi.ai}">Zur App &rarr;</a>
+        </main>
+      </body>
+      </html>
+
 networks:
   # Geteiltes Proxy-Netz — extern angelegt (B1: docker network create
   # traefik-proxy), von Traefik UND diesem Stack referenziert. NICHT

@@ -119,8 +119,11 @@ fi
 
 # ─── 4. Bezugs-Trigger + Verify ──────────────────────────────────────────────
 log "4/4  Cert-Bezug triggern + verifizieren (~30–90 s)"
-for sub in app runtime bridge; do
-  curl -k -s -o /dev/null --max-time 20 "https://${sub}.${DOMAIN}/" || true
+# Host-Liste inkl. NACKTER Apex (${DOMAIN}) — der nolmi-apex-Container braucht
+# sein eigenes Prod-Cert, sonst klebt der Apex beim Flip auf Staging/Default.
+HOSTS="app.${DOMAIN} runtime.${DOMAIN} bridge.${DOMAIN} ${DOMAIN}"
+for h in ${HOSTS}; do
+  curl -k -s -o /dev/null --max-time 20 "https://${h}/" || true
 done
 # Ein echtes Prod-Cert erfüllt ALLE drei: enthält "Let's Encrypt", NICHT "STAGING",
 # NICHT "TRAEFIK DEFAULT CERT". Letzteres ist Traefiks Platzhalter VOR dem Bezug —
@@ -140,8 +143,7 @@ issuer_state() { # → "prod" | "staging" | "default" | "none"
 all_prod=0
 for attempt in 1 2 3 4 5 6; do
   all_prod=1
-  for sub in app runtime bridge; do
-    h="${sub}.${DOMAIN}"
+  for h in ${HOSTS}; do
     case "$(issuer_state "${h}")" in
       prod)    : ;; # ok — wird nach der Schleife gesammelt gemeldet
       staging) all_prod=0 ;;
@@ -157,10 +159,10 @@ for attempt in 1 2 3 4 5 6; do
 done
 
 if [ "${all_prod}" = "1" ]; then
-  for sub in app runtime bridge; do ok "${sub}.${DOMAIN}: PROD-Issuer (Let's Encrypt)"; done
+  for h in ${HOSTS}; do ok "${h}: PROD-Issuer (Let's Encrypt)"; done
   cat <<EOF
 
-  ✓ Prod-Zertifikate aktiv über app/runtime/bridge.${DOMAIN}.
+  ✓ Prod-Zertifikate aktiv über app/runtime/bridge.${DOMAIN} + Apex ${DOMAIN}.
     Browser sollte keine TLS-Warnung mehr zeigen.
 EOF
 else

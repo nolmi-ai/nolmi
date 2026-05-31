@@ -657,15 +657,18 @@ Aus der **D2-Revision** (`DISTRIBUTION-STRATEGY.md §2`, Tag 33): Ein OpenAI/Cod
 
 Bis Weg B existiert: **keine Aktion**, nur dokumentierte Setzung.
 
-### nolmi.ai Root-Domain liefert 404 — Landing-Page fehlt / ungeroutet
+### nolmi.ai Root-Domain liefert 404 — minimale Platzhalter-Seite ✅ (Production-Live offen)
 
-**Status:** OFFEN (Backlog, kein Deploy-Fehler, **kein aktueller Blocker**) | **Größe S–M** | **Priorität:** should (relevant **vor öffentlichem Launch**) | Befund Tag 33 (Production-Deploy Etappe 2)
+**Status:** **GEBAUT + config-validiert (Tag 33)** | Production-Live-Verifikation **beim nächsten Deploy** | **Größe S** | Befund Tag 33 (Production-Deploy Etappe 2)
 
-Beim Production-Deploy-Smoke aufgefallen: **`nolmi.ai`** (Root/Apex, **ohne** `app.`) liefert **404**. Die App lebt unter `app.nolmi.ai`, `runtime.nolmi.ai`, `bridge.nolmi.ai` — die Apex-Domain ist im Traefik-Routing nicht belegt / es existiert keine Landing-Page.
+Apex-`nolmi.ai` lieferte 404 (kein Traefik-Router). **Gewählt: Option (b)** (Diagnose) — ein **separater Static-Container `nolmi-apex` (nginx:alpine)**, isoliert von Next-App/Auth/BasicAuth:
+- `docker/nolmi/docker-compose.yml`: neuer Service `nolmi-apex` mit Router `Host(\`${DOMAIN:-nolmi.ai}\`)` (nackte Apex), websecure/tls/`${ACME_RESOLVER}`, **bewusst KEIN `nolmi-auth`-Middleware-Label** → öffentlich, kein BasicAuth (verifiziert: app.-Router behält BasicAuth, Apex hat keins). HTML inline via `configs.content` (kein Bind-Mount → kein Symlink-Compose-Relativpfad-Problem, kein Custom-Build). Minimale Platzhalter-Seite („Nolmi" + ein Satz + Link `app.${DOMAIN}`), `${DOMAIN}`-interpoliert (verifiziert: DOMAIN=foo.test → Link app.foo.test).
+- **ACME:** Apex braucht ein eigenes Cert (in Prod beim ersten Request gezogen). `install/tls-promote.sh` triggert + verifiziert den Apex jetzt **mit** (Host-Liste inkl. `${DOMAIN}`) — sonst klebt der Apex beim nächsten Staging→Prod-Flip auf Staging/Default.
 
-**Relevanz:** Ein Besucher, der nackt `nolmi.ai` aufruft (der natürliche Erst-Touchpoint für einen öffentlichen Self-Hosting-Launch), sieht 404 statt eines Einstiegs. **Kein Blocker für den aktuellen Closed-Beta-Betrieb** (alle echten Pfade laufen über die Subdomains), aber **vor dem öffentlichen Launch** zu schließen.
+**Verifiziert (lokal):** `docker compose config` VALID, Apex-Labels korrekt (Host nackt, Port 80, kein BasicAuth), HTML-Interpolation, app-BasicAuth unverändert, `tls-promote.sh` `bash -n` grün.
+**Offen:** **Production-Live-Verifikation** (Apex liefert die Seite, kein BasicAuth, Cert) — **nicht jetzt isoliert auf Prod**, sondern als Teil des **nächsten Production-Deploys** (mit dem `git pull` + `docker compose up -d nolmi-apex` dort).
 
-**Berührungspunkte (zu klären beim Bau):** Verhältnis zum bestehenden Landing-Page-Item **#112** (Self-Hosting-Launch-Landing) — ob die Apex-Route dieselbe Landing serviert oder ein Redirect auf `app.`/Docs. Traefik-Router für Apex (`Host(\`nolmi.ai\`)`) fehlt im `docker/nolmi/docker-compose.yml`.
+**Cross-Ref #112:** Dies ist die **minimale Platzhalter-Seite**, NICHT die volle Launch-Landing. **#112** (Self-Hosting-Launch-Landing, Going Public) bleibt offen — kann die `nolmi-apex`-`index.html` später ersetzen oder auf eine echte Landing umhängen.
 
 ### NPM-Distribution `npm i -g nolmi` — Wrapper-Bau, an Public-/Etappe-3-Gate gekoppelt
 
