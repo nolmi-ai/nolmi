@@ -74,6 +74,10 @@ Vier etablierte Agentic-Standards, jeweils ein Layer:
 
 **Twin-Lab-Strategie:** Eigene Bridge + SSE bleibt Foundation für Twin-Lab-spezifische Pfade (Mandate-Layer, Owner-Recognition, Trust-Relationships, Reply-Detection). Standards werden als Adapter-Schichten obendrauf eingebunden — analog zur A2A-Strategie aus 2. Mai 2026: „zusätzlich, nicht statt".
 
+### 19. Hermes Agent als Backend evaluieren — ENTSCHIEDEN
+Strategische Option, die geklärt wurde: **Nein.** Hybrid-Strategie — eigenes TypeScript-Backend mit Hermes-Inspirationen (Profile-Mechanismus, FTS5 Session Search, agentskills.io-Format). Begründung in Architektur-Entscheidungen oben.
+
+
 ---
 
 ## Phase 2.5 — Konkrete nächste Sub-Schritte
@@ -161,10 +165,6 @@ Claude (anthropic/claude-opus-4-7) generiert in Markus' Persona Antworten ohne U
 Aktuell hardcoded `{}` im Boot — Persona-Metadata (Verbindungen, Tags, etc.) hat keine DB-Spalte. Migration 005 für `metadata_json TEXT`-Spalte. Genutzt u.a. für Beziehungs-Mapping ("Florian ist Co-Founder von Markus").
 **Größe:** S · **Priorität:** should · **Aus:** Sub-Schritt 2c Caveat
 
-### 16. Backward-Compat-Aliases entfernen
-Sub-Schritt 2d hat alte Pfade (`/chat`, `/twin-profile`, `/audit`, `/audit/pending`, etc.) als Aliases zu `/twins/@markus/...` umgeleitet. Sollte nach komplettem UI-Refresh-Cycle entfernt werden — sonst dauerhafter Tech-Debt.
-**Größe:** S · **Priorität:** should · **Aus:** Sub-Schritt 2d Caveat #5
-
 ### 17. Stream-Page auf Multi-Twin migrieren
 `/stream` zeigt aktuell @markus via Legacy-Alias. Neue Route `/stream/[handle]/page.tsx` analog zur Chat-Route. Backend-Routes `/twins/:handle/stream` existieren bereits.
 **Größe:** S · **Priorität:** should · **Aus:** Sub-Schritt 2d Caveat #2
@@ -173,9 +173,6 @@ Sub-Schritt 2d hat alte Pfade (`/chat`, `/twin-profile`, `/audit`, `/audit/pendi
 ### 18. @-Char in URLs decodieren bei Display-Output
 Chat-Header zeigt `%40florian` statt `@florian` (URL-encodierter `@`). Backend-Routes akzeptieren beides, aber UI-Display sollte decoded sein. Einmal `decodeURIComponent()` an den richtigen Stellen.
 **Größe:** S · **Priorität:** nice · **Aus:** Sub-Schritt 2d Live-Test, in 2.5.3 erneut sichtbar (Chat-Header zeigt "%40heiko")
-
-### 19. Hermes Agent als Backend evaluieren — ENTSCHIEDEN
-Strategische Option, die geklärt wurde: **Nein.** Hybrid-Strategie — eigenes TypeScript-Backend mit Hermes-Inspirationen (Profile-Mechanismus, FTS5 Session Search, agentskills.io-Format). Begründung in Architektur-Entscheidungen oben.
 
 ### 33. Mandate-basierte Approval-Logik auch im Web-UI
 Heute: Web-UI-Chat überspringt Approval-Flow für Markus, aber blockt für Heiko (cautious). A2A-Eingang nutzt Approval. Konzeptionell unklar: was, wenn Markus im Web-UI eine sensitive Antwort generieren lässt, die er sich nochmal anschauen will? Vorschlag: Mandates differenzieren `requires_approval` per Channel. RESPOND_TO_CHAT könnte für Owner-Chats `false`, für externe `true` sein. Verknüpft mit #14 (Owner-Recognition).
@@ -217,10 +214,6 @@ Konzeptionell ist das ein Skill-System-Feature (Capability-Layer entscheidet, ob
 **Größe:** L · **Priorität:** should · **Aus:** 2.5.3 Heiko-Live-Test
 
 ## Aus Phase 2.5.4.1-3 entstanden
-
-### 46. Test-Skript Step 6+7 reparieren
-`test-trust-flow.ts` Step 6 (Sender-Side Reply-Detection) und Step 7 (Read-Marker) sind heute false-negative — Skript prüft `reply-received` auf der falschen Seite oder mit zu engem Setup. Live-Test 2.5.4.2 hat Reply-Detection verifiziert (10:52 Audit nach Florian-Approval), aber Skript-Setup simuliert nur Trusted-Bypass-Pfad ohne echte Reply-Sequenz mit Mandate-Approval-Loop. Skript braucht Erweiterung: Florian sendet → Markus' Twin antwortet (über Trusted-Bypass) → Florian empfängt Antwort mit `inReplyTo` → prüfen, ob Florian-seitig `reply-received`-Audit entsteht.
-**Größe:** M · **Priorität:** should · **Aus:** 2.5.4.2 + 2.5.4.3 Test-Skript-Output
 
 ### 47. Reply-Marker bei Approval-Antworten manchmal fehlend
 Conversation-View zeigt Reply-Marker (`↩ reply`) nicht zuverlässig bei allen Approval-Antworten — z.B. die „Wieder ein Test"-Antwort um 13:45 in Florian's View ohne Marker, obwohl konzeptionell Reply auf vorherige Test-Message. Hypothese: Backend setzt `inReplyTo` korrekt, aber Frontend-Render verschluckt es bei bestimmten Pfaden. Vermutlich Edge-Case in `mergeAuditIntoBridgeMessages` oder in der Render-Conditional, die zwischen `reply-received` und `respond_to_twin_message` unterscheidet.
@@ -271,18 +264,12 @@ Heute: ChatLayout nutzt `h-[calc(100vh-65px)]`. Auf Safari iOS (und älteren Mob
 **Größe:** S · **Priorität:** nice · **Aus:** UX-Iteration 3. Mai (Layout-Fix Caveat)
 **Stufe:** 0 → 1 · **Spur:** UX-Reifung
 
-### 58. Visual Design + Brand-Iteration für twin-lab — NEU 3. Mai 2026 nachmittags
+### Nolmi-Visual-Design-Iteration (vor Public-Polish)
+
+*(Triage 2c: twin-lab-Branding-Bezug raus; frische Nolmi-Visual-Welle, low/launch-nah.)*
 Aktuell: monospace, schwarz-weiß-grün, sehr functional. Konzeptionell stimmig zum „Lab"-Charakter, aber spätestens bei Multi-Tenant-Public-Launch (nach 2.5.6) wird die Frage akut: wie soll twin-lab aussehen für externe User? Eigene Brand-Identity entwickeln (Logo, Farben, Typografie-Hierarchie), Header-Komponente neu konzipieren, Page-Templates strukturieren, Conversation-Bubble-Designs polishen. Vorbereitung: Mood-Boards, Inspiration sammeln. Empfohlen mit Florian zusammen (Designer). Trigger: vor Phase 2.5.6 oder nach.
 **Größe:** XL · **Priorität:** should · **Aus:** UX-Diskussion 3. Mai (Option-3-Reizfrage)
 **Stufe:** 0 → 2 · **Spur:** UX-Reifung
-
-### 61. Bridge-Image hat kein wget/curl für Healthcheck — NEU 3. Mai 2026 nachmittags
-`docker compose exec bridge wget ...` schlägt fehl, weil `wget` im node:20-alpine-Image nicht da ist (heute mit Node-Fetch umgangen). Für Healthcheck-Direktiven in `docker-compose.yml` (HEALTHCHECK-Stanza) wäre `wget` oder `curl` praktisch. Lösung: entweder `apk add --no-cache wget` im Runner-Stage (~1 MB Image-Größe), oder Healthcheck via `node -e "fetch(...)"` als CMD im Dockerfile. Letzteres ist sauberer (kein zusätzliches Tool im Production-Image).
-**Größe:** S · **Priorität:** nice · **Aus:** #45 Verifikation
-
-### 62. Bridge-Container OOM-Risiko — NEU 3. Mai 2026 nachmittags
-Alter Bridge-Container vom 1. Mai war mit Exit-Code 137 abgeschossen (SIGKILL durch OOM-Killer oder externes Stop, vor 6h). Konkrete Ursache nicht ermittelbar (Container heute weg). Falls neue Bridge unter Last das gleiche Problem zeigt: Memory-Limits in Compose setzen (`deploy.resources.limits.memory: 256M`), better-sqlite3 ist eigentlich speicherarm, aber Node-Heap kann unter Last wachsen. Zur Sicherheit Monitoring etablieren — `docker stats` periodisch oder einen einfachen Memory-Logger im Bridge-Code für lange Laufzeiten.
-**Größe:** S · **Priorität:** nice · **Aus:** #45 Forensik des alten Containers
 
 ### 66. DB-Backup-Strategie für Production-DBs — NEU 4. Mai
 Drei DBs auf VPS, alle bisher ohne Backup: `twin-lab-bridge-data`, `twin-lab-web-data` (Runtime), und implizit auch `traefik`-Konfig. Bei Volume-Verlust sind drei User-Accounts plus Twin-Profile (Persona, Mandates, Encryption-Keys, API-Keys verschlüsselt) weg.
@@ -297,7 +284,9 @@ Master-Key sollte separat gesichert sein (Passwort-Manager, schon erledigt) — 
 Kein Notfall solange nichts kaputt ist. Wird wichtig sobald mehr als drei Power-User dranhängen.
 **Größe:** M · **Priorität:** should · **Aus:** 2.5.6 Production-Reflexion
 
-### 70. Production-Stack-Doku: README für `/docker/twin-lab-web/`
+### README für `docker/nolmi/` (Production-Stack-Doku am Ort)
+
+*(Triage 2c: Verzeichnis heißt jetzt `docker/nolmi/`; low.)*
 Heute: README im Repo unter `docker/twin-lab-web/README.md` beschreibt Build-Sequenz und ENV-Variablen. Ergänzen um:
 - Operations-Runbook: wie Restart, wie Logs lesen, wie .env editieren ohne Container zu stoppen
 - Troubleshooting-Sektion: Hairpin-NAT-Symptom (Connect-Timeout zu Bridge-Public-URL), Cookie-Domain-Symptom (Login-Loop), NEXT_PUBLIC-Symptom (hartcodierte URLs im Bundle)
@@ -305,17 +294,6 @@ Heute: README im Repo unter `docker/twin-lab-web/README.md` beschreibt Build-Seq
 - Backup/Restore-Anleitung (verknüpft mit #66)
 
 **Größe:** S · **Priorität:** should · **Aus:** 2.5.6 Reflexion
-
-### 71c. Hydration-Error nach ENV-Variable-Änderungen — Stale-Bundle-Phantom
-Während #71-Test sichtbarer Hydration-Error auf `<footer>`-Element. Nach Diagnose-Sequenz (Vor-#15-Stand auschecken, Test, Stand zurück, Hard-Reload) verschwand der Fehler komplett.
-
-Ursache: `next dev` Hot-Reload beim ENV-Variable-Update (NEXT_PUBLIC_DEPLOYMENT_LABEL aus #15) hat das Bundle nicht sauber neu generiert. Server-Render hatte alten Wert, Client-Bundle den neuen — Hydration-Mismatch. Hard-Reload (Cmd+Shift+R) räumt Bundle-Cache, alles okay.
-
-Kein echter Code-Bug — pragmatisch dokumentiert als Lesson („bei ENV-Änderungen lokal Hard-Reload"), kein Sub-Schritt nötig. Falls in Production reproducible, dann eigenes Item.
-
-**Größe:** XS · **Priorität:** nice · **Aus:** #71 Live-Test, kein Action Required
-
----
 
 ## Aus Phase 3.1 entstanden
 
@@ -364,22 +342,6 @@ Bei der #78-Diagnose gesichtet: Tabelle `persona` mit `id INTEGER PRIMARY KEY CH
 Migration 009 könnte die Tabelle droppen. Triviale `DROP TABLE persona;`. Nice-to-have, kein Blocker.
 
 **Größe:** XS · **Priorität:** nice · **Aus:** Tag-8 #78-Diagnose
-
-### 82. Heikos Persona-Source-File `docs/persona-heiko.md` fehlt
-Beim Tag-8-Production-Persona-Sync entdeckt: für @heiko gibt's keine `docs/persona-heiko.md` und keine `docs/persona-heiko-meta.yaml`. `twin:reload @heiko --force` failed mit `persona.md fehlt unter /app/docs/persona-heiko.md`.
-
-Ursache: Heikos Twin wurde via Onboarding-Wizard angelegt, nicht via `twin:bootstrap`-Skript. Wizard schreibt direkt in DB, kein File-Backup im `docs/`-Ordner. Heikos Production-Persona ist 344 chars (Stub aus Wizard).
-
-Lösungs-Optionen:
-1. **Persona-File aus DB rückwärts erzeugen** — Reverse-Sync DB → File. Wäre eine Funktion im `twin:reload`-Tool oder ein eigenes `twin:export-persona <handle>`. Out-of-scope #78
-2. **Onboarding-Wizard erweitern** — schreibt automatisch File-Backup in `docs/persona-<handle>.md` parallel zum DB-Insert. Strukturell sauberer, aber Wizard-Refactor
-3. **Manuell ein File anlegen** — pragmatisch, einmalig. Wenn Heiko seine Persona ohnehin überarbeiten will, ist das jetzt der Anlass
-
-Vote: **3 für jetzt, 2 für später.** Heute kein Druck — Heikos Twin auf Production hat einen funktionierenden Stub, der reicht für die Test-Phase. Wenn er Persona-Updates braucht: einmalig manuell `docs/persona-heiko.md` und `docs/persona-heiko-meta.yaml` anlegen, dann läuft `twin:reload`.
-
-Verwandt mit #78 — beide entstehen aus dem File-zu-DB-Sync-Modell. Onboarding-Wizard-Erweiterung als sauberster Pfad gehört strukturell zur 2.5.3-Phase (Onboarding-Wizard) als Backwash-Item.
-
-**Größe:** S (Variante 1, 3) / M (Variante 2) · **Priorität:** nice · **Aus:** Tag-8-Production-Deploy
 
 ### 83. UI-Reply-Verkettung verhindert Twin-Trigger bei Folge-Fragen
 Beim Tag-8-Production-Smoke-Test fiel auf: Florians Twin antwortet nicht autonom auf Markus' Bridge-Messages — obwohl Trust beidseitig gesetzt ist und der Mandate-Layer Trusted-Bypass für `respond_to_twin_message` korrekt definiert hat. Initial-Hypothese „Auto-Respond gebrochen seit 4. Mai" hat sich als falsch erwiesen.
@@ -1405,32 +1367,6 @@ Heißt nicht „Prompt-Tuning ist nutzlos" — als Defense-in-Depth ist es wertv
 
 ## Tag-14-Items (Recherche-getrieben, MemPalace-Inspirationen)
 
-### #102 Self-Hosting-Doku: DEPLOYMENT.md + docker-compose.override.yml.example (M, should)
-
-**Kontext:** Tag-15-Production-Deploy hat drei Doku-Lücken offengelegt:
-
-1. **`docker-compose.override.yml` lebt nur auf VPS.** Self-Hoster sehen das Pattern gar nicht. Heute hatten wir auf VPS drei Bind-Mounts (docs, mcp-servers, model-cache) plus eine ENV-Variable (TWIN_LAB_MODEL_CACHE_DIR) — alles undokumentiert für externe Nutzer.
-2. **`.env.example` ist Self-Hosting-unvollständig.** Phase-3.4-ENVs (EPISODIC_*, TWIN_LAB_EMBEDDING_*) sind nicht drin, weil sie Defaults haben — aber ein Self-Hoster der's konfigurieren möchte hat keinen Anhaltspunkt.
-3. **musl/glibc-Inkompatibilität bei sqlite-vec.** Wir haben heute 1h+ Diagnose-Marathon gebraucht um das zu verstehen. Self-Hoster, die ein anderes Base-Image probieren, würden in dieselbe Falle laufen. „Use node:20-slim or any glibc-based Linux distro" sollte explizit dokumentiert sein.
-
-**Lösung:** Zwei Dateien anlegen:
-
-- **`docker-compose.override.yml.example`** im Repo committen — Vorlage mit Platzhaltern für deployment-spezifische Werte (Domains, Volume-Pfade). Header-Kommentar erklärt: „Kopiere zu `docker-compose.override.yml`, passe an, niemals committen."
-- **`docs/DEPLOYMENT.md`** mit:
-  - Pre-Deploy-Checks (Disk-Speicher, DNS, Bridge-Network)
-  - Volume-Konfiguration (model-cache, data-volume, docs/mcp-servers bind-mounts)
-  - ENV-Variable-Reference (was muss/kann/sollte gesetzt sein)
-  - Base-Image-Anforderung: **glibc, nicht musl** (sqlite-vec liefert nur glibc-Builds)
-  - Deploy-Sequenz (Pull, Build, Recreate, Embedding-Initialization)
-  - Smoke-Tests post-Deploy
-  - Troubleshooting (vec0.so.so-Pattern erklären als Auto-Fallback bei dlopen-Fail)
-
-**Größe:** M — ca. 2-3h, weil Substanz heute schon klar. Tag-15-Lessons direkt verarbeiten.
-
-**Wann:** vor erstem externen Self-Hosting-Use-Case, oder als Polish-Item wenn Roadmap Pause hat. Nicht zeitkritisch, aber Vision-relevant (siehe TWIN-VISION.md / Pitch-Deck).
-
----
-
 ### #103 Pre-Check in production-äquivalentem Container, nicht lokal (S, should)
 
 **Kontext:** Tag-15-Production-Deploy hat einen substantiellen Pre-Check-Lücke offengelegt. Der Pre-Check für Phase 3.4 vom 12. Mai wurde *lokal auf macOS arm64* gemacht — drei kritische Patterns wurden verifiziert (BigInt-rowid, Buffer-Wrap, CTE-KNN), Stack-Kompatibilität festgestellt. Aber: das `vec0.so`-Binary von sqlite-vec ist glibc-gebaut, Alpine Linux nutzt musl. macOS-Lokal-Verifikation hat das nicht abgedeckt.
@@ -1608,6 +1544,11 @@ Danach:
 - **#90 Resume-Prompt-Tuning** (should, M) — 5-Min-Edit
 - **#91 Reject-Reason-UI** (nice, S) — window.prompt durch Modal ersetzen (ModalWrapper aus 3.3.G3 verfügbar)
 
+### Lesson (#62 / Bridge-OOM): Exit-137 einmalig, kein Recurrence — Resource-Limits in Reserve
+
+Der alte Bridge-Container wurde am 1. Mai 2026 mit **Exit-Code 137** (SIGKILL, OOM-Killer oder externes Stop) abgeschossen; Ursache nicht mehr ermittelbar (Container weg). **Keine Wiederholung** seither. Falls eine Bridge unter Last erneut OOMt: Memory-Limit in Compose (`deploy.resources.limits.memory: 256M`) + `docker stats`-Monitoring. better-sqlite3 ist speicherarm, aber der Node-Heap kann unter Last wachsen. (Bau-Item #62 in 2c gestrichen — one-off; dieser Hinweis bleibt als Reserve.)
+
+
 ## Tag-27-Items (#131-getrieben)
 
 ## Tag-28-Items (#141+#142-Follow-ups)
@@ -1672,23 +1613,6 @@ Danach:
 3. ggf. Source-Header / README-Badge angleichen.
 
 Bewusst **nicht** im Tag-33-Doku-Commit ausgeführt — eigener Schritt im Going-Public-Block.
-
-### Rebrand-Phase 4 — Nolmi-VPS Production-Deploy (M-L, must — nach 1-3, VPS bereits provisioniert)
-
-**Status:** Offen, **Setzungen gelockt Tag 31** | gated nach Phase 1-3 | Aufwand: M-L | **VPS bereits provisioniert Tag 30/31**
-
-**Strategy + Bau-Vorlage:** [`docs/PHASE-4-VPS-STRATEGY.md`](./PHASE-4-VPS-STRATEGY.md) — 7 Setzungen (S1 DB-Migration, S2 voller Stack inkl. Bridge unter `/docker/nolmi/` + **Doppel-DB-Migration `twin.db`+`bridge.db`**, S3 Secrets + Encryption-Key-Übernahme, S4 Traefik + BasicAuth, S5 HTTPS-PAT, S6 Parallel-Cut-Over, S7 Hot-Standby-Rollback), zwei Bedingungen (Encryption-Key-Kontinuität + Bridge-Migration), Cut-Over-Sequenz, Rollback-Plan, Bau-Reihenfolge B1–B7. **S2 final Tag 31 Block 8: Bridge-DB-Migration statt Re-Registrierung** (B3-Befund). **B1 ✅ DONE Tag 31 Block 9** (VPS-Prep + Docker 29.5.2 + Traefik v3.6 auf `187.124.3.235`; 3 Cookbook-Bugs §7). **B2 ✅ DONE (Prod) Tag 31 Block 14** (3-Service-Stack up, **Prod-Certs** `Let's Encrypt CN=YR2` über app/runtime/bridge.nolmi.ai, `TLS-verify=0`, Bridge selbstheilend, BasicAuth app→401, runtime/bridge→404; 4 Cookbook-Befunde §7; Repo-Fixes Block 11/12/13: Dockerfile-Filter, Bridge-Auto-init, htpasswd-Mount-Konsistenz; Prod-Cert-Flip griff erst nach Resolver-Store-Reset, §7 B2-4). **B4 ✅ DONE Tag 31 Block 15** (Doppel-DB-Migration auf Backup-Kopie verifiziert, ohne Production-Freeze: Bedingung A kein GCM-Fehler + Secrets entschlüsselt, S2-Token-Match `bridge_token`==`api_token` 3/3 byte-gleich, A2A-Stream ×3 gegen nolmi-bridge; 2 B6-Pflicht-Befunde §5: Stale-`bridge_url`-Sweep + Geist-Twin `@test122prod`). **B5 ✅ DONE Tag 31 Block 16** (Smoke 4/4 auf migriertem Stack: Container/Health, Migration intakt, Bedingung A end-to-end (Chat-Turn beantwortet), S2 end-to-end (A2A-Roundtrip @markus→@florian, kein 401), alle 3 §7-Fallen negativ). **B6 ✅ DONE (reduziert) Tag 31 Block 17** (Cut-Over im Single-User-Test-Kontext — nur Markus nutzt, @florian/@heiko Test-Twins → kein Dritt-Freeze/Re-Sync nötig; Geist-Twin `@test122prod` aus bridge.db gelöscht, Backup davor; Cut-Over-Entscheidung getroffen). **✅ PHASE 4 ABGESCHLOSSEN — Nolmi produktiv auf `187.124.3.235` (B1–B6).** Komplette Rebrand→Deploy-Pipeline (Phase 1+2+3a+3b+4) im Ziel. Einzige Restaktion: alter Stack `srv1046432` abschalten — bewusst offen gehalten (Hot-Standby, S7), siehe Item unten.
-
-Separater Hostinger-VPS Frankfurt, Ubuntu 24.04 LTS, IP `187.124.3.235`. Neu-Aufsetz analog DEPLOYMENT.md §9 Cookbook, mit Nolmi-Branding + Light + neuer Domain:
-
-- ✅ VPS provisioniert, Domain `nolmi.ai` + `getnolmi.com` + 5 DNS-A-Records grün (apex + app + runtime + bridge + docs → `187.124.3.235`) — Setup-Block kann starten
-- Traefik + Stack deployen
-- Brand-Assets (Wordmark, Favicon, OG-Image) — Light-first
-- Screenshots neu aufnehmen (Light-Branding) für #112 Landing / #113 Demo
-
-**Markus' parallele Arbeit (Stand Tag 31):** ✅ Foundation gesichert (Domain + VPS + GitHub-Org `nolmi-ai` + npm `@nolmi` + PyPI + Docker Hub `nolmi` + Mail-Stack + Trademark-Quick-Search). Verbleibend: Social-Handles + Brand-Assets-Produktion. Details siehe Strategy-Doc §9.
-
----
 
 ## Archiv — erledigt (Stand Tag 33)
 
@@ -2535,6 +2459,55 @@ Sheet für Smoke-Cleanups.
 **Test-Twin-Cleanup Tag 31 Block 5 hat CLI-seitig PRAGMA gesetzt** —
 keine offenen Waisen aus dieser Operation.
 
+### #102 Self-Hosting-Doku: DEPLOYMENT.md + docker-compose.override.yml.example (M, should) ✅
+
+✅ **Erledigt** (Beleg: `docker-compose.override.yml.example` + DEPLOYMENT.md deckt glibc/musl/vec0 + Deploy-Sequenz/Troubleshooting + `.env.example` mit EPISODIC/Embedding-Vars — alle 3 Tag-15-Lücken gedeckt; Triage 2c gegengelesen).
+
+**Kontext:** Tag-15-Production-Deploy hat drei Doku-Lücken offengelegt:
+
+1. **`docker-compose.override.yml` lebt nur auf VPS.** Self-Hoster sehen das Pattern gar nicht. Heute hatten wir auf VPS drei Bind-Mounts (docs, mcp-servers, model-cache) plus eine ENV-Variable (TWIN_LAB_MODEL_CACHE_DIR) — alles undokumentiert für externe Nutzer.
+2. **`.env.example` ist Self-Hosting-unvollständig.** Phase-3.4-ENVs (EPISODIC_*, TWIN_LAB_EMBEDDING_*) sind nicht drin, weil sie Defaults haben — aber ein Self-Hoster der's konfigurieren möchte hat keinen Anhaltspunkt.
+3. **musl/glibc-Inkompatibilität bei sqlite-vec.** Wir haben heute 1h+ Diagnose-Marathon gebraucht um das zu verstehen. Self-Hoster, die ein anderes Base-Image probieren, würden in dieselbe Falle laufen. „Use node:20-slim or any glibc-based Linux distro" sollte explizit dokumentiert sein.
+
+**Lösung:** Zwei Dateien anlegen:
+
+- **`docker-compose.override.yml.example`** im Repo committen — Vorlage mit Platzhaltern für deployment-spezifische Werte (Domains, Volume-Pfade). Header-Kommentar erklärt: „Kopiere zu `docker-compose.override.yml`, passe an, niemals committen."
+- **`docs/DEPLOYMENT.md`** mit:
+  - Pre-Deploy-Checks (Disk-Speicher, DNS, Bridge-Network)
+  - Volume-Konfiguration (model-cache, data-volume, docs/mcp-servers bind-mounts)
+  - ENV-Variable-Reference (was muss/kann/sollte gesetzt sein)
+  - Base-Image-Anforderung: **glibc, nicht musl** (sqlite-vec liefert nur glibc-Builds)
+  - Deploy-Sequenz (Pull, Build, Recreate, Embedding-Initialization)
+  - Smoke-Tests post-Deploy
+  - Troubleshooting (vec0.so.so-Pattern erklären als Auto-Fallback bei dlopen-Fail)
+
+**Größe:** M — ca. 2-3h, weil Substanz heute schon klar. Tag-15-Lessons direkt verarbeiten.
+
+**Wann:** vor erstem externen Self-Hosting-Use-Case, oder als Polish-Item wenn Roadmap Pause hat. Nicht zeitkritisch, aber Vision-relevant (siehe TWIN-VISION.md / Pitch-Deck).
+
+---
+
+
+### Rebrand-Phase 4 — Nolmi-VPS Production-Deploy (M-L, must — nach 1-3, VPS bereits provisioniert) ✅
+
+✅ **Erledigt** (Beleg: Production-Deploy Etappe 2 `c88f0eb` Tag 33 auf `srv1712371` + B6-Cut-Over Tag 31 — Nolmi läuft auf seinem VPS; siehe PHASE-4-VPS-STRATEGY §5/§6).
+
+**Status:** Offen, **Setzungen gelockt Tag 31** | gated nach Phase 1-3 | Aufwand: M-L | **VPS bereits provisioniert Tag 30/31**
+
+**Strategy + Bau-Vorlage:** [`docs/PHASE-4-VPS-STRATEGY.md`](./PHASE-4-VPS-STRATEGY.md) — 7 Setzungen (S1 DB-Migration, S2 voller Stack inkl. Bridge unter `/docker/nolmi/` + **Doppel-DB-Migration `twin.db`+`bridge.db`**, S3 Secrets + Encryption-Key-Übernahme, S4 Traefik + BasicAuth, S5 HTTPS-PAT, S6 Parallel-Cut-Over, S7 Hot-Standby-Rollback), zwei Bedingungen (Encryption-Key-Kontinuität + Bridge-Migration), Cut-Over-Sequenz, Rollback-Plan, Bau-Reihenfolge B1–B7. **S2 final Tag 31 Block 8: Bridge-DB-Migration statt Re-Registrierung** (B3-Befund). **B1 ✅ DONE Tag 31 Block 9** (VPS-Prep + Docker 29.5.2 + Traefik v3.6 auf `187.124.3.235`; 3 Cookbook-Bugs §7). **B2 ✅ DONE (Prod) Tag 31 Block 14** (3-Service-Stack up, **Prod-Certs** `Let's Encrypt CN=YR2` über app/runtime/bridge.nolmi.ai, `TLS-verify=0`, Bridge selbstheilend, BasicAuth app→401, runtime/bridge→404; 4 Cookbook-Befunde §7; Repo-Fixes Block 11/12/13: Dockerfile-Filter, Bridge-Auto-init, htpasswd-Mount-Konsistenz; Prod-Cert-Flip griff erst nach Resolver-Store-Reset, §7 B2-4). **B4 ✅ DONE Tag 31 Block 15** (Doppel-DB-Migration auf Backup-Kopie verifiziert, ohne Production-Freeze: Bedingung A kein GCM-Fehler + Secrets entschlüsselt, S2-Token-Match `bridge_token`==`api_token` 3/3 byte-gleich, A2A-Stream ×3 gegen nolmi-bridge; 2 B6-Pflicht-Befunde §5: Stale-`bridge_url`-Sweep + Geist-Twin `@test122prod`). **B5 ✅ DONE Tag 31 Block 16** (Smoke 4/4 auf migriertem Stack: Container/Health, Migration intakt, Bedingung A end-to-end (Chat-Turn beantwortet), S2 end-to-end (A2A-Roundtrip @markus→@florian, kein 401), alle 3 §7-Fallen negativ). **B6 ✅ DONE (reduziert) Tag 31 Block 17** (Cut-Over im Single-User-Test-Kontext — nur Markus nutzt, @florian/@heiko Test-Twins → kein Dritt-Freeze/Re-Sync nötig; Geist-Twin `@test122prod` aus bridge.db gelöscht, Backup davor; Cut-Over-Entscheidung getroffen). **✅ PHASE 4 ABGESCHLOSSEN — Nolmi produktiv auf `187.124.3.235` (B1–B6).** Komplette Rebrand→Deploy-Pipeline (Phase 1+2+3a+3b+4) im Ziel. Einzige Restaktion: alter Stack `srv1046432` abschalten — bewusst offen gehalten (Hot-Standby, S7), siehe Item unten.
+
+Separater Hostinger-VPS Frankfurt, Ubuntu 24.04 LTS, IP `187.124.3.235`. Neu-Aufsetz analog DEPLOYMENT.md §9 Cookbook, mit Nolmi-Branding + Light + neuer Domain:
+
+- ✅ VPS provisioniert, Domain `nolmi.ai` + `getnolmi.com` + 5 DNS-A-Records grün (apex + app + runtime + bridge + docs → `187.124.3.235`) — Setup-Block kann starten
+- Traefik + Stack deployen
+- Brand-Assets (Wordmark, Favicon, OG-Image) — Light-first
+- Screenshots neu aufnehmen (Light-Branding) für #112 Landing / #113 Demo
+
+**Markus' parallele Arbeit (Stand Tag 31):** ✅ Foundation gesichert (Domain + VPS + GitHub-Org `nolmi-ai` + npm `@nolmi` + PyPI + Docker Hub `nolmi` + Mail-Stack + Trademark-Quick-Search). Verbleibend: Social-Handles + Brand-Assets-Produktion. Details siehe Strategy-Doc §9.
+
+---
+
+
 
 
 ---
@@ -3041,3 +3014,36 @@ Ein **CLA** (Contributor License Agreement) oder mindestens **DCO** (Developer C
 **Neue Items aus Phase 3a (für später):**
 - **`SESSION_COOKIE_NAME`-Konstante konsolidieren:** heute in `apps/runtime/src/auth/session.ts` (Export) **und** `apps/web/middleware.ts` (Local-Const-Duplikat) gepflegt. Cross-App-Import vom Runtime ins Web ist heute strukturell nicht vorgesehen (Runtime exportiert keine Subpaths). Sauberer Pfad: `@nolmi/shared/auth-cookies` mit beiden Konstanten, beide Apps konsumieren von dort. Aufwand S, nice (Phase 5+).
 
+### 16. Backward-Compat-Aliases entfernen
+
+*(Triage 2c: zeit-vertagt — `TWIN_LAB_*`-Aliases noch in ~7 Dateien (crypto-utils, session, env.ts …), Hart-Cut bewusst 6–12 Monate später.)*
+Sub-Schritt 2d hat alte Pfade (`/chat`, `/twin-profile`, `/audit`, `/audit/pending`, etc.) als Aliases zu `/twins/@markus/...` umgeleitet. Sollte nach komplettem UI-Refresh-Cycle entfernt werden — sonst dauerhafter Tech-Debt.
+**Größe:** S · **Priorität:** should · **Aus:** Sub-Schritt 2d Caveat #5
+
+
+---
+
+## Privat / Markus-spezifisch
+
+Persönliche/instanz-spezifische Items — **nicht Teil der öffentlichen Roadmap** (BACKLOG wird mit Going Public öffentlich lesbar).
+
+### 61. Bridge-Image hat kein wget/curl für Healthcheck — NEU 3. Mai 2026 nachmittags
+`docker compose exec bridge wget ...` schlägt fehl, weil `wget` im node:20-alpine-Image nicht da ist (heute mit Node-Fetch umgangen). Für Healthcheck-Direktiven in `docker-compose.yml` (HEALTHCHECK-Stanza) wäre `wget` oder `curl` praktisch. Lösung: entweder `apk add --no-cache wget` im Runner-Stage (~1 MB Image-Größe), oder Healthcheck via `node -e "fetch(...)"` als CMD im Dockerfile. Letzteres ist sauberer (kein zusätzliches Tool im Production-Image).
+**Größe:** S · **Priorität:** nice · **Aus:** #45 Verifikation
+
+
+### 82. Heikos Persona-Source-File `docs/persona-heiko.md` fehlt
+Beim Tag-8-Production-Persona-Sync entdeckt: für @heiko gibt's keine `docs/persona-heiko.md` und keine `docs/persona-heiko-meta.yaml`. `twin:reload @heiko --force` failed mit `persona.md fehlt unter /app/docs/persona-heiko.md`.
+
+Ursache: Heikos Twin wurde via Onboarding-Wizard angelegt, nicht via `twin:bootstrap`-Skript. Wizard schreibt direkt in DB, kein File-Backup im `docs/`-Ordner. Heikos Production-Persona ist 344 chars (Stub aus Wizard).
+
+Lösungs-Optionen:
+1. **Persona-File aus DB rückwärts erzeugen** — Reverse-Sync DB → File. Wäre eine Funktion im `twin:reload`-Tool oder ein eigenes `twin:export-persona <handle>`. Out-of-scope #78
+2. **Onboarding-Wizard erweitern** — schreibt automatisch File-Backup in `docs/persona-<handle>.md` parallel zum DB-Insert. Strukturell sauberer, aber Wizard-Refactor
+3. **Manuell ein File anlegen** — pragmatisch, einmalig. Wenn Heiko seine Persona ohnehin überarbeiten will, ist das jetzt der Anlass
+
+Vote: **3 für jetzt, 2 für später.** Heute kein Druck — Heikos Twin auf Production hat einen funktionierenden Stub, der reicht für die Test-Phase. Wenn er Persona-Updates braucht: einmalig manuell `docs/persona-heiko.md` und `docs/persona-heiko-meta.yaml` anlegen, dann läuft `twin:reload`.
+
+Verwandt mit #78 — beide entstehen aus dem File-zu-DB-Sync-Modell. Onboarding-Wizard-Erweiterung als sauberster Pfad gehört strukturell zur 2.5.3-Phase (Onboarding-Wizard) als Backwash-Item.
+
+**Größe:** S (Variante 1, 3) / M (Variante 2) · **Priorität:** nice · **Aus:** Tag-8-Production-Deploy
