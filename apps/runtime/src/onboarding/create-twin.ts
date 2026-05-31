@@ -43,19 +43,36 @@ export interface CreateTwinInput {
   mandateTemplate: MandateTemplateId;
   llmConfig: { provider: LlmProvider; model: string; apiKey: string };
   presetSelections: readonly PresetSelection[];
-  /** Optional — Default aus `resolveOnboardingBridgeUrl()` (ENV/Fallback). */
-  bridgeUrl?: string;
+  /**
+   * Bridge-Anbindung:
+   *   - `undefined` → Default aus `resolveOnboardingBridgeUrl()` (ENV/Fallback),
+   *     dann an der Bridge registrieren (unveränderter Web-Wizard-Pfad).
+   *   - `string`    → diese Bridge-URL, registrieren (eigene Bridge).
+   *   - `null`      → SOLO-Twin: keine Registrierung, bridge_url/token bleiben NULL.
+   */
+  bridgeUrl?: string | null;
+  /**
+   * Expliziter Register-Token für die eigene Bridge (Owner kennt ihn, 2.4b).
+   * Nur relevant, wenn registriert wird; Fallback `BRIDGE_REGISTER_TOKEN`-ENV.
+   */
+  bridgeRegisterToken?: string;
 }
 
 export interface CreateTwinDeps {
   profilesRepo: TwinProfilesRepo;
-  registry: TwinServiceRegistry;
-  skillRepo: SkillRepo;
-  mcpServersRepo: McpServersRepo;
   masterKey: Buffer;
-  examplesDir: string;
-  mcpServersDir: string;
   logger: CreateTwinLogger;
+  /**
+   * Hot-Load-Deps — nur im SERVER-Prozess verfügbar (Web-Wizard). Fehlen sie
+   * (z.B. CLI-Prozess), überspringt createTwin Schritt 7: der Twin landet in
+   * der DB, geht aber erst nach Runtime-Restart live (`requiresRestart: true`),
+   * und Presets werden NICHT aktiviert (activatePresets braucht die Registry).
+   */
+  registry?: TwinServiceRegistry;
+  skillRepo?: SkillRepo;
+  mcpServersRepo?: McpServersRepo;
+  examplesDir?: string;
+  mcpServersDir?: string;
 }
 
 export interface CreateTwinResult {
@@ -122,23 +139,30 @@ export async function createTwin(
     throw new CreateTwinError(400, `API-Key ungültig: ${validation.reason}`);
   }
 
-  // 3. Bridge-Handle registrieren
-  let bridgeToken: string;
-  const bridgeUrl = input.bridgeUrl ?? resolveOnboardingBridgeUrl();
-  try {
-    const result = await registerHandleOnBridge({
-      bridgeUrl,
-      handle: persona.handle,
-      displayName: persona.fullName,
-    });
-    bridgeToken = result.token;
-  } catch (err) {
-    const status = err instanceof BridgeRegisterError ? err.status : 502;
-    const msg = err instanceof Error ? err.message : String(err);
-    throw new CreateTwinError(
-      status === 409 ? 409 : 502,
-      `Bridge-Registrierung fehlgeschlagen: ${msg}`,
-    );
+  // 3. Bridge-Handle registrieren — ausser bei SOLO (input.bridgeUrl === null).
+  let bridgeUrl: string | null;
+  let bridgeToken: string | null;
+  if (input.bridgeUrl === null) {
+    bridgeUrl = null;
+    bridgeToken = null;
+  } else {
+    bridgeUrl = input.bridgeUrl ?? resolveOnboardingBridgeUrl();
+    try {
+      const result = await registerHandleOnBridge({
+        bridgeUrl,
+        handle: persona.handle,
+        displayName: persona.fullName,
+        registerToken: input.bridgeRegisterToken,
+      });
+      bridgeToken = result.token;
+    } catch (err) {
+      const status = err instanceof BridgeRegisterError ? err.status : 502;
+      const msg = err instanceof Error ? err.message : String(err);
+      throw new CreateTwinError(
+        status === 409 ? 409 : 502,
+        `Bridge-Registrierung fehlgeschlagen: ${msg}`,
+      );
+    }
   }
 
   // 4. Persona-MD bauen + Mandates laden
@@ -182,6 +206,25 @@ export async function createTwin(
 
   // 7. Hot-Reload (#37) — Twin direkt in die Registry einklinken, damit der
   //    Wizard-Redirect zu /chat/<handle> ohne Runtime-Restart funktioniert.
+  //
+  //    Ohne Live-Registry (CLI-Prozess, kein Server): überspringen — der Twin
+  //    ist in der DB, geht aber erst nach Runtime-Restart live
+  //    (`requiresRestart: true`), und Presets werden NICHT aktiviert
+  //    (activatePresets braucht die Registry-Engine; via Settings nachholbar).
+  if (
+    !deps.registry ||
+    !deps.skillRepo ||
+    !deps.mcpServersRepo ||
+    deps.examplesDir == null ||
+    deps.mcpServersDir == null
+  ) {
+    return {
+      twinId: profile.twinId,
+      handle: profile.handle,
+      requiresRestart: true,
+    };
+  }
+
   //    Bei Hot-Load-Fehler: Profil bleibt in DB, Caller bekommt
   //    requiresRestart=true mit ehrlichem Hinweis (Restart hilft, weil
   //    loadAll() das Profil dann beim Boot picked). Preset-Activation läuft

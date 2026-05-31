@@ -97,7 +97,7 @@ function pickApiKey(provider: LlmProvider, twinName?: string): string | undefine
   return undefined;
 }
 
-function defaultModelFor(provider: LlmProvider): string {
+export function defaultModelFor(provider: LlmProvider): string {
   switch (provider) {
     case "openai":
       return process.env.OPENAI_MODEL?.trim() || "gpt-5.5";
