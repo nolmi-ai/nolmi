@@ -18,8 +18,15 @@
 # Staging-Store zu leeren reicht AUCH nicht — der le-Prod-Resolver legt dann nur
 # einen Account an (acme.json = Account-only), bezieht aber keine Certs, weil der
 # neu gefüllte Staging-Store „kein Bezugsbedarf" signalisiert. BEIDE Stores
-# (acme-staging.json UND acme.json) müssen geleert werden → Traefik-Restart →
-# ein Request pro Host als Bezugs-Trigger. Genau das macht dieses Skript.
+# (acme-staging.json UND acme.json) müssen geleert werden.
+#
+# Und die REIHENFOLGE ist entscheidend (VM-Gegentest Tag 33): erst den Stack auf
+# das le-Label recreaten (le durchgängig aktiv), DANN beide Stores leeren +
+# Traefik-Restart, DANN triggern. Sonst entsteht zwischen Store-Reset und
+# Stack-Recreate ein Fenster, in dem die Stores leer sind, der Stack aber noch
+# auf dem le-staging-Label steht → ein Bezug zieht wieder Staging. Ablauf also:
+#   (1) .env→le  (2) Stack-Recreate (le-Label)  (3) beide Stores leeren+Restart
+#   (4) Trigger/Verify. Genau das macht dieses Skript.
 #
 #   DOMAIN=deine-domain.tld bash install/tls-promote.sh
 
@@ -65,20 +72,31 @@ else
 fi
 ok "ACME_RESOLVER=le gesetzt"
 
-# ─── 2. BEIDE ACME-Stores leeren (B2-Befund 4, VM-verifiziert Tag 33) ─────────
-# Tiefer als ursprünglich dokumentiert: NUR acme-staging.json zu leeren reicht
-# NICHT. Traefik registriert dann zwar einen le-Prod-ACME-Account (acme.json =
-# Account-only, KEINE Certs), serviert aber WEITER das Staging-Cert — solange
-# für die Domains irgendein Cert existiert (Staging-Store neu gefüllt +
-# in-memory), sieht Traefik "kein Bezugsbedarf". Beide Stores müssen leer sein.
-# Reihenfolge entscheidend: BEIDE leeren → Restart (lädt leere Stores, kein Cert
-# zum Matchen) → Trigger (Schritt 4) erzwingt Neu-Bezug gegen le (Prod).
+# ─── 2. Stack-Recreate ZUERST — le-Label durchgängig aktiv (Reihenfolge-Fix) ──
+# REIHENFOLGE ist entscheidend (VM-Gegentest Tag 33): der Stack-Recreate (neues
+# certresolver=le-Label) muss VOR dem Store-Reset laufen. Sonst entsteht zwischen
+# Store-Reset und Recreate ein Fenster, in dem Traefik mit LEEREN Stores läuft,
+# der Stack aber noch das ALTE le-staging-Label trägt → ein Bezug in diesem
+# Fenster geht wieder gegen Staging (genau der Gegentest-Befund: acme.json leer,
+# acme-staging.json voll, alle Hosts STAGING). le erst am Stack aktiv machen,
+# DANN die Stores leeren — kein Staging-Fenster mehr.
+log "2/4  Nolmi-Stack neu erstellen (Label certresolver=le aktiv, BEVOR Stores angefasst werden)"
+( cd "${NOLMI_DIR_STACK}" && docker compose up -d --force-recreate )
+ok "Stack neu erstellt — le-Label durchgängig aktiv"
+
+# ─── 3. BEIDE ACME-Stores leeren (B2-Befund 4, VM-verifiziert Tag 33) ─────────
+# NUR acme-staging.json zu leeren reicht NICHT: der le-Prod-Resolver legt dann
+# nur einen Account an (acme.json = Account-only, KEINE Certs), serviert aber
+# WEITER das Staging-Cert — solange für die Domains irgendein Cert existiert
+# (Staging-Store neu gefüllt + in-memory), sieht Traefik "kein Bezugsbedarf".
+# Beide Stores müssen leer sein. Da der Stack (Schritt 2) bereits durchgängig auf
+# le steht, kann der folgende Restart/Trigger keinen Staging-Bezug mehr auslösen.
 #
 # TRADE-OFF: acme.json mitzuleeren wirft auch den Prod-ACME-Account weg → bei
 # JEDEM Flip neuer Account + frischer Bezug. Für den EINMALIGEN Staging→Prod-
 # Flip unkritisch (Account-Anlage ist gratis, kein Rate-Limit darauf). Wer je
 # WIEDERHOLT flippt, sollte das bedenken.
-log "2/4  BEIDE ACME-Stores leeren + Traefik neustarten"
+log "3/4  BEIDE ACME-Stores leeren + Traefik neustarten"
 STAGING_STORE="${TRAEFIK_DIR}/letsencrypt/acme-staging.json"
 PROD_STORE="${TRAEFIK_DIR}/letsencrypt/acme.json"
 if [ -f "${STAGING_STORE}" ] || [ -f "${PROD_STORE}" ]; then
@@ -99,32 +117,47 @@ else
   warn "(BEIDE Stores, nicht nur Staging — B2-Befund 4), sonst bleibt Staging kleben."
 fi
 
-# ─── 3. Nolmi-Stack recreaten (neues certresolver=le-Label greift) ───────────
-log "3/4  Nolmi-Stack neu erstellen (Label certresolver=le aktiv)"
-( cd "${NOLMI_DIR_STACK}" && docker compose up -d --force-recreate )
-ok "Stack neu erstellt"
-
 # ─── 4. Bezugs-Trigger + Verify ──────────────────────────────────────────────
 log "4/4  Cert-Bezug triggern + verifizieren (~30–90 s)"
 for sub in app runtime bridge; do
   curl -k -s -o /dev/null --max-time 20 "https://${sub}.${DOMAIN}/" || true
 done
-sleep 5
-all_prod=1
-for sub in app runtime bridge; do
-  h="${sub}.${DOMAIN}"
-  issuer="$(echo | openssl s_client -connect "${h}:443" -servername "${h}" 2>/dev/null \
-            | openssl x509 -noout -issuer 2>/dev/null || true)"
-  if [ -z "${issuer}" ]; then
-    warn "${h}: noch kein Cert lesbar — ACME läuft evtl. noch (in ~1 min erneut prüfen)."; all_prod=0
-  elif echo "${issuer}" | grep -qi "STAGING"; then
-    warn "${h}: noch STAGING-Issuer (${issuer}) — Bezug evtl. noch nicht durch."; all_prod=0
-  else
-    ok "${h}: PROD-Issuer (${issuer})"
+# Ein echtes Prod-Cert erfüllt ALLE drei: enthält "Let's Encrypt", NICHT "STAGING",
+# NICHT "TRAEFIK DEFAULT CERT". Letzteres ist Traefiks Platzhalter VOR dem Bezug —
+# der wurde fälschlich als Erfolg gewertet (VM-Befund Tag 33). Retry, weil ACME
+# nach dem Trigger ~30–90 s braucht; bis zu 6×15 s = 90 s.
+issuer_state() { # → "prod" | "staging" | "default" | "none"
+  local h="$1" iss
+  iss="$(echo | openssl s_client -connect "${h}:443" -servername "${h}" 2>/dev/null \
+         | openssl x509 -noout -issuer 2>/dev/null || true)"
+  if [ -z "${iss}" ]; then echo "none"; return; fi
+  if echo "${iss}" | grep -qi "STAGING"; then echo "staging"; return; fi
+  if echo "${iss}" | grep -qi "TRAEFIK DEFAULT CERT"; then echo "default"; return; fi
+  if echo "${iss}" | grep -qi "Let's Encrypt"; then echo "prod"; return; fi
+  echo "default" # unbekannter Issuer → nicht als Erfolg werten
+}
+
+all_prod=0
+for attempt in 1 2 3 4 5 6; do
+  all_prod=1
+  for sub in app runtime bridge; do
+    h="${sub}.${DOMAIN}"
+    case "$(issuer_state "${h}")" in
+      prod)    : ;; # ok — wird nach der Schleife gesammelt gemeldet
+      staging) all_prod=0 ;;
+      default) all_prod=0 ;;
+      none)    all_prod=0 ;;
+    esac
+  done
+  [ "${all_prod}" = "1" ] && break
+  if [ "${attempt}" -lt 6 ]; then
+    warn "Bezug noch nicht durch (Versuch ${attempt}/6) — warte 15 s …"
+    sleep 15
   fi
 done
 
 if [ "${all_prod}" = "1" ]; then
+  for sub in app runtime bridge; do ok "${sub}.${DOMAIN}: PROD-Issuer (Let's Encrypt)"; done
   cat <<EOF
 
   ✓ Prod-Zertifikate aktiv über app/runtime/bridge.${DOMAIN}.
@@ -133,12 +166,14 @@ EOF
 else
   cat <<EOF
 
-  ! Noch nicht alle Hosts auf Prod-Issuer. ACME braucht manchmal 1–2 min.
-    Erneut prüfen:
+  ! Nach ~90 s noch nicht alle Hosts auf echten Prod-Certs (Let's Encrypt, kein
+    STAGING / kein "TRAEFIK DEFAULT CERT"). ACME kann länger brauchen.
+    Manuell prüfen:
       for h in app runtime bridge; do
         echo | openssl s_client -connect \$h.${DOMAIN}:443 -servername \$h.${DOMAIN} 2>/dev/null \\
           | openssl x509 -noout -issuer
       done
-    Bleibt STAGING kleben: Traefik-Logs prüfen (--since 5m) + acme-staging.json wirklich leer?
+    Default-Cert klebt: Traefik-Logs (--since 5m) auf le-Bezugsfehler prüfen.
+    Staging klebt: acme-staging.json wirklich leer? le-Label am Stack aktiv?
 EOF
 fi
