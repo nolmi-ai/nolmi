@@ -1005,11 +1005,11 @@ Keine Schema-Änderung nötig (`owner_user_id` existiert seit Migration 026, nul
 
 **Bewusste MVP-Grenze:** **keine Presets im CLI** (`activatePresets` braucht die Live-Registry des Server-Prozesses) → Skills/Presets danach im Web unter Settings. Twin geht erst nach **Runtime-Restart** live (Registry lädt beim Boot) — für Headless der Normalfall.
 
-### Weg-B Advanced-Pfad ungetestet (eigene Bridge, Mandate-Wahl, volle PersonaInput) — Folge-Check
+### Weg-B Advanced-Pfad (eigene Bridge, Mandate-Wahl, volle PersonaInput) — ✅ verifiziert
 
-**Status:** OFFEN (Folge-Check, **kein Blocker**) | **Größe S** | aus Weg-B Phase 2 (Tag 33)
+**Status:** **DONE** (Tag 33, lokal am Verhalten verifiziert) | **Größe S** | aus Weg-B Phase 2
 
-Der **Advanced**-Pfad von `twin:onboard` ist gebaut, aber noch **nicht am Verhalten verifiziert**: volle `PersonaInput`-Felder (tone/pronoun/preferences/topics), Mandate-Template-Wahl, und v.a. **eigene Bridge** via `registerHandleOnBridge` + Register-Token. Letzteres braucht eine **laufende Bridge mit Token** → separat zu testen. QuickStart (Solo) ist verifiziert; der Advanced-Bridge-Pfad nutzt denselben `createTwin` (nur `bridgeUrl`≠null + `bridgeRegisterToken`), Risiko gering.
+Der **Advanced**-Pfad von `twin:onboard` ist am Verhalten verifiziert (lokal, Wegwerf-DB + **echte Bridge**): Advanced-Flow durchgelaufen — volle `PersonaInput` (CTO / `direct` / `du` / `no-emojis`), Mandate-Wahl, Provider/Model; **eigene Bridge** via `registerHandleOnBridge` → `@advancedtest` an der Bridge registriert (`bridge.db`-Check: **JA**); `twin.db` mit `bridge_url=127.0.0.1:5100` + `bridge_token` gesetzt + `owner_user_id`. Test-Handle danach aus `bridge.db` entfernt. Damit sind **beide** Weg-B-Pfade verifiziert (QuickStart/Solo + Advanced/eigene Bridge), beide über denselben `createTwin`-Service.
 
 **TTY-Befund (festhalten):** `readLine`/`readSecret` (`scripts/_prompt-helpers.ts`) teilen **keinen Buffer über aufeinanderfolgende Aufrufe** → gepipter Mehrzeilen-Input wird nach dem ersten Prompt verworfen; nur **interaktiv (TTY)** nutzbar, **nicht piped/CI**. Weg-B ist (wie OpenClaw) interaktiv gedacht (`docker compose exec -it … onboard.js`). Ein **Helper-Refactor** (geteilter Stdin-Buffer) wäre ein **separates Stück**, falls je nicht-interaktive/CI-Tests des Onboarding-Flows gewünscht sind — die Helper tragen auch andere CLIs (`set-api-key` etc.), daher bewusst nicht im Weg-B-Scope.
 
