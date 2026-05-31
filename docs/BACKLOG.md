@@ -950,7 +950,8 @@ Runtime selbst ist Bridge-resilient (Reconnect-Loop ohne Crash für existing Twi
 
 **Verbleibend (Distribution Etappe 2 / D3-Re-Bind):**
 - ✅ `twin:bootstrap` setzt `owner_user_id` jetzt via `OWNER_EMAIL`-Lookup (Etappe 2.1, eigenes Item unten DONE) — **Release-Blocker behoben**.
-- ✅ CLI-Onboarding Weg A / Opt 3 (Etappe 2.2, eigenes Item unten DONE): `pnpm twin:onboard` legt den ersten User an, der Web-Wizard erstellt den Twin (setzt Owner korrekt). **Zwei gleichwertige Türen** erreicht. Verbleibend: Weg B (durchgehendes Terminal-Onboarding inkl. Persona/Key) später.
+- ✅ CLI-Onboarding Weg A / Opt 3 (Etappe 2.2, eigenes Item unten DONE): `pnpm twin:onboard` legt den ersten User an, der Web-Wizard erstellt den Twin (setzt Owner korrekt). **Zwei gleichwertige Türen** erreicht.
+- ✅ **Weg B** (durchgehendes Terminal-Onboarding inkl. Persona/Key, Tag 33, eigenes Item unten DONE): `twin:onboard` baut jetzt auch den Twin (geteilter `createTwin`-Service). QuickStart verifiziert; Advanced-Bridge-Pfad als Folge-Check offen.
 - ✅ `auth_mode`-Durchsetzung (D2, Etappe 2.4a, eigenes Item unten DONE): OAuth nur bei `auth_mode='oauth'`, zwei-Ebenen-Gate (CLI + UI), Allowlist nur via Admin-CLI `twin:auth-mode`, kein Self-Service.
 - Onboarding-**Wizard**-Submit-Branch: Solo-Twin via Web anlegen (heute verlangt der Wizard noch eine Bridge — `server.ts` Onboarding-Submit)
 - ✅ Re-Bind Solo→Bound (D3 Stufe 1→2, Etappe 2.4b, eigenes Item unten DONE): CLI `twin:bind-bridge` an die eigene Bridge. Verbleibend: UI-Re-Bind-Knopf (zweite Tür) + Umbinden bereits gebundener Twins + Fremd-Bridge/Föderation (Phase 4).
@@ -990,7 +991,27 @@ Keine Schema-Änderung nötig (`owner_user_id` existiert seit Migration 026, nul
 
 **End-to-End lokal verifiziert** (Wegwerf-User `test-onboard@local.dev` + Twin `@onboardtest`, restlos entfernt): onboard→User (Hash `$2a$12$`); Login→`GET /twins`=`[]` (Wizard-Trigger); `submit`→201; **DB owner_user_id = neuer User, genau 1 Twin (kein Doppel)**; Switcher zeigt ihn; Direct-Chat HTTP 200 mit echter LLM-Antwort. Kein 409, kein manuelles UPDATE. **KEIN Production-Deploy.**
 
-**Weg B (offen, später):** durchgehendes Terminal-Onboarding inkl. Persona/LLM-Key im CLI — bräuchte einen „vorhandenen Twin ergänzen"-Pfad im Wizard ODER einen Stub-Twin-Modus im Bootstrap. Opt 3 verbaut das nicht.
+**Weg B (✅ DONE, Tag 33):** durchgehendes Terminal-Onboarding inkl. Persona/LLM-Key im CLI — eigenes Item direkt unten. Lösung war nicht „Stub-Twin im Bootstrap", sondern der **geteilte createTwin-Service** (aus dem Wizard extrahiert), den das CLI mit aufruft.
+
+### Weg B — durchgehendes Terminal-Onboarding (twin:onboard baut den Twin) ✅
+
+**Status:** **DONE** (Distribution Weg B, Phase 1+2, Tag 33, interaktiv verifiziert) | **Größe M** | durchgehende Terminal-Tür für Headless-VPS (kein Browser-Zwang)
+
+**Phase 1 — createTwin-Service-Extract (Commit `759fcbf`):** Die 7-Schritt-Twin-Erstellung aus dem `/onboarding/submit`-Handler in einen geteilten `createTwin(input, deps)` gezogen (`onboarding/create-twin.ts`), den Web-Wizard UND CLI aufrufen — keine Duplikation. Verhaltensneutral, Web-Wizard am Verhalten verifiziert (Owner/Switcher/Chat/Presets). Deps als Parameter (CLI-tauglich), typisierter `CreateTwinError` (HTTP-Status 1:1).
+
+**Phase 2 — CLI-Flow (Commit `2e61007`):** `pnpm twin:onboard` (`scripts/onboard.ts`) durchgehend: DB-Init-Check → User idempotent → **Doppel-Twin-Schutz** (`list({ownerUserId})` → freundlicher Abbruch, kein 409-Crash) → QuickStart/Advanced-Gabel → Persona/Mandate/Bridge/Provider → `readSecret`-Key + `validateApiKey`-Live-Check (3 Versuche) → `createTwin`. **Kein OAuth-Prompt** (D2), `auth_mode`-Default `api_key`. `createTwin` additiv erweitert (Wizard byte-unverändert): **Solo-Pfad** (`bridgeUrl=null`) + optionaler `bridgeRegisterToken`; **Hot-Load-Deps optional** → ohne Live-Registry (CLI-Prozess): Twin in DB, `requiresRestart=true`, keine Presets.
+
+**Verifiziert (interaktiv, Wegwerf-DB):** QuickStart durchgelaufen — `validateApiKey` ok, Twin `@cli-twin` mit `owner_user_id` + generierter Persona + `bridge_url` NULL (Solo) + `auth_mode` api_key; Doppel-Twin-Schutz greift; Restart-Hinweis + Settings-Verweis. Switcher/Chat-nach-Restart über Phase-1-Smoke + identischen Hot-Load-Pfad abgedeckt.
+
+**Bewusste MVP-Grenze:** **keine Presets im CLI** (`activatePresets` braucht die Live-Registry des Server-Prozesses) → Skills/Presets danach im Web unter Settings. Twin geht erst nach **Runtime-Restart** live (Registry lädt beim Boot) — für Headless der Normalfall.
+
+### Weg-B Advanced-Pfad ungetestet (eigene Bridge, Mandate-Wahl, volle PersonaInput) — Folge-Check
+
+**Status:** OFFEN (Folge-Check, **kein Blocker**) | **Größe S** | aus Weg-B Phase 2 (Tag 33)
+
+Der **Advanced**-Pfad von `twin:onboard` ist gebaut, aber noch **nicht am Verhalten verifiziert**: volle `PersonaInput`-Felder (tone/pronoun/preferences/topics), Mandate-Template-Wahl, und v.a. **eigene Bridge** via `registerHandleOnBridge` + Register-Token. Letzteres braucht eine **laufende Bridge mit Token** → separat zu testen. QuickStart (Solo) ist verifiziert; der Advanced-Bridge-Pfad nutzt denselben `createTwin` (nur `bridgeUrl`≠null + `bridgeRegisterToken`), Risiko gering.
+
+**TTY-Befund (festhalten):** `readLine`/`readSecret` (`scripts/_prompt-helpers.ts`) teilen **keinen Buffer über aufeinanderfolgende Aufrufe** → gepipter Mehrzeilen-Input wird nach dem ersten Prompt verworfen; nur **interaktiv (TTY)** nutzbar, **nicht piped/CI**. Weg-B ist (wie OpenClaw) interaktiv gedacht (`docker compose exec -it … onboard.js`). Ein **Helper-Refactor** (geteilter Stdin-Buffer) wäre ein **separates Stück**, falls je nicht-interaktive/CI-Tests des Onboarding-Flows gewünscht sind — die Helper tragen auch andere CLIs (`set-api-key` etc.), daher bewusst nicht im Weg-B-Scope.
 
 ### auth_mode-Durchsetzung (D2): OAuth nur bei auth_mode='oauth', kein Self-Service ✅
 
