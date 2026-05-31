@@ -159,7 +159,7 @@ BACKLOG.md; Items mit `(neu)` werden im Folge-Briefing dort angelegt.
   (externer Tester, evtl. Heiko punktuell).
 - **Onboarding-Wizard im UI** (erster Login + Twin-Anlage).
 - **Public-Repo-Hygiene:** README mit klarer Pitch + Quick-Start,
-  LICENSE (MIT? Apache 2.0?), CONTRIBUTING.md, Issue-Templates.
+  LICENSE (**Default-Richtung Copyleft-Start/AGPL-artig — finale Wahl offen, s. `DISTRIBUTION-STRATEGY.md §5b`**; die Apache-2.0-LICENSE aus #111 ist relativ dazu veraltet und vor Public anzupassen), CONTRIBUTING.md, Issue-Templates.
 
 ### Block 5 — Launch-Vorbereitung (~15–17 Tage, Stand Tag 26)
 

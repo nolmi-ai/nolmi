@@ -36,7 +36,7 @@ Der Schritt von „läuft für mich" zu **„ist ein Produkt für andere"** — 
 
 **Fünf Setzungen (D1–D5):** D1 Self-Hosting zuerst, Managed zweiter Strang · D2 API-Key-Default, OAuth nur self-hosted + manuelle Allowlist (Liability-Lehre aus dem Anthropic-OpenClaw-Block) · D3 Bridge optional (standalone → eigene → fremde Bridge; Föderation bleibt Produkt-Phase 4) · D4 Phase 2.5 reicht für Allowlist-Gruppe, Fremden-Apparat vertagt, Sofort-Schritt Tenant-Isolations-Audit · D5 Gratis-Closed-Beta jetzt, kommerziell-Managed als bewusst offene spätere Tür.
 
-**Bau-Sequenz:** Etappe 0 Diagnosen (read-only: Bridge-Abhängigkeitstiefe, Isolations-Audit, Onboarding-Stand) → Etappe 1 Bridge-Optionalität (die eine Architektur-Arbeit) → Etappe 2 Distribution-Layer (One-Liner-Install = Phase-4-B1/B2 + 6 Cookbook-Befunde automatisiert, CLI-Onboarding, `auth_mode`-Flag, Update-Mechanismus) → Etappe 3 Release. **Release-Gates:** secret-freie Git-History (PAT-Rotation + History-Scan — Blocker) + Lizenz (MIT).
+**Bau-Sequenz:** Etappe 0 Diagnosen (read-only: Bridge-Abhängigkeitstiefe, Isolations-Audit, Onboarding-Stand) → Etappe 1 Bridge-Optionalität (die eine Architektur-Arbeit) → Etappe 2 Distribution-Layer (One-Liner-Install = Phase-4-B1/B2 + 6 Cookbook-Befunde automatisiert, CLI-Onboarding, `auth_mode`-Flag, Update-Mechanismus) → Etappe 3 Release. **Release-Gates:** secret-freie Git-History (PAT-Rotation ✅ + History-Scan 🟢 sauber, Tag 33 — Gate erfüllt) + Lizenz (**Default-Richtung Copyleft-Start/AGPL-artig**, finale Wahl offen — s. `DISTRIBUTION-STRATEGY.md §5b`; MIT als Default verworfen).
 
 **Differenzierung:** Solo-Twin auf OpenClaw/Hermes-Niveau (Einstieg) + **A2A-Bridge als Alleinstellung** (kein Solo-Agent hat das).
 
