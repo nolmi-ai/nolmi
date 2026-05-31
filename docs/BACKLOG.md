@@ -2887,9 +2887,11 @@ Beim Phase-4-Deploy zu nolmi-ai/nolmi: Alias umbenennen zu
 2. VPS srv1046432 herunterfahren
 3. Falls Hostinger-Mietkosten: VPS-Vertrag kündigen
 
-### PAT-Rotation + Git-History-Secret-Scan — Release-Gate für Open-Source-Self-Hosting
+### PAT-Rotation + Git-History-Secret-Scan — Release-Gate für Open-Source-Self-Hosting ✅
 
-**Status:** **OFFEN** | **Größe S** | **Priorität: must-vor-Release** (Blocker für `Repo public`) | siehe [`docs/DISTRIBUTION-STRATEGY.md`](./DISTRIBUTION-STRATEGY.md) §5a
+**Status:** **DONE** (Tag 33) | **Größe S** | **war: must-vor-Release** | siehe [`docs/DISTRIBUTION-STRATEGY.md`](./DISTRIBUTION-STRATEGY.md) §5a
+
+**Erledigt Tag 33:** PAT rotiert (alt revoked, neu read-only). Secret-History-Scan 🟢 sauber (gitleaks 8.30.1, volle History 327 Commits + manueller Gegencheck; einziger Treffer = False-Positive `OAuthActivationModal`-Komponentenname; PAT war nie in einem Commit). **Kein `filter-repo` nötig.** Hygiene-Reminder: Scan unmittelbar vor dem tatsächlichen Public-Schalten einmal wiederholen.
 
 Ein öffentliches Repo veröffentlicht die **komplette Git-History**, nicht nur den HEAD-Stand. Der für den VPS-Repo-Klon ausgestellte **Fine-grained PAT** (read-only, `nolmi-ai/nolmi`, S5) wurde im Chat-Kontext gepostet und liegt **potenziell in History/Commits/Notizen** — in öffentlicher History wäre er sofort kompromittiert. **Vor dem Öffnen des Repos (Distribution Etappe 3):**
 1. **PAT rotieren** — alten Token bei GitHub widerrufen, neuen ausstellen (entwertet den alten unabhängig davon, wo er liegt)
@@ -2897,6 +2899,31 @@ Ein öffentliches Repo veröffentlicht die **komplette Git-History**, nicht nur 
 3. Erst dann `Repo public`
 
 Kein Hygiene-Nice-to-have, sondern hartes Release-Gate. Aus Distribution-Session Tag 31 (Block 19).
+
+### Apache-2.0 → AGPL-3.0 — LICENSE-Altlast vor Going Public ersetzen
+
+**Status:** **OFFEN** | **Größe S** | **Priorität: must-vor-Public** | Lizenz-Setzung Tag 33, s. `DISTRIBUTION-STRATEGY.md §5b`
+
+**Setzung Tag 33:** Nolmi wird **AGPL-3.0** lizenziert (Network-Use-Copyleft §13 → schließt die SaaS-Lücke, schützt gegen geschlossene Managed-Forks bei vollem offenem Code; 2026-Standard für Open-Source-SaaS: Grafana/Bitwarden/Mattermost/Gitea/Nextcloud/Mastodon/Plausible). Relizenzierungs-Logik: AGPL→MIT jederzeit lockerbar, MIT→AGPL unmöglich → restriktiver Start hält „Weg 3 jetzt, Weg 1 langfristig" offen.
+
+**Altlast (aus #111, Tag 25):** committet liegen eine **Apache-2.0-`LICENSE`** + `package.json: "license": "Apache-2.0"` — widersprechen AGPL. **Vor Public:**
+1. `LICENSE` durch **AGPL-3.0**-Volltext ersetzen (Copyright-Notice beibehalten).
+2. `package.json: "license": "AGPL-3.0"`.
+3. ggf. Source-Header / README-Badge angleichen.
+
+Bewusst **nicht** im Tag-33-Doku-Commit ausgeführt — eigener Schritt im Going-Public-Block.
+
+### CLA/DCO vor den ersten externen Beiträgen (Vorbedingung für Dual-Licensing)
+
+**Status:** OFFEN (jetzt unkritisch, Alleinautor) | **Größe S–M** | **Gate:** vor „erste externe Beiträge annehmen"
+
+Ein **CLA** (Contributor License Agreement) oder mindestens **DCO** (Developer Certificate of Origin) ist die **Vorbedingung für späteres Dual-Licensing**: ohne Rechte-Bündelung an externen Beiträgen kann der Rechteinhaber das Gesamtwerk nicht kommerziell relizenzieren (ein AGPL-Beitrag eines Dritten „infiziert" sonst die kommerzielle Lizenzierbarkeit). Solange Markus Alleinautor ist, **kein Handlungsbedarf** — aber **vor dem ersten gemergten Fremd-PR** muss das Modell stehen (CLA-Bot o.ä.). Als Gate gemerkt.
+
+### Dual-License-Ausgestaltung bei konkreter Managed-Tür (+ Rechtsberatung)
+
+**Status:** OFFEN (D5-Territorium, bewusst vertagt) | **Größe L** | **Trigger:** wenn die Managed-Tür konkret wird
+
+**Dual-Licensing** (AGPL frei **+** kommerzielle Lizenz) ist der **Monetarisierungs-Pfad** für die spätere Managed-Tür: wer Nolmi proprietär/closed betreiben will, kauft eine kommerzielle Lizenz statt unter AGPL offenzulegen. **Ausgestaltung erst, wenn die Managed-Tür konkret wird** (Preis, Lizenztext, Vertrieb). Bei echtem Geld: **Fachkundige(r) für Lizenzrecht** hinzuziehen. Vorbedingung: CLA/DCO (Item oben). Hängt an D5 (Managed = eigenes Unternehmen).
 
 **Neue Items aus Phase 3a (für später):**
 - **`SESSION_COOKIE_NAME`-Konstante konsolidieren:** heute in `apps/runtime/src/auth/session.ts` (Export) **und** `apps/web/middleware.ts` (Local-Const-Duplikat) gepflegt. Cross-App-Import vom Runtime ins Web ist heute strukturell nicht vorgesehen (Runtime exportiert keine Subpaths). Sauberer Pfad: `@nolmi/shared/auth-cookies` mit beiden Konstanten, beide Apps konsumieren von dort. Aufwand S, nice (Phase 5+).
