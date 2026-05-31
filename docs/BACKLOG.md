@@ -216,26 +216,6 @@ Nachteile: zusätzlicher LLM-Call vor jeder Antwort, mehr Latenz (~300-500ms), z
 Konzeptionell ist das ein Skill-System-Feature (Capability-Layer entscheidet, ob Skill ohne Approval ausführbar ist). Deshalb auf Phase 3 verschoben, nicht in 2.5.x.
 **Größe:** L · **Priorität:** should · **Aus:** 2.5.3 Heiko-Live-Test
 
-### 40. CSRF-Token für /auth/*-Endpoints — NEU aus 2.5.4
-Heute schützt nur `SameSite=Lax` auf dem Session-Cookie. Bei breiterem Deployment (echte Domain, eingebettete Iframes, Browser-Extensions, etc.) braucht es `@fastify/csrf` für tokenbasierten Schutz, um POST-CSRF-Angriffe zu blocken.
-**Größe:** M · **Priorität:** should · **Aus:** 2.5.4 Caveat #5
-
-### 41. Magic-Link Auth (passwordless) — NEU aus 2.5.4
-Alternative zu Email/Passwort: User gibt Email ein, kriegt Login-Link via Email zugeschickt. Vorteil: kein Passwort-Management, sicherer (kein Rainbow-Table-Risiko, kein Password-Reuse). Vorbedingung: Email-Versand aus 2.5.5. Markus' Frage vom 02.05: "Magic Link könnten wir für die Zukunft nochmal überlegen."
-**Größe:** L · **Priorität:** nice · **Aus:** 2.5.4 Architektur-Diskussion, blockt auf 2.5.5
-**Stufe:** 0 → 2 · **Spur:** UX-Reifung
-
-### 42. Rate-Limiting auf /auth/login — NEU aus 2.5.4
-Heute kein Rate-Limit. Bei breiterem Deployment Brute-Force-anfällig. `@fastify/rate-limit` mit konservativem Default (z.B. 5 Login-Versuche pro IP pro 15 Minuten), bei Treffer 429 mit Retry-After-Header. Plus per-Email-Tracking gegen distributed Brute-Force.
-**Größe:** S · **Priorität:** should · **Aus:** 2.5.4 Caveat #6
-
-### 44. Self-Service-Password-Reset — NEU aus 2.5.4
-Florian und Heiko haben heute Platzhalter-Passworte von Markus per CLI bekommen. Es gibt aber keinen Weg für sie, das Passwort selbst zu ändern. CLI-Tool (`pnpm user:create` mit Update-Flag oder ein neues `user:reset-password`) reicht für heute, aber UI-Flow ("Passwort vergessen?" → Email-Link → Set-New-Password) wäre richtig. Vorbedingung: Email-Versand aus 2.5.5.
-**Größe:** M · **Priorität:** should · **Aus:** 2.5.4 Migration der drei bestehenden User, blockt auf 2.5.5
-**Stufe:** 0 → 2 · **Spur:** UX-Reifung
-
----
-
 ## Aus Phase 2.5.4.1-3 entstanden
 
 ### 46. Test-Skript Step 6+7 reparieren
@@ -304,16 +284,6 @@ Aktuell: monospace, schwarz-weiß-grün, sehr functional. Konzeptionell stimmig 
 Alter Bridge-Container vom 1. Mai war mit Exit-Code 137 abgeschossen (SIGKILL durch OOM-Killer oder externes Stop, vor 6h). Konkrete Ursache nicht ermittelbar (Container heute weg). Falls neue Bridge unter Last das gleiche Problem zeigt: Memory-Limits in Compose setzen (`deploy.resources.limits.memory: 256M`), better-sqlite3 ist eigentlich speicherarm, aber Node-Heap kann unter Last wachsen. Zur Sicherheit Monitoring etablieren — `docker stats` periodisch oder einen einfachen Memory-Logger im Bridge-Code für lange Laufzeiten.
 **Größe:** S · **Priorität:** nice · **Aus:** #45 Forensik des alten Containers
 
-### 65. Reverse-Proxy-Architektur statt Cookie-Domain — NEU 4. Mai
-Heute: Cookie-Domain via ENV (`SESSION_COOKIE_DOMAIN=.twin.harwayexperience.com`) als Quick-Fix für Cross-Subdomain-Setup. Funktioniert, ist aber konzeptionell ein Workaround — Same-Origin wäre sauberer.
-
-Saubere Variante: Web-App und Runtime hinter demselben Origin (z.B. `app.twin.harwayexperience.com` mit Path-Prefix `/api/*` zur Runtime). Next-Middleware oder Traefik-Path-Routing übernimmt das. Vorteile: kein Cookie-Domain-Trick, keine CORS-Konfig (Same-Origin), Browser-DevTools zeigen nur eine Origin.
-
-Trade-off: Runtime ist dann nicht mehr direkt von außen aufrufbar (ohne Path-Prefix). Für Power-User-Tooling (Curl, Postman) müsste man den Path-Prefix kennen. Plus: Migration heißt Cookie-Domain entfernen, Runtime-CORS entfernen, Frontend-Calls auf relative Pfade umstellen.
-
-Kein Notfall — heutige Lösung läuft stabil. Sub-Schritt für ruhigeren Tag, wenn Architektur-Konsolidierung dran ist.
-**Größe:** L · **Priorität:** should · **Aus:** 2.5.6 Phase A.5 Reflexion
-
 ### 66. DB-Backup-Strategie für Production-DBs — NEU 4. Mai
 Drei DBs auf VPS, alle bisher ohne Backup: `twin-lab-bridge-data`, `twin-lab-web-data` (Runtime), und implizit auch `traefik`-Konfig. Bei Volume-Verlust sind drei User-Accounts plus Twin-Profile (Persona, Mandates, Encryption-Keys, API-Keys verschlüsselt) weg.
 
@@ -326,43 +296,6 @@ Master-Key sollte separat gesichert sein (Passwort-Manager, schon erledigt) — 
 
 Kein Notfall solange nichts kaputt ist. Wird wichtig sobald mehr als drei Power-User dranhängen.
 **Größe:** M · **Priorität:** should · **Aus:** 2.5.6 Production-Reflexion
-
-### 67. Production-Monitoring + Alerting — NEU 4. Mai
-Drei Container live, kein Monitoring. Wenn Bridge oder Runtime abstürzt, merken wir es erst beim nächsten Login.
-
-Optionen, von einfach nach reich:
-- Uptime-Kuma als selbst-gehosteter Healthcheck (ein vierter Container) mit Email/Slack-Notification
-- BetterStack / Healthchecks.io als externer Service
-- Grafana + Prometheus für Metriken (overkill für drei User)
-
-Vorbedingung: Healthcheck-Endpoints in Bridge und Runtime — Bridge hat noch kein wget/curl im Image (#61).
-**Größe:** M · **Priorität:** should · **Aus:** 2.5.6 Production-Reflexion
-
-### 68. Master-Key in Vault statt ENV-Datei — NEU 4. Mai (vorgesehen aber nicht umgesetzt)
-2.5.6 Spec erwähnte „Master-Key in produktions-tauglichem Vault (nicht mehr in ENV-Datei)". Heute pragmatisch in `/docker/twin-lab-web/.env` belassen, weil Vault-Setup für drei Power-User Overengineering wäre.
-
-Künftige Optionen wenn relevant:
-- HashiCorp Vault als selbst-gehosteter Container
-- 1Password Connect (Service-Account-API)
-- Bitwarden CLI mit Service-Token
-- AWS Secrets Manager / Hetzner-eigene Lösung
-
-Trade-off: Vault macht Container-Recovery komplexer (Container braucht Vault-Token zum Start, Vault-Token muss von woher kommen → Boot-Strapping-Problem).
-
-Heute: ENV-Datei mit `chmod 600`, `/docker/`-Verzeichnis nur für Root les- und schreibbar. Reicht für aktuellen Risikostand.
-**Größe:** M · **Priorität:** nice · **Aus:** 2.5.6 Spec, bewusst verschoben
-
-### 69. Onboarding-Polish: User-Email-Verifikation + Self-Service-Reset
-Heute (Tag 5): drei User onboarded mit Passwörtern, die Markus selbst getippt hat. Florian und Heiko kennen ihre Passwörter nicht — funktioniert solange Markus es ihnen mitteilt, aber kein Self-Service-Onboarding möglich.
-
-Pflicht-Items, wenn neue User von außen kommen:
-- Email-Verifikation beim Onboarding (Token-Link zu `/auth/verify`)
-- Password-Reset-Flow via Email-Token (#44 verknüpft, dort als nice eingestuft — heute zu must aufrücken sobald externe User kommen)
-- Optional: SSO via Google/GitHub (heute nicht nötig)
-
-Vorbedingung: Email-Versand-Infrastruktur (resend.com Konto vorhanden, in 2.5.5 für Notifications eh geplant).
-**Größe:** L · **Priorität:** should · **Aus:** 2.5.6 Production-Live
-**Stufe:** 0 → 2 · **Spur:** UX-Reifung
 
 ### 70. Production-Stack-Doku: README für `/docker/twin-lab-web/`
 Heute: README im Repo unter `docker/twin-lab-web/README.md` beschreibt Build-Sequenz und ENV-Variablen. Ergänzen um:
@@ -530,29 +463,9 @@ Aktuell nicht relevant, weil Thinking im Send-Path nicht aktiviert ist. Wenn kü
 
 Memory-Schichten und Skill-System. Vor Phase 4. Aufwand-Cluster.
 
-### 20. Konversations-Memory (Schicht 1 — Conversation)
-Frühere Chats und Twin-Konversationen als komprimierter Kontext bei jeder neuen Anfrage. Stale-aware (Memories älter als X Wochen werden weggekippt, wenn nicht aktiv referenziert). Implementierung via Sliding-Window mit Auto-Summary.
-**Größe:** M · **Priorität:** should · **Aus:** Memory-Diskussion 1.5.
-
-### 21. Episodic Memory (Schicht 2 — Episodic)
-Konkrete Ereignisse mit Vector-Embeddings, retrievable via Similarity. sqlite-vec als lokaler Vector-Store. Twin "erinnert" sich an spezifische Events ("Florian hat letzte Woche XY gesagt").
-**Größe:** L · **Priorität:** should · **Aus:** Memory-Diskussion 1.5.
-
-### 22. Semantic Memory (Schicht 3 — Semantic)
-Persistente Fakten-DB als `facts.md` plus structured KV-Store. "Memory" als eigenes Konzept in der UI, du kannst Memories explizit hinzufügen oder löschen. "Vergiss, dass Florian XY gesagt hat" als Mechanismus.
-**Größe:** L · **Priorität:** should · **Aus:** Memory-Diskussion 1.5.
-
 ### 23. Procedural Memory (Schicht 4 — Procedural)
 Lerngedächtnis. Twin lernt aus Approves/Rejects/Edits. Persona-Iterationen über Zeit, oder feinere Korrekturen. Hermes-style: nach komplexen Tasks (5+ Tool-Calls) schreibt der Twin eine Skill-Markdown selbst.
 **Größe:** XL · **Priorität:** nice · **Aus:** Memory-Diskussion 1.5.
-
-### 24. MCP-Client-Implementierung
-Twin als MCP-Client, kann Tools von externen MCP-Servern nutzen. Standard-Compliance, damit Skills aus dem MCP-Ökosystem ohne Custom-Adapter angeschlossen werden können.
-**Größe:** L · **Priorität:** must · **Aus:** Skills-Strategie
-
-### 25. Skill-System (4-Layer Capability/Tool/Skill/Mandate)
-Skill-Engine mit klarer Hierarchie: Capability (was kann der Twin), Tool (welche API/Lib), Skill (Markdown-File mit definierter Aktion), Mandate (was darf der Twin autonom). Vorbedingung für externe Tools, plus Vorbedingung für #39 (Klassifikator-Vorlauf).
-**Größe:** XL · **Priorität:** must · **Aus:** Skills-Diskussion 1.5.
 
 ### 26. agentskills.io-Kompatibilität
 Skills im Hermes/agentskills.io-Format implementieren, damit wir community-Skills nutzen können und eigene Skills portabel sind.
@@ -575,75 +488,6 @@ Twin schreibt nach komplexen Tasks (5+ Tool-Calls oder definierte Trigger) eine 
 ## Phase 4 — Multi-Channel + Föderation
 
 Twins werden überall erreichbar, Bridge-Architektur dezentralisiert.
-
-### 29. Multi-Channel-Adapter — Owner-Mode
-Twin via Telegram/WhatsApp/Signal/iMessage erreichbar — zuerst nur für Owner selbst (nicht für externe Schreiber). Telegram zuerst (Bot-API einfach, ~2-3 Tage Code), dann WhatsApp (Meta-Business-API, KYC-Bürokratie, ~5-7 Tage), dann Signal/iMessage. Channel-Adapter pro Plattform mit einheitlicher interner API. Auth pro Channel: Sender-ID mappt auf User in Twin-DB.
-**Größe:** L · **Priorität:** should · **Aus:** Backlog-Anregung Markus, 1. Mai 2026 Abend
-
-**Inspiration NanoClaw (Tag 21):** Skills-driven Channel-Install-Pattern als Vorbild — `/add-telegram`, `/add-whatsapp` etc. als Claude-Code-getriebene Skills statt monolithischer Adapter-Bau. NanoClaw Trunk shippt nur Registry + Infrastructure, Channel-Adapter sind opt-in und kopieren das benötigte Modul in den Fork. Direkter Bezug zu Twin-Lab's `examples/skills/`-Foundation (Tag 20). Cross-Reference: https://github.com/nanocoai/nanoclaw.
-
-### 30. Multi-Channel-Adapter — Public-Mode
-Externe schreiben Twin via Channel an, Twin entscheidet ob er antwortet (Mandate-Layer wird kritisch). Zusätzlicher Sicherheits-Layer ggü. Owner-Mode. DSGVO-Erwägungen (WhatsApp-Geschäftskonto, Datenfluss US-Anbieter).
-**Größe:** L · **Priorität:** nice · **Aus:** Backlog-Anregung Markus, 1. Mai 2026 Abend
-
-**Inspiration NanoClaw (Tag 21):** Container-Isolation pro Agent-Gruppe als Pattern für Public-Mode-Sicherheit. NanoClaw runs per-Agent-Group in eigenem Docker-Container mit eigener CLAUDE.md, eigenem Memory, eigenen Mounts. Für Twin-Lab's Public-Mode (externe Sender + Approval-Gates) relevant — verstärkt Isolations-Garantie über DB-Twin-ID-Trennung hinaus. Phase-B-Architektur-Erwägung.
-
-### 31. Föderation — Mehrere Bridges sprechen miteinander
-Phase 2 hat zentrale Bridge. Phase 4 = mehrere Bridges können sprechen (Matrix-Modell). Twin auf Bridge-A kann mit Twin auf Bridge-B reden, ohne dass beide auf derselben Bridge registriert sind.
-**Größe:** XL · **Priorität:** nice · **Aus:** Architektur-Diskussion
-
-### 32. P2P mit DIDs (Phase 5+)
-Voll-P2P, keine Bridge mehr. DIDs (Decentralized Identifiers) für Identität. Optional: Blockchain als Bezahlebene OBEN AUF Messaging — nicht als Messaging-Layer selbst.
-**Größe:** XL · **Priorität:** nice · **Aus:** Strategische Vision
-
-**Konkrete Spec-Referenz: Agent Network Protocol (ANP).** `agent-network-protocol.com` bietet einen layered Protocol-Stack genau für dieses Szenario:
-
-- **did:wba** (Web-Based-Agent-DID) für verifiable Agent-Identität und readable Handles
-- **Agent Description + Discovery Protocol** für Capability-Publishing
-- **Messaging Profiles** (P3 Direct, P4 Group, P5/P6 E2EE, P7 Attachments, P8 Federation/Cross-Domain)
-- **AP2-Integration** für Payment-Flows mit ANP-Identity-Chain
-
-ANP wäre die konkrete Implementierung dessen, was #32 abstrakt vorsieht. Alternative Specs (TBD): IETF Agent-Working-Groups, W3C DID-Methods, andere DID-Implementierungen (did:web, did:key). GitHub: `agent-network-protocol/AgentNetworkProtocol`.
-
-### 36. Google A2A-Protokoll-Kompatibilität
-Twins als A2A-Server zusätzlich zur internen Bridge erreichbar machen. Implementierung:
-- `/.well-known/agent.json` mit Persona-Description und Skills
-- A2A-Adapter, der eingehende JSON-RPC-Messages auf interne Pending-Queue mapt
-- Mandate-Layer wendet Approval-Gates auf eingehende A2A-Requests an
-- Ausgehende A2A-Calls: unsere Twins können andere A2A-Agenten anrufen
-
-Vorteile: Ökosystem-Anbindung (Google ADK, CrewAI, Langgraph alle A2A-fähig), standardisierte Discovery, keine Lock-In auf eigenes Protokoll. Nachteile: Mehr Code-Pfade, Security-Komplexität (jeder im Internet kann anpingen).
-
-Vorbedingungen: Phase 4 (Multi-Channel-Architektur), Mandate-Engine reif für externe Quellen. Aufwand: 2-3 Wochen für saubere Adapter-Schicht. Bestandteil der Föderations-Strategie.
-**Größe:** L · **Priorität:** should · **Aus:** Markus' Recherche zu Google A2A Codelab, 2. Mai 2026
-
-**Inspiration NanoClaw (Tag 21):** NanoClaw's „Skills over Features"-Philosophie ist Pattern-Bestätigung für A2A als opt-in Adapter statt eingebauter Capability. Plus Credential-Vault (OneCLI Agent-Vault) als Pattern für API-Key-Isolation bei externen Protokollen — Twin-Lab heute mit AES-256-GCM-Encryption in DB, NanoClaw's Vault-Pattern als nächste Schicht für Phase B.
-
-### 125. AG-UI-Protokoll-Kompatibilität (Agent↔User Interaction)
-
-AG-UI (Agent-User Interaction Protocol, von CopilotKit + Partner-Frameworks) ist der dritte etablierte Agentic-Standard neben MCP (Agent↔Tools, von Anthropic) und A2A (Agent↔Agent, von Google). Open, event-basiert, baut auf HTTP/WebSockets für streaming Agent-Frontend-Kommunikation.
-
-twin-lab heute: Custom SSE-Stream mit eigenen Events (`twin.thinking`, `tool.call.start/complete`, `pending-added`, `pending-resolved`, `reply-received`). Funktional ähnlich zu AG-UI's Building Blocks (Streaming chat, Thinking steps, Tool output streaming, Interrupts, Custom events).
-
-**Vorteile AG-UI-Adapter:**
-
-- Client-Ökosystem (CopilotKit, React Native, Terminal-Clients community)
-- Ökosystem-Anbindung wie bei A2A (#36) — externe Frontends können twin-lab-Twins anbinden ohne custom SSE-Schema zu lernen
-- Standardisierte Discovery + Capabilities-Exchange
-
-**Nachteile / Trade-offs:**
-
-- twin-lab-spezifische Events (z.B. `reply-received` für A2A-Symmetrie, `pending-added` für Approval-Workflow) müssen als AG-UI Custom-Events gemappt werden
-- Adapter-Schicht obendrauf, eigene SSE bleibt für Twin-Lab-spezifische Pfade (Mandate-Layer, Trust-Relationships)
-
-**Pattern:** A2A-Strategie analog — AG-UI wird zusätzlich gebaut, nicht als Ersatz. Eigene SSE bleibt für Approval/Mandate/Trust-Pfade, AG-UI als Standard-Interface obendrauf für externe Clients.
-
-**Vorbedingungen:** Phase 4 Multi-Channel-Foundation (#29/#30) — analog zu A2A, AG-UI ergibt erst Sinn wenn Twin via mehrere Kanäle erreichbar ist und externe Clients ein Standard-Interface brauchen.
-
-**Größe:** L · **Priorität:** should · **Aus:** Markus' Protokoll-Landscape-Review, 21. Mai 2026 Abend (Tag 22). Spec: https://docs.ag-ui.com/introduction
-**Status:** offen, Phase 4 oder später
-
----
 
 ## Cross-Cutting / Architektur-Erwägungen
 
@@ -752,15 +596,6 @@ Pattern: bekannt aus ChatGPT/Claude-Web. Verschwindet sobald die erste User-Mess
 
 Items aus dem Strategy-Pivot Tag 18. Block 3 nutzt die seit Phase 3.5 deployed Hyperbrowser-Foundation für einen schmalen Recherche-Workflow als Hook-Feature. Vollständiges Computer-Use-Agent-Pattern bleibt verschoben (siehe #27 Update). Spec: `docs/PRE-LAUNCH-A-STRATEGY.md`.
 
-### 107. Recherche-Workflow als Skill-Pattern
-Schmaler Computer-Use-Hook für den Self-Hosting-Launch. Twin kann auf Nutzer-Anfrage zu einem Thema recherchieren: `search_with_bing` für 2–5 Top-Results, dann `scrape_webpage` auf die relevantesten, dann Synthese mit Quellen-Referenz.
-
-Pattern wird als Skill-Definition realisiert (keine neuen Backend-Routes nötig — beide Tools sind seit 3.5 Hyperbrowser-Foundation verfügbar). Plus Persona-Pattern-Hinweis im System-Prompt, dass Twin proaktiv recherchieren darf, wenn der Nutzer zu einem aktuellen Thema fragt.
-
-**Beta-deklariert für Launch:** README und Landing-Page weisen explizit darauf hin, dass die Recherche-Capability „Frühphase" ist — Latenz 30–60 s, gelegentliche Quellen-Schwäche möglich, kein Multi-Step-Browser-Handling.
-
-**Größe:** S · **Priorität:** must · **Aus:** Pre-Launch-Phase-A-Strategy (Block 3) · **Spur:** Pre-Launch-Phase A
-
 ### 108. Launch-Deklaration Recherche-Capability als Beta
 In README, Landing-Page und ggf. UI-Hint klarstellen, dass die Recherche-Capability im Self-Hosting-Launch Beta-Status hat. Erwartungs-Management vermeidet User-Enttäuschung bei Edge-Cases.
 
@@ -790,17 +625,6 @@ Konkrete Stellen:
 **Größe:** S (Variante 1) / M (Variante 2/3) · **Priorität:** nice · **Aus:** Tag-20 Test 6 #107
 **Status:** offen, kein Pre-Launch-Phase-A-Blocker
 
-### 120. Dockerfile kopiert `examples/` nicht ins Container-Image
-
-**Befund Tag 20 (Production-Deploy):** `examples/skills/` wurde heute Mittag als Production-Template-Pattern angelegt (Commit `ad0063f`), ist aber nicht im Runtime-Container-Image. `apps/runtime/Dockerfile` COPYt nur `apps/runtime/`, `packages/shared/` und Workspace-Configs — `pnpm deploy --filter @twin-lab/runtime --prod /out` materialisiert nur workspace-relevante Files. Folge: Skill-Create-CLI im Container findet `/app/examples/skills/recherche-workflow` nicht.
-
-**Workaround Tag 20:** `docker cp /docker/twin-lab-web/repo/examples twin-lab-runtime:/app/examples` — transient, beim nächsten Container-Recreate weg.
-
-**Fix:** Single `COPY examples /app/examples` im Runner-Stage des Dockerfile. examples/ ist statischer Content ohne Build-Step, braucht keinen Builder-Pfad.
-
-**Größe:** XS · **Priorität:** must (Self-Hosting-Pattern braucht den Pfad) · **Aus:** Tag-20 Production-Deploy
-**Status:** offen → wird im selben Block durch Dockerfile-Edit geschlossen
-
 ### 121. Wizard-Layout-Polish
 
 **Befund Tag 21 (#110 Phase 2A Smoke):** Wizard-Layout ist nach Container-Width-Fix funktional, aber nicht mit dem eingeloggten Zustand visuell konsistent.
@@ -816,47 +640,6 @@ Verbleibende Polish-Punkte:
 **Status:** offen, Phase-B-Kandidat (UX-Welle 2)
 
 **Update Tag 21 (nach Phase 2A Closure):** Foundation aus Phase 2A für den vollen Polish steht — `w-full max-w-X mx-auto`-Pattern in flex-col-Layouts (gelernt im Tag-21-Layout-Saga, siehe STAND-Lesson) und Container-Width-Hierarchie (`/login` 448px für Auth, Onboarding/Wizard 672px). Beim vollen Polish: Hierarchie nicht brechen, Pattern weiter nutzen für Step-Indicator, Mobile-Responsive, Animationen. Section-Component hat heute optionalen `title` — bleibt verfügbar für künftige Card-Gruppen, ohne in Form-Steps zurückzukommen.
-
-### 122. MCP-Server-Auto-Provisioning im Onboarding ✅
-
-**Abgeschlossen Tag 29 (27. Mai 2026, Mittwoch), Commit `a3c6b3a` auf `origin/main`. Production-Deploy Tag 29 auf `cbc0d4c` (inkl. Sub-Block-A Dockerfile-Fix).** Onboarding-Friction für MCP-abhängige Presets aufgelöst: Wizard sammelt API-Keys pro `requiresMcpServers`-Eintrag direkt im Preset-Step (Inline-Form unterhalb der Card, Password-Input pro Server), Submit-Backend provisioniert MCP-Server + synct Tool-Skills, Recherche-Workflow funktioniert nach Wizard ohne Settings-Detour.
-
-**Phase-A-Setzungen umgesetzt:**
-- **Soft-Block-α:** Wenn ein Preset enabled ist und `requiresMcpServers` Keys braucht, ist Submit disabled mit Tooltip + Warn-Hint bis alle Keys gesetzt sind. Backend wird nie mit unvollständigen Preset-Daten gerufen.
-- **Skip-Default:** Presets bleiben standardmäßig unselected. User klickt aktiv an, dann erscheint der Key-Input.
-
-**Reuse statt Re-Bau:**
-- `McpServersRepo.add` (`apps/runtime/src/mcp/repo.ts:90`) + `McpSkillSync.syncOnAdd` (`apps/runtime/src/mcp/skill-sync.ts:60`) 1:1 wie im Settings-Add-Endpoint (`server.ts:1507-1576`)
-- Rollback-Pattern bei Sync-Failure aus `server.ts:1556-1573` (Settings-Add finally-block) gespiegelt
-- `McpServerSpecSchema` aus `_mcp-cli-helpers.ts` für Template-Validation (Twin-agnostische Spec)
-- Card-Inline-API-Key-Form-Pattern aus `McpServerAddModal.tsx:84-189` (Env-Marker-Extraktion + Password-Inputs) auf Wizard-Card adaptiert
-
-**Schema-Erweiterungen (`packages/shared/src/index.ts`):**
-- `PresetSelectionSchema` (presetId + mcpServerKeys-Record)
-- `PresetActivationResultSchema.mcpServers[]` mit `added`/`skipped`/`failed`-Status (Settings-Path bekommt `failed: API-Key fehlt`)
-
-**Backend-Erweiterungen:**
-- `RuntimeConfig.mcpServersDir` neu (default `WORKSPACE_ROOT/mcp-servers`), in `ServerDeps` durchgereicht
-- `activate-presets.ts` Komplett-Refactor: pro Preset Skill-Import + Schleife über `requiresMcpServers` via `provisionMcpServer`-Helper (Idempotenz, Template-Substitution, Sync mit Rollback)
-- `OnboardingSubmitSchema`: `presets: string[]` → `presetSelections: PresetSelection[]`
-- Settings full-config-PATCH wrappt `body.presets.map(id => ({ presetId: id, mcpServerKeys: {} }))` — bestehendes Settings-Verhalten ohne Auto-Provision
-
-**Frontend-Erweiterungen (`apps/web/app/onboarding/page.tsx`):**
-- State `presetsSelected: string[]` → `presetSelections: Record<id,{enabled,mcpServerKeys}>`
-- PresetCard refaktoriert vom Button-only zu Card-Frame `<div>` mit Header-Button + Inline-Env-Form als Geschwister (sonst nested-input nicht möglich)
-- `useMemo`-`hasMissingKeys` für Soft-Block-α, Submit-Button `disabled` + `title`-Tooltip + Warn-Text
-
-Typecheck 4/4 grün, Husky-Build 4/4 grün (`/onboarding` 6.31 kB → 6.87 kB First Load). **Local-Smoke 4/4 grün:**
-1. **Happy-Path Recherche-Preset** — Test-User → Wizard → Recherche-Preset anklicken → Hyperbrowser-API-Key eingeben → Submit grün. DB-Verify: Twin angelegt, `hyperbrowser-approval`-MCP-Server in `mcp_servers`, **11 Tool-Skills** unter `mcp:hyperbrowser-approval:*` + Recherche-Pattern-Skill — Pre-Pass-Tool-Forcing kann direkt greifen.
-2. **Soft-Block-α** — Preset enabled ohne Key → Submit disabled + Tooltip „API-Key fehlt für ausgewähltes Preset" + Warn-Hint unterm Button. Wizard kommt aus dem Zustand nicht raus, bevor der Key drin ist.
-3. **No-Preset-Path** — Skip-Default unselected → Submit grün, Twin ohne Skills/MCP-Server. Existing-Behavior unverändert.
-4. **Error-Edge Dummy-Key** — ungültiger Key (`invalid-key-test`) → Provisioning succeeds (`listTools` validiert den Key nicht beim Spawn), erst der Tool-Call im Chat failt ehrlich beim ersten Recherche-Versuch. Kein #122-Bug — sondern erwartbares Verhalten der Hyperbrowser-MCP-API-Key-Validation.
-
-**Production-Deploy Tag 29 (Block 7 + Sub-Block A):** Pre-Flight-Check vor Deploy hat gefunden: `apps/runtime/Dockerfile` kopiert `mcp-servers/` nicht (nur `examples/`-Pattern aus #120). **Sub-Block A** (`cbc0d4c`, ~10 Min) hat einen `COPY mcp-servers /app/mcp-servers` analog Z. 74 ergänzt — **präventiv via Pre-Flight gefunden statt durch Smoke-Failure** (Lesson Tag 29 #5, direkter Pattern-Match aus #120). VPS `srv1046432` `git pull` zog `a3c6b3a` + Doku-Commits + `cbc0d4c`. Runtime + Web rebuilt mit `--build-arg NEXT_PUBLIC_RUNTIME_URL=https://runtime.twin.harwayexperience.com`, Bridge bewusst nicht rebuilt (kein Bridge-Code-Change, Lesson Tag 29 #1). Boot-Verify clean: 3 Twins aktiv, bridge-stream verbunden, oauth-refresh started. Filesystem-Sanity: `/app/mcp-servers/` enthält die 4 Files (3× JSON + README). **Production-Smoke grün** (Test-User `test-122-prod@harway.local`, Handle `@test122prod`, Recherche-Preset + Dummy-Key): DB-Verify Twin `twin_qHZZCooUhCHMYutw` + MCP-Server `mcp_wIn0_jJ35wdqc4-c` (`is_active=1`) + 11 Skills — **strukturell identisch zum Local-Smoke**. **Cleanup via PRAGMA** (`db.pragma("foreign_keys = ON")` analog Lesson Tag 29 #4): Twin + MCP-Server + Skills + User in einer Operation kaskadiert weg, Post-Cleanup `c: 0`. **FK-Cascade in Production funktional verifiziert** (Lesson Tag 29 #6, #159 teil-verifiziert).
-
-**Größe ursprünglich:** M-L. **Final:** ~4.5h netto inkl. Production-Deploy (Diagnose-First ~30 Min, Backend ~1h, Frontend ~1.5h, Local-Smoke + Doku ~30 Min, Block-6-Lessons-Welle + #159 ~25 Min, Sub-Block-A Pre-Flight + Dockerfile-Fix ~10 Min, Block-7-Production-Deploy + Smoke ~25 Min, Block-8-Production-Closure-Doku ~15 Min). **Spur:** Pre-Launch-Phase A Block 4 (Self-Hosting-Polish).
-
-**Cross-Reference:** `apps/runtime/src/skills/scan-examples-presets.ts:extractMcpServersFromRequiresTools` liefert die MCP-Server-Liste aus dem Preset-Frontmatter. Tag-29-Lesson #2 dokumentiert: `requires_tools` ist Pre-Pass-Hint, nicht Tool-Filter — `syncOnAdd` legt alle Tools des MCP-Servers als Skills an, nicht nur die referenzierten. Future Sub-Schritt bei Bedarf: post-Sync `setActive(false)` für Out-of-Scope-Tools.
 
 ### 123. Handle-Editierung im Settings-Wizard
 
@@ -887,147 +670,6 @@ Beide Pages importieren die shared Components. Onboarding-File würde ~1497 → 
 **Größe:** L · **Priorität:** nice · **Aus:** Tag 22 #110 Phase 2B Commit 11B
 **Status:** offen, Phase-2C-Kandidat (kein Phase-A-Blocker — Duplikation funktioniert)
 
-### 126. Build-Time-Validation für NEXT_PUBLIC_* Variables ✅
-
-**Abgeschlossen Tag 30 (28. Mai 2026, Donnerstag), Tag 30 Block 2.** Strukturelle Lösung statt Doku-Pflaster nach **dreimaligem Auftreten** des `localhost:4000`-im-Client-Bundle-Bugs (Tag 23 Re-Deploy + Tag 28 Block 13 + Tag 29 Block 7 wäre die Diagnose-Stelle, dort nur per Pre-Flight-Lesson vermieden).
-
-**Lösung Option (a)-verfeinert:** Prebuild-npm-Hook mit Guard-Script (`apps/web/scripts/check-build-env.mjs`). Guard koppelt sich an den existierenden Production-Marker `NEXT_PUBLIC_DEPLOYMENT_LABEL=production`:
-- Label = `production` und `NEXT_PUBLIC_RUNTIME_URL` fehlt oder matched `/localhost|127\.0\.0\.1/` → exit 1 mit handlungsleitender Fehlermeldung
-- Sonst (dev, leerer Label, lokaler Build, Husky-Pre-Push) → no-op, localhost-Default erlaubt
-
-**Wiring:** `apps/web/package.json` bekommt `"prebuild": "node scripts/check-build-env.mjs"`. pnpm folgt npm-Hook-Konvention (das existierende `predev` belegt das), Trigger empirisch verifiziert mit `NEXT_PUBLIC_DEPLOYMENT_LABEL=production pnpm --filter @twin-lab/web build` → exit 1 stoppt die Chain **vor** `next build`, `.next/` bleibt unangetastet.
-
-**Smoke 5/5 grün** (alle direkt via node):
-1. Dev (kein Label) → exit 0
-2. Production + missing URL → exit 1
-3. Production + localhost:4000 → exit 1
-4. Production + 127.0.0.1:4000 → exit 1
-5. Production + `https://runtime.example.com` → exit 0
-
-Plus Hook-Trigger-Test via `pnpm --filter @twin-lab/web build` mit production-Label ohne URL → pnpm stoppt bei prebuild mit `ERR_PNPM_RECURSIVE_RUN_FIRST_FAIL`, `next build` startet nie.
-
-**Defense-in-Depth:** Source-`?? "http://localhost:4000"`-Fallbacks in den 9 page.tsx **nicht angefasst** — sie sind für `pnpm dev` korrekt und Defense-in-Depth gegen ENV-Resolution-Drift. Guard greift eine Ebene höher (Build-Zeit), Fallback bleibt für Runtime.
-
-**Dockerfile + DEPLOYMENT.md aktualisiert:** Kommentar im Dockerfile vor `ARG NEXT_PUBLIC_RUNTIME_URL` verweist auf den Guard. DEPLOYMENT.md §3.1.2 ergänzt um „Build-Guard (#126)"-Hinweis-Block in der existing localhost-Warnung.
-
-**Größe ursprünglich:** S. **Final:** ~30 Min (Diagnose + Guard + 5 Smokes + Hook-Trigger-Verifikation + Doku). **Spur:** Pre-Launch-Phase A.
-
-### 127. .env.example säubern — Phase-1-Legacy-Variables entfernen ✅
-
-**Abgeschlossen Tag 30 (28. Mai 2026, Donnerstag), gemeinsam mit #129 in einem Commit (Tag 30 Block 1).**
-
-**Scope-Korrektur (α, User-bestätigt):** Ursprünglicher Plan war Variable-Delete. Diagnose vor Edit zeigte: `apps/runtime/src/scripts/bootstrap-twin.ts:87-95` liest alle drei Vars (`BRIDGE_URL`, `BRIDGE_TWIN_HANDLE`, `BRIDGE_TWIN_TOKEN`) aktiv und wirft mit klarer Diagnose, wenn `BRIDGE_URL` fehlt. **`bootstrap-twin.ts` ist gewollter File-basierter Power-User-Pfad, nicht deprecated.** Delete hätte den Pfad ohne Vorwarnung gebrochen.
-
-**Statt Delete:** Die drei Vars als „Advanced: File-basierter Twin-Bootstrap (`pnpm twin:bootstrap`)" Block im `.env.example` gruppiert mit klarem Header-Kommentar: „Der normale Self-Hosting-Pfad ist der Onboarding-Wizard; der braucht diese Variablen NICHT, sondern nur `TWIN_LAB_DEFAULT_BRIDGE_URL`." Self-Hoster, der den Wizard nutzt, kann die drei Zeilen ignorieren. Power-User, der File-Bootstrap will, setzt sie weiter wie vorher.
-
-`TWIN_LAB_DEFAULT_BRIDGE_URL` ist im neuen Block-Layout zuerst (als „Bridge: Wizard-Default") und damit positiv abgegrenzt vom Power-User-Block darunter.
-
-**Größe ursprünglich:** XS. **Final:** ~10 Min (gemeinsam mit #129 in einem Edit-Pass). **Spur:** Pre-Launch-Phase A.
-
-### 128. Bridge-optional-Mode für Single-Twin-Self-Hosting
-
-**Befund Tag 24 (#109 §9 Code-Check):** Twin-Creation (Wizard + Bootstrap-CLI) verlangt heute zwingend eine erreichbare Bridge. Self-Hoster ohne Bridge-Zugang können keinen Twin anlegen.
-
-Runtime selbst ist Bridge-resilient (Reconnect-Loop ohne Crash für existing Twins), aber Anlege-Pfade sind hart:
-
-- `apps/runtime/src/server.ts:696` — Onboarding-Submit ruft `registerHandleOnBridge`, bei Fehler 502 (kein Twin in DB)
-- `apps/runtime/src/scripts/bootstrap-twin.ts:94,102` — wirft wenn `BRIDGE_URL`/`BRIDGE_<NAME>_TOKEN` leer
-
-**Use-Case:** Single-User-Self-Hosting ohne A2A-Bedarf. User will mit eigenem Twin chatten (Memory, Skills, Settings), aber braucht keine Twin-zu-Twin-Kommunikation.
-
-**Implementation-Ideen:**
-- Onboarding-Submit-Branch: wenn `TWIN_LAB_DEFAULT_BRIDGE_URL` leer → Skip Bridge-Register, Twin-Create mit `bridge_url: null`
-- A2A-Features (Send-To-Twin, Inbox) UI blendet aus wenn Twin ohne Bridge-Config
-- Nachträglich Bridge-Anbindung: Settings-Page bekommt "Bridge einhängen"-Section
-
-**Größe:** M-L · **Priorität:** nice → **must (Distribution D3)** · **Aus:** Tag 24 Cookbook-Walkthrough (#109 §9)
-**Status:** 🟢 **Etappe-1-Kern ✅ DONE + lokal am Verhalten verifiziert (Tag 31 Block 20+21).** Der Runtime-/CLI-/Chat-Kern ist gebaut **und 4/4 verhaltens-verifiziert** (Solo-Twin `@solo`: Boot „Solo-Modus"/kein Reconnect-Loop · Direct-Chat end-to-end ohne Bridge → LLM-Antwort/200 · UI blendet A2A aus · A2A-Send → HTTP 409 `bridge_disabled`; Bridge-Twin-Regression intakt):
-- ✅ Schema: Migration 026 `bridge_url`/`bridge_token` nullable (FK-Cascade-sicher via Runner-`foreign_keys_off`-Opt-in)
-- ✅ Registry-Boot-Guard: Solo-Twin ohne Bridge-Client/Stream, kein Reconnect-Loop, Boot-Log „Solo-Modus"
-- ✅ A2A graceful: `BridgeDisabledError` → HTTP 409 `bridge_disabled` statt Crash; conversations-Routen solo-sicher
-- ✅ `bootstrap-twin` ohne `BRIDGE_URL` → Solo-Twin (Handle `@<name>`, bridge NULL, keine Registrierung)
-- ✅ Chat-UI: A2A-Liste + „Neue Konversation" ausgeblendet bei `profile.bridge.url == null` (Inbox-Tab bleibt — Tool/Mandate-Approvals sind bridge-unabhängig)
-
-**Verbleibend (Distribution Etappe 2 / D3-Re-Bind):**
-- ✅ `twin:bootstrap` setzt `owner_user_id` jetzt via `OWNER_EMAIL`-Lookup (Etappe 2.1, eigenes Item unten DONE) — **Release-Blocker behoben**.
-- ✅ CLI-Onboarding Weg A / Opt 3 (Etappe 2.2, eigenes Item unten DONE): `pnpm twin:onboard` legt den ersten User an, der Web-Wizard erstellt den Twin (setzt Owner korrekt). **Zwei gleichwertige Türen** erreicht.
-- ✅ **Weg B** (durchgehendes Terminal-Onboarding inkl. Persona/Key, Tag 33, eigenes Item unten DONE): `twin:onboard` baut jetzt auch den Twin (geteilter `createTwin`-Service). QuickStart verifiziert; Advanced-Bridge-Pfad als Folge-Check offen.
-- ✅ `auth_mode`-Durchsetzung (D2, Etappe 2.4a, eigenes Item unten DONE): OAuth nur bei `auth_mode='oauth'`, zwei-Ebenen-Gate (CLI + UI), Allowlist nur via Admin-CLI `twin:auth-mode`, kein Self-Service.
-- Onboarding-**Wizard**-Submit-Branch: Solo-Twin via Web anlegen (heute verlangt der Wizard noch eine Bridge — `server.ts` Onboarding-Submit)
-- ✅ Re-Bind Solo→Bound (D3 Stufe 1→2, Etappe 2.4b, eigenes Item unten DONE): CLI `twin:bind-bridge` an die eigene Bridge. Verbleibend: UI-Re-Bind-Knopf (zweite Tür) + Umbinden bereits gebundener Twins + Fremd-Bridge/Föderation (Phase 4).
-- ✅ **Production-Deploy der Migration 026** (Distribution Etappe 2 Schritt 5, eigenes Item unten DONE): Sammeldeploy `c88f0eb` auf `srv1712371`, **026 FK-safe auf Production-Echtdaten** (Log „foreign_keys_off-Modus", `foreign_key_check` leer, Kind-Counts vorher=nachher identisch). Backup B4-Klasse offsite vorab.
-
-### twin:bootstrap setzt keinen owner_user_id — Solo-Twin ownerlos + im Switcher unsichtbar ✅
-
-**Status:** **DONE** (Distribution Etappe 2.1, lokal verifiziert) | **Größe S** | **Priorität war: must-vor-Self-Hosting-Release** | Befund Tag 31 Block 21, behoben Tag 31 Block 22
-
-`twin:bootstrap` legt Twins mit `owner_user_id = NULL` an. Bei den Bestands-Bridge-Twins fiel das nie auf (sie bekamen ihren Owner über den Onboarding-Wizard bzw. die User-Migration). Der Distribution-Etappe-1-Smoke mit dem Solo-Twin `@solo` machte die Lücke sichtbar: der frisch ge-bootstrappte Solo-Twin war **im Twin-Switcher unsichtbar** (die `/twins`-Liste ist owner-gescoped), bis ein manuelles `UPDATE twin_profiles SET owner_user_id=… WHERE handle='@solo'` + **Runtime-Neustart** (Owner-Zuordnung wird beim Boot in der Registry gecached) ihn dem eingeloggten User zuwies.
-
-**Kein Solo-Pfad-Bug** — der Solo-Modus selbst (Boot/Chat/UI/A2A-409) funktioniert lückenlos (4/4 verifiziert, #128). Vorbestehende Bootstrap-Lücke, die der Solo-Modus nur exponiert hat.
-
-**Warum Release-Blocker:** Ein frischer Self-Hoster würde nach `twin:bootstrap` (One-Liner-Install-Pfad) **seinen eigenen Twin nicht sehen** → die Installation wirkt kaputt.
-
-**Fix (umgesetzt, Etappe 2.1):** `bootstrap-twin.ts` löst den Owner jetzt aus ENV auf, **bevorzugt E-Mail-basiert**:
-- `OWNER_EMAIL=<x@y.z>` → via `UsersRepo.findByEmail()` zur `user_id` aufgelöst, `owner_user_id` gesetzt. Trifft die E-Mail keinen User → **harter Fehler** (kein stiller NULL-Fallback), Hinweis auf `user:create`.
-- `OWNER_USER_ID=user_<…>` → direkte ID als Fallback (Skripte/Tests).
-- **Kein Owner gesetzt → deutliche `WARN`-Zeile** ("Twin wird im Switcher unsichtbar sein, setze OWNER_EMAIL") statt stillschweigend NULL — die Lücke kann nie wieder lautlos passieren.
-- UPDATE-Pfad überschreibt `owner_user_id` nur, wenn explizit ein Owner übergeben wurde (kein Reset einer bestehenden Zuordnung auf NULL).
-
-Keine Schema-Änderung nötig (`owner_user_id` existiert seit Migration 026, nullable).
-
-**Lokal verifiziert (Verhalten, Wegwerf-Twin `@solo2`, danach entfernt):** (1) bootstrap mit `OWNER_EMAIL=markus.baier@harway.de` (ohne `BRIDGE_URL`) → DB-Check `owner_user_id = user_GnAgLosIQsW1ymQu` (≠ NULL); (2) owner-gescopte Switcher-Query (`list({ ownerUserId })`, identisch zur `GET /twins`-Filterung `profile.ownerUserId === user.userId` in `server.ts:250`) liefert `@solo2` → **erscheint im Switcher ohne manuelles UPDATE**; Registry-Boot lädt `@solo2` eager. (3) Gegenprobe ohne `OWNER_EMAIL` → `WARN`-Zeile + Owner NULL. (4) Fehler-Pfad `OWNER_EMAIL` ohne User → harter Fehler mit `user:create`-Hinweis.
-
-**Onboarding-Kopplung (User-Anlage + Owner-Zuweisung im interaktiven Flow)** → erledigt in **Etappe 2.2 (Block 23)** via Weg A / Opt 3, siehe eigenes Item unten.
-
-### CLI-Onboarding Weg A / Opt 3 (twin:onboard legt ersten User, Wizard macht Twin) ✅
-
-**Status:** **DONE** (Distribution Etappe 2.2, Block 23, lokal end-to-end verifiziert) | **Größe S** | zweite Tür neben Web-Wizard (#110)
-
-**Phase-A-Befund (die kritische Frage „kann der Wizard einen vorhandenen Twin aufgreifen?"):** **Nein.** `POST /onboarding/submit` macht immer `INSERT` eines neuen Twins und wirft **409 bei existierendem Handle** (`server.ts:723`), registriert immer auf der Bridge. Und ein Owner, der **schon einen Twin besitzt, landet nie im Wizard** — `/chat` leitet zu `/chat/<handle>`, der Wizard erscheint nur bei 0 owned Twins (`chat/page.tsx:38`). Zusatz: `bootstrap-twin` ist nicht „minimal" — Persona-Files + LLM-Key sind Pflicht, der Twin ist nach Bootstrap schon vollständig. Würde das CLI einen Twin bootstrappen, gäbe es im Wizard ein **409 oder einen Doppel-Twin**.
-
-**Entscheidung (Markus, Opt 3):** Das CLI deckt nur die echte Terminal-/UI-Lücke ab — den **ersten User** anlegen (keine öffentliche Signup-Seite, nur `/login`; ohne Login kein Wizard-Zugang). Den Twin macht der Web-Wizard (Persona+LLM-Key+Presets im UI, Owner korrekt gesetzt — `server.ts:791`, A3 verifiziert). Web-Wizard **unangetastet**.
-
-**Umsetzung:** `pnpm twin:onboard` (`apps/runtime/src/scripts/onboard.ts`) — interaktiv E-Mail (`readLine`) + Passwort+Bestätigung (`readSecret`, kein Echo) + optionaler Anzeigename → `UsersRepo.create` (bcrypt cost 12). Idempotent (existierender User → „logge dich ein", kein Doppel-Anlegen). Übergabe-Meldung an Tür 2. `readSecret`/`readLine` nach `scripts/_prompt-helpers.ts` extrahiert (DRY beim zweiten Aufruf; `set-api-key.ts` nutzt den shared Baustein).
-
-**End-to-End lokal verifiziert** (Wegwerf-User `test-onboard@local.dev` + Twin `@onboardtest`, restlos entfernt): onboard→User (Hash `$2a$12$`); Login→`GET /twins`=`[]` (Wizard-Trigger); `submit`→201; **DB owner_user_id = neuer User, genau 1 Twin (kein Doppel)**; Switcher zeigt ihn; Direct-Chat HTTP 200 mit echter LLM-Antwort. Kein 409, kein manuelles UPDATE. **KEIN Production-Deploy.**
-
-**Weg B (✅ DONE, Tag 33):** durchgehendes Terminal-Onboarding inkl. Persona/LLM-Key im CLI — eigenes Item direkt unten. Lösung war nicht „Stub-Twin im Bootstrap", sondern der **geteilte createTwin-Service** (aus dem Wizard extrahiert), den das CLI mit aufruft.
-
-### Weg B — durchgehendes Terminal-Onboarding (twin:onboard baut den Twin) ✅
-
-**Status:** **DONE** (Distribution Weg B, Phase 1+2, Tag 33, interaktiv verifiziert) | **Größe M** | durchgehende Terminal-Tür für Headless-VPS (kein Browser-Zwang)
-
-**Phase 1 — createTwin-Service-Extract (Commit `759fcbf`):** Die 7-Schritt-Twin-Erstellung aus dem `/onboarding/submit`-Handler in einen geteilten `createTwin(input, deps)` gezogen (`onboarding/create-twin.ts`), den Web-Wizard UND CLI aufrufen — keine Duplikation. Verhaltensneutral, Web-Wizard am Verhalten verifiziert (Owner/Switcher/Chat/Presets). Deps als Parameter (CLI-tauglich), typisierter `CreateTwinError` (HTTP-Status 1:1).
-
-**Phase 2 — CLI-Flow (Commit `2e61007`):** `pnpm twin:onboard` (`scripts/onboard.ts`) durchgehend: DB-Init-Check → User idempotent → **Doppel-Twin-Schutz** (`list({ownerUserId})` → freundlicher Abbruch, kein 409-Crash) → QuickStart/Advanced-Gabel → Persona/Mandate/Bridge/Provider → `readSecret`-Key + `validateApiKey`-Live-Check (3 Versuche) → `createTwin`. **Kein OAuth-Prompt** (D2), `auth_mode`-Default `api_key`. `createTwin` additiv erweitert (Wizard byte-unverändert): **Solo-Pfad** (`bridgeUrl=null`) + optionaler `bridgeRegisterToken`; **Hot-Load-Deps optional** → ohne Live-Registry (CLI-Prozess): Twin in DB, `requiresRestart=true`, keine Presets.
-
-**Verifiziert (interaktiv, Wegwerf-DB):** QuickStart durchgelaufen — `validateApiKey` ok, Twin `@cli-twin` mit `owner_user_id` + generierter Persona + `bridge_url` NULL (Solo) + `auth_mode` api_key; Doppel-Twin-Schutz greift; Restart-Hinweis + Settings-Verweis. Switcher/Chat-nach-Restart über Phase-1-Smoke + identischen Hot-Load-Pfad abgedeckt.
-
-**Bewusste MVP-Grenze:** **keine Presets im CLI** (`activatePresets` braucht die Live-Registry des Server-Prozesses) → Skills/Presets danach im Web unter Settings. Twin geht erst nach **Runtime-Restart** live (Registry lädt beim Boot) — für Headless der Normalfall.
-
-### Weg-B Advanced-Pfad (eigene Bridge, Mandate-Wahl, volle PersonaInput) — ✅ verifiziert
-
-**Status:** **DONE** (Tag 33, lokal am Verhalten verifiziert) | **Größe S** | aus Weg-B Phase 2
-
-Der **Advanced**-Pfad von `twin:onboard` ist am Verhalten verifiziert (lokal, Wegwerf-DB + **echte Bridge**): Advanced-Flow durchgelaufen — volle `PersonaInput` (CTO / `direct` / `du` / `no-emojis`), Mandate-Wahl, Provider/Model; **eigene Bridge** via `registerHandleOnBridge` → `@advancedtest` an der Bridge registriert (`bridge.db`-Check: **JA**); `twin.db` mit `bridge_url=127.0.0.1:5100` + `bridge_token` gesetzt + `owner_user_id`. Test-Handle danach aus `bridge.db` entfernt. Damit sind **beide** Weg-B-Pfade verifiziert (QuickStart/Solo + Advanced/eigene Bridge), beide über denselben `createTwin`-Service.
-
-**TTY-Befund (festhalten):** `readLine`/`readSecret` (`scripts/_prompt-helpers.ts`) teilen **keinen Buffer über aufeinanderfolgende Aufrufe** → gepipter Mehrzeilen-Input wird nach dem ersten Prompt verworfen; nur **interaktiv (TTY)** nutzbar, **nicht piped/CI**. Weg-B ist (wie OpenClaw) interaktiv gedacht (`docker compose exec -it … onboard.js`). Ein **Helper-Refactor** (geteilter Stdin-Buffer) wäre ein **separates Stück**, falls je nicht-interaktive/CI-Tests des Onboarding-Flows gewünscht sind — die Helper tragen auch andere CLIs (`set-api-key` etc.), daher bewusst nicht im Weg-B-Scope.
-
-### auth_mode-Durchsetzung (D2): OAuth nur bei auth_mode='oauth', kein Self-Service ✅
-
-**Status:** **DONE** (Distribution Etappe 2.4a, Block 24, lokal end-to-end verifiziert) | **Größe S** | D2-Setzung
-
-**Phase-A-Befund (war auth_mode tot/gegated/lückenhaft?):** **lückenhaft.** Das Flag war LIVE für die Send-Path-Provider-Wahl (`twin-service.ts:1758`), aber der OAuth-**Start** nicht gegated: Settings-UI bot `api_key`-Twins einen „OAuth aktivieren"-Button (`settings/page.tsx:1374`), und `twin:oauth-login` schaltete jeden Twin selbst auf `oauth` (`cli-oauth-login.ts:378`) statt eine Vorbedingung zu prüfen. **Keine** HTTP-User-Route ändert `auth_mode` (`/full-config`-Schema kennt das Feld nicht; `setAuthMode` nur im CLI) → keine echte HTTP-Self-Service-Lücke, nur UI-Button + ungegateter CLI.
-
-**Fix (zwei Ebenen, weil UI-only umgehbar):**
-1. **CLI-Gate** (`cli-oauth-login.ts`): `twin:oauth-login` lehnt hart ab, wenn `auth_mode != 'oauth'` (klare D2-Meldung). Kein Self-Grant mehr — das abschließende `setAuthMode('oauth')` ist nur noch idempotente Bestätigung.
-2. **UI-Gate** (`settings/page.tsx`): `api_key`-Zweig zeigt nur Status, keinen Aktivieren-Button. oauth-Zweig (Re-Login) unverändert.
-3. **Admin-CLI** `twin:auth-mode <@handle> [oauth|api_key]` (`scripts/set-auth-mode.ts`, Shell-only): die manuelle Allowlist, getrennt vom Login. Anzeige-Modus ohne Mode-Arg.
-
-Keine Migration (Spalte existiert). **End-to-End verifiziert:** api_key (@florian) → Login abgelehnt; oauth (@markus) → Gate passt (Regression, kein Mode-Change); Allowlist→Login→Revoke-Flow auf Wegwerf-`@authtest`; `settings-data` mode spiegelt DB; `PATCH /full-config {authMode:oauth}` → wirkungslos (Feld ignoriert); api_key-Chat grün. **KEIN Production-Deploy.**
-
-**Verbleibend (optional, später):** Managed-Mode-Policy `auth_mode_default` falls nolmi.ai je einen anderen Default als `api_key` bräuchte (heute global `api_key`-Default ausreichend).
-
 ### OpenAI/Codex-OAuth-Provider — erst in Weg-B-Onboarding, self-hosted-only
 
 **Status:** OFFEN (Awareness / Folge-Item aus D2-Revision Tag 33) | **Größe S–M** | **Priorität:** nice | **Trigger:** erst wenn **Weg B** (durchgehendes Terminal-Onboarding inkl. Persona/Key, Etappe 2) gebaut wird
@@ -1039,59 +681,6 @@ Aus der **D2-Revision** (`DISTRIBUTION-STRATEGY.md §2`, Tag 33): Ein OpenAI/Cod
 - **Keine Architektur-Abhängigkeit** — wie bei Anthropic-OAuth strikt hinter `auth_mode='oauth'` + Admin-CLI-Allowlist (2.4a), bei Provider-Politik-Wechsel via `twin:auth-mode … api_key` widerrufbar, ohne dass etwas bricht. API-Key bleibt der Default-Fels.
 
 Bis Weg B existiert: **keine Aktion**, nur dokumentierte Setzung.
-
-### Re-Bind Solo-Twin an eigene Bridge (D3 Stufe 1→2) ✅
-
-**Status:** **DONE** (Distribution Etappe 2.4b, Block 25, lokal end-to-end verifiziert) | **Größe S** | D3-Setzung, CLI-only
-
-**Phase-A-Befund:** `registerHandleOnBridge` (`onboarding/bridge-register.ts`) ist der vorhandene Register-Mechanismus (POST `/twins/register`, `BridgeRegisterError(status)` für 409/401), standalone + wiederverwendbar (nicht bootstrap-wired). **Kein Live-Re-Init:** `addTwin` no-op bei geladenem Twin, kein `setBridgeClient`; `buildEntry` baut den BridgeClient nur bei `bridgeUrl && bridgeToken` beim Boot → Re-Bind greift erst nach **Runtime-Neustart**. `auth_mode` orthogonal (update() patcht nur bridge-Felder).
-
-**Umsetzung:** neuer CLI `twin:bind-bridge <@handle> --bridge-url <url> [--register-token …]` (`scripts/bind-bridge.ts`). `registerHandleOnBridge` um optionalen `registerToken`-Param erweitert (backward-compat, Fallback ENV). Ablauf: solo-Validierung (kein Umbinden) → Register ZUERST → bridge_url/token ERST nach Erfolg (atomar, Fehlerfall lässt Solo) → Neustart-Hinweis. **Scope-Grenze (D3):** nur EIGENE Bridge (Owner kennt Register-Token); Fremd-Bridge/Föderation = Phase 4.
-
-**End-to-End verifiziert** (Wegwerf-@bindtest, restlos entfernt): Solo 409 → Re-Bind (bridge_url/token gesetzt, Bridge-DB registriert) → Neustart `[bridge:stream] verbunden` → A2A-Send **201** statt 409. Fehlerfälle (falsches Token 401, unerreichbare Bridge) → bridge_url bleibt NULL. Already-bound-Guard lehnt ab. @markus-Regression intakt, `auth_mode` unberührt. **KEIN Production-Deploy.**
-
-**Verbleibend (später):** UI-Re-Bind-Knopf in Settings (zweite Tür — heute CLI-only, weil Neustart-Erfordernis UI-Re-Bind ohne Live-Reload entwertet); Umbinden bereits gebundener Twins (eigener Fall); Live-Re-Init ohne Neustart (`setBridgeClient`-Pfad).
-
-### Single-Host One-Liner-Install-Skript (ohne TLS) ✅
-
-**Status:** **DONE** (Distribution Etappe 2.3, Block 26 gebaut + Block 27 **am Verhalten verifiziert** — Frische-Test von Null bestanden) | **Größe M** | One-Liner-Install, Single-Host-Tür
-
-**Phase-A-Befund:** Der vorhandene `docker/nolmi/docker-compose.yml` ist der **Production-Stack** (Traefik `external`-Netz, TLS-certresolver, htpasswd) → nicht Single-Host-tauglich, **separate Traefik-freie Variante** nötig. DB-Init läuft **automatisch** im Container-CMD (idempotent, Runtime + Bridge) → kein manueller `db:init`. Alle Dockerfiles nutzen schon `@nolmi/*`-Filter (B2-Runbook-„@twin-lab"-Hinweis stale). `loadMasterKey` verlangt 32-Byte-base64 → `openssl rand -base64 32` ist format-gleicher Drop-in (Host-node für die Generatoren nicht nötig).
-
-**Umsetzung:**
-- `docker/nolmi/docker-compose.single-host.yml` — 3 Services, `build:`-Blöcke (Kontext `../..`), Ports 3000/4000/5100 direkt, internes Netz, **kein** Traefik/TLS/htpasswd. `SESSION_COOKIE_SECURE=false` (Login über http), `TELEGRAM_USE_POLLING=true` (kein Webhook-Crash-Loop), Web-Build-Args `NEXT_PUBLIC_RUNTIME_URL`/`DEPLOYMENT_LABEL=self-host`.
-- `install/install.sh` — `set -euo pipefail`, 7 Schritte (OS/Tools → Docker prüfen/+apt-install → Repo klonen-oder-nutzen → `.env` mit `openssl`-Secrets **idempotent, nie geloggt, umask 077** → `up --build -d` → DB-Init-Hinweis → Übergabe an `twin:onboard` via `docker compose exec`). ENV-konfigurierbar (`NOLMI_HOST` für VPS-IP etc.).
-- `install/README.md` — lokal vs. VPS, Ports/Sichtbarkeit, TLS=3b.
-
-**§7-Cookbook-Befunde adressiert (Single-Host-relevant):** B2-Befund 2 (Telegram-Polling-Default) + #126 (Web-Build-Arg). Traefik-Befunde (B1-1/2, B2-1/4) explizit auf 3b verschoben.
-
-**Verifiziert (statisch, Block 26):** `bash -n` Syntax grün; `docker compose -f …single-host.yml config` VALID (3 Services).
-
-**Verifiziert (am Verhalten, Block 27 — Frische-Test von Null):** echter Lauf in einem isolierten `docker:dind`-Wegwerf-Container (srv1046432, getrennt vom Standby, danach restlos entfernt). Code **credential-frei** rein via `git archive` + stdin-tar → **Mode 1** („Im Repo ausgeführt", kein Clone/PAT). **7/7 Skript-Schritte grün** (Build aller 3 Images ~115 s, out-of-the-box, keine stale `@twin-lab`-Referenz; `.env`-Secrets via `openssl` nicht geloggt). **3 Container Up** (kein Restart-Loop). Runtime sauber: **alle 26 Migrationen frisch inkl. 026 im `foreign_keys_off`-Modus auf LEERER DB** (Nebenbefund: FK-Cascade-sicherer Runner-Tweak läuft auch auf frischer Wiese), Onboarding-only/0 Twins, :4000, **kein `EADDRINUSE`, kein Telegram-Crash-Loop**. Isolation gehalten (Standby + alle srv1046432-Stacks unberührt). Bewusst nicht im dind getestet: `twin:onboard`+Browser (2.2 schon end-to-end) + externer Port-Zugang. **KEIN Production-Deploy.**
-
-**Verbleibend:** **Schritt 3b** (Production/TLS: Traefik + ACME + Domain + BasicAuth — der bestehende `docker-compose.yml`); Update-Mechanismus (git pull + rebuild / Image-Tag-Bump); optional Docker-Auto-Install auch für non-apt-Linux.
-
-### Production-Deploy Etappe 2 (Sammeldeploy c88f0eb) — Migration 026 FK-safe auf Echtdaten ✅
-
-**Status:** **DONE** (Distribution Etappe 2 Schritt 5, am Verhalten auf Production verifiziert) | **Größe M** | **Priorität war: must-vor-Self-Hosting-Release** | srv1712371 (`187.124.3.235`), `/docker/nolmi/repo`
-
-Sammeldeploy `main`→`c88f0eb` auf den Production-VPS: **Etappe 1 + 2.1 + 2.2 + 2.4a + 2.4b + 2.3 + Migration 026** in einem Rutsch. Production stand vorher auf Migration 025.
-
-**Befund vorab (Single-Point-of-Failure):** Die Etappe-2-Commits (`24665a1`, `c5f9012`, `a75adbe`, `aaf207a`, `4ee36ad`, `c88f0eb`) waren **lokal committet, aber nicht gepusht** — `origin/main` stand auf `2ad7d3d`. Erst `git push` (FF `2ad7d3d`→`c88f0eb`, kein Force; Pre-Push-Hook `pnpm -r build` grün), dann VPS-`git pull --ff-only` + Rebuild auf dem **vollständigen** Stand. Die nur-lokale Existenz der Etappe-2-Arbeit ist damit beseitigt.
-
-**Migration 026 (destruktiver 12-Schritt-FK-Rebuild von `twin_profiles`) auf Production-Echtdaten SICHER:**
-- Runtime-Log **„026 … angewendet (foreign_keys_off-Modus)"** = der **neue** FK-sichere Runner (aus `6c6032f`) fuhr sie, nicht der alte. Schutz greift, weil das neue Image Runner+026 zusammen bündelt → beim Boot läuft der neue Runner zuerst (`init-db.js && exec index.js`).
-- `foreign_key_check` **leer** (kein verwaister FK in den 11 Kind-Tabellen).
-- `bridge_url`/`bridge_token` jetzt **`notnull=0`** (vorher 1).
-- **Kind-Tabellen-Counts vorher=nachher IDENTISCH** — einzige Differenz `schema_migrations` 25→26 → **kein Cascade-Verlust, Twin-Historie intakt** (der härteste Beweis).
-
-**Pre-Flight B4-Klasse:** `VACUUM INTO`-Konsistenz-Snapshot von `twin.db` **und** `bridge.db`, tar.gz nach `/docker/nolmi`, **offsite auf den Mac** (`nolmi-db-backup-20260531-064823.tar.gz`). Rollback-Image `nolmi-runtime:rollback-025` (+ `web`) getaggt **vor** dem Rebuild, Counts-before festgehalten.
-
-**Live verifiziert (am Verhalten):** Direct-Chat @markus über `app.nolmi.ai` · A2A @markus→@florian Echtzeit (**201**, kein 409, `bridge_url` erhalten) · `auth_mode`-Gate 2.4a live (api_key-Twin **kein** OAuth-Button in Settings). 3 Container Up, **Bridge unangefasst** (kein Bridge-Code-Change — `bridge-register.ts` liegt unter `apps/runtime/`, nicht in der Bridge-App; nur runtime + web rebuilt).
-
-**Aufräum-Reminder (kein Blocker):** Rollback-Images `nolmi-runtime:rollback-025` + `nolmi-web:rollback-025` liegen noch auf dem VPS. **Aufräumen erst nach einer Stabilitäts-Schamfrist** (einige Tage Production-Laufzeit ohne Auffälligkeit), nicht sofort.
-
-**Verbleibend:** Schritt 3b (TLS-Install) bleibt offen; Root-404 separat (Item direkt unten).
 
 ### nolmi.ai Root-Domain liefert 404 — Landing-Page fehlt / ungeroutet
 
@@ -1122,215 +711,6 @@ Globales npm-Paket (`npm i -g nolmi` → `nolmi onboard`) wie OpenClaw. **Phasen
 - `onboard`-Übergabe (`docker compose exec -it … node dist/scripts/onboard.js`) braucht **interaktiven TTY-Passthrough** (`stdio: 'inherit'`).
 
 **Entscheidung (Pfad a):** Bau hinter die Public-Entscheidung — kein B2 jetzt. Bevorzugt B1-Image-Pull (Docker Hub), Fallback B1-Clone (Repo public). Beide nach §5a.
-
-### 129. .env.example-Default auf Anthropic switchen ✅
-
-**Abgeschlossen Tag 30 (28. Mai 2026, Donnerstag), gemeinsam mit #127 in einem Commit (Tag 30 Block 1).** `.env.example` Provider-Block umgestellt:
-- `ANTHROPIC_API_KEY=sk-ant-replace-me` aktiv (vorher auskommentiert)
-- `ANTHROPIC_MODEL=claude-opus-4-7` aktiv (vorher auskommentiert)
-- `ACTIVE_PROVIDER=anthropic` (vorher `openai`)
-- `OPENAI_API_KEY` + `OPENAI_MODEL` als auskommentierter Alternativ-Block mit Switch-Anleitung („für Switch hier un-kommentieren, unten ACTIVE_PROVIDER=openai setzen")
-
-Quick-Start matched jetzt README + Tech-Stack-Story. Friktionsloser Switch zwischen beiden Providern via 2-Zeilen-Edit.
-
-**Größe ursprünglich:** XS. **Final:** ~5 Min (gemeinsam mit #127). **Spur:** Pre-Launch-Phase A.
-
-### 130. Telegram-Adapter Stufe 1 (Owner-Only-Bridge)
-
-Wettbewerbs-Pivot aus Tag 25 Strategy-Session (`docs/BLOCK-5-STRATEGY.md`): NanoClaw + Hermes Agent haben Multi-Channel-Messaging als Default. Twin-Lab ohne Messaging-Integration wirkt rückständig im Self-Hosting-Markt, auch wenn Multi-Twin ein anderes Konzept ist. Telegram-Stufe-1 verteidigt minimal-viable.
-
-**Scope Stufe 1 — Owner-Only-Bridge:**
-
-- Owner verbindet eigenen Telegram-Account via `/start`-Command zum eigenen Twin
-- Twin antwortet auf Owner-Messages mit voller Memory-Tiefe und Persona
-- Bot-Token-Storage encrypted in Settings pro Twin
-- Webhook-Pattern (`/webhooks/telegram/:twin-handle`) hinter Traefik
-- Single-User pro Twin, kein External-Sender-Auth-Flow (das wäre Stufe 2)
-
-**Implementation-Skizze:**
-
-- Migration für `telegram_chats`-Tabelle + Bot-Token-Storage (encrypted via existing ENCRYPTION_KEY-Pattern)
-- `apps/runtime/src/telegram/`-Service mit Bot-API-Client (`node-telegram-bot-api` oder `telegraf`)
-- Webhook-Endpoint mit Auth-Token-Verification (Telegram-Webhook-Secret)
-- Owner-Pairing-Flow: `/start`-Command matched Telegram-User-ID gegen Owner-Email-Hash, persistiert Mapping
-- Settings-UI: pro Twin „Telegram-Bot konfigurieren" mit Bot-Token-Eingabe + Test-Connection-Button + Pairing-Status
-- Conversation-Persistence in existing audit-stream (Channel-Marker `telegram` zusätzlich zu `web`)
-
-**Smoke-Tests:**
-
-- Send-Receive-Roundtrip
-- Multi-Turn-Konversation mit Memory-Recall über mehrere Sessions
-- Memory-Hit-Badge auch sichtbar wenn Konversation via Telegram begann und im Web fortgeführt wird
-- Cross-Channel: User schreibt im Web, dann auf Telegram weiter — Conversation-Thread bleibt zusammen
-
-**Größe:** L · **Priorität:** must · **Aus:** Block-5-Strategy Tag 25 (Wettbewerbs-Pivot) · **Spur:** Pre-Launch-Phase A (Block 5)
-
-**Status-Notiz Tag 25:** Wettbewerbs-Pivot aus Block-5-Strategy-Session. Vorgezogen aus ROADMAP Phase 4.1 (Stufe 1 Owner-Only-Bridge). Strategy-Setzungen in `docs/BLOCK-5-STRATEGY.md`.
-
-**Architektur-Detail:** Siehe [`docs/130-TELEGRAM-STRATEGY.md`](./130-TELEGRAM-STRATEGY.md) (Tag-25-Nachmittag-Session, sieben Achsen + 5-Phasen-Sequenz).
-
-**Phase-B-Implikation:** Stufe 2 (External Senders mit Pre-Approval) und Stufe 3 (Voll-Multi-Twin-Router) bleiben Phase B. WhatsApp + Discord + Slack folgen in ROADMAP Phase 4.1-4.5 wie geplant.
-
-### 131. OpenAI Subscription-OAuth — ✅ Phase A DONE (25.–26. Mai 2026)
-
-**Status: ✅ DONE Phase A** (Tag 27–28, 30 Blöcke). Volle Bilanz in
-[`docs/131-OAUTH-STRATEGY.md`](./131-OAUTH-STRATEGY.md) §a–§w (27 Sub-
-Sections). CLI `pnpm twin:oauth-login @<handle>` (Phase 4) + Web-UI
-Auth-Status + Modal (Phase 5) live. Bauzeit ~3 Tage statt initial-
-geschätzten 5–7. Phase-B-Polish-Items: #139, #140, #141, #142, #143
-(Web-OAuth-Production), #144 (VPS/Linux-Path), #145 (Multi-Account).
-
----
-
-**Historische Doku (Original-Spec aus Tag 25, vor Bau):**
-
-OpenAI Codex hat OAuth-Flow für Subscription-Auth (ChatGPT Plus/Pro/Team), offiziell für eigene Codex-Produkte. OpenClaw und vergleichbare Tools nutzen den Flow auch für eigene Apps — laut OpenClaw-Doku „explicitly supported", laut OpenAI-Codex-Doku nicht explizit für externe Apps adressiert.
-
-**Status:** Backlog, nicht in Phase A. Bau in Phase B nach Launch + Feedback.
-
-**Implementations-Skizze (für späteren Bau):**
-
-OAuth-Flow analog OpenClaw (PKCE):
-
-1. PKCE-Verifier/Challenge + Random-State generieren
-2. Browser auf `https://auth.openai.com/oauth/authorize?...` öffnen
-3. Callback auf `http://127.0.0.1:1455/auth/callback` (oder Twin-Lab-eigener Port)
-4. Token-Exchange auf `https://auth.openai.com/oauth/token`
-5. AccountId aus Access-Token extrahieren
-6. `{access, refresh, expires, accountId}` per Twin verschlüsselt speichern (Reuse Existing EncryptionService aus `apps/runtime/src/crypto-utils.ts`)
-7. Refresh-Loop mit File-Lock
-8. Settings-UI: User wählt Auth-Mode pro Twin (API-Key vs Subscription-OAuth)
-
-**Risiken (im UI explizit machen):**
-
-- OpenAI hat den Pattern nicht prominent für externe Apps dokumentiert
-- Pattern kann jederzeit von OpenAI gekappt werden (Präzedenz: Anthropic Claude Pro/Max Anfang April 2026 — initial gekappt, später laut OpenClaw-Doku „wieder erlaubt", Status fluide)
-- ChatGPT-ToS lässt programmatische Nutzung in Grauzone
-- Twin-Lab-Default bleibt API-Key (BYOK), OAuth ist explizites Opt-in mit ToS-Disclaimer
-
-**Quellen:**
-
-- OpenAI offizielle Codex-Auth-Doku: https://developers.openai.com/codex/auth
-- OpenClaw OAuth-Doku (PKCE-Flow-Details): https://docs.openclaw.ai/concepts/oauth
-
-**Größe:** XL (5-7 Bautage — PKCE-Client + Refresh-Service + Provider-Switch + CLI-Login + Settings-UI + SSH-Tunnel-Doku + Smoke). **Priorität:** should. **Spur:** Pre-Launch-Phase A Block 5.
-
-**Status-Notiz Tag 25:** Recherche-Session zu Subscription-Auth-Patterns. OpenClaw nutzt diesen Pattern produktiv, dokumentiert PKCE-Flow präzise. Implementations-Pfad konkret skizziert, aber Pattern hat ToS-Grauzone-Charakter. Bau nicht launch-kritisch, Wartemodus bis Phase B + Nutzer-Demand.
-
-**Status-Notiz Tag 26 (25. Mai 2026):** Vorgezogen von Phase B nach Phase A Block 5. Bau-Reihenfolge `#130 → #131 → #113 → #112 → #114 → #115`. Launch-Window von KW 29-30 auf KW 31-32 angepasst (1-2 Wochen Verschiebung).
-
-**Begründung Vorziehung:**
-- Owner-Persona-Validierung: Power-User mit OpenAI + Claude beide via Subscription (Max-Plan, ChatGPT Plus). OAuth ist Kern-UX-Verbesserung, nicht Convenience (1000+ Messages/Monat via API-Key kosten substantiell mehr als Subscription)
-- Wettbewerbs-Positionierung: OpenClaw + Hermes haben OAuth, "BYOK-only" wäre HN-Feedback-Schwäche im Launch-Day
-- OpenAI dokumentiert + supported 3rd-Party-OAuth offiziell (developers.openai.com/codex/auth), nicht Reverse-Engineering wie befürchtet
-- Launch-Toleranz akzeptiert: KW 31-32 ist immer noch innerhalb sinnvollem Launch-Fenster
-
-**Twin-Lab-Default bleibt BYOK** (API-Key). OAuth ist Opt-in mit ToS-Disclaimer: "OpenAI hat das nicht explicit für 3rd-Party-Apps dokumentiert, kann gekappt werden."
-
-**Phase-A-Status:** `should`-Item, neue Spur Pre-Launch-Phase A Block 5.
-
-**Status-Notiz Tag 27 (25. Mai 2026):** Strategy-Session abgeschlossen. Re-Estimate auf XL (5-7 Bautage) nach Recherche-Findings: OpenAI Codex OAuth hat hardcoded localhost:1455-Redirect, headless-OAuth nicht supported (Issue #2798 offen). SSH-Tunnel-Pattern ist Branchen-Standard (Hermes, RooCode, OpenCode).
-
-Strategy-Setzungen:
-- CLI-First (`pnpm twin:oauth-login`), Web-UI zeigt nur Status
-- Exklusiver Auth-Mode pro Twin (api_key XOR oauth)
-- Migration 025: dedizierte `oauth_tokens`-Tabelle
-- OpenRouter als dokumentierter Fallback (Hermes-Pattern)
-- 5-Phasen-Bau mit Stop-Punkten
-
-Strategy-Doc: [`docs/131-OAUTH-STRATEGY.md`](./131-OAUTH-STRATEGY.md).
-
-**Status-Notiz Tag 27 Nachmittag (25. Mai 2026):** Phase 1 + 2 abgeschlossen (Commits `cfe223c` Backend-Foundation, `638e200` Refresh-Service). Phase 3 Strategy-Iteration mit substantiellen Architektur-Findings.
-
-**Re-Estimate XL → XXL (8-12 Bautage):**
-
-- OAuth-Token funktioniert NICHT mit Standard-OpenAI-API (`api.openai.com/v1/*`)
-- Codex-spezifischer Backend-Endpoint `chatgpt.com/backend-api/codex/responses` ist Pflicht
-- Pre-Flight 3/3 HTTP 200 verifiziert (curl Mac, VPS-Container, Node v22 native fetch)
-- Node native fetch durchgelassen — kein TLS-Bypass / curl-FFI nötig
-- Spike-First-Approach: Walking-Skeleton vor inkrementellem Sub-Phasen-Ausbau
-
-**Phase 3 Sub-Phasen-Sequenz:**
-
-| Sub-Phase | Aufwand | Tag |
-|---|---|---|
-| 3.0 Spike (Direct-fetch + Minimal-Instructions) | 2-4h | 27 |
-| 3.1 SSE-Parser-Robustness | 1 Tag | 28 |
-| 3.2 Codex-System-Prompt-Engineering | 0.5-1 Tag | 28 |
-| 3.3 Tool-Calls + Reasoning-Traces | 1-2 Tage | 29 |
-| 3.4 Vercel-Provider-Refactor (optional) | 1 Tag | 29-30 |
-
-**Risiko-Assessment (neu in Strategy-Doc §j):**
-
-- Risiko 1: ToS-Grauzone (Mitigation: Disclaimer + Monitoring + OpenRouter-Fallback)
-- Risiko 2: Pattern-Block-Präzedenz (Anthropic April 2026), Mitigation: BYOK bleibt funktional, Closed-Beta-Approach
-- Risiko 3: Codex-Endpoint-Format-Changes, Mitigation: CLI-Release-Monitoring, Format-Mapping isoliert in 3.4
-
-**Launch-Window-Impact:** KW 33-34 (statt KW 31-32). Buffer 0-7 Tage (statt 5-15 Tage). Phase-A bleibt machbar aber ohne weiteren Slack.
-
-Strategy-Doc erweitert um §g (Codex-Endpoint-Architektur), §h (Cloudflare-TLS-Pre-Flight), §i (Sub-Phase-Sequenz), §j (Risiko-Assessment), Re-Estimate-Section.
-
-**Status-Notiz Tag 27 Abend (25. Mai 2026):** Phase 3.0 Spike Walking-Skeleton durch. Variante (c) — Branch in `TwinService.chat()` vor `generateText`, eigene `runModelViaCodex`-Helper-Methode bypassed Phase-3.1+-Schichten (Skills, Tools, Pre-Pass, Memory).
-
-Sub-Bau (~5 Schritte):
-1. `TwinProfile.authMode` exposen (Interface + Row + Queries + `setAuthMode`) — Phase-1-Audit-Repair, Migration 025 hatte das Feld nie über den Repo-Layer gehoben
-2. `OAuthRefreshService` in `RegistryDeps` + `TwinServiceDeps` (optional)
-3. `oauth/codex-adapter.ts` mit direct-fetch + SSE-Text-Collector
-4. `runModelViaCodex`-Branch in `runModel` (lazy CodexAdapter-Init)
-5. Helper-Script `test-oauth-phase3-spike.ts` mit `smoke`/`setup`/`cleanup`-Modes
-
-**Smoke 1 (Adapter-only) — grün:** HTTP 200 in 2.4s, plan-type=pro, cf-ray gesetzt, Response-Text korrekt geliefert. Echter Codex-Token aus `~/.codex/auth.json` → AES-256-GCM-DB-Persist → `ensureFresh` → Codex-Endpoint → SSE-Stream → Text-Collect. End-to-End-Architektur durchgehend bewiesen.
-
-**Smoke 2 (End-to-End via `/twins/@markus/chat`) — skipped:** `pnpm dev` lokal nicht erreichbar (Runtime auf :4000 nicht hochgekommen, vermutlich Telegram-Webhook-ENV-Friction → siehe #138). Server-Layer-Aufruf ist nur noch Wiring durch existing `requireOwner` + `entry.service.chat()` — der OAuth-Branch sitzt in `runModel` und wird von beiden Send-Pfaden erreicht. Phase 3.1 (Tag 28) zieht End-to-End-Smoke zusammen mit SSE-Parser-Robustness nach.
-
-**Lesson Tag 27 #4 (siehe STAND):** Migration ohne Repo-Update ist Anti-Pattern. Migration 025 hatte `auth_mode`-Column angelegt aber nicht durch `TwinProfile`-Read/Write-Pfad gehoben — Phase-3.0-Spike hat den Fehler beim ersten Konsum aufgedeckt. Repair in Schritt 1 mit erfasst.
-
-### 132. Anthropic Subscription-Auth (Claude-CLI-Reuse-Pattern)
-
-Anthropic hat keine offizielle 3rd-Party-OAuth-Surface für Claude Pro/Max-Subscription-Nutzung in externen Apps. Stattdessen: Claude-CLI-Reuse-Pattern — wenn auf dem Host-System ein gültiger Claude-CLI-Login existiert, kann eine externe App diese Credentials wiederverwenden.
-
-Anthropic-Stance war fluide: Anfang April 2026 wurde Claude Pro/Max via 3rd-Party-Agent-Frameworks gekappt, OpenClaw-Doku sagt Stand Tag 25: „Anthropic staff told us this usage is allowed again". Status nicht offiziell publiziert, basiert auf direkter Kommunikation.
-
-**Status:** Backlog, nicht in Phase A. Bau in Phase B nach Launch + Feedback, abhängig von Anthropic-Stance-Stabilität.
-
-**Implementations-Skizze (für späteren Bau):**
-
-Claude-CLI-Reuse-Pattern (analog OpenClaw):
-
-1. Detect Claude-CLI-Auth auf Host-System (`~/.claude/auth.json` oder OS-Keychain)
-2. Twin-Lab liest Credentials, mirrored mit Provenance (nicht eigene Refresh-Rotation, sondern externes CLI bleibt Source-of-Truth)
-3. API-Calls gegen Anthropic-API mit Subscription-Auth-Token statt API-Key
-4. Settings-UI: pro Twin „Use Claude-CLI Subscription" als Opt-in mit Detection-Status
-
-**Alternativ-Pattern (falls Phase-1.1-Recherche zeigt es ist mit Setup-Token möglich):**
-
-- Anthropic bietet „Setup-Token" für Claude-Code als offizieller Token-Auth-Pfad
-- Wenn dieser Token in externer App genutzt werden kann, wäre das offiziellerer Pfad als CLI-Reuse
-
-**Risiken:**
-
-- Anthropic-Stance fluide (initial gekappt, laut OpenClaw-Doku „wieder erlaubt") — Status kann sich jederzeit ändern
-- Pattern hängt von lokal verfügbarem Claude-CLI-Login ab — Self-Hoster ohne Claude-CLI können's nicht nutzen
-- Wenn Anthropic offiziell wieder kappt, Twin-Lab-Setting muss als „deprecated" gemarkt werden
-
-**Quellen:**
-
-- Anthropic Claude-Code-Plan-Doku: https://support.claude.com/en/articles/11145838-using-claude-code-with-your-pro-or-max-plan
-- OpenClaw OAuth-Doku (Anthropic-Sektion): https://docs.openclaw.ai/concepts/oauth#anthropic-legacy-token-compatibility
-
-**Größe:** M (2-3 Bautage — CLI-Detection + Credential-Mirror + Settings-UI + Status-Monitoring). **Priorität:** later. **Spur:** Pre-Launch-Phase B.
-
-**Status-Notiz Tag 25:** Pattern-Symmetrie zu #131. Anthropic-Stance weniger klar als OpenAI-Codex-OAuth-Stance — laut OpenClaw-Doku wieder erlaubt, aber nicht öffentlich publiziert. Bau erst sinnvoll wenn Anthropic offizielle Position publiziert.
-
-**Status-Notiz Tag 26 (25. Mai 2026):** Anthropic-Stance hat sich Tag 25-26 geklärt: kein 3rd-Party-OAuth mehr, nur Token-Kauf-Pattern. CLI-Reuse-Pattern (Claude Code via lokale CLI-Authentifizierung wiederverwenden) ist damit obsolet.
-
-**Konzept-Update-Pflicht vor Bau:** Item bleibt Phase B, aber Implementation-Pfad muss neu konzipiert werden:
-- Alt: Claude-CLI-Subscription-Reuse via lokales Auth-File
-- Neu: Token-Buying-Surface — Twin-Lab vermittelt API-Token-Käufe direkt über Anthropic-API, Owner zahlt nicht für Subscription separat
-
-**Recherche-Session vor Phase-B-Bau Pflicht:** Anthropic-aktuellen Stance verifizieren (Tag-25-Mai-26-Snapshot kann morgen schon anders sein), Token-Buying-API-Surface dokumentieren, Pricing-Modell verstehen (Markup oder pass-through).
-
-**Bleibt:** Größe M, Priorität `later`, Spur Pre-Launch-Phase B.
 
 ### 133. Cross-Channel-Mental-Model-Doku
 
@@ -1371,20 +751,6 @@ Phase-4-Scope war zu eng für den Refactor, deshalb in Phase 4.3 pragmatisch das
 
 **Status-Notiz Tag 26:** Angelegt aus Phase 4.3 Tag-26-Closure (Commit `402a1ae`). Heutiges Coupling funktional, aber UX-suboptimal — Tab-Switch innerhalb Konfiguration ist nicht "kosten-frei".
 
-### 135. Account-Settings UI (Email/Password-Edit-Surface) ✅
-
-**Abgeschlossen Tag 29 (27. Mai 2026, Mittwoch), Commit `f39b14f` auf `origin/main`. Production-Deploy Tag 29 auf `3561122`.** Option B umgesetzt: eigene Route `/account` mit zwei Forms (Email-Change + Password-Change), beide mit Current-Password-Confirm. UsersRepo um `updateEmail` (Email-Uniqueness-Pre-Check, wirft `UserAlreadyExistsError`) + `updatePassword` (bcrypt cost 12) erweitert. Zwei neue Endpoints `PATCH /auth/me/email` und `PATCH /auth/me/password` mit Session-Check (`getCurrentUser`) + `verifyPassword`-Confirm. ProfileMenu-Link „Account" oberhalb Logout. Middleware `PROTECTED_PREFIXES` um `/account` ergänzt.
-
-Phase-A-Setzungen umgesetzt: Email-Change ohne Verify-Link (direkt umstellen für drei dev-fitte Owner), Old-Password als Confirm-Pflicht beim Passwort-Wechsel. Account-Delete bewusst **defer** auf eigenes Item (semantisch heavy: Twin-Kaskadierung, A2A-Konversationen), Email-Verify-Flow defer auf Phase B. Keine neuen BACKLOG-Items aus dem #135-Bau angelegt — die Defers sind im Briefing als „eigenes Item für später" formuliert ohne Anlegen-Anweisung; sie werden konkret, wenn der jeweilige Block sie zieht.
-
-Typecheck 4/4 grün, Husky-Build 4/4 grün (Push-Hook), Local-Smoke 7/7 grün (Login + `/account` via ProfileMenu + Email-Change Happy-Path + Re-Login mit neuer Email + Password-Change Happy-Path + Re-Login mit neuem PW + Edge-Cases: 401-Toast bei falschem Current-PW, 409-Toast bei kollidierender Email, Submit-Disabled bei `<8`-Char und Mismatch).
-
-**Production-Deploy Tag 29 (Block 3):** VPS `srv1046432` `git pull origin main` zog `f39b14f` + `3561122` (Drift ab Tag-28-Block-20 `7453bd9`). Bridge bewusst **nicht** rebuilt — kein Bridge-Code in #135, Schema-Union unverändert (Lesson Tag 29 #1 + Lesson Tag 28 #15). Nur runtime + web rebuilt + recreated, web mit `--build-arg NEXT_PUBLIC_RUNTIME_URL=https://runtime.twin.harwayexperience.com` (Lesson Tag 28 #13). **Production-Smoke 7/7 grün** (gleiche 7-Schritt-Liste wie Local-Smoke). **DB-Verify:** `markus.baier@harway.de` mit `updated_at: 2026-05-27T16:08:18.760Z` (Production-Audit-Trail-fähig, Repository-Pattern korrekt durchgereicht). Nach Smoke Original-Email + Original-Passwort restored — Production-Account in Pre-Smoke-Zustand.
-
-**Größe ursprünglich:** S (~0.5 Bautag — Page + Form + 1-2 Backend-Endpoints für Email-Change + Password-Change). **Final:** ~3h 40 Min netto (Backend ~30 Min, Frontend ~1h, Middleware + ProfileMenu + Doku ~30 Min, Diagnose-First ~15 Min, Closure-Doku ~10 Min, Production-Deploy + Smoke ~20 Min, Production-Closure-Doku ~10 Min). **Spur:** Pre-Launch-Phase A Block 4 (Self-Hosting-Polish).
-
-**Status-Notiz Tag 26:** Angelegt aus Phase 4 Tag-26-Strategy-Session. Out-of-Scope für #130 Phase 4 (Tab-Restructuring war Channel-Adapter-Fokussiert).
-
 ### 136. Telegram-Config Status-Felder (paired_at + last_message_at)
 
 `TelegramChannelTab` Modus „Configured-Paired" zeigt heute nur Bot-Username + ✓-Hint, kein Datum. Wünschenswerter Status:
@@ -1406,36 +772,6 @@ Pro-Tipp: konsistent zu künftigen Channel-Adaptern (WhatsApp/Discord) — Field
 **Größe:** S (~0.5 Bautag — Migration + Repo-Add + UI-Render + Manual-Smoke). **Priorität:** could. **Spur:** Polish-Welle nach Phase 5 Production-Deploy.
 
 **Status-Notiz Tag 26:** Angelegt aus Phase 4.4 Phase-1.1-Diagnose (Commit `97b2ce7`). Pragmatisch weggelassen aus Phase 4.4 wegen Müdigkeitslevel + Schema-Migration-Scope-Drift.
-
-### 137. Production-Build-Test im Pre-Push-Workflow
-
-Aus Tag-26-Phase-5-Deploy-Diagnose. Test-Page (`apps/web/app/test-tabs/page.tsx`) hatte useSearchParams() ohne Suspense-Wrapper — lokal lief durch (pnpm dev), Production-Build brach ab.
-
-CI-Hook oder Pre-Push-Script:
-
-```bash
-pnpm --filter @twin-lab/runtime build && pnpm --filter @twin-lab/web build
-```
-
-Sollte als Pre-Push-Hook (Husky) oder GitHub-Action laufen. Vermeidet Wiederholung des Phase-5-Deploy-Stops.
-
-**Größe:** S · **Priorität:** should · **Aus:** Tag 26 Phase 5 Build-Bug · **Spur:** Polish nach Phase 5
-
-### 138. Local-Dev pnpm dev braucht dev-friendly Defaults für Telegram-Webhook ✅
-
-**Abgeschlossen Tag 27 Abend (25. Mai 2026).** Hybrid-Branch in `apps/runtime/src/config.ts`: wenn weder `TELEGRAM_USE_POLLING` noch `RUNTIME_PUBLIC_URL` gesetzt sind, fällt die Runtime auf `TELEGRAM_USE_POLLING=true` mit Warning-Log zurück. `pnpm dev` aus pristinem Clone bootet damit out of the box. Production-Pfad (explicit `false` ohne URL) crasht weiter mit klarer Pflicht-Message.
-
-`.env.example` Default umgestellt auf `TELEGRAM_USE_POLLING=true` plus Auto-Detection-Note. SETUP.md (Zeile 91-100) Auto-Detection-Erklärung ergänzt. DEPLOYMENT.md §10 Production-Pattern detaillierter mit Fallback-Klarstellung („nicht für Production").
-
-Smokes 4/4 grün (alle isoliert via `env -i` + tsx-eval gegen `loadRuntimeConfig`):
-1. Pristine env → Fallback + Warning
-2. Explicit `false` ohne URL → Throw
-3. Explicit `true` → kein Warning, polling=true
-4. Production-Konfig (`false` + URL) → wie konfiguriert
-
-Begründung Hybrid-Branch statt `parseBoolEnv`-Refactor: zwar ist `parseBoolEnv` heute nur Konsument für `TELEGRAM_USE_POLLING`, aber expliziter Branch am Call-Site ist lesbarer als Default-Magic im Util-Helper.
-
-**Größe ursprünglich:** S — final: ~30 LoC + drei Doku-Files. **Aus:** Tag-27-Nachmittag Smoke-2-Aufsetz-Friction · **Spur:** Pre-Launch-Phase A Polish
 
 ## Pre-Launch-Phase A — Block 4: Self-Hosting-Polish
 
@@ -1495,58 +831,6 @@ Optimal-Timing für Public-Launch:
 ## Pre-Launch-Phase B — Vision-Material
 
 Items, die konzeptuell aus Vision Block 2.5/4 fallen aber jenseits des Self-Hosting-Launches liegen. Strategy-Sessions vor dem Bau jeweils Pflicht — die hier festgehaltenen MVP-Skizzen sind keine Bau-Briefings.
-
-### 116. Conversational Skill/MCP-Install
-
-Twin nimmt in der Konversation Anweisung "installiere Skill X" oder "verbinde MCP-Server Y" entgegen und führt die Installation mit Owner-Approval aus. Mobile-relevant: auf Telegram/WhatsApp gibt es keine Settings-UI, Conversational Install ist dort der einzige Weg.
-
-**MVP-Scope-Skizze:**
-- Neue Capabilities `install_skill`, `install_mcp_server` mit Approval
-- Twin antwortet z.B.: "Ich brauche Skill X für die Aufgabe. Hier ist manifest.yaml + SKILL.md. Bitte freigeben."
-- User approved → existing CLI-/Backend-Logic (#86, #87) wird aufgerufen
-- Source: manueller Paste in Chat oder Verweis auf Public-Skill-Registry (später)
-
-**Aufwand-Range:**
-- Minimal (Tool-Call + Approval mit existing #86/#87-Backend): M-L
-- Full Self-Service (Skill-Registry-Integration): XL, eigenes Item
-
-**Begründung:** Vererbungs-Story für Mobile-Use. Anna soll auf WhatsApp ihrem Twin sagen können "installiere den Calendar-Skill" ohne zum Desktop wechseln zu müssen.
-
-**Dependencies:**
-- #86 ✅ Skill-Editor-UI (Backend-Routes für Skill-CRUD)
-- #87 (in Arbeit) MCP-Configurator-UI (Backend-Routes für MCP-CRUD)
-- Mobile-Anbindung (eigenes Phase-B-Item, noch nicht angelegt)
-
-**Größe:** L · **Priorität:** later · **Aus:** Strategy-Session Tag 18 Nachmittag · **Spur:** Pre-Launch-Phase B (SaaS + Mobile)
-
-**Inspiration NanoClaw (Tag 21):** NanoClaw's `/add-<name>`-Pattern (z.B. `/add-telegram`, `/add-codex`) ist die natürliche Evolution von Conversational Install. Claude Code übernimmt das Install-Step direkt, kopiert nur das benötigte Modul in den Fork. Vision-Bestätigung für Anna-Use-Case: „Anna sagt auf WhatsApp ‚installiere Calendar-Skill'" → Twin-Lab erkennt Intent, Claude Code bzw. Twin-Service führt aus mit Owner-Approval.
-
-Plus: NanoClaw's „AI-native, hybrid by design"-Onboarding-Philosophie (scripted Happy-Path + Claude-Code-Fallback bei Step-Failure) als Inspiration für Phase-B-Onboarding-Evolution über das heutige Wizard-Form-Pattern (#110) hinaus.
-
-### 117. Self-Authored Skills (Twin erstellt eigene Skills)
-
-Twin beobachtet eigene Konversationen, erkennt wiederkehrende Patterns ("Owner fragt mich oft nach X mit ähnlicher Struktur"), generiert eigene Skill-Definitionen (Manifest + Instructions), und nutzt sie ab dann. Konzept analog zu autonom-skill-authoring Agent-Patterns.
-
-**Strategy-Session vorab Pflicht.** Offene Fragen:
-- **Trigger:** Wie erkennt Twin "wiederkehrendes Pattern"? Background-Pipeline, periodische Reflektion, on-demand?
-- **Generation:** Twin generiert Skill-Manifest + Instructions selbst per LLM-Call?
-- **Approval:** Self-Approval (Twin nutzt direkt), User-Approval-Flow, oder gestaffelt (erste N Nutzungen mit Approval, dann automatisch)?
-- **Versionierung:** Twin verbessert eigene Skills über Zeit — Skill-Versionen, Audit-Trail, Rollback?
-- **Vererbungs-Implikation:** Self-Authored Skills sind Teil der Twin-Identity. Bei Vererbung an Anna (Vision Block 4): wie wird Self-Authored-Status kommuniziert? Anna sieht "diesen Skill hat Markus' Twin selbst entwickelt"?
-
-**Verknüpfung zur Twin-Reife (#101):**
-- Stufe "Tief" bedeutet aktuell: viel Memory, viele Themen, lange Zeitspanne. Mit Self-Authored Skills bekommt "Tief" eine neue Dimension: Twin hat **eigene Capabilities entwickelt**.
-- Möglicher Stufen-Indikator: "Self-Authored Skills: 3" als 5. Dimension in der Maturity-Heuristik.
-
-**Dependencies:**
-- #86 ✅ Skill-Editor-UI (Backend für Skill-Persistenz)
-- Memory-Reflektion-Pipeline (existiert für Episodic, müsste erweitert werden)
-- LLM-Call mit Manifest-Schema-aware Output (Constrained Decoding?)
-- Audit/Versionierung-Infrastruktur
-
-**Begründung:** Self-Authored Skills sind die *spürbarste* Vision-Eigenschaft — Twin wird mit der Zeit nicht nur "schlauer" sondern *fähiger*. Differenzierungs-Story-Material für Pre-Launch B / Public-Launch.
-
-**Größe:** XL · **Priorität:** vision-kritisch · **Aus:** Strategy-Session Tag 18 Nachmittag · **Spur:** Pre-Launch-Phase B+ / Phase 3.7
 
 ### 118. Konversations-Lifecycle-UI (Beenden / Löschen / Reset)
 
@@ -2123,77 +1407,7 @@ Heißt nicht „Prompt-Tuning ist nutzlos" — als Defense-in-Depth ist es wertv
 
 ## Tag-12-Items (Recherche-getrieben, beide nice für Phase 3.6+ oder später)
 
-### #93 Cognee als optionaler MCP-Skill für Knowledge-Recall (L, nice)
-
-Wenn ein Twin größere Doc-Sets braucht (Workshop-Materialien, Notizen, Wissens-Korpus), kann Cognee (cognee.ai, 16.6k Stars, Apache 2.0) als MCP-Server pro Twin angebunden werden. Pattern identisch zu `everything`-Server aus 3.2 — `mcp_cognee_remember`, `mcp_cognee_recall` als Tools, optional `mcp_cognee_forget`. Pro Twin eigenes Cognee-Dataset, Isolation via Dataset-ID. Voraussetzung: 3.3 Conversation+Semantic-Memory steht (✅), plus 3.5 zeigt dass MCP-Pattern für externe Tools robust ist. Erst danach evaluieren ob Cognee echten Mehrwert über unsere Eigen-Implementation hinaus bringt (Knowledge-Graph, Ontology, Auto-Routing zwischen Session/Graph). Aus Tag-12-Recherche.
-
-### #94 Dream-Pattern für Memory-Kuratierung (L, nice)
-
-Periodischer LLM-Job pro Twin der die Facts-Sammlung verdichtet, dedupliziert und mit Konversations-Insights ergänzt. Pattern adaptiert von Anthropic Managed-Agents-Dreams (Research Preview, claude.com/docs/managed-agents/dreams). Eigen-implementiert ohne Vendor-Lock. Architektur:
-- Cron-Job oder On-Demand-Trigger pro Twin
-- LLM-Call mit Persona + aktueller Facts-Liste + Konversations-Summary-Sample
-- Prompt: „Hier ist deine Faktensammlung. Hier sind 50 zufällige Konversations-Auszüge. Welche Fakten sollten aktualisiert, dedupliziert oder ergänzt werden? Schreibe vorgeschlagene neue Facts-Liste."
-- Output → Diff-Vorschlag im UI → User approved/rejected pro Fact
-- Andockpunkt vermutlich Phase 3.6 (Procedural Memory) oder Phase 4
-
-Vorbedingung: 3.3 komplett ✅, plus Pilot-Phase mit ~50+ Fakten pro Twin gelaufen, damit der Job sinnvolle Eingangsdaten hat. Aktuell @markus mit ~8 Facts — noch zu wenig für Job-Auslastung. Aus Tag-12-Recherche.
-
----
-
 ## Tag-14-Items (Recherche-getrieben, MemPalace-Inspirationen)
-
-### #95 MemPalace-Patterns als Inspirationsquelle dokumentiert (S, nice)
-
-MemPalace (github.com/mempalace/mempalace, 48.2k Stars, MIT) — open-source AI-Memory-System, Python-basiert mit ChromaDB-Backend. Vier Patterns, die für twin-lab als Inspirationsquelle relevant sind:
-
-1. **Wings/Rooms/Drawers-Hierarchie** (siehe #96)
-2. **Temporal-Knowledge-Graph mit Validity-Windows** (siehe #97)
-3. **Verbatim-Storage statt Summary-Compression** — sie speichern Konversationen 1:1, suchen über Original-Text. Wir summarizen bei >50 Messages. Trade-off: ihre Detail-Tiefe vs. unsere Speicher-Effizienz. Bei Pattern-Phase „Reverse-Memory-Query" (TWIN-VISION Punkt 8) evaluieren, ob Summary-Compression zu viel Detail verliert.
-4. **Auto-Save-Hooks für Claude Code** — periodische Hooks plus Pre-Compression-Hook. Verwandt zu unserem Pattern „Auto-Diary-Generation" (Self-Reflection-Pattern), aber MemPalace ist Claude-Code-spezifisch, wir sind Twin-Plattform.
-
-Architektur-Entscheidung vom 11. Mai (Eigen-Bau statt Cognee/Dreams) bleibt — MemPalace adressiert nur die Memory-Schicht, twin-lab ist Twin-Plattform mit A2A, Persona, Mandates, Trust. Plus: MemPalace ist Python, wir sind TypeScript — Integration via MCP-Server möglich, aber zwei Runtimes parallel ist Compose-Komplexität nicht wert für isoliertes Memory-Layer.
-
-Benchmarks (zur Orientierung, keine direkte Vergleichbarkeit): LongMemEval R@5 96.6% raw / 98.4% hybrid v4, LoCoMo R@10 88.9% hybrid, ConvoMem 92.9% avg recall, MemBench 80.3% R@5.
-
-Aus Tag-14-Recherche.
-
-### #96 Hierarchical Memory-Scoping als Mitigation für Name-Overlap (M, should)
-
-Direktes Mitigation für Name-Overlap-Problem aus 3.4-Pre-Check (Query „Wo geht Markus in Urlaub?" → Toskana-Passage auf Rank 5/5, weil 4 andere Passages „Markus" als Token enthielten). MemPalace löst das via Wings/Rooms/Drawers-Hierarchie: Memory ist nicht flach, sondern strukturiert. „Wings" = große Cluster (Personen, Projekte), „Rooms" = Topics innerhalb eines Wings, „Drawers" = einzelne Memory-Einträge. Suchen kann auf Wing-Level oder Room-Level gescopet werden — Vector-Search läuft nur innerhalb des relevanten Wings, nicht über alles.
-
-Übertragung auf twin-lab: Datenschicht aus 3.4 hat bereits Felder, die in Richtung gehen — `topic_tags` (JSON-Array, NULL initially) und `narrative_thread_id` (TEXT, NULL initially) auf der `embeddings`-Tabelle. Diese könnten als „Light-Hierarchy" interpretiert werden:
-
-- Auto-Tagging beim Embedden via LLM-Call („Welche Topics/Subjekte beschreibt dieser Text?")
-- `narrative_thread_id` als Verkettung verwandter Memories
-- Search-API erweitert: `EmbeddingsRepo.search(twinId, query, { topicTagFilter?, narrativeThreadId? })`
-
-Alternative: Hybrid Search via FTS5 (Datenschicht in 3.4 vorbereitet via `memory_fts`-Tabelle) — kombiniert Vector + BM25-Keyword-Search. Eine der beiden Mitigationen reicht vermutlich, je nach welche zuerst nötig wird im Real-Data-Test.
-
-Andockpunkt: Pattern-Phase „Aufmerksamkeit/Fokus" (TWIN-VISION) oder dedicated Mini-Phase falls Name-Overlap in Production-3.4-Tests spürbar wird.
-
-Aus Tag-14-Recherche + Pre-Check-Befund.
-
-### #97 Facts mit Validity-Windows + History-Tracking (L, should)
-
-Erweiterung des Facts-Systems (`facts`-Tabelle aus 3.3) um temporale Dimension. Heute überschreibt ein neuer Fact den alten — keine History, kein Audit, kein Drift-Tracking möglich.
-
-MemPalace hat das gelöst via Temporal-Knowledge-Graph mit Validity-Windows: Entity-Relationship-Graph mit Zeit-Stempeln pro Fact, alte Einträge werden invalidated (nicht überschrieben), Timeline-Queries möglich (z.B. „Wie war Markus' Beziehungsstatus 2015?").
-
-Übertragung auf twin-lab:
-
-- `facts`-Tabelle bekommt `valid_from`, `valid_until`, `invalidated_by_fact_id` Spalten
-- Plus neue `facts_history`-Tabelle für vollständigen Audit-Trail bei Updates
-- Repo-Methoden: `factsRepo.invalidate(factId, by)`, `factsRepo.getAsOf(date)`, `factsRepo.getTimeline(key)`
-- UI: Facts-Page bekommt Toggle „aktuell" vs „historisch", Timeline-Ansicht pro Fact-Key
-
-Direktes Substrate für Vision-Patterns:
-- **Werte-Drift** (TWIN-VISION Pattern 5): Twin kann beobachten wie sich Markus' Werte über Zeit verschieben
-- **Zeit-Erleben** (Pattern 2): „Was war 2025 wichtig, was ist heute wichtig?"
-- **Lebens-Narrativ** (Pattern 7): Kohärente Story-Linie aus zeitlich verorteten Facts
-
-Substantiell — eigene Phase, vermutlich nach 3.4 oder mit Pattern-Phase „Zeit-Erleben" gebündelt. MemPalace's Implementation als Referenz nutzen, keine direkte Code-Übernahme (Python → TypeScript).
-
-Aus Tag-14-Recherche.
 
 ### #102 Self-Hosting-Doku: DEPLOYMENT.md + docker-compose.override.yml.example (M, should)
 
@@ -2400,6 +1614,589 @@ Danach:
 
 ## Tag-27-Items (#131-getrieben)
 
+## Tag-28-Items (#141+#142-Follow-ups)
+
+### #147 Auto-Tool-Picker-Reliability blockiert Approve-Pfad-Smoke (Cross-Ref #87/#89)
+
+**Kontext (Tag 28 Block 2.2):** Bei #141+#142-Verifikation hat das LLM (Opus 4.7 im Codex-Pfad) in drei Anläufen verweigert, das `mcp:everything-approval:get-sum`-Tool zu rufen — "Tool ist nicht verfügbar"-Antwort statt Tool-Call, obwohl Skill aktiv und im Tool-Set. Vermutlich Auto-Tool-Picker-Problem aus der LLM-Tool-Use-Behavior-Familie (#87 Skills-UI, #89 Tool-Use-Behavior-Tuning).
+
+**Konsequenz für #141+#142:** Resume-Pfad-Verifikation für `mcp-tool-use`-Audits wurde **nur code-analytisch** durchgeführt (via Code-Trace `approveMcpToolUse` → `runModel` → patched Return). Live-Smoke ausstehend, sobald Auto-Tool-Picker zuverlässig approval-Tools rufen kann.
+
+**Status:** Cross-Reference, kein neues Bau-Item. #87/#89 sind die eigentlichen Träger. Hier nur dokumentiert, dass dieses Verhalten **Resume-Pfad-Smokes generell** blockiert, nicht nur #141+#142.
+
+**Priorität:** nice (transitiv aus #87/#89).
+
+### #148 api_key-Pfad-Smoke für #141+#142 nachholen (S, nice)
+
+**Kontext (Tag 28 Block 2.1):** Smoke C (api_key-Pfad) wurde während #141+#142-Verifikation skipped, weil keine api_key-Twins für aktive Smokes verfügbar waren — `@markus` ist seit Phase 5.2 oauth, andere Twins (`@florian`, `@heiko`) sind formal api_key, aber im aktuellen Setup nicht in der Smoke-Loop.
+
+**Soll-Stand:** Beim nächsten Anlass mit aktivem api_key-Twin (z.B. neuer Onboarding-Smoke, oder explizit ein Test-Twin auf api_key gesetzt) den `providerMetadata`-Flat-Merge gegen den Anthropic-Pfad verifizieren. Erwartet: `provider:"anthropic"`, `authMode:"api_key"`, `twinId`, `latencyMs`, `model` aus `result.response.modelId` (Anthropic kann Versions-Suffix mitliefern, z.B. `claude-opus-4-7-20260101` statt Alias).
+
+**Risiko:** sehr niedrig. Fix ist code-strukturell symmetrisch — gleicher `runModel`-Return, gleicher Un-Nest-Mechanismus für beide Provider-Namespaces (`openai-codex` vs `anthropic`). Anthropic-SDK liefert `providerMetadata` vermutlich nach gleichem V3-Pattern.
+
+**Priorität:** nice. Verifikation ist Bestätigungs-Smoke, kein erwarteter Bug.
+
+## Rebrand Twin-Lab → Nolmi ✅ Tag 30+31
+
+**Strategie + Phasen-Plan:** [`docs/REBRAND-NOLMI-STRATEGY.md`](./REBRAND-NOLMI-STRATEGY.md) (Tag 30 Strategy-Session als „Tavryn" gestartet, Tag 31 auf „Nolmi" finalisiert + Doc umbenannt). Vollständige Mapping-Tabelle, Trademark-Status, Produkt-Narrativ, Operative Foundation §9.
+
+- Phase 1 ✅ Light-Mode-Switch (Tag 30 Block 3, Commit 58766de)
+- Phase 2 ✅ User-Strings (Tag 31 Block 2, Commit f6ebd61)
+- Phase 3a ✅ Env/Package/Cookie (Tag 31 Block 3, Commit e746446)
+- Phase 3b ✅ Verzeichnis-Rename + GitHub-Repo (Tag 31 Block 4, dieser Commit)
+- Phase 4 ⏳ Nolmi-VPS-Setup (offen, eigener Block-würdig)
+
+**Code-Rebrand abgeschlossen** (Phase 1 Light-Mode + Phase 2 User-Strings + Phase 3a Env/Package/Cookie + Phase 3b Verzeichnis/Repo). **Trademark-Gate ✅ grün** (USPTO + EUIPO 0 Treffer). Phase 4 (Production-Deploy auf Nolmi-VPS) ist der natürliche nächste Schritt.
+
+### Alten Stack srv1046432 abschalten — einzige offene Phase-4-Restaktion
+
+**Status:** **OFFEN** (S) | bewusst offen gehalten nach B6-Cut-Over (Tag 31 Block 17) | siehe [`docs/PHASE-4-VPS-STRATEGY.md`](./PHASE-4-VPS-STRATEGY.md) §6 + S7
+
+**Stand Tag 31 Block 17:** Nolmi ist produktiv auf `187.124.3.235`, Phase 4 (B1–B6) abgeschlossen. Der alte Stack `srv1046432` (`twin.harwayexperience.com`) **bleibt Hot-Standby** und wird **nicht** mit-abgeschaltet — Markus' echte @markus-Daten liegen dort in nicht-reproduzierbarem Zustand, also ist das Standby-Netz gerade jetzt (frisch produktiv) am wertvollsten. Abschaltung ist eine **spätere Einzelentscheidung**, nach stabilem Nolmi-Prod-Fenster.
+
+**Vor der Abschaltung (Voraussetzungen):**
+1. Gewohnheit/Bookmarks auf `app.nolmi.ai` umgestellt (versehentliches Weitertesten auf `twin.harwayexperience.com` vermeiden)
+2. Optional: alte Domain auf „umgezogen"-Redirect — **ohne** den Standby-Stack zu killen
+3. Nolmi-Prod über ein stilles Fenster stabil bestätigt
+
+**Abschalt-Schritte (wenn entschieden):**
+1. DB-Backup von srv1046432 als Archiv ziehen
+2. VPS srv1046432 herunterfahren
+3. Falls Hostinger-Mietkosten: VPS-Vertrag kündigen
+
+### Apache-2.0 → AGPL-3.0 — LICENSE-Altlast vor Going Public ersetzen
+
+**Status:** **OFFEN** | **Größe S** | **Priorität: must-vor-Public** | Lizenz-Setzung Tag 33, s. `DISTRIBUTION-STRATEGY.md §5b`
+
+**Setzung Tag 33:** Nolmi wird **AGPL-3.0** lizenziert (Network-Use-Copyleft §13 → schließt die SaaS-Lücke, schützt gegen geschlossene Managed-Forks bei vollem offenem Code; 2026-Standard für Open-Source-SaaS: Grafana/Bitwarden/Mattermost/Gitea/Nextcloud/Mastodon/Plausible). Relizenzierungs-Logik: AGPL→MIT jederzeit lockerbar, MIT→AGPL unmöglich → restriktiver Start hält „Weg 3 jetzt, Weg 1 langfristig" offen.
+
+**Altlast (aus #111, Tag 25):** committet liegen eine **Apache-2.0-`LICENSE`** + `package.json: "license": "Apache-2.0"` — widersprechen AGPL. **Vor Public:**
+1. `LICENSE` durch **AGPL-3.0**-Volltext ersetzen (Copyright-Notice beibehalten).
+2. `package.json: "license": "AGPL-3.0"`.
+3. ggf. Source-Header / README-Badge angleichen.
+
+Bewusst **nicht** im Tag-33-Doku-Commit ausgeführt — eigener Schritt im Going-Public-Block.
+
+### Rebrand-Phase 4 — Nolmi-VPS Production-Deploy (M-L, must — nach 1-3, VPS bereits provisioniert)
+
+**Status:** Offen, **Setzungen gelockt Tag 31** | gated nach Phase 1-3 | Aufwand: M-L | **VPS bereits provisioniert Tag 30/31**
+
+**Strategy + Bau-Vorlage:** [`docs/PHASE-4-VPS-STRATEGY.md`](./PHASE-4-VPS-STRATEGY.md) — 7 Setzungen (S1 DB-Migration, S2 voller Stack inkl. Bridge unter `/docker/nolmi/` + **Doppel-DB-Migration `twin.db`+`bridge.db`**, S3 Secrets + Encryption-Key-Übernahme, S4 Traefik + BasicAuth, S5 HTTPS-PAT, S6 Parallel-Cut-Over, S7 Hot-Standby-Rollback), zwei Bedingungen (Encryption-Key-Kontinuität + Bridge-Migration), Cut-Over-Sequenz, Rollback-Plan, Bau-Reihenfolge B1–B7. **S2 final Tag 31 Block 8: Bridge-DB-Migration statt Re-Registrierung** (B3-Befund). **B1 ✅ DONE Tag 31 Block 9** (VPS-Prep + Docker 29.5.2 + Traefik v3.6 auf `187.124.3.235`; 3 Cookbook-Bugs §7). **B2 ✅ DONE (Prod) Tag 31 Block 14** (3-Service-Stack up, **Prod-Certs** `Let's Encrypt CN=YR2` über app/runtime/bridge.nolmi.ai, `TLS-verify=0`, Bridge selbstheilend, BasicAuth app→401, runtime/bridge→404; 4 Cookbook-Befunde §7; Repo-Fixes Block 11/12/13: Dockerfile-Filter, Bridge-Auto-init, htpasswd-Mount-Konsistenz; Prod-Cert-Flip griff erst nach Resolver-Store-Reset, §7 B2-4). **B4 ✅ DONE Tag 31 Block 15** (Doppel-DB-Migration auf Backup-Kopie verifiziert, ohne Production-Freeze: Bedingung A kein GCM-Fehler + Secrets entschlüsselt, S2-Token-Match `bridge_token`==`api_token` 3/3 byte-gleich, A2A-Stream ×3 gegen nolmi-bridge; 2 B6-Pflicht-Befunde §5: Stale-`bridge_url`-Sweep + Geist-Twin `@test122prod`). **B5 ✅ DONE Tag 31 Block 16** (Smoke 4/4 auf migriertem Stack: Container/Health, Migration intakt, Bedingung A end-to-end (Chat-Turn beantwortet), S2 end-to-end (A2A-Roundtrip @markus→@florian, kein 401), alle 3 §7-Fallen negativ). **B6 ✅ DONE (reduziert) Tag 31 Block 17** (Cut-Over im Single-User-Test-Kontext — nur Markus nutzt, @florian/@heiko Test-Twins → kein Dritt-Freeze/Re-Sync nötig; Geist-Twin `@test122prod` aus bridge.db gelöscht, Backup davor; Cut-Over-Entscheidung getroffen). **✅ PHASE 4 ABGESCHLOSSEN — Nolmi produktiv auf `187.124.3.235` (B1–B6).** Komplette Rebrand→Deploy-Pipeline (Phase 1+2+3a+3b+4) im Ziel. Einzige Restaktion: alter Stack `srv1046432` abschalten — bewusst offen gehalten (Hot-Standby, S7), siehe Item unten.
+
+Separater Hostinger-VPS Frankfurt, Ubuntu 24.04 LTS, IP `187.124.3.235`. Neu-Aufsetz analog DEPLOYMENT.md §9 Cookbook, mit Nolmi-Branding + Light + neuer Domain:
+
+- ✅ VPS provisioniert, Domain `nolmi.ai` + `getnolmi.com` + 5 DNS-A-Records grün (apex + app + runtime + bridge + docs → `187.124.3.235`) — Setup-Block kann starten
+- Traefik + Stack deployen
+- Brand-Assets (Wordmark, Favicon, OG-Image) — Light-first
+- Screenshots neu aufnehmen (Light-Branding) für #112 Landing / #113 Demo
+
+**Markus' parallele Arbeit (Stand Tag 31):** ✅ Foundation gesichert (Domain + VPS + GitHub-Org `nolmi-ai` + npm `@nolmi` + PyPI + Docker Hub `nolmi` + Mail-Stack + Trademark-Quick-Search). Verbleibend: Social-Handles + Brand-Assets-Produktion. Details siehe Strategy-Doc §9.
+
+---
+
+## Archiv — erledigt (Stand Tag 33)
+
+Items, die im Code/STAND nachweisbar gebaut + verifiziert sind — in Triage Schritt 2a (Tag 33) hierher umsortiert, **kein Informationsverlust, Texte unverändert**. Die frisch mit ✅ + Beleg markierten waren gebaut, aber noch nicht abgehakt.
+
+### 20. Konversations-Memory (Schicht 1 — Conversation) ✅
+
+✅ **Erledigt** (Beleg: Migration 009_conversations + 013_conversation_summaries; Phase 3 gebaut.)
+Frühere Chats und Twin-Konversationen als komprimierter Kontext bei jeder neuen Anfrage. Stale-aware (Memories älter als X Wochen werden weggekippt, wenn nicht aktiv referenziert). Implementierung via Sliding-Window mit Auto-Summary.
+**Größe:** M · **Priorität:** should · **Aus:** Memory-Diskussion 1.5.
+
+### 21. Episodic Memory (Schicht 2 — Episodic) ✅
+
+✅ **Erledigt** (Beleg: Migration 017_embeddings_and_fts + 018_embedding_status (sqlite-vec); Phase 3.)
+Konkrete Ereignisse mit Vector-Embeddings, retrievable via Similarity. sqlite-vec als lokaler Vector-Store. Twin "erinnert" sich an spezifische Events ("Florian hat letzte Woche XY gesagt").
+**Größe:** L · **Priorität:** should · **Aus:** Memory-Diskussion 1.5.
+
+### 22. Semantic Memory (Schicht 3 — Semantic) ✅
+
+✅ **Erledigt** (Beleg: `apps/runtime/src/facts/` + Migration 014_facts/016_facts_rejected; Phase 3.)
+Persistente Fakten-DB als `facts.md` plus structured KV-Store. "Memory" als eigenes Konzept in der UI, du kannst Memories explizit hinzufügen oder löschen. "Vergiss, dass Florian XY gesagt hat" als Mechanismus.
+**Größe:** L · **Priorität:** should · **Aus:** Memory-Diskussion 1.5.
+
+### 24. MCP-Client-Implementierung ✅
+
+✅ **Erledigt** (Beleg: `apps/runtime/src/mcp/` MCP-Client; Phase 3.2.)
+Twin als MCP-Client, kann Tools von externen MCP-Servern nutzen. Standard-Compliance, damit Skills aus dem MCP-Ökosystem ohne Custom-Adapter angeschlossen werden können.
+**Größe:** L · **Priorität:** must · **Aus:** Skills-Strategie
+
+### 25. Skill-System (4-Layer Capability/Tool/Skill/Mandate) ✅
+
+✅ **Erledigt** (Beleg: `apps/runtime/src/skills/` + Migration 008_skills/021_skills_trigger_mode; Phase 3.)
+Skill-Engine mit klarer Hierarchie: Capability (was kann der Twin), Tool (welche API/Lib), Skill (Markdown-File mit definierter Aktion), Mandate (was darf der Twin autonom). Vorbedingung für externe Tools, plus Vorbedingung für #39 (Klassifikator-Vorlauf).
+**Größe:** XL · **Priorität:** must · **Aus:** Skills-Diskussion 1.5.
+
+### 107. Recherche-Workflow als Skill-Pattern ✅
+
+✅ **Erledigt** (Beleg: STAND Tag 20 — Recherche-Workflow-Skill deployed.)
+Schmaler Computer-Use-Hook für den Self-Hosting-Launch. Twin kann auf Nutzer-Anfrage zu einem Thema recherchieren: `search_with_bing` für 2–5 Top-Results, dann `scrape_webpage` auf die relevantesten, dann Synthese mit Quellen-Referenz.
+
+Pattern wird als Skill-Definition realisiert (keine neuen Backend-Routes nötig — beide Tools sind seit 3.5 Hyperbrowser-Foundation verfügbar). Plus Persona-Pattern-Hinweis im System-Prompt, dass Twin proaktiv recherchieren darf, wenn der Nutzer zu einem aktuellen Thema fragt.
+
+**Beta-deklariert für Launch:** README und Landing-Page weisen explizit darauf hin, dass die Recherche-Capability „Frühphase" ist — Latenz 30–60 s, gelegentliche Quellen-Schwäche möglich, kein Multi-Step-Browser-Handling.
+
+**Größe:** S · **Priorität:** must · **Aus:** Pre-Launch-Phase-A-Strategy (Block 3) · **Spur:** Pre-Launch-Phase A
+
+### 120. Dockerfile kopiert `examples/` nicht ins Container-Image ✅
+
+✅ **Erledigt** (Beleg: Status-Zeile bestaetigt (im selben Block geschlossen) — Dockerfile-COPY ergaenzt.)
+
+**Befund Tag 20 (Production-Deploy):** `examples/skills/` wurde heute Mittag als Production-Template-Pattern angelegt (Commit `ad0063f`), ist aber nicht im Runtime-Container-Image. `apps/runtime/Dockerfile` COPYt nur `apps/runtime/`, `packages/shared/` und Workspace-Configs — `pnpm deploy --filter @twin-lab/runtime --prod /out` materialisiert nur workspace-relevante Files. Folge: Skill-Create-CLI im Container findet `/app/examples/skills/recherche-workflow` nicht.
+
+**Workaround Tag 20:** `docker cp /docker/twin-lab-web/repo/examples twin-lab-runtime:/app/examples` — transient, beim nächsten Container-Recreate weg.
+
+**Fix:** Single `COPY examples /app/examples` im Runner-Stage des Dockerfile. examples/ ist statischer Content ohne Build-Step, braucht keinen Builder-Pfad.
+
+**Größe:** XS · **Priorität:** must (Self-Hosting-Pattern braucht den Pfad) · **Aus:** Tag-20 Production-Deploy
+**Status:** offen → wird im selben Block durch Dockerfile-Edit geschlossen
+
+### 122. MCP-Server-Auto-Provisioning im Onboarding ✅
+
+**Abgeschlossen Tag 29 (27. Mai 2026, Mittwoch), Commit `a3c6b3a` auf `origin/main`. Production-Deploy Tag 29 auf `cbc0d4c` (inkl. Sub-Block-A Dockerfile-Fix).** Onboarding-Friction für MCP-abhängige Presets aufgelöst: Wizard sammelt API-Keys pro `requiresMcpServers`-Eintrag direkt im Preset-Step (Inline-Form unterhalb der Card, Password-Input pro Server), Submit-Backend provisioniert MCP-Server + synct Tool-Skills, Recherche-Workflow funktioniert nach Wizard ohne Settings-Detour.
+
+**Phase-A-Setzungen umgesetzt:**
+- **Soft-Block-α:** Wenn ein Preset enabled ist und `requiresMcpServers` Keys braucht, ist Submit disabled mit Tooltip + Warn-Hint bis alle Keys gesetzt sind. Backend wird nie mit unvollständigen Preset-Daten gerufen.
+- **Skip-Default:** Presets bleiben standardmäßig unselected. User klickt aktiv an, dann erscheint der Key-Input.
+
+**Reuse statt Re-Bau:**
+- `McpServersRepo.add` (`apps/runtime/src/mcp/repo.ts:90`) + `McpSkillSync.syncOnAdd` (`apps/runtime/src/mcp/skill-sync.ts:60`) 1:1 wie im Settings-Add-Endpoint (`server.ts:1507-1576`)
+- Rollback-Pattern bei Sync-Failure aus `server.ts:1556-1573` (Settings-Add finally-block) gespiegelt
+- `McpServerSpecSchema` aus `_mcp-cli-helpers.ts` für Template-Validation (Twin-agnostische Spec)
+- Card-Inline-API-Key-Form-Pattern aus `McpServerAddModal.tsx:84-189` (Env-Marker-Extraktion + Password-Inputs) auf Wizard-Card adaptiert
+
+**Schema-Erweiterungen (`packages/shared/src/index.ts`):**
+- `PresetSelectionSchema` (presetId + mcpServerKeys-Record)
+- `PresetActivationResultSchema.mcpServers[]` mit `added`/`skipped`/`failed`-Status (Settings-Path bekommt `failed: API-Key fehlt`)
+
+**Backend-Erweiterungen:**
+- `RuntimeConfig.mcpServersDir` neu (default `WORKSPACE_ROOT/mcp-servers`), in `ServerDeps` durchgereicht
+- `activate-presets.ts` Komplett-Refactor: pro Preset Skill-Import + Schleife über `requiresMcpServers` via `provisionMcpServer`-Helper (Idempotenz, Template-Substitution, Sync mit Rollback)
+- `OnboardingSubmitSchema`: `presets: string[]` → `presetSelections: PresetSelection[]`
+- Settings full-config-PATCH wrappt `body.presets.map(id => ({ presetId: id, mcpServerKeys: {} }))` — bestehendes Settings-Verhalten ohne Auto-Provision
+
+**Frontend-Erweiterungen (`apps/web/app/onboarding/page.tsx`):**
+- State `presetsSelected: string[]` → `presetSelections: Record<id,{enabled,mcpServerKeys}>`
+- PresetCard refaktoriert vom Button-only zu Card-Frame `<div>` mit Header-Button + Inline-Env-Form als Geschwister (sonst nested-input nicht möglich)
+- `useMemo`-`hasMissingKeys` für Soft-Block-α, Submit-Button `disabled` + `title`-Tooltip + Warn-Text
+
+Typecheck 4/4 grün, Husky-Build 4/4 grün (`/onboarding` 6.31 kB → 6.87 kB First Load). **Local-Smoke 4/4 grün:**
+1. **Happy-Path Recherche-Preset** — Test-User → Wizard → Recherche-Preset anklicken → Hyperbrowser-API-Key eingeben → Submit grün. DB-Verify: Twin angelegt, `hyperbrowser-approval`-MCP-Server in `mcp_servers`, **11 Tool-Skills** unter `mcp:hyperbrowser-approval:*` + Recherche-Pattern-Skill — Pre-Pass-Tool-Forcing kann direkt greifen.
+2. **Soft-Block-α** — Preset enabled ohne Key → Submit disabled + Tooltip „API-Key fehlt für ausgewähltes Preset" + Warn-Hint unterm Button. Wizard kommt aus dem Zustand nicht raus, bevor der Key drin ist.
+3. **No-Preset-Path** — Skip-Default unselected → Submit grün, Twin ohne Skills/MCP-Server. Existing-Behavior unverändert.
+4. **Error-Edge Dummy-Key** — ungültiger Key (`invalid-key-test`) → Provisioning succeeds (`listTools` validiert den Key nicht beim Spawn), erst der Tool-Call im Chat failt ehrlich beim ersten Recherche-Versuch. Kein #122-Bug — sondern erwartbares Verhalten der Hyperbrowser-MCP-API-Key-Validation.
+
+**Production-Deploy Tag 29 (Block 7 + Sub-Block A):** Pre-Flight-Check vor Deploy hat gefunden: `apps/runtime/Dockerfile` kopiert `mcp-servers/` nicht (nur `examples/`-Pattern aus #120). **Sub-Block A** (`cbc0d4c`, ~10 Min) hat einen `COPY mcp-servers /app/mcp-servers` analog Z. 74 ergänzt — **präventiv via Pre-Flight gefunden statt durch Smoke-Failure** (Lesson Tag 29 #5, direkter Pattern-Match aus #120). VPS `srv1046432` `git pull` zog `a3c6b3a` + Doku-Commits + `cbc0d4c`. Runtime + Web rebuilt mit `--build-arg NEXT_PUBLIC_RUNTIME_URL=https://runtime.twin.harwayexperience.com`, Bridge bewusst nicht rebuilt (kein Bridge-Code-Change, Lesson Tag 29 #1). Boot-Verify clean: 3 Twins aktiv, bridge-stream verbunden, oauth-refresh started. Filesystem-Sanity: `/app/mcp-servers/` enthält die 4 Files (3× JSON + README). **Production-Smoke grün** (Test-User `test-122-prod@harway.local`, Handle `@test122prod`, Recherche-Preset + Dummy-Key): DB-Verify Twin `twin_qHZZCooUhCHMYutw` + MCP-Server `mcp_wIn0_jJ35wdqc4-c` (`is_active=1`) + 11 Skills — **strukturell identisch zum Local-Smoke**. **Cleanup via PRAGMA** (`db.pragma("foreign_keys = ON")` analog Lesson Tag 29 #4): Twin + MCP-Server + Skills + User in einer Operation kaskadiert weg, Post-Cleanup `c: 0`. **FK-Cascade in Production funktional verifiziert** (Lesson Tag 29 #6, #159 teil-verifiziert).
+
+**Größe ursprünglich:** M-L. **Final:** ~4.5h netto inkl. Production-Deploy (Diagnose-First ~30 Min, Backend ~1h, Frontend ~1.5h, Local-Smoke + Doku ~30 Min, Block-6-Lessons-Welle + #159 ~25 Min, Sub-Block-A Pre-Flight + Dockerfile-Fix ~10 Min, Block-7-Production-Deploy + Smoke ~25 Min, Block-8-Production-Closure-Doku ~15 Min). **Spur:** Pre-Launch-Phase A Block 4 (Self-Hosting-Polish).
+
+**Cross-Reference:** `apps/runtime/src/skills/scan-examples-presets.ts:extractMcpServersFromRequiresTools` liefert die MCP-Server-Liste aus dem Preset-Frontmatter. Tag-29-Lesson #2 dokumentiert: `requires_tools` ist Pre-Pass-Hint, nicht Tool-Filter — `syncOnAdd` legt alle Tools des MCP-Servers als Skills an, nicht nur die referenzierten. Future Sub-Schritt bei Bedarf: post-Sync `setActive(false)` für Out-of-Scope-Tools.
+
+### 126. Build-Time-Validation für NEXT_PUBLIC_* Variables ✅
+
+**Abgeschlossen Tag 30 (28. Mai 2026, Donnerstag), Tag 30 Block 2.** Strukturelle Lösung statt Doku-Pflaster nach **dreimaligem Auftreten** des `localhost:4000`-im-Client-Bundle-Bugs (Tag 23 Re-Deploy + Tag 28 Block 13 + Tag 29 Block 7 wäre die Diagnose-Stelle, dort nur per Pre-Flight-Lesson vermieden).
+
+**Lösung Option (a)-verfeinert:** Prebuild-npm-Hook mit Guard-Script (`apps/web/scripts/check-build-env.mjs`). Guard koppelt sich an den existierenden Production-Marker `NEXT_PUBLIC_DEPLOYMENT_LABEL=production`:
+- Label = `production` und `NEXT_PUBLIC_RUNTIME_URL` fehlt oder matched `/localhost|127\.0\.0\.1/` → exit 1 mit handlungsleitender Fehlermeldung
+- Sonst (dev, leerer Label, lokaler Build, Husky-Pre-Push) → no-op, localhost-Default erlaubt
+
+**Wiring:** `apps/web/package.json` bekommt `"prebuild": "node scripts/check-build-env.mjs"`. pnpm folgt npm-Hook-Konvention (das existierende `predev` belegt das), Trigger empirisch verifiziert mit `NEXT_PUBLIC_DEPLOYMENT_LABEL=production pnpm --filter @twin-lab/web build` → exit 1 stoppt die Chain **vor** `next build`, `.next/` bleibt unangetastet.
+
+**Smoke 5/5 grün** (alle direkt via node):
+1. Dev (kein Label) → exit 0
+2. Production + missing URL → exit 1
+3. Production + localhost:4000 → exit 1
+4. Production + 127.0.0.1:4000 → exit 1
+5. Production + `https://runtime.example.com` → exit 0
+
+Plus Hook-Trigger-Test via `pnpm --filter @twin-lab/web build` mit production-Label ohne URL → pnpm stoppt bei prebuild mit `ERR_PNPM_RECURSIVE_RUN_FIRST_FAIL`, `next build` startet nie.
+
+**Defense-in-Depth:** Source-`?? "http://localhost:4000"`-Fallbacks in den 9 page.tsx **nicht angefasst** — sie sind für `pnpm dev` korrekt und Defense-in-Depth gegen ENV-Resolution-Drift. Guard greift eine Ebene höher (Build-Zeit), Fallback bleibt für Runtime.
+
+**Dockerfile + DEPLOYMENT.md aktualisiert:** Kommentar im Dockerfile vor `ARG NEXT_PUBLIC_RUNTIME_URL` verweist auf den Guard. DEPLOYMENT.md §3.1.2 ergänzt um „Build-Guard (#126)"-Hinweis-Block in der existing localhost-Warnung.
+
+**Größe ursprünglich:** S. **Final:** ~30 Min (Diagnose + Guard + 5 Smokes + Hook-Trigger-Verifikation + Doku). **Spur:** Pre-Launch-Phase A.
+
+### 127. .env.example säubern — Phase-1-Legacy-Variables entfernen ✅
+
+**Abgeschlossen Tag 30 (28. Mai 2026, Donnerstag), gemeinsam mit #129 in einem Commit (Tag 30 Block 1).**
+
+**Scope-Korrektur (α, User-bestätigt):** Ursprünglicher Plan war Variable-Delete. Diagnose vor Edit zeigte: `apps/runtime/src/scripts/bootstrap-twin.ts:87-95` liest alle drei Vars (`BRIDGE_URL`, `BRIDGE_TWIN_HANDLE`, `BRIDGE_TWIN_TOKEN`) aktiv und wirft mit klarer Diagnose, wenn `BRIDGE_URL` fehlt. **`bootstrap-twin.ts` ist gewollter File-basierter Power-User-Pfad, nicht deprecated.** Delete hätte den Pfad ohne Vorwarnung gebrochen.
+
+**Statt Delete:** Die drei Vars als „Advanced: File-basierter Twin-Bootstrap (`pnpm twin:bootstrap`)" Block im `.env.example` gruppiert mit klarem Header-Kommentar: „Der normale Self-Hosting-Pfad ist der Onboarding-Wizard; der braucht diese Variablen NICHT, sondern nur `TWIN_LAB_DEFAULT_BRIDGE_URL`." Self-Hoster, der den Wizard nutzt, kann die drei Zeilen ignorieren. Power-User, der File-Bootstrap will, setzt sie weiter wie vorher.
+
+`TWIN_LAB_DEFAULT_BRIDGE_URL` ist im neuen Block-Layout zuerst (als „Bridge: Wizard-Default") und damit positiv abgegrenzt vom Power-User-Block darunter.
+
+**Größe ursprünglich:** XS. **Final:** ~10 Min (gemeinsam mit #129 in einem Edit-Pass). **Spur:** Pre-Launch-Phase A.
+
+### 128. Bridge-optional-Mode für Single-Twin-Self-Hosting
+
+**Befund Tag 24 (#109 §9 Code-Check):** Twin-Creation (Wizard + Bootstrap-CLI) verlangt heute zwingend eine erreichbare Bridge. Self-Hoster ohne Bridge-Zugang können keinen Twin anlegen.
+
+Runtime selbst ist Bridge-resilient (Reconnect-Loop ohne Crash für existing Twins), aber Anlege-Pfade sind hart:
+
+- `apps/runtime/src/server.ts:696` — Onboarding-Submit ruft `registerHandleOnBridge`, bei Fehler 502 (kein Twin in DB)
+- `apps/runtime/src/scripts/bootstrap-twin.ts:94,102` — wirft wenn `BRIDGE_URL`/`BRIDGE_<NAME>_TOKEN` leer
+
+**Use-Case:** Single-User-Self-Hosting ohne A2A-Bedarf. User will mit eigenem Twin chatten (Memory, Skills, Settings), aber braucht keine Twin-zu-Twin-Kommunikation.
+
+**Implementation-Ideen:**
+- Onboarding-Submit-Branch: wenn `TWIN_LAB_DEFAULT_BRIDGE_URL` leer → Skip Bridge-Register, Twin-Create mit `bridge_url: null`
+- A2A-Features (Send-To-Twin, Inbox) UI blendet aus wenn Twin ohne Bridge-Config
+- Nachträglich Bridge-Anbindung: Settings-Page bekommt "Bridge einhängen"-Section
+
+**Größe:** M-L · **Priorität:** nice → **must (Distribution D3)** · **Aus:** Tag 24 Cookbook-Walkthrough (#109 §9)
+**Status:** 🟢 **Etappe-1-Kern ✅ DONE + lokal am Verhalten verifiziert (Tag 31 Block 20+21).** Der Runtime-/CLI-/Chat-Kern ist gebaut **und 4/4 verhaltens-verifiziert** (Solo-Twin `@solo`: Boot „Solo-Modus"/kein Reconnect-Loop · Direct-Chat end-to-end ohne Bridge → LLM-Antwort/200 · UI blendet A2A aus · A2A-Send → HTTP 409 `bridge_disabled`; Bridge-Twin-Regression intakt):
+- ✅ Schema: Migration 026 `bridge_url`/`bridge_token` nullable (FK-Cascade-sicher via Runner-`foreign_keys_off`-Opt-in)
+- ✅ Registry-Boot-Guard: Solo-Twin ohne Bridge-Client/Stream, kein Reconnect-Loop, Boot-Log „Solo-Modus"
+- ✅ A2A graceful: `BridgeDisabledError` → HTTP 409 `bridge_disabled` statt Crash; conversations-Routen solo-sicher
+- ✅ `bootstrap-twin` ohne `BRIDGE_URL` → Solo-Twin (Handle `@<name>`, bridge NULL, keine Registrierung)
+- ✅ Chat-UI: A2A-Liste + „Neue Konversation" ausgeblendet bei `profile.bridge.url == null` (Inbox-Tab bleibt — Tool/Mandate-Approvals sind bridge-unabhängig)
+
+**Verbleibend (Distribution Etappe 2 / D3-Re-Bind):**
+- ✅ `twin:bootstrap` setzt `owner_user_id` jetzt via `OWNER_EMAIL`-Lookup (Etappe 2.1, eigenes Item unten DONE) — **Release-Blocker behoben**.
+- ✅ CLI-Onboarding Weg A / Opt 3 (Etappe 2.2, eigenes Item unten DONE): `pnpm twin:onboard` legt den ersten User an, der Web-Wizard erstellt den Twin (setzt Owner korrekt). **Zwei gleichwertige Türen** erreicht.
+- ✅ **Weg B** (durchgehendes Terminal-Onboarding inkl. Persona/Key, Tag 33, eigenes Item unten DONE): `twin:onboard` baut jetzt auch den Twin (geteilter `createTwin`-Service). QuickStart verifiziert; Advanced-Bridge-Pfad als Folge-Check offen.
+- ✅ `auth_mode`-Durchsetzung (D2, Etappe 2.4a, eigenes Item unten DONE): OAuth nur bei `auth_mode='oauth'`, zwei-Ebenen-Gate (CLI + UI), Allowlist nur via Admin-CLI `twin:auth-mode`, kein Self-Service.
+- Onboarding-**Wizard**-Submit-Branch: Solo-Twin via Web anlegen (heute verlangt der Wizard noch eine Bridge — `server.ts` Onboarding-Submit)
+- ✅ Re-Bind Solo→Bound (D3 Stufe 1→2, Etappe 2.4b, eigenes Item unten DONE): CLI `twin:bind-bridge` an die eigene Bridge. Verbleibend: UI-Re-Bind-Knopf (zweite Tür) + Umbinden bereits gebundener Twins + Fremd-Bridge/Föderation (Phase 4).
+- ✅ **Production-Deploy der Migration 026** (Distribution Etappe 2 Schritt 5, eigenes Item unten DONE): Sammeldeploy `c88f0eb` auf `srv1712371`, **026 FK-safe auf Production-Echtdaten** (Log „foreign_keys_off-Modus", `foreign_key_check` leer, Kind-Counts vorher=nachher identisch). Backup B4-Klasse offsite vorab.
+
+### twin:bootstrap setzt keinen owner_user_id — Solo-Twin ownerlos + im Switcher unsichtbar ✅
+
+**Status:** **DONE** (Distribution Etappe 2.1, lokal verifiziert) | **Größe S** | **Priorität war: must-vor-Self-Hosting-Release** | Befund Tag 31 Block 21, behoben Tag 31 Block 22
+
+`twin:bootstrap` legt Twins mit `owner_user_id = NULL` an. Bei den Bestands-Bridge-Twins fiel das nie auf (sie bekamen ihren Owner über den Onboarding-Wizard bzw. die User-Migration). Der Distribution-Etappe-1-Smoke mit dem Solo-Twin `@solo` machte die Lücke sichtbar: der frisch ge-bootstrappte Solo-Twin war **im Twin-Switcher unsichtbar** (die `/twins`-Liste ist owner-gescoped), bis ein manuelles `UPDATE twin_profiles SET owner_user_id=… WHERE handle='@solo'` + **Runtime-Neustart** (Owner-Zuordnung wird beim Boot in der Registry gecached) ihn dem eingeloggten User zuwies.
+
+**Kein Solo-Pfad-Bug** — der Solo-Modus selbst (Boot/Chat/UI/A2A-409) funktioniert lückenlos (4/4 verifiziert, #128). Vorbestehende Bootstrap-Lücke, die der Solo-Modus nur exponiert hat.
+
+**Warum Release-Blocker:** Ein frischer Self-Hoster würde nach `twin:bootstrap` (One-Liner-Install-Pfad) **seinen eigenen Twin nicht sehen** → die Installation wirkt kaputt.
+
+**Fix (umgesetzt, Etappe 2.1):** `bootstrap-twin.ts` löst den Owner jetzt aus ENV auf, **bevorzugt E-Mail-basiert**:
+- `OWNER_EMAIL=<x@y.z>` → via `UsersRepo.findByEmail()` zur `user_id` aufgelöst, `owner_user_id` gesetzt. Trifft die E-Mail keinen User → **harter Fehler** (kein stiller NULL-Fallback), Hinweis auf `user:create`.
+- `OWNER_USER_ID=user_<…>` → direkte ID als Fallback (Skripte/Tests).
+- **Kein Owner gesetzt → deutliche `WARN`-Zeile** ("Twin wird im Switcher unsichtbar sein, setze OWNER_EMAIL") statt stillschweigend NULL — die Lücke kann nie wieder lautlos passieren.
+- UPDATE-Pfad überschreibt `owner_user_id` nur, wenn explizit ein Owner übergeben wurde (kein Reset einer bestehenden Zuordnung auf NULL).
+
+Keine Schema-Änderung nötig (`owner_user_id` existiert seit Migration 026, nullable).
+
+**Lokal verifiziert (Verhalten, Wegwerf-Twin `@solo2`, danach entfernt):** (1) bootstrap mit `OWNER_EMAIL=markus.baier@harway.de` (ohne `BRIDGE_URL`) → DB-Check `owner_user_id = user_GnAgLosIQsW1ymQu` (≠ NULL); (2) owner-gescopte Switcher-Query (`list({ ownerUserId })`, identisch zur `GET /twins`-Filterung `profile.ownerUserId === user.userId` in `server.ts:250`) liefert `@solo2` → **erscheint im Switcher ohne manuelles UPDATE**; Registry-Boot lädt `@solo2` eager. (3) Gegenprobe ohne `OWNER_EMAIL` → `WARN`-Zeile + Owner NULL. (4) Fehler-Pfad `OWNER_EMAIL` ohne User → harter Fehler mit `user:create`-Hinweis.
+
+**Onboarding-Kopplung (User-Anlage + Owner-Zuweisung im interaktiven Flow)** → erledigt in **Etappe 2.2 (Block 23)** via Weg A / Opt 3, siehe eigenes Item unten.
+
+### CLI-Onboarding Weg A / Opt 3 (twin:onboard legt ersten User, Wizard macht Twin) ✅
+
+**Status:** **DONE** (Distribution Etappe 2.2, Block 23, lokal end-to-end verifiziert) | **Größe S** | zweite Tür neben Web-Wizard (#110)
+
+**Phase-A-Befund (die kritische Frage „kann der Wizard einen vorhandenen Twin aufgreifen?"):** **Nein.** `POST /onboarding/submit` macht immer `INSERT` eines neuen Twins und wirft **409 bei existierendem Handle** (`server.ts:723`), registriert immer auf der Bridge. Und ein Owner, der **schon einen Twin besitzt, landet nie im Wizard** — `/chat` leitet zu `/chat/<handle>`, der Wizard erscheint nur bei 0 owned Twins (`chat/page.tsx:38`). Zusatz: `bootstrap-twin` ist nicht „minimal" — Persona-Files + LLM-Key sind Pflicht, der Twin ist nach Bootstrap schon vollständig. Würde das CLI einen Twin bootstrappen, gäbe es im Wizard ein **409 oder einen Doppel-Twin**.
+
+**Entscheidung (Markus, Opt 3):** Das CLI deckt nur die echte Terminal-/UI-Lücke ab — den **ersten User** anlegen (keine öffentliche Signup-Seite, nur `/login`; ohne Login kein Wizard-Zugang). Den Twin macht der Web-Wizard (Persona+LLM-Key+Presets im UI, Owner korrekt gesetzt — `server.ts:791`, A3 verifiziert). Web-Wizard **unangetastet**.
+
+**Umsetzung:** `pnpm twin:onboard` (`apps/runtime/src/scripts/onboard.ts`) — interaktiv E-Mail (`readLine`) + Passwort+Bestätigung (`readSecret`, kein Echo) + optionaler Anzeigename → `UsersRepo.create` (bcrypt cost 12). Idempotent (existierender User → „logge dich ein", kein Doppel-Anlegen). Übergabe-Meldung an Tür 2. `readSecret`/`readLine` nach `scripts/_prompt-helpers.ts` extrahiert (DRY beim zweiten Aufruf; `set-api-key.ts` nutzt den shared Baustein).
+
+**End-to-End lokal verifiziert** (Wegwerf-User `test-onboard@local.dev` + Twin `@onboardtest`, restlos entfernt): onboard→User (Hash `$2a$12$`); Login→`GET /twins`=`[]` (Wizard-Trigger); `submit`→201; **DB owner_user_id = neuer User, genau 1 Twin (kein Doppel)**; Switcher zeigt ihn; Direct-Chat HTTP 200 mit echter LLM-Antwort. Kein 409, kein manuelles UPDATE. **KEIN Production-Deploy.**
+
+**Weg B (✅ DONE, Tag 33):** durchgehendes Terminal-Onboarding inkl. Persona/LLM-Key im CLI — eigenes Item direkt unten. Lösung war nicht „Stub-Twin im Bootstrap", sondern der **geteilte createTwin-Service** (aus dem Wizard extrahiert), den das CLI mit aufruft.
+
+### Weg B — durchgehendes Terminal-Onboarding (twin:onboard baut den Twin) ✅
+
+**Status:** **DONE** (Distribution Weg B, Phase 1+2, Tag 33, interaktiv verifiziert) | **Größe M** | durchgehende Terminal-Tür für Headless-VPS (kein Browser-Zwang)
+
+**Phase 1 — createTwin-Service-Extract (Commit `759fcbf`):** Die 7-Schritt-Twin-Erstellung aus dem `/onboarding/submit`-Handler in einen geteilten `createTwin(input, deps)` gezogen (`onboarding/create-twin.ts`), den Web-Wizard UND CLI aufrufen — keine Duplikation. Verhaltensneutral, Web-Wizard am Verhalten verifiziert (Owner/Switcher/Chat/Presets). Deps als Parameter (CLI-tauglich), typisierter `CreateTwinError` (HTTP-Status 1:1).
+
+**Phase 2 — CLI-Flow (Commit `2e61007`):** `pnpm twin:onboard` (`scripts/onboard.ts`) durchgehend: DB-Init-Check → User idempotent → **Doppel-Twin-Schutz** (`list({ownerUserId})` → freundlicher Abbruch, kein 409-Crash) → QuickStart/Advanced-Gabel → Persona/Mandate/Bridge/Provider → `readSecret`-Key + `validateApiKey`-Live-Check (3 Versuche) → `createTwin`. **Kein OAuth-Prompt** (D2), `auth_mode`-Default `api_key`. `createTwin` additiv erweitert (Wizard byte-unverändert): **Solo-Pfad** (`bridgeUrl=null`) + optionaler `bridgeRegisterToken`; **Hot-Load-Deps optional** → ohne Live-Registry (CLI-Prozess): Twin in DB, `requiresRestart=true`, keine Presets.
+
+**Verifiziert (interaktiv, Wegwerf-DB):** QuickStart durchgelaufen — `validateApiKey` ok, Twin `@cli-twin` mit `owner_user_id` + generierter Persona + `bridge_url` NULL (Solo) + `auth_mode` api_key; Doppel-Twin-Schutz greift; Restart-Hinweis + Settings-Verweis. Switcher/Chat-nach-Restart über Phase-1-Smoke + identischen Hot-Load-Pfad abgedeckt.
+
+**Bewusste MVP-Grenze:** **keine Presets im CLI** (`activatePresets` braucht die Live-Registry des Server-Prozesses) → Skills/Presets danach im Web unter Settings. Twin geht erst nach **Runtime-Restart** live (Registry lädt beim Boot) — für Headless der Normalfall.
+
+### Weg-B Advanced-Pfad (eigene Bridge, Mandate-Wahl, volle PersonaInput) — ✅ verifiziert
+
+**Status:** **DONE** (Tag 33, lokal am Verhalten verifiziert) | **Größe S** | aus Weg-B Phase 2
+
+Der **Advanced**-Pfad von `twin:onboard` ist am Verhalten verifiziert (lokal, Wegwerf-DB + **echte Bridge**): Advanced-Flow durchgelaufen — volle `PersonaInput` (CTO / `direct` / `du` / `no-emojis`), Mandate-Wahl, Provider/Model; **eigene Bridge** via `registerHandleOnBridge` → `@advancedtest` an der Bridge registriert (`bridge.db`-Check: **JA**); `twin.db` mit `bridge_url=127.0.0.1:5100` + `bridge_token` gesetzt + `owner_user_id`. Test-Handle danach aus `bridge.db` entfernt. Damit sind **beide** Weg-B-Pfade verifiziert (QuickStart/Solo + Advanced/eigene Bridge), beide über denselben `createTwin`-Service.
+
+**TTY-Befund (festhalten):** `readLine`/`readSecret` (`scripts/_prompt-helpers.ts`) teilen **keinen Buffer über aufeinanderfolgende Aufrufe** → gepipter Mehrzeilen-Input wird nach dem ersten Prompt verworfen; nur **interaktiv (TTY)** nutzbar, **nicht piped/CI**. Weg-B ist (wie OpenClaw) interaktiv gedacht (`docker compose exec -it … onboard.js`). Ein **Helper-Refactor** (geteilter Stdin-Buffer) wäre ein **separates Stück**, falls je nicht-interaktive/CI-Tests des Onboarding-Flows gewünscht sind — die Helper tragen auch andere CLIs (`set-api-key` etc.), daher bewusst nicht im Weg-B-Scope.
+
+### auth_mode-Durchsetzung (D2): OAuth nur bei auth_mode='oauth', kein Self-Service ✅
+
+**Status:** **DONE** (Distribution Etappe 2.4a, Block 24, lokal end-to-end verifiziert) | **Größe S** | D2-Setzung
+
+**Phase-A-Befund (war auth_mode tot/gegated/lückenhaft?):** **lückenhaft.** Das Flag war LIVE für die Send-Path-Provider-Wahl (`twin-service.ts:1758`), aber der OAuth-**Start** nicht gegated: Settings-UI bot `api_key`-Twins einen „OAuth aktivieren"-Button (`settings/page.tsx:1374`), und `twin:oauth-login` schaltete jeden Twin selbst auf `oauth` (`cli-oauth-login.ts:378`) statt eine Vorbedingung zu prüfen. **Keine** HTTP-User-Route ändert `auth_mode` (`/full-config`-Schema kennt das Feld nicht; `setAuthMode` nur im CLI) → keine echte HTTP-Self-Service-Lücke, nur UI-Button + ungegateter CLI.
+
+**Fix (zwei Ebenen, weil UI-only umgehbar):**
+1. **CLI-Gate** (`cli-oauth-login.ts`): `twin:oauth-login` lehnt hart ab, wenn `auth_mode != 'oauth'` (klare D2-Meldung). Kein Self-Grant mehr — das abschließende `setAuthMode('oauth')` ist nur noch idempotente Bestätigung.
+2. **UI-Gate** (`settings/page.tsx`): `api_key`-Zweig zeigt nur Status, keinen Aktivieren-Button. oauth-Zweig (Re-Login) unverändert.
+3. **Admin-CLI** `twin:auth-mode <@handle> [oauth|api_key]` (`scripts/set-auth-mode.ts`, Shell-only): die manuelle Allowlist, getrennt vom Login. Anzeige-Modus ohne Mode-Arg.
+
+Keine Migration (Spalte existiert). **End-to-End verifiziert:** api_key (@florian) → Login abgelehnt; oauth (@markus) → Gate passt (Regression, kein Mode-Change); Allowlist→Login→Revoke-Flow auf Wegwerf-`@authtest`; `settings-data` mode spiegelt DB; `PATCH /full-config {authMode:oauth}` → wirkungslos (Feld ignoriert); api_key-Chat grün. **KEIN Production-Deploy.**
+
+**Verbleibend (optional, später):** Managed-Mode-Policy `auth_mode_default` falls nolmi.ai je einen anderen Default als `api_key` bräuchte (heute global `api_key`-Default ausreichend).
+
+### Re-Bind Solo-Twin an eigene Bridge (D3 Stufe 1→2) ✅
+
+**Status:** **DONE** (Distribution Etappe 2.4b, Block 25, lokal end-to-end verifiziert) | **Größe S** | D3-Setzung, CLI-only
+
+**Phase-A-Befund:** `registerHandleOnBridge` (`onboarding/bridge-register.ts`) ist der vorhandene Register-Mechanismus (POST `/twins/register`, `BridgeRegisterError(status)` für 409/401), standalone + wiederverwendbar (nicht bootstrap-wired). **Kein Live-Re-Init:** `addTwin` no-op bei geladenem Twin, kein `setBridgeClient`; `buildEntry` baut den BridgeClient nur bei `bridgeUrl && bridgeToken` beim Boot → Re-Bind greift erst nach **Runtime-Neustart**. `auth_mode` orthogonal (update() patcht nur bridge-Felder).
+
+**Umsetzung:** neuer CLI `twin:bind-bridge <@handle> --bridge-url <url> [--register-token …]` (`scripts/bind-bridge.ts`). `registerHandleOnBridge` um optionalen `registerToken`-Param erweitert (backward-compat, Fallback ENV). Ablauf: solo-Validierung (kein Umbinden) → Register ZUERST → bridge_url/token ERST nach Erfolg (atomar, Fehlerfall lässt Solo) → Neustart-Hinweis. **Scope-Grenze (D3):** nur EIGENE Bridge (Owner kennt Register-Token); Fremd-Bridge/Föderation = Phase 4.
+
+**End-to-End verifiziert** (Wegwerf-@bindtest, restlos entfernt): Solo 409 → Re-Bind (bridge_url/token gesetzt, Bridge-DB registriert) → Neustart `[bridge:stream] verbunden` → A2A-Send **201** statt 409. Fehlerfälle (falsches Token 401, unerreichbare Bridge) → bridge_url bleibt NULL. Already-bound-Guard lehnt ab. @markus-Regression intakt, `auth_mode` unberührt. **KEIN Production-Deploy.**
+
+**Verbleibend (später):** UI-Re-Bind-Knopf in Settings (zweite Tür — heute CLI-only, weil Neustart-Erfordernis UI-Re-Bind ohne Live-Reload entwertet); Umbinden bereits gebundener Twins (eigener Fall); Live-Re-Init ohne Neustart (`setBridgeClient`-Pfad).
+
+### Single-Host One-Liner-Install-Skript (ohne TLS) ✅
+
+**Status:** **DONE** (Distribution Etappe 2.3, Block 26 gebaut + Block 27 **am Verhalten verifiziert** — Frische-Test von Null bestanden) | **Größe M** | One-Liner-Install, Single-Host-Tür
+
+**Phase-A-Befund:** Der vorhandene `docker/nolmi/docker-compose.yml` ist der **Production-Stack** (Traefik `external`-Netz, TLS-certresolver, htpasswd) → nicht Single-Host-tauglich, **separate Traefik-freie Variante** nötig. DB-Init läuft **automatisch** im Container-CMD (idempotent, Runtime + Bridge) → kein manueller `db:init`. Alle Dockerfiles nutzen schon `@nolmi/*`-Filter (B2-Runbook-„@twin-lab"-Hinweis stale). `loadMasterKey` verlangt 32-Byte-base64 → `openssl rand -base64 32` ist format-gleicher Drop-in (Host-node für die Generatoren nicht nötig).
+
+**Umsetzung:**
+- `docker/nolmi/docker-compose.single-host.yml` — 3 Services, `build:`-Blöcke (Kontext `../..`), Ports 3000/4000/5100 direkt, internes Netz, **kein** Traefik/TLS/htpasswd. `SESSION_COOKIE_SECURE=false` (Login über http), `TELEGRAM_USE_POLLING=true` (kein Webhook-Crash-Loop), Web-Build-Args `NEXT_PUBLIC_RUNTIME_URL`/`DEPLOYMENT_LABEL=self-host`.
+- `install/install.sh` — `set -euo pipefail`, 7 Schritte (OS/Tools → Docker prüfen/+apt-install → Repo klonen-oder-nutzen → `.env` mit `openssl`-Secrets **idempotent, nie geloggt, umask 077** → `up --build -d` → DB-Init-Hinweis → Übergabe an `twin:onboard` via `docker compose exec`). ENV-konfigurierbar (`NOLMI_HOST` für VPS-IP etc.).
+- `install/README.md` — lokal vs. VPS, Ports/Sichtbarkeit, TLS=3b.
+
+**§7-Cookbook-Befunde adressiert (Single-Host-relevant):** B2-Befund 2 (Telegram-Polling-Default) + #126 (Web-Build-Arg). Traefik-Befunde (B1-1/2, B2-1/4) explizit auf 3b verschoben.
+
+**Verifiziert (statisch, Block 26):** `bash -n` Syntax grün; `docker compose -f …single-host.yml config` VALID (3 Services).
+
+**Verifiziert (am Verhalten, Block 27 — Frische-Test von Null):** echter Lauf in einem isolierten `docker:dind`-Wegwerf-Container (srv1046432, getrennt vom Standby, danach restlos entfernt). Code **credential-frei** rein via `git archive` + stdin-tar → **Mode 1** („Im Repo ausgeführt", kein Clone/PAT). **7/7 Skript-Schritte grün** (Build aller 3 Images ~115 s, out-of-the-box, keine stale `@twin-lab`-Referenz; `.env`-Secrets via `openssl` nicht geloggt). **3 Container Up** (kein Restart-Loop). Runtime sauber: **alle 26 Migrationen frisch inkl. 026 im `foreign_keys_off`-Modus auf LEERER DB** (Nebenbefund: FK-Cascade-sicherer Runner-Tweak läuft auch auf frischer Wiese), Onboarding-only/0 Twins, :4000, **kein `EADDRINUSE`, kein Telegram-Crash-Loop**. Isolation gehalten (Standby + alle srv1046432-Stacks unberührt). Bewusst nicht im dind getestet: `twin:onboard`+Browser (2.2 schon end-to-end) + externer Port-Zugang. **KEIN Production-Deploy.**
+
+**Verbleibend:** **Schritt 3b** (Production/TLS: Traefik + ACME + Domain + BasicAuth — der bestehende `docker-compose.yml`); Update-Mechanismus (git pull + rebuild / Image-Tag-Bump); optional Docker-Auto-Install auch für non-apt-Linux.
+
+### Production-Deploy Etappe 2 (Sammeldeploy c88f0eb) — Migration 026 FK-safe auf Echtdaten ✅
+
+**Status:** **DONE** (Distribution Etappe 2 Schritt 5, am Verhalten auf Production verifiziert) | **Größe M** | **Priorität war: must-vor-Self-Hosting-Release** | srv1712371 (`187.124.3.235`), `/docker/nolmi/repo`
+
+Sammeldeploy `main`→`c88f0eb` auf den Production-VPS: **Etappe 1 + 2.1 + 2.2 + 2.4a + 2.4b + 2.3 + Migration 026** in einem Rutsch. Production stand vorher auf Migration 025.
+
+**Befund vorab (Single-Point-of-Failure):** Die Etappe-2-Commits (`24665a1`, `c5f9012`, `a75adbe`, `aaf207a`, `4ee36ad`, `c88f0eb`) waren **lokal committet, aber nicht gepusht** — `origin/main` stand auf `2ad7d3d`. Erst `git push` (FF `2ad7d3d`→`c88f0eb`, kein Force; Pre-Push-Hook `pnpm -r build` grün), dann VPS-`git pull --ff-only` + Rebuild auf dem **vollständigen** Stand. Die nur-lokale Existenz der Etappe-2-Arbeit ist damit beseitigt.
+
+**Migration 026 (destruktiver 12-Schritt-FK-Rebuild von `twin_profiles`) auf Production-Echtdaten SICHER:**
+- Runtime-Log **„026 … angewendet (foreign_keys_off-Modus)"** = der **neue** FK-sichere Runner (aus `6c6032f`) fuhr sie, nicht der alte. Schutz greift, weil das neue Image Runner+026 zusammen bündelt → beim Boot läuft der neue Runner zuerst (`init-db.js && exec index.js`).
+- `foreign_key_check` **leer** (kein verwaister FK in den 11 Kind-Tabellen).
+- `bridge_url`/`bridge_token` jetzt **`notnull=0`** (vorher 1).
+- **Kind-Tabellen-Counts vorher=nachher IDENTISCH** — einzige Differenz `schema_migrations` 25→26 → **kein Cascade-Verlust, Twin-Historie intakt** (der härteste Beweis).
+
+**Pre-Flight B4-Klasse:** `VACUUM INTO`-Konsistenz-Snapshot von `twin.db` **und** `bridge.db`, tar.gz nach `/docker/nolmi`, **offsite auf den Mac** (`nolmi-db-backup-20260531-064823.tar.gz`). Rollback-Image `nolmi-runtime:rollback-025` (+ `web`) getaggt **vor** dem Rebuild, Counts-before festgehalten.
+
+**Live verifiziert (am Verhalten):** Direct-Chat @markus über `app.nolmi.ai` · A2A @markus→@florian Echtzeit (**201**, kein 409, `bridge_url` erhalten) · `auth_mode`-Gate 2.4a live (api_key-Twin **kein** OAuth-Button in Settings). 3 Container Up, **Bridge unangefasst** (kein Bridge-Code-Change — `bridge-register.ts` liegt unter `apps/runtime/`, nicht in der Bridge-App; nur runtime + web rebuilt).
+
+**Aufräum-Reminder (kein Blocker):** Rollback-Images `nolmi-runtime:rollback-025` + `nolmi-web:rollback-025` liegen noch auf dem VPS. **Aufräumen erst nach einer Stabilitäts-Schamfrist** (einige Tage Production-Laufzeit ohne Auffälligkeit), nicht sofort.
+
+**Verbleibend:** Schritt 3b (TLS-Install) bleibt offen; Root-404 separat (Item direkt unten).
+
+### 129. .env.example-Default auf Anthropic switchen ✅
+
+**Abgeschlossen Tag 30 (28. Mai 2026, Donnerstag), gemeinsam mit #127 in einem Commit (Tag 30 Block 1).** `.env.example` Provider-Block umgestellt:
+- `ANTHROPIC_API_KEY=sk-ant-replace-me` aktiv (vorher auskommentiert)
+- `ANTHROPIC_MODEL=claude-opus-4-7` aktiv (vorher auskommentiert)
+- `ACTIVE_PROVIDER=anthropic` (vorher `openai`)
+- `OPENAI_API_KEY` + `OPENAI_MODEL` als auskommentierter Alternativ-Block mit Switch-Anleitung („für Switch hier un-kommentieren, unten ACTIVE_PROVIDER=openai setzen")
+
+Quick-Start matched jetzt README + Tech-Stack-Story. Friktionsloser Switch zwischen beiden Providern via 2-Zeilen-Edit.
+
+**Größe ursprünglich:** XS. **Final:** ~5 Min (gemeinsam mit #127). **Spur:** Pre-Launch-Phase A.
+
+### 130. Telegram-Adapter Stufe 1 (Owner-Only-Bridge) ✅
+
+✅ **Erledigt** (Beleg: STAND Tag 26 — Telegram Phase 1–5 production-deployed.)
+
+Wettbewerbs-Pivot aus Tag 25 Strategy-Session (`docs/BLOCK-5-STRATEGY.md`): NanoClaw + Hermes Agent haben Multi-Channel-Messaging als Default. Twin-Lab ohne Messaging-Integration wirkt rückständig im Self-Hosting-Markt, auch wenn Multi-Twin ein anderes Konzept ist. Telegram-Stufe-1 verteidigt minimal-viable.
+
+**Scope Stufe 1 — Owner-Only-Bridge:**
+
+- Owner verbindet eigenen Telegram-Account via `/start`-Command zum eigenen Twin
+- Twin antwortet auf Owner-Messages mit voller Memory-Tiefe und Persona
+- Bot-Token-Storage encrypted in Settings pro Twin
+- Webhook-Pattern (`/webhooks/telegram/:twin-handle`) hinter Traefik
+- Single-User pro Twin, kein External-Sender-Auth-Flow (das wäre Stufe 2)
+
+**Implementation-Skizze:**
+
+- Migration für `telegram_chats`-Tabelle + Bot-Token-Storage (encrypted via existing ENCRYPTION_KEY-Pattern)
+- `apps/runtime/src/telegram/`-Service mit Bot-API-Client (`node-telegram-bot-api` oder `telegraf`)
+- Webhook-Endpoint mit Auth-Token-Verification (Telegram-Webhook-Secret)
+- Owner-Pairing-Flow: `/start`-Command matched Telegram-User-ID gegen Owner-Email-Hash, persistiert Mapping
+- Settings-UI: pro Twin „Telegram-Bot konfigurieren" mit Bot-Token-Eingabe + Test-Connection-Button + Pairing-Status
+- Conversation-Persistence in existing audit-stream (Channel-Marker `telegram` zusätzlich zu `web`)
+
+**Smoke-Tests:**
+
+- Send-Receive-Roundtrip
+- Multi-Turn-Konversation mit Memory-Recall über mehrere Sessions
+- Memory-Hit-Badge auch sichtbar wenn Konversation via Telegram begann und im Web fortgeführt wird
+- Cross-Channel: User schreibt im Web, dann auf Telegram weiter — Conversation-Thread bleibt zusammen
+
+**Größe:** L · **Priorität:** must · **Aus:** Block-5-Strategy Tag 25 (Wettbewerbs-Pivot) · **Spur:** Pre-Launch-Phase A (Block 5)
+
+**Status-Notiz Tag 25:** Wettbewerbs-Pivot aus Block-5-Strategy-Session. Vorgezogen aus ROADMAP Phase 4.1 (Stufe 1 Owner-Only-Bridge). Strategy-Setzungen in `docs/BLOCK-5-STRATEGY.md`.
+
+**Architektur-Detail:** Siehe [`docs/130-TELEGRAM-STRATEGY.md`](./130-TELEGRAM-STRATEGY.md) (Tag-25-Nachmittag-Session, sieben Achsen + 5-Phasen-Sequenz).
+
+**Phase-B-Implikation:** Stufe 2 (External Senders mit Pre-Approval) und Stufe 3 (Voll-Multi-Twin-Router) bleiben Phase B. WhatsApp + Discord + Slack folgen in ROADMAP Phase 4.1-4.5 wie geplant.
+
+### 131. OpenAI Subscription-OAuth — ✅ Phase A DONE (25.–26. Mai 2026)
+
+**Status: ✅ DONE Phase A** (Tag 27–28, 30 Blöcke). Volle Bilanz in
+[`docs/131-OAUTH-STRATEGY.md`](./131-OAUTH-STRATEGY.md) §a–§w (27 Sub-
+Sections). CLI `pnpm twin:oauth-login @<handle>` (Phase 4) + Web-UI
+Auth-Status + Modal (Phase 5) live. Bauzeit ~3 Tage statt initial-
+geschätzten 5–7. Phase-B-Polish-Items: #139, #140, #141, #142, #143
+(Web-OAuth-Production), #144 (VPS/Linux-Path), #145 (Multi-Account).
+
+---
+
+**Historische Doku (Original-Spec aus Tag 25, vor Bau):**
+
+OpenAI Codex hat OAuth-Flow für Subscription-Auth (ChatGPT Plus/Pro/Team), offiziell für eigene Codex-Produkte. OpenClaw und vergleichbare Tools nutzen den Flow auch für eigene Apps — laut OpenClaw-Doku „explicitly supported", laut OpenAI-Codex-Doku nicht explizit für externe Apps adressiert.
+
+**Status:** Backlog, nicht in Phase A. Bau in Phase B nach Launch + Feedback.
+
+**Implementations-Skizze (für späteren Bau):**
+
+OAuth-Flow analog OpenClaw (PKCE):
+
+1. PKCE-Verifier/Challenge + Random-State generieren
+2. Browser auf `https://auth.openai.com/oauth/authorize?...` öffnen
+3. Callback auf `http://127.0.0.1:1455/auth/callback` (oder Twin-Lab-eigener Port)
+4. Token-Exchange auf `https://auth.openai.com/oauth/token`
+5. AccountId aus Access-Token extrahieren
+6. `{access, refresh, expires, accountId}` per Twin verschlüsselt speichern (Reuse Existing EncryptionService aus `apps/runtime/src/crypto-utils.ts`)
+7. Refresh-Loop mit File-Lock
+8. Settings-UI: User wählt Auth-Mode pro Twin (API-Key vs Subscription-OAuth)
+
+**Risiken (im UI explizit machen):**
+
+- OpenAI hat den Pattern nicht prominent für externe Apps dokumentiert
+- Pattern kann jederzeit von OpenAI gekappt werden (Präzedenz: Anthropic Claude Pro/Max Anfang April 2026 — initial gekappt, später laut OpenClaw-Doku „wieder erlaubt", Status fluide)
+- ChatGPT-ToS lässt programmatische Nutzung in Grauzone
+- Twin-Lab-Default bleibt API-Key (BYOK), OAuth ist explizites Opt-in mit ToS-Disclaimer
+
+**Quellen:**
+
+- OpenAI offizielle Codex-Auth-Doku: https://developers.openai.com/codex/auth
+- OpenClaw OAuth-Doku (PKCE-Flow-Details): https://docs.openclaw.ai/concepts/oauth
+
+**Größe:** XL (5-7 Bautage — PKCE-Client + Refresh-Service + Provider-Switch + CLI-Login + Settings-UI + SSH-Tunnel-Doku + Smoke). **Priorität:** should. **Spur:** Pre-Launch-Phase A Block 5.
+
+**Status-Notiz Tag 25:** Recherche-Session zu Subscription-Auth-Patterns. OpenClaw nutzt diesen Pattern produktiv, dokumentiert PKCE-Flow präzise. Implementations-Pfad konkret skizziert, aber Pattern hat ToS-Grauzone-Charakter. Bau nicht launch-kritisch, Wartemodus bis Phase B + Nutzer-Demand.
+
+**Status-Notiz Tag 26 (25. Mai 2026):** Vorgezogen von Phase B nach Phase A Block 5. Bau-Reihenfolge `#130 → #131 → #113 → #112 → #114 → #115`. Launch-Window von KW 29-30 auf KW 31-32 angepasst (1-2 Wochen Verschiebung).
+
+**Begründung Vorziehung:**
+- Owner-Persona-Validierung: Power-User mit OpenAI + Claude beide via Subscription (Max-Plan, ChatGPT Plus). OAuth ist Kern-UX-Verbesserung, nicht Convenience (1000+ Messages/Monat via API-Key kosten substantiell mehr als Subscription)
+- Wettbewerbs-Positionierung: OpenClaw + Hermes haben OAuth, "BYOK-only" wäre HN-Feedback-Schwäche im Launch-Day
+- OpenAI dokumentiert + supported 3rd-Party-OAuth offiziell (developers.openai.com/codex/auth), nicht Reverse-Engineering wie befürchtet
+- Launch-Toleranz akzeptiert: KW 31-32 ist immer noch innerhalb sinnvollem Launch-Fenster
+
+**Twin-Lab-Default bleibt BYOK** (API-Key). OAuth ist Opt-in mit ToS-Disclaimer: "OpenAI hat das nicht explicit für 3rd-Party-Apps dokumentiert, kann gekappt werden."
+
+**Phase-A-Status:** `should`-Item, neue Spur Pre-Launch-Phase A Block 5.
+
+**Status-Notiz Tag 27 (25. Mai 2026):** Strategy-Session abgeschlossen. Re-Estimate auf XL (5-7 Bautage) nach Recherche-Findings: OpenAI Codex OAuth hat hardcoded localhost:1455-Redirect, headless-OAuth nicht supported (Issue #2798 offen). SSH-Tunnel-Pattern ist Branchen-Standard (Hermes, RooCode, OpenCode).
+
+Strategy-Setzungen:
+- CLI-First (`pnpm twin:oauth-login`), Web-UI zeigt nur Status
+- Exklusiver Auth-Mode pro Twin (api_key XOR oauth)
+- Migration 025: dedizierte `oauth_tokens`-Tabelle
+- OpenRouter als dokumentierter Fallback (Hermes-Pattern)
+- 5-Phasen-Bau mit Stop-Punkten
+
+Strategy-Doc: [`docs/131-OAUTH-STRATEGY.md`](./131-OAUTH-STRATEGY.md).
+
+**Status-Notiz Tag 27 Nachmittag (25. Mai 2026):** Phase 1 + 2 abgeschlossen (Commits `cfe223c` Backend-Foundation, `638e200` Refresh-Service). Phase 3 Strategy-Iteration mit substantiellen Architektur-Findings.
+
+**Re-Estimate XL → XXL (8-12 Bautage):**
+
+- OAuth-Token funktioniert NICHT mit Standard-OpenAI-API (`api.openai.com/v1/*`)
+- Codex-spezifischer Backend-Endpoint `chatgpt.com/backend-api/codex/responses` ist Pflicht
+- Pre-Flight 3/3 HTTP 200 verifiziert (curl Mac, VPS-Container, Node v22 native fetch)
+- Node native fetch durchgelassen — kein TLS-Bypass / curl-FFI nötig
+- Spike-First-Approach: Walking-Skeleton vor inkrementellem Sub-Phasen-Ausbau
+
+**Phase 3 Sub-Phasen-Sequenz:**
+
+| Sub-Phase | Aufwand | Tag |
+|---|---|---|
+| 3.0 Spike (Direct-fetch + Minimal-Instructions) | 2-4h | 27 |
+| 3.1 SSE-Parser-Robustness | 1 Tag | 28 |
+| 3.2 Codex-System-Prompt-Engineering | 0.5-1 Tag | 28 |
+| 3.3 Tool-Calls + Reasoning-Traces | 1-2 Tage | 29 |
+| 3.4 Vercel-Provider-Refactor (optional) | 1 Tag | 29-30 |
+
+**Risiko-Assessment (neu in Strategy-Doc §j):**
+
+- Risiko 1: ToS-Grauzone (Mitigation: Disclaimer + Monitoring + OpenRouter-Fallback)
+- Risiko 2: Pattern-Block-Präzedenz (Anthropic April 2026), Mitigation: BYOK bleibt funktional, Closed-Beta-Approach
+- Risiko 3: Codex-Endpoint-Format-Changes, Mitigation: CLI-Release-Monitoring, Format-Mapping isoliert in 3.4
+
+**Launch-Window-Impact:** KW 33-34 (statt KW 31-32). Buffer 0-7 Tage (statt 5-15 Tage). Phase-A bleibt machbar aber ohne weiteren Slack.
+
+Strategy-Doc erweitert um §g (Codex-Endpoint-Architektur), §h (Cloudflare-TLS-Pre-Flight), §i (Sub-Phase-Sequenz), §j (Risiko-Assessment), Re-Estimate-Section.
+
+**Status-Notiz Tag 27 Abend (25. Mai 2026):** Phase 3.0 Spike Walking-Skeleton durch. Variante (c) — Branch in `TwinService.chat()` vor `generateText`, eigene `runModelViaCodex`-Helper-Methode bypassed Phase-3.1+-Schichten (Skills, Tools, Pre-Pass, Memory).
+
+Sub-Bau (~5 Schritte):
+1. `TwinProfile.authMode` exposen (Interface + Row + Queries + `setAuthMode`) — Phase-1-Audit-Repair, Migration 025 hatte das Feld nie über den Repo-Layer gehoben
+2. `OAuthRefreshService` in `RegistryDeps` + `TwinServiceDeps` (optional)
+3. `oauth/codex-adapter.ts` mit direct-fetch + SSE-Text-Collector
+4. `runModelViaCodex`-Branch in `runModel` (lazy CodexAdapter-Init)
+5. Helper-Script `test-oauth-phase3-spike.ts` mit `smoke`/`setup`/`cleanup`-Modes
+
+**Smoke 1 (Adapter-only) — grün:** HTTP 200 in 2.4s, plan-type=pro, cf-ray gesetzt, Response-Text korrekt geliefert. Echter Codex-Token aus `~/.codex/auth.json` → AES-256-GCM-DB-Persist → `ensureFresh` → Codex-Endpoint → SSE-Stream → Text-Collect. End-to-End-Architektur durchgehend bewiesen.
+
+**Smoke 2 (End-to-End via `/twins/@markus/chat`) — skipped:** `pnpm dev` lokal nicht erreichbar (Runtime auf :4000 nicht hochgekommen, vermutlich Telegram-Webhook-ENV-Friction → siehe #138). Server-Layer-Aufruf ist nur noch Wiring durch existing `requireOwner` + `entry.service.chat()` — der OAuth-Branch sitzt in `runModel` und wird von beiden Send-Pfaden erreicht. Phase 3.1 (Tag 28) zieht End-to-End-Smoke zusammen mit SSE-Parser-Robustness nach.
+
+**Lesson Tag 27 #4 (siehe STAND):** Migration ohne Repo-Update ist Anti-Pattern. Migration 025 hatte `auth_mode`-Column angelegt aber nicht durch `TwinProfile`-Read/Write-Pfad gehoben — Phase-3.0-Spike hat den Fehler beim ersten Konsum aufgedeckt. Repair in Schritt 1 mit erfasst.
+
+### 135. Account-Settings UI (Email/Password-Edit-Surface) ✅
+
+**Abgeschlossen Tag 29 (27. Mai 2026, Mittwoch), Commit `f39b14f` auf `origin/main`. Production-Deploy Tag 29 auf `3561122`.** Option B umgesetzt: eigene Route `/account` mit zwei Forms (Email-Change + Password-Change), beide mit Current-Password-Confirm. UsersRepo um `updateEmail` (Email-Uniqueness-Pre-Check, wirft `UserAlreadyExistsError`) + `updatePassword` (bcrypt cost 12) erweitert. Zwei neue Endpoints `PATCH /auth/me/email` und `PATCH /auth/me/password` mit Session-Check (`getCurrentUser`) + `verifyPassword`-Confirm. ProfileMenu-Link „Account" oberhalb Logout. Middleware `PROTECTED_PREFIXES` um `/account` ergänzt.
+
+Phase-A-Setzungen umgesetzt: Email-Change ohne Verify-Link (direkt umstellen für drei dev-fitte Owner), Old-Password als Confirm-Pflicht beim Passwort-Wechsel. Account-Delete bewusst **defer** auf eigenes Item (semantisch heavy: Twin-Kaskadierung, A2A-Konversationen), Email-Verify-Flow defer auf Phase B. Keine neuen BACKLOG-Items aus dem #135-Bau angelegt — die Defers sind im Briefing als „eigenes Item für später" formuliert ohne Anlegen-Anweisung; sie werden konkret, wenn der jeweilige Block sie zieht.
+
+Typecheck 4/4 grün, Husky-Build 4/4 grün (Push-Hook), Local-Smoke 7/7 grün (Login + `/account` via ProfileMenu + Email-Change Happy-Path + Re-Login mit neuer Email + Password-Change Happy-Path + Re-Login mit neuem PW + Edge-Cases: 401-Toast bei falschem Current-PW, 409-Toast bei kollidierender Email, Submit-Disabled bei `<8`-Char und Mismatch).
+
+**Production-Deploy Tag 29 (Block 3):** VPS `srv1046432` `git pull origin main` zog `f39b14f` + `3561122` (Drift ab Tag-28-Block-20 `7453bd9`). Bridge bewusst **nicht** rebuilt — kein Bridge-Code in #135, Schema-Union unverändert (Lesson Tag 29 #1 + Lesson Tag 28 #15). Nur runtime + web rebuilt + recreated, web mit `--build-arg NEXT_PUBLIC_RUNTIME_URL=https://runtime.twin.harwayexperience.com` (Lesson Tag 28 #13). **Production-Smoke 7/7 grün** (gleiche 7-Schritt-Liste wie Local-Smoke). **DB-Verify:** `markus.baier@harway.de` mit `updated_at: 2026-05-27T16:08:18.760Z` (Production-Audit-Trail-fähig, Repository-Pattern korrekt durchgereicht). Nach Smoke Original-Email + Original-Passwort restored — Production-Account in Pre-Smoke-Zustand.
+
+**Größe ursprünglich:** S (~0.5 Bautag — Page + Form + 1-2 Backend-Endpoints für Email-Change + Password-Change). **Final:** ~3h 40 Min netto (Backend ~30 Min, Frontend ~1h, Middleware + ProfileMenu + Doku ~30 Min, Diagnose-First ~15 Min, Closure-Doku ~10 Min, Production-Deploy + Smoke ~20 Min, Production-Closure-Doku ~10 Min). **Spur:** Pre-Launch-Phase A Block 4 (Self-Hosting-Polish).
+
+**Status-Notiz Tag 26:** Angelegt aus Phase 4 Tag-26-Strategy-Session. Out-of-Scope für #130 Phase 4 (Tab-Restructuring war Channel-Adapter-Fokussiert).
+
+### 137. Production-Build-Test im Pre-Push-Workflow ✅
+
+✅ **Erledigt** (Beleg: `.husky/pre-push` fährt `pnpm -r build`.)
+
+Aus Tag-26-Phase-5-Deploy-Diagnose. Test-Page (`apps/web/app/test-tabs/page.tsx`) hatte useSearchParams() ohne Suspense-Wrapper — lokal lief durch (pnpm dev), Production-Build brach ab.
+
+CI-Hook oder Pre-Push-Script:
+
+```bash
+pnpm --filter @twin-lab/runtime build && pnpm --filter @twin-lab/web build
+```
+
+Sollte als Pre-Push-Hook (Husky) oder GitHub-Action laufen. Vermeidet Wiederholung des Phase-5-Deploy-Stops.
+
+**Größe:** S · **Priorität:** should · **Aus:** Tag 26 Phase 5 Build-Bug · **Spur:** Polish nach Phase 5
+
+### 138. Local-Dev pnpm dev braucht dev-friendly Defaults für Telegram-Webhook ✅
+
+**Abgeschlossen Tag 27 Abend (25. Mai 2026).** Hybrid-Branch in `apps/runtime/src/config.ts`: wenn weder `TELEGRAM_USE_POLLING` noch `RUNTIME_PUBLIC_URL` gesetzt sind, fällt die Runtime auf `TELEGRAM_USE_POLLING=true` mit Warning-Log zurück. `pnpm dev` aus pristinem Clone bootet damit out of the box. Production-Pfad (explicit `false` ohne URL) crasht weiter mit klarer Pflicht-Message.
+
+`.env.example` Default umgestellt auf `TELEGRAM_USE_POLLING=true` plus Auto-Detection-Note. SETUP.md (Zeile 91-100) Auto-Detection-Erklärung ergänzt. DEPLOYMENT.md §10 Production-Pattern detaillierter mit Fallback-Klarstellung („nicht für Production").
+
+Smokes 4/4 grün (alle isoliert via `env -i` + tsx-eval gegen `loadRuntimeConfig`):
+1. Pristine env → Fallback + Warning
+2. Explicit `false` ohne URL → Throw
+3. Explicit `true` → kein Warning, polling=true
+4. Production-Konfig (`false` + URL) → wie konfiguriert
+
+Begründung Hybrid-Branch statt `parseBoolEnv`-Refactor: zwar ist `parseBoolEnv` heute nur Konsument für `TELEGRAM_USE_POLLING`, aber expliziter Branch am Call-Site ist lesbarer als Default-Magic im Util-Helper.
+
+**Größe ursprünglich:** S — final: ~30 LoC + drei Doku-Files. **Aus:** Tag-27-Nachmittag Smoke-2-Aufsetz-Friction · **Spur:** Pre-Launch-Phase A Polish
+
 ### #139 OAuth-Token-Refresh-Latenz bei Multi-Step-Tool-Use untersuchen — ✅ Tag 28 DONE
 
 **Status-Notiz Tag 28 (26. Mai 2026):** Tracking-Pfad gebaut. `OAuthRefreshService.recordSuccess` analog `recordFailure` schreibt einen `oauth-refresh-success`-Audit mit `output: { latencyMs, oldExpiresAt, newExpiresAt, triggeredBy }`. `doRefreshIfNeeded` misst Latenz um den `refreshAccessToken`-Roundtrip. `ensureFresh(twinId, triggeredBy)` neu signiert (Default `"lazy"`), `pollAllTokens` markiert seinen Pfad als `"background"`. Plus Block-6-Sicherung: `OAUTH_REFRESH_POLL_DISABLED=true`-env-Guard in `start()` (Default unverändert, Lazy-Refresh bleibt aktiv), eingeführt nach zwei Token-Invalidierungs-Smokes (`refresh_token_reused` + `refresh_token_invalidated`). Phase-A-Diagnose (Block 7): H1 (refresh_token-Rotation nicht atomar) widerlegt, H2 (refreshAccessToken-Parsing-Bug) widerlegt, H3 (Race-Condition) unverifiziert, via Guard pragmatisch entschärft. Live-Smoke `audit_FuawriTsQd1j`: `latencyMs: 446`, `triggeredBy: "lazy"`, atomare Token-Rotation, `newExpiresAt` 10 Tage future. **Codex-Refresh-Token-Lifetime ist 10 Tage** (`expires_in: 863999`), nicht durch Code limitiert — siehe #150 für Doku-Klarstellung. Folge-Items: #149 (Mutex-Hardening), #150 (Token-Lifetime-Doku), #151 (id_token-/scope-Evaluation).
@@ -2489,44 +2286,6 @@ Faktor 14× langsamer im Initial-Smoke deutet auf Token-Refresh-Block hin: `OAut
 
 **Phase-B-Polish (BACKLOG-tracked, nice-to-have):** #139 (Refresh-Latenz), #140 (Re-Pause-Smoke), #141+#142 (providerMetadata pass-through, sollten gemeinsam gefixt werden), plus neue Phase-B-Items #143 (Web-OAuth-Production ohne CLI), #144 (VPS/Linux-Path via `--device-auth`), #145 (Multi-Account-Support).
 
-### #143 Web-OAuth-Production-Flow ohne CLI-Subprocess (XL, should — Phase B)
-
-**Phase-A-Variante:** OAuth läuft über `pnpm twin:oauth-login` CLI-Wrapper (Phase 4). User braucht Codex Desktop App + Terminal-Zugang zum twin-lab-Repo. Akzeptabel für drei dev-fitte Owner (florian/heiko/markus), aber Mass-User-Onboarding-Friction.
-
-**Phase-B-Ziel:** Browser-only OAuth direkt aus der Settings-Page heraus. Klick "OAuth aktivieren" → eigener PKCE-Server im runtime nimmt Callback entgegen → Token-Persist + Settings-Refresh. Kein Terminal-Wechsel, kein Codex-App-Requirement.
-
-**Implementation-Skizze:**
-- Eigener Loopback-Listener (Port 1455 oder dynamisch) im runtime-Workspace
-- PKCE-Challenge clientseitig im Web, Auth-URL öffnet sich in neuem Tab
-- Callback-Endpoint `/oauth/callback` im runtime nimmt Code entgegen, exchanged gegen Token, persistiert in oauth_tokens
-- WebSocket oder SSE-Push an Settings-UI für Status-Update
-
-**Risiken:** OAuth-Redirect-Whitelist bei OpenAI Codex (hardcoded localhost:1455), VPS-Self-Hosting braucht SSH-Tunnel oder Port-Forwarding. Strategy-Doc §a-§b hat das in der Original-XXL-Estimate berücksichtigt.
-
-**Größe:** XL (3-5 Bautage). **Priorität:** should. **Spur:** Phase B.
-
-### #144 VPS/Linux-Path für CLI via `--device-auth` (M, nice — Phase B)
-
-**Phase-A-Setzung (§t.8):** `pnpm twin:oauth-login` baut nur den lokalen macOS-Path mit Codex-Desktop-App-Bundle. VPS/Linux-Self-Hoster können das CLI noch nicht nutzen.
-
-**Phase-B-Ziel:** CLI um `--device-auth`-Flag erweitern. `codex login --device-auth` startet Device-Code-Flow — User loggt sich am Mac-Browser ein, gibt 8-stelligen Code in VPS-Terminal ein. Pattern-Adaption analog Hermes für SSH-only-Self-Hoster.
-
-**Alternative:** CLI um Detect-Logik erweitern (`fs.existsSync('/Applications/Codex.app')` → macOS-Path, sonst → Linux-Binary von `@openai/codex`-npm-Package). Plus `--device-auth`-Flag als manueller Override.
-
-**Größe:** M (1-1.5 Bautage). **Priorität:** nice (erst wenn ein User es konkret fordert). **Spur:** Phase B oder Phase A nach Launch.
-
-### #145 Multi-Account-Support für mehrere ChatGPT-Accounts (M, nice — Phase B)
-
-**Phase-A-Limit:** `~/.codex/auth.json` ist single-tenant. Re-Login mit anderem ChatGPT-Account überschreibt `account_id` im File. User mit mehreren ChatGPT-Accounts (Personal + Work) müssen zwischen Logins manuell wechseln.
-
-**Phase-B-Ziel:** Pro-Twin-`auth.json` (z.B. `~/.codex/auth.json.@markus`, `~/.codex/auth.json.@florian`) — getrennte Files für getrennte Accounts. CLI managed das Switching via Symlink oder per-twin-config.
-
-**Alternative:** Settings-UI-Warnung beim Re-Login: "Vorheriger ChatGPT-Account: X. Neuer Login überschreibt." User akzeptiert bewusst.
-
-**Größe:** M (1-2 Bautage). **Priorität:** nice. **Spur:** Phase B nach Launch + Demand-Signal.
-
-## Tag-28-Items (#141+#142-Follow-ups)
-
 ### #146 `extractModel()` Split-Fallback-Cleanup — ✅ Tag 28 DONE (Commit `3dbbc0b`)
 
 **Status-Notiz Tag 28 (26. Mai 2026):** Split-Fallback komplett entfernt, Return-Type von `string | null` auf `string` mit `"unknown"`-Fallback. Pre-Tag-28-Audits zeigen jetzt `"unknown"` statt zerlegtem Model-Wert — akzeptiert als Debug-Surface-Drift (keine User-Facing-Surface). `extractModel`-Konsumenten (`twin-answer.tsx:39`, `a2a-activity.tsx:73`) unverändert; ihr `?? undefined`-Pattern ist jetzt dead code für die rechte Seite, funktional aber äquivalent (`formatTokenCost` fällt für `"unknown"` über Pricing-Lookup-Miss auf `DEFAULT_MODEL` zurück).
@@ -2536,26 +2295,6 @@ Faktor 14× langsamer im Initial-Smoke deutet auf Token-Refresh-Block hin: `OAut
 **Soll-Stand:** `extractModel()` kann den Fallback-Pfad löschen, sobald entweder (a) alle Pre-Refactor-Audits via Pruning weg sind, oder (b) ein Cut-Off-Datum gesetzt wird ab dem die DB nur noch Post-Patch-Audits enthält. Im Code dann nur noch `return output?.providerMetadata?.model ?? null;`.
 
 **Priorität:** nice. Funktionaler Impact null (Fallback funktioniert weiterhin korrekt), Wartungs-Hygiene. Erst sinnvoll wenn Tag-28-Audits in der Mehrheit sind oder DB-Pruning durchläuft.
-
-### #147 Auto-Tool-Picker-Reliability blockiert Approve-Pfad-Smoke (Cross-Ref #87/#89)
-
-**Kontext (Tag 28 Block 2.2):** Bei #141+#142-Verifikation hat das LLM (Opus 4.7 im Codex-Pfad) in drei Anläufen verweigert, das `mcp:everything-approval:get-sum`-Tool zu rufen — "Tool ist nicht verfügbar"-Antwort statt Tool-Call, obwohl Skill aktiv und im Tool-Set. Vermutlich Auto-Tool-Picker-Problem aus der LLM-Tool-Use-Behavior-Familie (#87 Skills-UI, #89 Tool-Use-Behavior-Tuning).
-
-**Konsequenz für #141+#142:** Resume-Pfad-Verifikation für `mcp-tool-use`-Audits wurde **nur code-analytisch** durchgeführt (via Code-Trace `approveMcpToolUse` → `runModel` → patched Return). Live-Smoke ausstehend, sobald Auto-Tool-Picker zuverlässig approval-Tools rufen kann.
-
-**Status:** Cross-Reference, kein neues Bau-Item. #87/#89 sind die eigentlichen Träger. Hier nur dokumentiert, dass dieses Verhalten **Resume-Pfad-Smokes generell** blockiert, nicht nur #141+#142.
-
-**Priorität:** nice (transitiv aus #87/#89).
-
-### #148 api_key-Pfad-Smoke für #141+#142 nachholen (S, nice)
-
-**Kontext (Tag 28 Block 2.1):** Smoke C (api_key-Pfad) wurde während #141+#142-Verifikation skipped, weil keine api_key-Twins für aktive Smokes verfügbar waren — `@markus` ist seit Phase 5.2 oauth, andere Twins (`@florian`, `@heiko`) sind formal api_key, aber im aktuellen Setup nicht in der Smoke-Loop.
-
-**Soll-Stand:** Beim nächsten Anlass mit aktivem api_key-Twin (z.B. neuer Onboarding-Smoke, oder explizit ein Test-Twin auf api_key gesetzt) den `providerMetadata`-Flat-Merge gegen den Anthropic-Pfad verifizieren. Erwartet: `provider:"anthropic"`, `authMode:"api_key"`, `twinId`, `latencyMs`, `model` aus `result.response.modelId` (Anthropic kann Versions-Suffix mitliefern, z.B. `claude-opus-4-7-20260101` statt Alias).
-
-**Risiko:** sehr niedrig. Fix ist code-strukturell symmetrisch — gleicher `runModel`-Return, gleicher Un-Nest-Mechanismus für beide Provider-Namespaces (`openai-codex` vs `anthropic`). Anthropic-SDK liefert `providerMetadata` vermutlich nach gleichem V3-Pattern.
-
-**Priorität:** nice. Verifikation ist Bestätigungs-Smoke, kein erwarteter Bug.
 
 ### #149 Mutex-Hardening in `OAuthRefreshService.ensureFresh` — ✅ Tag 28 DONE (Diagnose, Pattern Null)
 
@@ -2590,71 +2329,6 @@ Faktor 14× langsamer im Initial-Smoke deutet auf Token-Refresh-Block hin: `OAut
 
 **Priority:** nice-to-have, Doku-only, kein Code-Change. **Aufwand:** XS.
 
-### #151 `id_token` + `scope` aus Refresh-Response evaluieren (S, nice — Phase B)
-
-**Files:** `apps/runtime/src/oauth/openai-pkce.ts` (`OAuthTokenResponse`-Type), `apps/runtime/src/oauth/oauth-tokens-repo.ts`.
-
-**Hintergrund (Tag 28 Block 7 Live-Diag):** Codex-Refresh-Response liefert die Felder `[access_token, expires_in, id_token, refresh_token, scope, token_type]` — siehe `audit_FuawriTsQd1j`-Begleit-Diag-Dump. Heute werden nur `access_token` + `refresh_token` + `expires_in` extrahiert. `id_token` (JWT mit Claims) und `scope` werden ignoriert.
-
-**Mögliche Use-Cases:**
-- **`id_token.exp`-Claim** für Initial-Token-Lifetime-Konsistenz (Cross-Ref #150). Würde erklären woher die ~50-Min-Initial-Lifetime nach `codex login` kommt.
-- **`id_token.email`** für Account-Verifikation. Owner-User-Mapping könnte gestärkt werden — heute basiert das nur auf `account_id`.
-- **`scope`** für Multi-Scope-Support in Phase B (z.B. wenn zusätzliche OpenAI-Capabilities pro Twin geschaltet werden sollen).
-
-**Action:** `OAuthTokenResponse`-Type um optionale Felder erweitern, JWT-Parsing-Helper für `id_token`-Claims, optionaler Spalten-Erweiterung im `oauth_tokens`-Repo (z.B. `id_token_email` indizierbar für Account-Lookup).
-
-**Priority:** nice-to-have, Phase B. **Aufwand:** S (~3-4h für Type + Parser + Repo-Erweiterung, ohne UI-Integration).
-
-### #152 Hot-Reload-Race im `tsx watch`-Dev-Setup adressieren (M-L, nice — Phase B)
-
-**Hintergrund (Tag 28 Block 11-12):** Block-11-Diagnose-Spike für #149 hat identifiziert: `tsx watch` (Dev-Setup für Runtime) kann mehrere `OAuthRefreshService`-Instanzen parallel laufen lassen — bei Code-Change in `refresh-service.ts` oder umgebenden Files startet eine neue Instanz, während die alte noch in-flight ist. Jede Instanz hat ihre eigene `inFlight`-Map, der Mutex greift nicht über Instanzen-Grenze hinweg. Mögliche Folge: zwei parallele `refreshAccessToken`-Calls für denselben Twin, OpenAI invalidiert beide Tokens (`refresh_token_reused`).
-
-Dies ist die plausibelste Erklärung für die Tag-28-Vormittag-Failures, die ursprünglich H3-Race-Verdacht in #149 ausgelöst hatten. #149 ist code-seitig korrekt (Single-Process-Modell), die Wurzelursache liegt im Dev-Tool-Lifecycle.
-
-**Production-Relevanz:** Aktuell **niedrig**, weil Production-Container-Restarts (nicht Hot-Reload) immer sauber booten. Aber: relevant für Container-Cluster-Setups (Phase B+) oder Multi-Instance-Skalierung mit horizontaler Replikation.
-
-**Lösungspfade:**
-
-- **Variante A — `OAuthRefreshService` als Singleton via Module-Scope.** Statt Instance-Field in `TwinService`-Konstruktion eine Module-Level-Variable mit Lazy-Init. Hot-Reload re-importiert das Module, aber der Module-Scope-Cache ist persistent (Node-Module-System). Komplexität: M.
-- **Variante B — SQLite-Lock auf `oauth_tokens`-Row für die Refresh-Dauer.** `BEGIN IMMEDIATE` + `UPDATE ... WHERE expires_at = ?` als atomic Check-and-Lock. Cross-Process-Safe, adressiert auch Container-Cluster-Setup. Komplexität: M-L.
-- **Variante C — In Dev-Setup `OAUTH_REFRESH_POLL_DISABLED=true` als Default in `.env.local` setzen.** Schnell-Fix via Doku, keine echte strukturelle Lösung. Bereits empirisch greifend ab Tag 28 Block 6.
-
-**Priority:** nice, Phase B. Bis dahin: Block-6-Guard (`OAUTH_REFRESH_POLL_DISABLED=true`) als pragmatische Mitigation, JSDoc in `ensureFresh` als forensische Spur für zukünftige Sessions.
-
-**Aufwand:** M (Variante A) bis L (Variante B). Variante C ist XS-Doku, aber kein "Fix".
-
-### #153 DEPLOYMENT.md §11 OAuth-Production-Workflow dokumentieren (XS, should — Phase B)
-
-**Hintergrund (Tag 28 Block 14-15):** Phase-B-CLI-Erweiterung `--auth-json=<path>` (Commit `76e49fe`) ermöglicht VPS-OAuth-Login ohne Codex-Binary im Container. Production-Workflow ist 4-Schritt-manuell:
-
-1. Mac-lokal: `codex login` → schreibt `~/.codex/auth.json`
-2. Mac: `scp ~/.codex/auth.json root@srv1046432:/tmp/auth.json`
-3. VPS: `docker cp /tmp/auth.json twin-lab-runtime:/tmp/auth.json`
-4. VPS: `docker exec twin-lab-runtime npx tsx /app/apps/runtime/src/scripts/cli-oauth-login.ts <@handle> --auth-json=/tmp/auth.json`
-5. Cleanup: `docker exec ... rm /tmp/auth.json` + `rm /tmp/auth.json` auf VPS-Host
-
-**Action:** in `docs/DEPLOYMENT.md` einen neuen `### §11 OAuth-Login für Production-Twins`-Abschnitt mit der Sequenz, Security-Hinweis (auth.json enthält access_token + refresh_token, nicht in Repo committen + nach Use löschen), und Cross-Ref auf #131-OAUTH-STRATEGY §y. Zusätzlich Re-Login-Pfad dokumentieren (gleiche Sequenz, `oauth_tokens.upsert` überschreibt existing Row).
-
-**Priority:** should. Solange #143 (Web-OAuth ohne CLI) Phase-B-Item ist, ist Manual-Workflow das produktive Pattern für `@florian`/`@heiko`-Onboarding und Re-Login. Ohne Doku-Anker wird die Sequenz aus Chat-Transkripten rekonstruiert. **Aufwand:** XS (~15-20 Min).
-
-### #154 DEPLOYMENT.md Deploy-Section: `--build-arg NEXT_PUBLIC_RUNTIME_URL` explizit dokumentieren (XS, should — Phase B)
-
-**Hintergrund (Tag 28 Block 13):** Production-Deploy ist auf einen Build-Arg-Bug gelaufen. `apps/web/Dockerfile` deklariert `ARG NEXT_PUBLIC_RUNTIME_URL=http://localhost:4000` als Default. Beim Production-`docker build` ohne `--build-arg` wurde der Default in das JS-Bundle inlined — NEXT_PUBLIC_*-Vars sind build-time-Konstanten in Next.js, kein Runtime-Lookup. Folge: Web-Container rief `http://localhost:4000/auth/login` statt der Production-Runtime-URL. ~30 Min Diagnose, ~10 Min Re-Build mit korrektem Build-Arg.
-
-**Action:** in `docs/DEPLOYMENT.md` Web-Build-Section explizit ergänzen:
-
-```sh
-docker build \
-  --build-arg NEXT_PUBLIC_RUNTIME_URL=https://runtime.twin.harwayexperience.com \
-  -t twin-lab-web:latest \
-  -f apps/web/Dockerfile \
-  .
-```
-
-Plus Warn-Box: "Ohne `--build-arg` greift der Dockerfile-Default `http://localhost:4000` und der Web-Container ruft localhost an. Always explicit."
-
-**Priority:** should. Einmaliger Doku-Aufwand, vermeidet ~40 Min Diagnose beim nächsten Production-Build. **Aufwand:** XS (~5-10 Min).
-
 ### #155 A2A Reply-Architektur-Korrektur (messageType als Single-Source-of-Truth) — ✅ Tag 28 DONE (Commit `903a813`)
 
 **Status-Notiz Tag 28 (26. Mai 2026, Abend):** Refactor von `inReplyTo`-Heuristik auf `messageType` als Single-Source-of-Truth für Empfänger-Verhalten. Bug: Web-UI setzte `inReplyTo` automatisch mit der letzten Thread-Message bei jedem Send (`apps/web/app/chat/[handle]/page.tsx` `lastReceivedBridgeId`-Memo) → jede neue Owner-Frage wurde als „reply" geframed → Empfänger-Twin-Service schrieb `reply-received`-Audit ohne LLM-Call. Wurzel: Tag-14-Implementierung (3. Mai 2026) hat Reply-Detection als generischen Fallschirm gebaut, der den Asymmetrie-Fall (Owner→Twin in aktivem Thread) nicht unterschied von Twin→Twin-Reply.
@@ -2662,90 +2336,6 @@ Plus Warn-Box: "Ohne `--build-arg` greift der Dockerfile-Default `http://localho
 **Refactor:** Bridge-Schema `MessageType`-Union von 2 auf 5 Werte erweitert (`twin`, `system`, `owner-direct`, `twin-initiated`, `twin-reply`). Runtime-Send-Pfade: `ownerDirectSend → "owner-direct"`, `approveTwinSend → "twin-initiated"`, `approveTwinResponse` + `handleTrustedBridgeMessage → "twin-reply"`. Inbound-Switch in `receiveBridgeMessage`: alter Reply-Detection-Block (~53 LOC mit `lookupSender`-Failsafe) entfernt, ersetzt durch ~30 LOC `messageType`-Switch mit Legacy-Normalisierung `'twin' → 'twin-initiated'`. Web-UI: `lastReceivedBridgeId`-Memo + `inReplyTo` aus Send-Body raus. `inReplyTo` bleibt im Schema reserviert für künftiges Quote-Reply-Feature, `lookupSender` als `@deprecated` markiert. 8 Files, +173/-115.
 
 **Production-Smoke:** 3 Container rebuilt + recreated (Runtime + Web + Bridge — Bridge initial übersehen, siehe Lesson #15). Smoke 1 grün: Owner-Direct an vertrauten Twin → Trusted-Bypass → Reply. Audits `audit_yBNtNszbAbkF` (owner-direct-send), `audit_qx0zMZHtSO21` (trusted-bypass), `audit_QZ0Rl-YFte5P` (reply-received). Latenz ~4 Sek.
-
-### #156 DEPLOYMENT.md Multi-Service-Refactor-Sequenz dokumentieren (XS, should — Phase B)
-
-**Hintergrund (Tag 28 Block 16):** Multi-Service-Refactor (#155 A2A Reply-Architektur) hat Bridge + Runtime + Web geändert. Deploy-Briefing nannte nur Runtime + Web, Bridge wurde übersehen. Production-Smoke schlug fehl mit Bridge-400 `"messageType muss einer von [twin, system] sein"` weil Bridge-Container noch alten Type-Union-Build hatte. Failed-Audit `audit_pk2D6B1bbdMx` ist live als forensische Spur.
-
-**Action:** Neue Section `### Multi-Service-Deploys` in `docs/DEPLOYMENT.md` mit:
-- Checklist: bei Schema-Changes die mehrere Container kennen müssen, **alle drei Container (Bridge + Runtime + Web) zusammen rebuilden + recreaten**
-- Beispiel-Build-Sequenz (alle drei Images parallel)
-- Hinweis auf `docker compose up -d --force-recreate bridge runtime web` als atomare Aktion
-- Cross-Ref Lesson #15 Tag 28 + #155
-
-**Priority:** should. Vermeidet ~5-10 Min Diagnose pro Multi-Service-Deploy. **Aufwand:** XS (~10-15 Min).
-
-### #157 Smoke-Scripts-Hygiene-Welle (Phase-by-Phase-Archivierung, M-L, nice — Phase B)
-
-**Status:** Offen | Phase B | Aufwand: M-L (1-1.5 Bautage)
-**Cross-Ref:** `docs/INVENTORY-tag28.md` Sektion B2
-
-Aktuell 35 `test-*.ts`-Smoke-Scripts in `apps/runtime/src/scripts/` (22 in `package.json` registriert, 13 unregistriert), alle aus konkreten Bauphasen (Phase 3.1 Skills, 3.2 MCP, 3.3 Memory/Facts, 3.4 OAuth/Codex, #130 Telegram).
-
-**Setzung Schule B (Tag 28 Block 19/20):** Phase-Closure-getriggert Smoke-Scripts nach `apps/runtime/src/scripts/archive/<phase>/` verschieben. `package.json`-Scripts entsprechend dokumentieren oder entfernen. Phase-bezogenes Mapping als `README.md` im jeweiligen Archive-Subfolder.
-
-**Scope-Bauschritte:**
-- Pro Bauphase Liste der Smoke-Scripts ermitteln (aus STAND/BACKLOG-Spuren zusammensuchen)
-- `archive/`-Subfolder mit `README.md`-Stub anlegen
-- Files mit `git mv` verschieben
-- `package.json`-Scripts-Section bereinigen
-- STRATEGY-Docs-Cross-Refs aktualisieren falls direkt auf Script-Pfad verwiesen wird
-
-**Nicht-Scope:**
-- Vitest-Migration (eigene Diskussion, nicht hier)
-- Aktive Phase (z.B. Phase 3.5 falls noch nicht closed) bleibt live
-
-**Findings aus Block 19 Inventur:**
-- **22 registriert** (B2.2 Inventur): `oauth-phase1/2/3-Spikes`, `codex-vercel-provider`, `codex-sse-parser`, `codex-retry`, `trust-test`, `memory-repos`, `episodic-repos`, `embedding-providers`, `model-cache-dir`, `memory-embedding-service`, `memory-retrieval-service/hybrid`, `twin-diary-cli`, `memory-maintenance`, `summary-engine`, `history-with-summary`, `prompt-builder`, `extraction-engine`
-- **13 unregistriert** (B2.3 Inventur): `test-conversation-flow/history`, `test-conversations-repo`, `test-mcp-client-manager`, `test-mcp-servers-repo`, `test-mcp-skill-sync`, `test-mcp-tool-execution`, `test-skill-engine`, `test-skill-repo`, `test-telegram-phase2/3`, `test-telegram-repos`, `setup-telegram-manual-smoke`
-
-### #158 Strategy-Doc-Lifecycle-Konvention etablieren (S, nice — Phase B)
-
-**Status:** Offen | Phase B | Aufwand: S (~30 Min Setup-Block, danach laufende Disziplin)
-**Cross-Ref:** `docs/INVENTORY-tag28.md` Beobachtung 9, `docs/archive/README.md`
-
-`131-OAUTH-STRATEGY.md` mit 141 KB und 25 Sub-Sections (§a-§y) zeigt: wenn jedes substantielle Phase-Item ein Live-Tagebuch bekommt, wachsen wir uns mit den Strategy-Docs kaputt. Brauchen Konvention.
-
-**Setzung:** Strategy-Docs leben in `docs/` während ihre Phase aktiv ist. Nach Phase-Closure wandern sie nach `docs/archive/`. Konvention dokumentiert im `docs/archive/README.md` (Block 20).
-
-**Scope-Bauschritte:**
-- Bei nächster Phase-Closure (z.B. Phase 3.5 oder #131 OAuth final-closed) Strategy-Doc nach `docs/archive/` verschieben
-- Live-STAND-Header weist auf Archive-Pfad hin
-- Falls künftige Phase Live-Strategy-Doc braucht: `README.md` im Phase-Folder vermerken, nicht im Repo-Root
-
-**Nicht-Scope:**
-- Retroaktive Archivierung von `131-OAUTH-STRATEGY.md` (Phase A closed seit Tag 27, aber Strategy-Doc ist heute Tag 28 Block 14 + 15 um §x + §y erweitert worden — hat noch live-Spuren). Wenn Phase A komplett closed ist und keine `--auth-json`-Folge-Iteration mehr ansteht, dann Move.
-
-### #159 FK-Cascade-Check für alle User/Twin/Owner-Relations (S, nice — Phase B)
-
-**Status:** Offen | Phase B | Aufwand: S (~30-60 Min Audit + ggf. punktuelle Pragma-Fixes + CLI-Cheat-Sheet)
-**Cross-Ref:** Lesson Tag 29 #4, `apps/runtime/src/scripts/_mcp-cli-helpers.ts:77-78`, `apps/runtime/src/scripts/init-db.ts`
-
-**Befund Tag 29 (27. Mai 2026):** Bei Block-5-Smoke-Cleanups via `sqlite3`-CLI sind Orphan-Rows entstanden — `DELETE FROM users WHERE email='test@…'` hinterließ `twin_profiles` + `audit_log` + `mcp_servers`-Rows ohne User. Wurzel: `sqlite3`-CLI enforced Foreign-Keys per default **nicht**, das Pragma muss pro Connection gesetzt werden. Application-Code macht das schon konsistent (`db.pragma("foreign_keys = ON")` in jedem DB-Connector, siehe `_mcp-cli-helpers.ts`, `init-db.ts`, `runtime/src/index.ts`), aber ad-hoc Shell-Sessions sind blind.
-
-**Scope:**
-1. **Audit aller DB-öffnenden Code-Pfade.** `grep -rn "new Database(" apps/` + `grep -rn "better-sqlite3" apps/` → für jeden Treffer verifizieren, dass `db.pragma("journal_mode = WAL")` und `db.pragma("foreign_keys = ON")` direkt nach dem Open gerufen werden. Fehlende Pragma-Setzungen ergänzen.
-2. **Schema-Audit der FK-Beziehungen.** Welche Tabellen referenzieren `users(user_id)`, `twin_profiles(twin_id)`, `owner_user_id`? `ON DELETE CASCADE` vs. `RESTRICT` vs. `SET NULL` — pro Beziehung dokumentieren, ob die Cascade-Policy gewollt ist (z.B. User-Delete → Twin-Delete? Oder Soft-Lock?).
-3. **DB-CLI-Cheat-Sheet** in `docs/SETUP.md` (oder neuer `docs/DB-CHEATSHEET.md`): "Vor manuellen DELETEs immer `PRAGMA foreign_keys = ON;` setzen. Empfohlener Header-Block für ad-hoc Cleanup-Sessions."
-4. **Optional:** Smoke-Cleanup-Helper-Skript (`pnpm db:cleanup-test-user <email>`) das die Pragma sauber setzt und User + abhängige Rows in einer Transaktion löscht — verhindert künftige Orphan-Drift.
-
-**Nicht-Scope:**
-- Account-Delete-UI (eigenes Item, aus #135 defer)
-- Datenmigration historischer Orphan-Rows (separater Cleanup-Block falls vorhandene Test-DB-Reste relevant werden)
-
-**Wert:** vermeidet stille DB-Drift bei künftigen Smokes, dokumentiert die FK-Semantik für jeden, der manuell in die DB greift. Niedriges Risiko, hoher Cleanliness-Impact für die Phase-B-Self-Hosting-Phase wenn externe Owner ihre Test-Twins iterativ wegputzen.
-
-## Rebrand Twin-Lab → Nolmi ✅ Tag 30+31
-
-**Strategie + Phasen-Plan:** [`docs/REBRAND-NOLMI-STRATEGY.md`](./REBRAND-NOLMI-STRATEGY.md) (Tag 30 Strategy-Session als „Tavryn" gestartet, Tag 31 auf „Nolmi" finalisiert + Doc umbenannt). Vollständige Mapping-Tabelle, Trademark-Status, Produkt-Narrativ, Operative Foundation §9.
-
-- Phase 1 ✅ Light-Mode-Switch (Tag 30 Block 3, Commit 58766de)
-- Phase 2 ✅ User-Strings (Tag 31 Block 2, Commit f6ebd61)
-- Phase 3a ✅ Env/Package/Cookie (Tag 31 Block 3, Commit e746446)
-- Phase 3b ✅ Verzeichnis-Rename + GitHub-Repo (Tag 31 Block 4, dieser Commit)
-- Phase 4 ⏳ Nolmi-VPS-Setup (offen, eigener Block-würdig)
-
-**Code-Rebrand abgeschlossen** (Phase 1 Light-Mode + Phase 2 User-Strings + Phase 3a Env/Package/Cookie + Phase 3b Verzeichnis/Repo). **Trademark-Gate ✅ grün** (USPTO + EUIPO 0 Treffer). Phase 4 (Production-Deploy auf Nolmi-VPS) ist der natürliche nächste Schritt.
 
 ### Rebrand-Phase 1 — Light-Mode-Switch ✅ Tag 30 DONE
 
@@ -2871,22 +2461,6 @@ spezifischem SSH-Key. Wird heute nur für Production-Deploy genutzt
 Beim Phase-4-Deploy zu nolmi-ai/nolmi: Alias umbenennen zu
 `github.com-nolmi` oder als zweiten Alias parallel anlegen.
 
-### Alten Stack srv1046432 abschalten — einzige offene Phase-4-Restaktion
-
-**Status:** **OFFEN** (S) | bewusst offen gehalten nach B6-Cut-Over (Tag 31 Block 17) | siehe [`docs/PHASE-4-VPS-STRATEGY.md`](./PHASE-4-VPS-STRATEGY.md) §6 + S7
-
-**Stand Tag 31 Block 17:** Nolmi ist produktiv auf `187.124.3.235`, Phase 4 (B1–B6) abgeschlossen. Der alte Stack `srv1046432` (`twin.harwayexperience.com`) **bleibt Hot-Standby** und wird **nicht** mit-abgeschaltet — Markus' echte @markus-Daten liegen dort in nicht-reproduzierbarem Zustand, also ist das Standby-Netz gerade jetzt (frisch produktiv) am wertvollsten. Abschaltung ist eine **spätere Einzelentscheidung**, nach stabilem Nolmi-Prod-Fenster.
-
-**Vor der Abschaltung (Voraussetzungen):**
-1. Gewohnheit/Bookmarks auf `app.nolmi.ai` umgestellt (versehentliches Weitertesten auf `twin.harwayexperience.com` vermeiden)
-2. Optional: alte Domain auf „umgezogen"-Redirect — **ohne** den Standby-Stack zu killen
-3. Nolmi-Prod über ein stilles Fenster stabil bestätigt
-
-**Abschalt-Schritte (wenn entschieden):**
-1. DB-Backup von srv1046432 als Archiv ziehen
-2. VPS srv1046432 herunterfahren
-3. Falls Hostinger-Mietkosten: VPS-Vertrag kündigen
-
 ### PAT-Rotation + Git-History-Secret-Scan — Release-Gate für Open-Source-Self-Hosting ✅
 
 **Status:** **DONE** (Tag 33) | **Größe S** | **war: must-vor-Release** | siehe [`docs/DISTRIBUTION-STRATEGY.md`](./DISTRIBUTION-STRATEGY.md) §5a
@@ -2899,49 +2473,6 @@ Ein öffentliches Repo veröffentlicht die **komplette Git-History**, nicht nur 
 3. Erst dann `Repo public`
 
 Kein Hygiene-Nice-to-have, sondern hartes Release-Gate. Aus Distribution-Session Tag 31 (Block 19).
-
-### Apache-2.0 → AGPL-3.0 — LICENSE-Altlast vor Going Public ersetzen
-
-**Status:** **OFFEN** | **Größe S** | **Priorität: must-vor-Public** | Lizenz-Setzung Tag 33, s. `DISTRIBUTION-STRATEGY.md §5b`
-
-**Setzung Tag 33:** Nolmi wird **AGPL-3.0** lizenziert (Network-Use-Copyleft §13 → schließt die SaaS-Lücke, schützt gegen geschlossene Managed-Forks bei vollem offenem Code; 2026-Standard für Open-Source-SaaS: Grafana/Bitwarden/Mattermost/Gitea/Nextcloud/Mastodon/Plausible). Relizenzierungs-Logik: AGPL→MIT jederzeit lockerbar, MIT→AGPL unmöglich → restriktiver Start hält „Weg 3 jetzt, Weg 1 langfristig" offen.
-
-**Altlast (aus #111, Tag 25):** committet liegen eine **Apache-2.0-`LICENSE`** + `package.json: "license": "Apache-2.0"` — widersprechen AGPL. **Vor Public:**
-1. `LICENSE` durch **AGPL-3.0**-Volltext ersetzen (Copyright-Notice beibehalten).
-2. `package.json: "license": "AGPL-3.0"`.
-3. ggf. Source-Header / README-Badge angleichen.
-
-Bewusst **nicht** im Tag-33-Doku-Commit ausgeführt — eigener Schritt im Going-Public-Block.
-
-### CLA/DCO vor den ersten externen Beiträgen (Vorbedingung für Dual-Licensing)
-
-**Status:** OFFEN (jetzt unkritisch, Alleinautor) | **Größe S–M** | **Gate:** vor „erste externe Beiträge annehmen"
-
-Ein **CLA** (Contributor License Agreement) oder mindestens **DCO** (Developer Certificate of Origin) ist die **Vorbedingung für späteres Dual-Licensing**: ohne Rechte-Bündelung an externen Beiträgen kann der Rechteinhaber das Gesamtwerk nicht kommerziell relizenzieren (ein AGPL-Beitrag eines Dritten „infiziert" sonst die kommerzielle Lizenzierbarkeit). Solange Markus Alleinautor ist, **kein Handlungsbedarf** — aber **vor dem ersten gemergten Fremd-PR** muss das Modell stehen (CLA-Bot o.ä.). Als Gate gemerkt.
-
-### Dual-License-Ausgestaltung bei konkreter Managed-Tür (+ Rechtsberatung)
-
-**Status:** OFFEN (D5-Territorium, bewusst vertagt) | **Größe L** | **Trigger:** wenn die Managed-Tür konkret wird
-
-**Dual-Licensing** (AGPL frei **+** kommerzielle Lizenz) ist der **Monetarisierungs-Pfad** für die spätere Managed-Tür: wer Nolmi proprietär/closed betreiben will, kauft eine kommerzielle Lizenz statt unter AGPL offenzulegen. **Ausgestaltung erst, wenn die Managed-Tür konkret wird** (Preis, Lizenztext, Vertrieb). Bei echtem Geld: **Fachkundige(r) für Lizenzrecht** hinzuziehen. Vorbedingung: CLA/DCO (Item oben). Hängt an D5 (Managed = eigenes Unternehmen).
-
-**Neue Items aus Phase 3a (für später):**
-- **`SESSION_COOKIE_NAME`-Konstante konsolidieren:** heute in `apps/runtime/src/auth/session.ts` (Export) **und** `apps/web/middleware.ts` (Local-Const-Duplikat) gepflegt. Cross-App-Import vom Runtime ins Web ist heute strukturell nicht vorgesehen (Runtime exportiert keine Subpaths). Sauberer Pfad: `@nolmi/shared/auth-cookies` mit beiden Konstanten, beide Apps konsumieren von dort. Aufwand S, nice (Phase 5+).
-
-### Rebrand-Phase 4 — Nolmi-VPS Production-Deploy (M-L, must — nach 1-3, VPS bereits provisioniert)
-
-**Status:** Offen, **Setzungen gelockt Tag 31** | gated nach Phase 1-3 | Aufwand: M-L | **VPS bereits provisioniert Tag 30/31**
-
-**Strategy + Bau-Vorlage:** [`docs/PHASE-4-VPS-STRATEGY.md`](./PHASE-4-VPS-STRATEGY.md) — 7 Setzungen (S1 DB-Migration, S2 voller Stack inkl. Bridge unter `/docker/nolmi/` + **Doppel-DB-Migration `twin.db`+`bridge.db`**, S3 Secrets + Encryption-Key-Übernahme, S4 Traefik + BasicAuth, S5 HTTPS-PAT, S6 Parallel-Cut-Over, S7 Hot-Standby-Rollback), zwei Bedingungen (Encryption-Key-Kontinuität + Bridge-Migration), Cut-Over-Sequenz, Rollback-Plan, Bau-Reihenfolge B1–B7. **S2 final Tag 31 Block 8: Bridge-DB-Migration statt Re-Registrierung** (B3-Befund). **B1 ✅ DONE Tag 31 Block 9** (VPS-Prep + Docker 29.5.2 + Traefik v3.6 auf `187.124.3.235`; 3 Cookbook-Bugs §7). **B2 ✅ DONE (Prod) Tag 31 Block 14** (3-Service-Stack up, **Prod-Certs** `Let's Encrypt CN=YR2` über app/runtime/bridge.nolmi.ai, `TLS-verify=0`, Bridge selbstheilend, BasicAuth app→401, runtime/bridge→404; 4 Cookbook-Befunde §7; Repo-Fixes Block 11/12/13: Dockerfile-Filter, Bridge-Auto-init, htpasswd-Mount-Konsistenz; Prod-Cert-Flip griff erst nach Resolver-Store-Reset, §7 B2-4). **B4 ✅ DONE Tag 31 Block 15** (Doppel-DB-Migration auf Backup-Kopie verifiziert, ohne Production-Freeze: Bedingung A kein GCM-Fehler + Secrets entschlüsselt, S2-Token-Match `bridge_token`==`api_token` 3/3 byte-gleich, A2A-Stream ×3 gegen nolmi-bridge; 2 B6-Pflicht-Befunde §5: Stale-`bridge_url`-Sweep + Geist-Twin `@test122prod`). **B5 ✅ DONE Tag 31 Block 16** (Smoke 4/4 auf migriertem Stack: Container/Health, Migration intakt, Bedingung A end-to-end (Chat-Turn beantwortet), S2 end-to-end (A2A-Roundtrip @markus→@florian, kein 401), alle 3 §7-Fallen negativ). **B6 ✅ DONE (reduziert) Tag 31 Block 17** (Cut-Over im Single-User-Test-Kontext — nur Markus nutzt, @florian/@heiko Test-Twins → kein Dritt-Freeze/Re-Sync nötig; Geist-Twin `@test122prod` aus bridge.db gelöscht, Backup davor; Cut-Over-Entscheidung getroffen). **✅ PHASE 4 ABGESCHLOSSEN — Nolmi produktiv auf `187.124.3.235` (B1–B6).** Komplette Rebrand→Deploy-Pipeline (Phase 1+2+3a+3b+4) im Ziel. Einzige Restaktion: alter Stack `srv1046432` abschalten — bewusst offen gehalten (Hot-Standby, S7), siehe Item unten.
-
-Separater Hostinger-VPS Frankfurt, Ubuntu 24.04 LTS, IP `187.124.3.235`. Neu-Aufsetz analog DEPLOYMENT.md §9 Cookbook, mit Nolmi-Branding + Light + neuer Domain:
-
-- ✅ VPS provisioniert, Domain `nolmi.ai` + `getnolmi.com` + 5 DNS-A-Records grün (apex + app + runtime + bridge + docs → `187.124.3.235`) — Setup-Block kann starten
-- Traefik + Stack deployen
-- Brand-Assets (Wordmark, Favicon, OG-Image) — Light-first
-- Screenshots neu aufnehmen (Light-Branding) für #112 Landing / #113 Demo
-
-**Markus' parallele Arbeit (Stand Tag 31):** ✅ Foundation gesichert (Domain + VPS + GitHub-Org `nolmi-ai` + npm `@nolmi` + PyPI + Docker Hub `nolmi` + Mail-Stack + Trademark-Quick-Search). Verbleibend: Social-Handles + Brand-Assets-Produktion. Details siehe Strategy-Doc §9.
 
 ### Pre-Flight Bridge-DB-Inhalt verifizieren (vor Bridge-Re-Registrierung) — ✅ Tag 31 Block 7 DONE
 
@@ -3007,4 +2538,505 @@ Sheet für Smoke-Cleanups.
 
 **Test-Twin-Cleanup Tag 31 Block 5 hat CLI-seitig PRAGMA gesetzt** —
 keine offenen Waisen aus dieser Operation.
+
+
+
+---
+
+## Phase-B / Post-Closed-Beta — bewusst vertagt
+
+Bewusst zurückgestellt nach Closed-Beta-Logik (D4/D5) — erst relevant, wenn externe Nutzer onboarden. **Kein offener Rückstand.**
+
+### 40. CSRF-Token für /auth/*-Endpoints — NEU aus 2.5.4
+Heute schützt nur `SameSite=Lax` auf dem Session-Cookie. Bei breiterem Deployment (echte Domain, eingebettete Iframes, Browser-Extensions, etc.) braucht es `@fastify/csrf` für tokenbasierten Schutz, um POST-CSRF-Angriffe zu blocken.
+**Größe:** M · **Priorität:** should · **Aus:** 2.5.4 Caveat #5
+
+### 41. Magic-Link Auth (passwordless) — NEU aus 2.5.4
+Alternative zu Email/Passwort: User gibt Email ein, kriegt Login-Link via Email zugeschickt. Vorteil: kein Passwort-Management, sicherer (kein Rainbow-Table-Risiko, kein Password-Reuse). Vorbedingung: Email-Versand aus 2.5.5. Markus' Frage vom 02.05: "Magic Link könnten wir für die Zukunft nochmal überlegen."
+**Größe:** L · **Priorität:** nice · **Aus:** 2.5.4 Architektur-Diskussion, blockt auf 2.5.5
+**Stufe:** 0 → 2 · **Spur:** UX-Reifung
+
+### 42. Rate-Limiting auf /auth/login — NEU aus 2.5.4
+Heute kein Rate-Limit. Bei breiterem Deployment Brute-Force-anfällig. `@fastify/rate-limit` mit konservativem Default (z.B. 5 Login-Versuche pro IP pro 15 Minuten), bei Treffer 429 mit Retry-After-Header. Plus per-Email-Tracking gegen distributed Brute-Force.
+**Größe:** S · **Priorität:** should · **Aus:** 2.5.4 Caveat #6
+
+### 44. Self-Service-Password-Reset — NEU aus 2.5.4
+Florian und Heiko haben heute Platzhalter-Passworte von Markus per CLI bekommen. Es gibt aber keinen Weg für sie, das Passwort selbst zu ändern. CLI-Tool (`pnpm user:create` mit Update-Flag oder ein neues `user:reset-password`) reicht für heute, aber UI-Flow ("Passwort vergessen?" → Email-Link → Set-New-Password) wäre richtig. Vorbedingung: Email-Versand aus 2.5.5.
+**Größe:** M · **Priorität:** should · **Aus:** 2.5.4 Migration der drei bestehenden User, blockt auf 2.5.5
+**Stufe:** 0 → 2 · **Spur:** UX-Reifung
+
+---
+
+### 65. Reverse-Proxy-Architektur statt Cookie-Domain — NEU 4. Mai
+Heute: Cookie-Domain via ENV (`SESSION_COOKIE_DOMAIN=.twin.harwayexperience.com`) als Quick-Fix für Cross-Subdomain-Setup. Funktioniert, ist aber konzeptionell ein Workaround — Same-Origin wäre sauberer.
+
+Saubere Variante: Web-App und Runtime hinter demselben Origin (z.B. `app.twin.harwayexperience.com` mit Path-Prefix `/api/*` zur Runtime). Next-Middleware oder Traefik-Path-Routing übernimmt das. Vorteile: kein Cookie-Domain-Trick, keine CORS-Konfig (Same-Origin), Browser-DevTools zeigen nur eine Origin.
+
+Trade-off: Runtime ist dann nicht mehr direkt von außen aufrufbar (ohne Path-Prefix). Für Power-User-Tooling (Curl, Postman) müsste man den Path-Prefix kennen. Plus: Migration heißt Cookie-Domain entfernen, Runtime-CORS entfernen, Frontend-Calls auf relative Pfade umstellen.
+
+Kein Notfall — heutige Lösung läuft stabil. Sub-Schritt für ruhigeren Tag, wenn Architektur-Konsolidierung dran ist.
+**Größe:** L · **Priorität:** should · **Aus:** 2.5.6 Phase A.5 Reflexion
+
+### 67. Production-Monitoring + Alerting — NEU 4. Mai
+Drei Container live, kein Monitoring. Wenn Bridge oder Runtime abstürzt, merken wir es erst beim nächsten Login.
+
+Optionen, von einfach nach reich:
+- Uptime-Kuma als selbst-gehosteter Healthcheck (ein vierter Container) mit Email/Slack-Notification
+- BetterStack / Healthchecks.io als externer Service
+- Grafana + Prometheus für Metriken (overkill für drei User)
+
+Vorbedingung: Healthcheck-Endpoints in Bridge und Runtime — Bridge hat noch kein wget/curl im Image (#61).
+**Größe:** M · **Priorität:** should · **Aus:** 2.5.6 Production-Reflexion
+
+### 68. Master-Key in Vault statt ENV-Datei — NEU 4. Mai (vorgesehen aber nicht umgesetzt)
+2.5.6 Spec erwähnte „Master-Key in produktions-tauglichem Vault (nicht mehr in ENV-Datei)". Heute pragmatisch in `/docker/twin-lab-web/.env` belassen, weil Vault-Setup für drei Power-User Overengineering wäre.
+
+Künftige Optionen wenn relevant:
+- HashiCorp Vault als selbst-gehosteter Container
+- 1Password Connect (Service-Account-API)
+- Bitwarden CLI mit Service-Token
+- AWS Secrets Manager / Hetzner-eigene Lösung
+
+Trade-off: Vault macht Container-Recovery komplexer (Container braucht Vault-Token zum Start, Vault-Token muss von woher kommen → Boot-Strapping-Problem).
+
+Heute: ENV-Datei mit `chmod 600`, `/docker/`-Verzeichnis nur für Root les- und schreibbar. Reicht für aktuellen Risikostand.
+**Größe:** M · **Priorität:** nice · **Aus:** 2.5.6 Spec, bewusst verschoben
+
+### 69. Onboarding-Polish: User-Email-Verifikation + Self-Service-Reset
+Heute (Tag 5): drei User onboarded mit Passwörtern, die Markus selbst getippt hat. Florian und Heiko kennen ihre Passwörter nicht — funktioniert solange Markus es ihnen mitteilt, aber kein Self-Service-Onboarding möglich.
+
+Pflicht-Items, wenn neue User von außen kommen:
+- Email-Verifikation beim Onboarding (Token-Link zu `/auth/verify`)
+- Password-Reset-Flow via Email-Token (#44 verknüpft, dort als nice eingestuft — heute zu must aufrücken sobald externe User kommen)
+- Optional: SSO via Google/GitHub (heute nicht nötig)
+
+Vorbedingung: Email-Versand-Infrastruktur (resend.com Konto vorhanden, in 2.5.5 für Notifications eh geplant).
+**Größe:** L · **Priorität:** should · **Aus:** 2.5.6 Production-Live
+**Stufe:** 0 → 2 · **Spur:** UX-Reifung
+
+### 29. Multi-Channel-Adapter — Owner-Mode
+Twin via Telegram/WhatsApp/Signal/iMessage erreichbar — zuerst nur für Owner selbst (nicht für externe Schreiber). Telegram zuerst (Bot-API einfach, ~2-3 Tage Code), dann WhatsApp (Meta-Business-API, KYC-Bürokratie, ~5-7 Tage), dann Signal/iMessage. Channel-Adapter pro Plattform mit einheitlicher interner API. Auth pro Channel: Sender-ID mappt auf User in Twin-DB.
+**Größe:** L · **Priorität:** should · **Aus:** Backlog-Anregung Markus, 1. Mai 2026 Abend
+
+**Inspiration NanoClaw (Tag 21):** Skills-driven Channel-Install-Pattern als Vorbild — `/add-telegram`, `/add-whatsapp` etc. als Claude-Code-getriebene Skills statt monolithischer Adapter-Bau. NanoClaw Trunk shippt nur Registry + Infrastructure, Channel-Adapter sind opt-in und kopieren das benötigte Modul in den Fork. Direkter Bezug zu Twin-Lab's `examples/skills/`-Foundation (Tag 20). Cross-Reference: https://github.com/nanocoai/nanoclaw.
+
+### 30. Multi-Channel-Adapter — Public-Mode
+Externe schreiben Twin via Channel an, Twin entscheidet ob er antwortet (Mandate-Layer wird kritisch). Zusätzlicher Sicherheits-Layer ggü. Owner-Mode. DSGVO-Erwägungen (WhatsApp-Geschäftskonto, Datenfluss US-Anbieter).
+**Größe:** L · **Priorität:** nice · **Aus:** Backlog-Anregung Markus, 1. Mai 2026 Abend
+
+**Inspiration NanoClaw (Tag 21):** Container-Isolation pro Agent-Gruppe als Pattern für Public-Mode-Sicherheit. NanoClaw runs per-Agent-Group in eigenem Docker-Container mit eigener CLAUDE.md, eigenem Memory, eigenen Mounts. Für Twin-Lab's Public-Mode (externe Sender + Approval-Gates) relevant — verstärkt Isolations-Garantie über DB-Twin-ID-Trennung hinaus. Phase-B-Architektur-Erwägung.
+
+### 31. Föderation — Mehrere Bridges sprechen miteinander
+Phase 2 hat zentrale Bridge. Phase 4 = mehrere Bridges können sprechen (Matrix-Modell). Twin auf Bridge-A kann mit Twin auf Bridge-B reden, ohne dass beide auf derselben Bridge registriert sind.
+**Größe:** XL · **Priorität:** nice · **Aus:** Architektur-Diskussion
+
+### 32. P2P mit DIDs (Phase 5+)
+Voll-P2P, keine Bridge mehr. DIDs (Decentralized Identifiers) für Identität. Optional: Blockchain als Bezahlebene OBEN AUF Messaging — nicht als Messaging-Layer selbst.
+**Größe:** XL · **Priorität:** nice · **Aus:** Strategische Vision
+
+**Konkrete Spec-Referenz: Agent Network Protocol (ANP).** `agent-network-protocol.com` bietet einen layered Protocol-Stack genau für dieses Szenario:
+
+- **did:wba** (Web-Based-Agent-DID) für verifiable Agent-Identität und readable Handles
+- **Agent Description + Discovery Protocol** für Capability-Publishing
+- **Messaging Profiles** (P3 Direct, P4 Group, P5/P6 E2EE, P7 Attachments, P8 Federation/Cross-Domain)
+- **AP2-Integration** für Payment-Flows mit ANP-Identity-Chain
+
+ANP wäre die konkrete Implementierung dessen, was #32 abstrakt vorsieht. Alternative Specs (TBD): IETF Agent-Working-Groups, W3C DID-Methods, andere DID-Implementierungen (did:web, did:key). GitHub: `agent-network-protocol/AgentNetworkProtocol`.
+
+### 36. Google A2A-Protokoll-Kompatibilität
+Twins als A2A-Server zusätzlich zur internen Bridge erreichbar machen. Implementierung:
+- `/.well-known/agent.json` mit Persona-Description und Skills
+- A2A-Adapter, der eingehende JSON-RPC-Messages auf interne Pending-Queue mapt
+- Mandate-Layer wendet Approval-Gates auf eingehende A2A-Requests an
+- Ausgehende A2A-Calls: unsere Twins können andere A2A-Agenten anrufen
+
+Vorteile: Ökosystem-Anbindung (Google ADK, CrewAI, Langgraph alle A2A-fähig), standardisierte Discovery, keine Lock-In auf eigenes Protokoll. Nachteile: Mehr Code-Pfade, Security-Komplexität (jeder im Internet kann anpingen).
+
+Vorbedingungen: Phase 4 (Multi-Channel-Architektur), Mandate-Engine reif für externe Quellen. Aufwand: 2-3 Wochen für saubere Adapter-Schicht. Bestandteil der Föderations-Strategie.
+**Größe:** L · **Priorität:** should · **Aus:** Markus' Recherche zu Google A2A Codelab, 2. Mai 2026
+
+**Inspiration NanoClaw (Tag 21):** NanoClaw's „Skills over Features"-Philosophie ist Pattern-Bestätigung für A2A als opt-in Adapter statt eingebauter Capability. Plus Credential-Vault (OneCLI Agent-Vault) als Pattern für API-Key-Isolation bei externen Protokollen — Twin-Lab heute mit AES-256-GCM-Encryption in DB, NanoClaw's Vault-Pattern als nächste Schicht für Phase B.
+
+### 125. AG-UI-Protokoll-Kompatibilität (Agent↔User Interaction)
+
+AG-UI (Agent-User Interaction Protocol, von CopilotKit + Partner-Frameworks) ist der dritte etablierte Agentic-Standard neben MCP (Agent↔Tools, von Anthropic) und A2A (Agent↔Agent, von Google). Open, event-basiert, baut auf HTTP/WebSockets für streaming Agent-Frontend-Kommunikation.
+
+twin-lab heute: Custom SSE-Stream mit eigenen Events (`twin.thinking`, `tool.call.start/complete`, `pending-added`, `pending-resolved`, `reply-received`). Funktional ähnlich zu AG-UI's Building Blocks (Streaming chat, Thinking steps, Tool output streaming, Interrupts, Custom events).
+
+**Vorteile AG-UI-Adapter:**
+
+- Client-Ökosystem (CopilotKit, React Native, Terminal-Clients community)
+- Ökosystem-Anbindung wie bei A2A (#36) — externe Frontends können twin-lab-Twins anbinden ohne custom SSE-Schema zu lernen
+- Standardisierte Discovery + Capabilities-Exchange
+
+**Nachteile / Trade-offs:**
+
+- twin-lab-spezifische Events (z.B. `reply-received` für A2A-Symmetrie, `pending-added` für Approval-Workflow) müssen als AG-UI Custom-Events gemappt werden
+- Adapter-Schicht obendrauf, eigene SSE bleibt für Twin-Lab-spezifische Pfade (Mandate-Layer, Trust-Relationships)
+
+**Pattern:** A2A-Strategie analog — AG-UI wird zusätzlich gebaut, nicht als Ersatz. Eigene SSE bleibt für Approval/Mandate/Trust-Pfade, AG-UI als Standard-Interface obendrauf für externe Clients.
+
+**Vorbedingungen:** Phase 4 Multi-Channel-Foundation (#29/#30) — analog zu A2A, AG-UI ergibt erst Sinn wenn Twin via mehrere Kanäle erreichbar ist und externe Clients ein Standard-Interface brauchen.
+
+**Größe:** L · **Priorität:** should · **Aus:** Markus' Protokoll-Landscape-Review, 21. Mai 2026 Abend (Tag 22). Spec: https://docs.ag-ui.com/introduction
+**Status:** offen, Phase 4 oder später
+
+---
+
+### 132. Anthropic Subscription-Auth (Claude-CLI-Reuse-Pattern)
+
+Anthropic hat keine offizielle 3rd-Party-OAuth-Surface für Claude Pro/Max-Subscription-Nutzung in externen Apps. Stattdessen: Claude-CLI-Reuse-Pattern — wenn auf dem Host-System ein gültiger Claude-CLI-Login existiert, kann eine externe App diese Credentials wiederverwenden.
+
+Anthropic-Stance war fluide: Anfang April 2026 wurde Claude Pro/Max via 3rd-Party-Agent-Frameworks gekappt, OpenClaw-Doku sagt Stand Tag 25: „Anthropic staff told us this usage is allowed again". Status nicht offiziell publiziert, basiert auf direkter Kommunikation.
+
+**Status:** Backlog, nicht in Phase A. Bau in Phase B nach Launch + Feedback, abhängig von Anthropic-Stance-Stabilität.
+
+**Implementations-Skizze (für späteren Bau):**
+
+Claude-CLI-Reuse-Pattern (analog OpenClaw):
+
+1. Detect Claude-CLI-Auth auf Host-System (`~/.claude/auth.json` oder OS-Keychain)
+2. Twin-Lab liest Credentials, mirrored mit Provenance (nicht eigene Refresh-Rotation, sondern externes CLI bleibt Source-of-Truth)
+3. API-Calls gegen Anthropic-API mit Subscription-Auth-Token statt API-Key
+4. Settings-UI: pro Twin „Use Claude-CLI Subscription" als Opt-in mit Detection-Status
+
+**Alternativ-Pattern (falls Phase-1.1-Recherche zeigt es ist mit Setup-Token möglich):**
+
+- Anthropic bietet „Setup-Token" für Claude-Code als offizieller Token-Auth-Pfad
+- Wenn dieser Token in externer App genutzt werden kann, wäre das offiziellerer Pfad als CLI-Reuse
+
+**Risiken:**
+
+- Anthropic-Stance fluide (initial gekappt, laut OpenClaw-Doku „wieder erlaubt") — Status kann sich jederzeit ändern
+- Pattern hängt von lokal verfügbarem Claude-CLI-Login ab — Self-Hoster ohne Claude-CLI können's nicht nutzen
+- Wenn Anthropic offiziell wieder kappt, Twin-Lab-Setting muss als „deprecated" gemarkt werden
+
+**Quellen:**
+
+- Anthropic Claude-Code-Plan-Doku: https://support.claude.com/en/articles/11145838-using-claude-code-with-your-pro-or-max-plan
+- OpenClaw OAuth-Doku (Anthropic-Sektion): https://docs.openclaw.ai/concepts/oauth#anthropic-legacy-token-compatibility
+
+**Größe:** M (2-3 Bautage — CLI-Detection + Credential-Mirror + Settings-UI + Status-Monitoring). **Priorität:** later. **Spur:** Pre-Launch-Phase B.
+
+**Status-Notiz Tag 25:** Pattern-Symmetrie zu #131. Anthropic-Stance weniger klar als OpenAI-Codex-OAuth-Stance — laut OpenClaw-Doku wieder erlaubt, aber nicht öffentlich publiziert. Bau erst sinnvoll wenn Anthropic offizielle Position publiziert.
+
+**Status-Notiz Tag 26 (25. Mai 2026):** Anthropic-Stance hat sich Tag 25-26 geklärt: kein 3rd-Party-OAuth mehr, nur Token-Kauf-Pattern. CLI-Reuse-Pattern (Claude Code via lokale CLI-Authentifizierung wiederverwenden) ist damit obsolet.
+
+**Konzept-Update-Pflicht vor Bau:** Item bleibt Phase B, aber Implementation-Pfad muss neu konzipiert werden:
+- Alt: Claude-CLI-Subscription-Reuse via lokales Auth-File
+- Neu: Token-Buying-Surface — Twin-Lab vermittelt API-Token-Käufe direkt über Anthropic-API, Owner zahlt nicht für Subscription separat
+
+**Recherche-Session vor Phase-B-Bau Pflicht:** Anthropic-aktuellen Stance verifizieren (Tag-25-Mai-26-Snapshot kann morgen schon anders sein), Token-Buying-API-Surface dokumentieren, Pricing-Modell verstehen (Markup oder pass-through).
+
+**Bleibt:** Größe M, Priorität `later`, Spur Pre-Launch-Phase B.
+
+### 116. Conversational Skill/MCP-Install
+
+Twin nimmt in der Konversation Anweisung "installiere Skill X" oder "verbinde MCP-Server Y" entgegen und führt die Installation mit Owner-Approval aus. Mobile-relevant: auf Telegram/WhatsApp gibt es keine Settings-UI, Conversational Install ist dort der einzige Weg.
+
+**MVP-Scope-Skizze:**
+- Neue Capabilities `install_skill`, `install_mcp_server` mit Approval
+- Twin antwortet z.B.: "Ich brauche Skill X für die Aufgabe. Hier ist manifest.yaml + SKILL.md. Bitte freigeben."
+- User approved → existing CLI-/Backend-Logic (#86, #87) wird aufgerufen
+- Source: manueller Paste in Chat oder Verweis auf Public-Skill-Registry (später)
+
+**Aufwand-Range:**
+- Minimal (Tool-Call + Approval mit existing #86/#87-Backend): M-L
+- Full Self-Service (Skill-Registry-Integration): XL, eigenes Item
+
+**Begründung:** Vererbungs-Story für Mobile-Use. Anna soll auf WhatsApp ihrem Twin sagen können "installiere den Calendar-Skill" ohne zum Desktop wechseln zu müssen.
+
+**Dependencies:**
+- #86 ✅ Skill-Editor-UI (Backend-Routes für Skill-CRUD)
+- #87 (in Arbeit) MCP-Configurator-UI (Backend-Routes für MCP-CRUD)
+- Mobile-Anbindung (eigenes Phase-B-Item, noch nicht angelegt)
+
+**Größe:** L · **Priorität:** later · **Aus:** Strategy-Session Tag 18 Nachmittag · **Spur:** Pre-Launch-Phase B (SaaS + Mobile)
+
+**Inspiration NanoClaw (Tag 21):** NanoClaw's `/add-<name>`-Pattern (z.B. `/add-telegram`, `/add-codex`) ist die natürliche Evolution von Conversational Install. Claude Code übernimmt das Install-Step direkt, kopiert nur das benötigte Modul in den Fork. Vision-Bestätigung für Anna-Use-Case: „Anna sagt auf WhatsApp ‚installiere Calendar-Skill'" → Twin-Lab erkennt Intent, Claude Code bzw. Twin-Service führt aus mit Owner-Approval.
+
+Plus: NanoClaw's „AI-native, hybrid by design"-Onboarding-Philosophie (scripted Happy-Path + Claude-Code-Fallback bei Step-Failure) als Inspiration für Phase-B-Onboarding-Evolution über das heutige Wizard-Form-Pattern (#110) hinaus.
+
+### 117. Self-Authored Skills (Twin erstellt eigene Skills)
+
+Twin beobachtet eigene Konversationen, erkennt wiederkehrende Patterns ("Owner fragt mich oft nach X mit ähnlicher Struktur"), generiert eigene Skill-Definitionen (Manifest + Instructions), und nutzt sie ab dann. Konzept analog zu autonom-skill-authoring Agent-Patterns.
+
+**Strategy-Session vorab Pflicht.** Offene Fragen:
+- **Trigger:** Wie erkennt Twin "wiederkehrendes Pattern"? Background-Pipeline, periodische Reflektion, on-demand?
+- **Generation:** Twin generiert Skill-Manifest + Instructions selbst per LLM-Call?
+- **Approval:** Self-Approval (Twin nutzt direkt), User-Approval-Flow, oder gestaffelt (erste N Nutzungen mit Approval, dann automatisch)?
+- **Versionierung:** Twin verbessert eigene Skills über Zeit — Skill-Versionen, Audit-Trail, Rollback?
+- **Vererbungs-Implikation:** Self-Authored Skills sind Teil der Twin-Identity. Bei Vererbung an Anna (Vision Block 4): wie wird Self-Authored-Status kommuniziert? Anna sieht "diesen Skill hat Markus' Twin selbst entwickelt"?
+
+**Verknüpfung zur Twin-Reife (#101):**
+- Stufe "Tief" bedeutet aktuell: viel Memory, viele Themen, lange Zeitspanne. Mit Self-Authored Skills bekommt "Tief" eine neue Dimension: Twin hat **eigene Capabilities entwickelt**.
+- Möglicher Stufen-Indikator: "Self-Authored Skills: 3" als 5. Dimension in der Maturity-Heuristik.
+
+**Dependencies:**
+- #86 ✅ Skill-Editor-UI (Backend für Skill-Persistenz)
+- Memory-Reflektion-Pipeline (existiert für Episodic, müsste erweitert werden)
+- LLM-Call mit Manifest-Schema-aware Output (Constrained Decoding?)
+- Audit/Versionierung-Infrastruktur
+
+**Begründung:** Self-Authored Skills sind die *spürbarste* Vision-Eigenschaft — Twin wird mit der Zeit nicht nur "schlauer" sondern *fähiger*. Differenzierungs-Story-Material für Pre-Launch B / Public-Launch.
+
+**Größe:** XL · **Priorität:** vision-kritisch · **Aus:** Strategy-Session Tag 18 Nachmittag · **Spur:** Pre-Launch-Phase B+ / Phase 3.7
+
+### #93 Cognee als optionaler MCP-Skill für Knowledge-Recall (L, nice)
+
+Wenn ein Twin größere Doc-Sets braucht (Workshop-Materialien, Notizen, Wissens-Korpus), kann Cognee (cognee.ai, 16.6k Stars, Apache 2.0) als MCP-Server pro Twin angebunden werden. Pattern identisch zu `everything`-Server aus 3.2 — `mcp_cognee_remember`, `mcp_cognee_recall` als Tools, optional `mcp_cognee_forget`. Pro Twin eigenes Cognee-Dataset, Isolation via Dataset-ID. Voraussetzung: 3.3 Conversation+Semantic-Memory steht (✅), plus 3.5 zeigt dass MCP-Pattern für externe Tools robust ist. Erst danach evaluieren ob Cognee echten Mehrwert über unsere Eigen-Implementation hinaus bringt (Knowledge-Graph, Ontology, Auto-Routing zwischen Session/Graph). Aus Tag-12-Recherche.
+
+### #94 Dream-Pattern für Memory-Kuratierung (L, nice)
+
+Periodischer LLM-Job pro Twin der die Facts-Sammlung verdichtet, dedupliziert und mit Konversations-Insights ergänzt. Pattern adaptiert von Anthropic Managed-Agents-Dreams (Research Preview, claude.com/docs/managed-agents/dreams). Eigen-implementiert ohne Vendor-Lock. Architektur:
+- Cron-Job oder On-Demand-Trigger pro Twin
+- LLM-Call mit Persona + aktueller Facts-Liste + Konversations-Summary-Sample
+- Prompt: „Hier ist deine Faktensammlung. Hier sind 50 zufällige Konversations-Auszüge. Welche Fakten sollten aktualisiert, dedupliziert oder ergänzt werden? Schreibe vorgeschlagene neue Facts-Liste."
+- Output → Diff-Vorschlag im UI → User approved/rejected pro Fact
+- Andockpunkt vermutlich Phase 3.6 (Procedural Memory) oder Phase 4
+
+Vorbedingung: 3.3 komplett ✅, plus Pilot-Phase mit ~50+ Fakten pro Twin gelaufen, damit der Job sinnvolle Eingangsdaten hat. Aktuell @markus mit ~8 Facts — noch zu wenig für Job-Auslastung. Aus Tag-12-Recherche.
+
+---
+
+### #95 MemPalace-Patterns als Inspirationsquelle dokumentiert (S, nice)
+
+MemPalace (github.com/mempalace/mempalace, 48.2k Stars, MIT) — open-source AI-Memory-System, Python-basiert mit ChromaDB-Backend. Vier Patterns, die für twin-lab als Inspirationsquelle relevant sind:
+
+1. **Wings/Rooms/Drawers-Hierarchie** (siehe #96)
+2. **Temporal-Knowledge-Graph mit Validity-Windows** (siehe #97)
+3. **Verbatim-Storage statt Summary-Compression** — sie speichern Konversationen 1:1, suchen über Original-Text. Wir summarizen bei >50 Messages. Trade-off: ihre Detail-Tiefe vs. unsere Speicher-Effizienz. Bei Pattern-Phase „Reverse-Memory-Query" (TWIN-VISION Punkt 8) evaluieren, ob Summary-Compression zu viel Detail verliert.
+4. **Auto-Save-Hooks für Claude Code** — periodische Hooks plus Pre-Compression-Hook. Verwandt zu unserem Pattern „Auto-Diary-Generation" (Self-Reflection-Pattern), aber MemPalace ist Claude-Code-spezifisch, wir sind Twin-Plattform.
+
+Architektur-Entscheidung vom 11. Mai (Eigen-Bau statt Cognee/Dreams) bleibt — MemPalace adressiert nur die Memory-Schicht, twin-lab ist Twin-Plattform mit A2A, Persona, Mandates, Trust. Plus: MemPalace ist Python, wir sind TypeScript — Integration via MCP-Server möglich, aber zwei Runtimes parallel ist Compose-Komplexität nicht wert für isoliertes Memory-Layer.
+
+Benchmarks (zur Orientierung, keine direkte Vergleichbarkeit): LongMemEval R@5 96.6% raw / 98.4% hybrid v4, LoCoMo R@10 88.9% hybrid, ConvoMem 92.9% avg recall, MemBench 80.3% R@5.
+
+Aus Tag-14-Recherche.
+
+### #96 Hierarchical Memory-Scoping als Mitigation für Name-Overlap (M, should)
+
+Direktes Mitigation für Name-Overlap-Problem aus 3.4-Pre-Check (Query „Wo geht Markus in Urlaub?" → Toskana-Passage auf Rank 5/5, weil 4 andere Passages „Markus" als Token enthielten). MemPalace löst das via Wings/Rooms/Drawers-Hierarchie: Memory ist nicht flach, sondern strukturiert. „Wings" = große Cluster (Personen, Projekte), „Rooms" = Topics innerhalb eines Wings, „Drawers" = einzelne Memory-Einträge. Suchen kann auf Wing-Level oder Room-Level gescopet werden — Vector-Search läuft nur innerhalb des relevanten Wings, nicht über alles.
+
+Übertragung auf twin-lab: Datenschicht aus 3.4 hat bereits Felder, die in Richtung gehen — `topic_tags` (JSON-Array, NULL initially) und `narrative_thread_id` (TEXT, NULL initially) auf der `embeddings`-Tabelle. Diese könnten als „Light-Hierarchy" interpretiert werden:
+
+- Auto-Tagging beim Embedden via LLM-Call („Welche Topics/Subjekte beschreibt dieser Text?")
+- `narrative_thread_id` als Verkettung verwandter Memories
+- Search-API erweitert: `EmbeddingsRepo.search(twinId, query, { topicTagFilter?, narrativeThreadId? })`
+
+Alternative: Hybrid Search via FTS5 (Datenschicht in 3.4 vorbereitet via `memory_fts`-Tabelle) — kombiniert Vector + BM25-Keyword-Search. Eine der beiden Mitigationen reicht vermutlich, je nach welche zuerst nötig wird im Real-Data-Test.
+
+Andockpunkt: Pattern-Phase „Aufmerksamkeit/Fokus" (TWIN-VISION) oder dedicated Mini-Phase falls Name-Overlap in Production-3.4-Tests spürbar wird.
+
+Aus Tag-14-Recherche + Pre-Check-Befund.
+
+### #97 Facts mit Validity-Windows + History-Tracking (L, should)
+
+Erweiterung des Facts-Systems (`facts`-Tabelle aus 3.3) um temporale Dimension. Heute überschreibt ein neuer Fact den alten — keine History, kein Audit, kein Drift-Tracking möglich.
+
+MemPalace hat das gelöst via Temporal-Knowledge-Graph mit Validity-Windows: Entity-Relationship-Graph mit Zeit-Stempeln pro Fact, alte Einträge werden invalidated (nicht überschrieben), Timeline-Queries möglich (z.B. „Wie war Markus' Beziehungsstatus 2015?").
+
+Übertragung auf twin-lab:
+
+- `facts`-Tabelle bekommt `valid_from`, `valid_until`, `invalidated_by_fact_id` Spalten
+- Plus neue `facts_history`-Tabelle für vollständigen Audit-Trail bei Updates
+- Repo-Methoden: `factsRepo.invalidate(factId, by)`, `factsRepo.getAsOf(date)`, `factsRepo.getTimeline(key)`
+- UI: Facts-Page bekommt Toggle „aktuell" vs „historisch", Timeline-Ansicht pro Fact-Key
+
+Direktes Substrate für Vision-Patterns:
+- **Werte-Drift** (TWIN-VISION Pattern 5): Twin kann beobachten wie sich Markus' Werte über Zeit verschieben
+- **Zeit-Erleben** (Pattern 2): „Was war 2025 wichtig, was ist heute wichtig?"
+- **Lebens-Narrativ** (Pattern 7): Kohärente Story-Linie aus zeitlich verorteten Facts
+
+Substantiell — eigene Phase, vermutlich nach 3.4 oder mit Pattern-Phase „Zeit-Erleben" gebündelt. MemPalace's Implementation als Referenz nutzen, keine direkte Code-Übernahme (Python → TypeScript).
+
+Aus Tag-14-Recherche.
+
+### #143 Web-OAuth-Production-Flow ohne CLI-Subprocess (XL, should — Phase B)
+
+**Phase-A-Variante:** OAuth läuft über `pnpm twin:oauth-login` CLI-Wrapper (Phase 4). User braucht Codex Desktop App + Terminal-Zugang zum twin-lab-Repo. Akzeptabel für drei dev-fitte Owner (florian/heiko/markus), aber Mass-User-Onboarding-Friction.
+
+**Phase-B-Ziel:** Browser-only OAuth direkt aus der Settings-Page heraus. Klick "OAuth aktivieren" → eigener PKCE-Server im runtime nimmt Callback entgegen → Token-Persist + Settings-Refresh. Kein Terminal-Wechsel, kein Codex-App-Requirement.
+
+**Implementation-Skizze:**
+- Eigener Loopback-Listener (Port 1455 oder dynamisch) im runtime-Workspace
+- PKCE-Challenge clientseitig im Web, Auth-URL öffnet sich in neuem Tab
+- Callback-Endpoint `/oauth/callback` im runtime nimmt Code entgegen, exchanged gegen Token, persistiert in oauth_tokens
+- WebSocket oder SSE-Push an Settings-UI für Status-Update
+
+**Risiken:** OAuth-Redirect-Whitelist bei OpenAI Codex (hardcoded localhost:1455), VPS-Self-Hosting braucht SSH-Tunnel oder Port-Forwarding. Strategy-Doc §a-§b hat das in der Original-XXL-Estimate berücksichtigt.
+
+**Größe:** XL (3-5 Bautage). **Priorität:** should. **Spur:** Phase B.
+
+### #144 VPS/Linux-Path für CLI via `--device-auth` (M, nice — Phase B)
+
+**Phase-A-Setzung (§t.8):** `pnpm twin:oauth-login` baut nur den lokalen macOS-Path mit Codex-Desktop-App-Bundle. VPS/Linux-Self-Hoster können das CLI noch nicht nutzen.
+
+**Phase-B-Ziel:** CLI um `--device-auth`-Flag erweitern. `codex login --device-auth` startet Device-Code-Flow — User loggt sich am Mac-Browser ein, gibt 8-stelligen Code in VPS-Terminal ein. Pattern-Adaption analog Hermes für SSH-only-Self-Hoster.
+
+**Alternative:** CLI um Detect-Logik erweitern (`fs.existsSync('/Applications/Codex.app')` → macOS-Path, sonst → Linux-Binary von `@openai/codex`-npm-Package). Plus `--device-auth`-Flag als manueller Override.
+
+**Größe:** M (1-1.5 Bautage). **Priorität:** nice (erst wenn ein User es konkret fordert). **Spur:** Phase B oder Phase A nach Launch.
+
+### #145 Multi-Account-Support für mehrere ChatGPT-Accounts (M, nice — Phase B)
+
+**Phase-A-Limit:** `~/.codex/auth.json` ist single-tenant. Re-Login mit anderem ChatGPT-Account überschreibt `account_id` im File. User mit mehreren ChatGPT-Accounts (Personal + Work) müssen zwischen Logins manuell wechseln.
+
+**Phase-B-Ziel:** Pro-Twin-`auth.json` (z.B. `~/.codex/auth.json.@markus`, `~/.codex/auth.json.@florian`) — getrennte Files für getrennte Accounts. CLI managed das Switching via Symlink oder per-twin-config.
+
+**Alternative:** Settings-UI-Warnung beim Re-Login: "Vorheriger ChatGPT-Account: X. Neuer Login überschreibt." User akzeptiert bewusst.
+
+**Größe:** M (1-2 Bautage). **Priorität:** nice. **Spur:** Phase B nach Launch + Demand-Signal.
+
+### #151 `id_token` + `scope` aus Refresh-Response evaluieren (S, nice — Phase B)
+
+**Files:** `apps/runtime/src/oauth/openai-pkce.ts` (`OAuthTokenResponse`-Type), `apps/runtime/src/oauth/oauth-tokens-repo.ts`.
+
+**Hintergrund (Tag 28 Block 7 Live-Diag):** Codex-Refresh-Response liefert die Felder `[access_token, expires_in, id_token, refresh_token, scope, token_type]` — siehe `audit_FuawriTsQd1j`-Begleit-Diag-Dump. Heute werden nur `access_token` + `refresh_token` + `expires_in` extrahiert. `id_token` (JWT mit Claims) und `scope` werden ignoriert.
+
+**Mögliche Use-Cases:**
+- **`id_token.exp`-Claim** für Initial-Token-Lifetime-Konsistenz (Cross-Ref #150). Würde erklären woher die ~50-Min-Initial-Lifetime nach `codex login` kommt.
+- **`id_token.email`** für Account-Verifikation. Owner-User-Mapping könnte gestärkt werden — heute basiert das nur auf `account_id`.
+- **`scope`** für Multi-Scope-Support in Phase B (z.B. wenn zusätzliche OpenAI-Capabilities pro Twin geschaltet werden sollen).
+
+**Action:** `OAuthTokenResponse`-Type um optionale Felder erweitern, JWT-Parsing-Helper für `id_token`-Claims, optionaler Spalten-Erweiterung im `oauth_tokens`-Repo (z.B. `id_token_email` indizierbar für Account-Lookup).
+
+**Priority:** nice-to-have, Phase B. **Aufwand:** S (~3-4h für Type + Parser + Repo-Erweiterung, ohne UI-Integration).
+
+### #152 Hot-Reload-Race im `tsx watch`-Dev-Setup adressieren (M-L, nice — Phase B)
+
+**Hintergrund (Tag 28 Block 11-12):** Block-11-Diagnose-Spike für #149 hat identifiziert: `tsx watch` (Dev-Setup für Runtime) kann mehrere `OAuthRefreshService`-Instanzen parallel laufen lassen — bei Code-Change in `refresh-service.ts` oder umgebenden Files startet eine neue Instanz, während die alte noch in-flight ist. Jede Instanz hat ihre eigene `inFlight`-Map, der Mutex greift nicht über Instanzen-Grenze hinweg. Mögliche Folge: zwei parallele `refreshAccessToken`-Calls für denselben Twin, OpenAI invalidiert beide Tokens (`refresh_token_reused`).
+
+Dies ist die plausibelste Erklärung für die Tag-28-Vormittag-Failures, die ursprünglich H3-Race-Verdacht in #149 ausgelöst hatten. #149 ist code-seitig korrekt (Single-Process-Modell), die Wurzelursache liegt im Dev-Tool-Lifecycle.
+
+**Production-Relevanz:** Aktuell **niedrig**, weil Production-Container-Restarts (nicht Hot-Reload) immer sauber booten. Aber: relevant für Container-Cluster-Setups (Phase B+) oder Multi-Instance-Skalierung mit horizontaler Replikation.
+
+**Lösungspfade:**
+
+- **Variante A — `OAuthRefreshService` als Singleton via Module-Scope.** Statt Instance-Field in `TwinService`-Konstruktion eine Module-Level-Variable mit Lazy-Init. Hot-Reload re-importiert das Module, aber der Module-Scope-Cache ist persistent (Node-Module-System). Komplexität: M.
+- **Variante B — SQLite-Lock auf `oauth_tokens`-Row für die Refresh-Dauer.** `BEGIN IMMEDIATE` + `UPDATE ... WHERE expires_at = ?` als atomic Check-and-Lock. Cross-Process-Safe, adressiert auch Container-Cluster-Setup. Komplexität: M-L.
+- **Variante C — In Dev-Setup `OAUTH_REFRESH_POLL_DISABLED=true` als Default in `.env.local` setzen.** Schnell-Fix via Doku, keine echte strukturelle Lösung. Bereits empirisch greifend ab Tag 28 Block 6.
+
+**Priority:** nice, Phase B. Bis dahin: Block-6-Guard (`OAUTH_REFRESH_POLL_DISABLED=true`) als pragmatische Mitigation, JSDoc in `ensureFresh` als forensische Spur für zukünftige Sessions.
+
+**Aufwand:** M (Variante A) bis L (Variante B). Variante C ist XS-Doku, aber kein "Fix".
+
+### #153 DEPLOYMENT.md §11 OAuth-Production-Workflow dokumentieren (XS, should — Phase B)
+
+**Hintergrund (Tag 28 Block 14-15):** Phase-B-CLI-Erweiterung `--auth-json=<path>` (Commit `76e49fe`) ermöglicht VPS-OAuth-Login ohne Codex-Binary im Container. Production-Workflow ist 4-Schritt-manuell:
+
+1. Mac-lokal: `codex login` → schreibt `~/.codex/auth.json`
+2. Mac: `scp ~/.codex/auth.json root@srv1046432:/tmp/auth.json`
+3. VPS: `docker cp /tmp/auth.json twin-lab-runtime:/tmp/auth.json`
+4. VPS: `docker exec twin-lab-runtime npx tsx /app/apps/runtime/src/scripts/cli-oauth-login.ts <@handle> --auth-json=/tmp/auth.json`
+5. Cleanup: `docker exec ... rm /tmp/auth.json` + `rm /tmp/auth.json` auf VPS-Host
+
+**Action:** in `docs/DEPLOYMENT.md` einen neuen `### §11 OAuth-Login für Production-Twins`-Abschnitt mit der Sequenz, Security-Hinweis (auth.json enthält access_token + refresh_token, nicht in Repo committen + nach Use löschen), und Cross-Ref auf #131-OAUTH-STRATEGY §y. Zusätzlich Re-Login-Pfad dokumentieren (gleiche Sequenz, `oauth_tokens.upsert` überschreibt existing Row).
+
+**Priority:** should. Solange #143 (Web-OAuth ohne CLI) Phase-B-Item ist, ist Manual-Workflow das produktive Pattern für `@florian`/`@heiko`-Onboarding und Re-Login. Ohne Doku-Anker wird die Sequenz aus Chat-Transkripten rekonstruiert. **Aufwand:** XS (~15-20 Min).
+
+### #154 DEPLOYMENT.md Deploy-Section: `--build-arg NEXT_PUBLIC_RUNTIME_URL` explizit dokumentieren (XS, should — Phase B)
+
+**Hintergrund (Tag 28 Block 13):** Production-Deploy ist auf einen Build-Arg-Bug gelaufen. `apps/web/Dockerfile` deklariert `ARG NEXT_PUBLIC_RUNTIME_URL=http://localhost:4000` als Default. Beim Production-`docker build` ohne `--build-arg` wurde der Default in das JS-Bundle inlined — NEXT_PUBLIC_*-Vars sind build-time-Konstanten in Next.js, kein Runtime-Lookup. Folge: Web-Container rief `http://localhost:4000/auth/login` statt der Production-Runtime-URL. ~30 Min Diagnose, ~10 Min Re-Build mit korrektem Build-Arg.
+
+**Action:** in `docs/DEPLOYMENT.md` Web-Build-Section explizit ergänzen:
+
+```sh
+docker build \
+  --build-arg NEXT_PUBLIC_RUNTIME_URL=https://runtime.twin.harwayexperience.com \
+  -t twin-lab-web:latest \
+  -f apps/web/Dockerfile \
+  .
+```
+
+Plus Warn-Box: "Ohne `--build-arg` greift der Dockerfile-Default `http://localhost:4000` und der Web-Container ruft localhost an. Always explicit."
+
+**Priority:** should. Einmaliger Doku-Aufwand, vermeidet ~40 Min Diagnose beim nächsten Production-Build. **Aufwand:** XS (~5-10 Min).
+
+### #156 DEPLOYMENT.md Multi-Service-Refactor-Sequenz dokumentieren (XS, should — Phase B)
+
+**Hintergrund (Tag 28 Block 16):** Multi-Service-Refactor (#155 A2A Reply-Architektur) hat Bridge + Runtime + Web geändert. Deploy-Briefing nannte nur Runtime + Web, Bridge wurde übersehen. Production-Smoke schlug fehl mit Bridge-400 `"messageType muss einer von [twin, system] sein"` weil Bridge-Container noch alten Type-Union-Build hatte. Failed-Audit `audit_pk2D6B1bbdMx` ist live als forensische Spur.
+
+**Action:** Neue Section `### Multi-Service-Deploys` in `docs/DEPLOYMENT.md` mit:
+- Checklist: bei Schema-Changes die mehrere Container kennen müssen, **alle drei Container (Bridge + Runtime + Web) zusammen rebuilden + recreaten**
+- Beispiel-Build-Sequenz (alle drei Images parallel)
+- Hinweis auf `docker compose up -d --force-recreate bridge runtime web` als atomare Aktion
+- Cross-Ref Lesson #15 Tag 28 + #155
+
+**Priority:** should. Vermeidet ~5-10 Min Diagnose pro Multi-Service-Deploy. **Aufwand:** XS (~10-15 Min).
+
+### #157 Smoke-Scripts-Hygiene-Welle (Phase-by-Phase-Archivierung, M-L, nice — Phase B)
+
+**Status:** Offen | Phase B | Aufwand: M-L (1-1.5 Bautage)
+**Cross-Ref:** `docs/INVENTORY-tag28.md` Sektion B2
+
+Aktuell 35 `test-*.ts`-Smoke-Scripts in `apps/runtime/src/scripts/` (22 in `package.json` registriert, 13 unregistriert), alle aus konkreten Bauphasen (Phase 3.1 Skills, 3.2 MCP, 3.3 Memory/Facts, 3.4 OAuth/Codex, #130 Telegram).
+
+**Setzung Schule B (Tag 28 Block 19/20):** Phase-Closure-getriggert Smoke-Scripts nach `apps/runtime/src/scripts/archive/<phase>/` verschieben. `package.json`-Scripts entsprechend dokumentieren oder entfernen. Phase-bezogenes Mapping als `README.md` im jeweiligen Archive-Subfolder.
+
+**Scope-Bauschritte:**
+- Pro Bauphase Liste der Smoke-Scripts ermitteln (aus STAND/BACKLOG-Spuren zusammensuchen)
+- `archive/`-Subfolder mit `README.md`-Stub anlegen
+- Files mit `git mv` verschieben
+- `package.json`-Scripts-Section bereinigen
+- STRATEGY-Docs-Cross-Refs aktualisieren falls direkt auf Script-Pfad verwiesen wird
+
+**Nicht-Scope:**
+- Vitest-Migration (eigene Diskussion, nicht hier)
+- Aktive Phase (z.B. Phase 3.5 falls noch nicht closed) bleibt live
+
+**Findings aus Block 19 Inventur:**
+- **22 registriert** (B2.2 Inventur): `oauth-phase1/2/3-Spikes`, `codex-vercel-provider`, `codex-sse-parser`, `codex-retry`, `trust-test`, `memory-repos`, `episodic-repos`, `embedding-providers`, `model-cache-dir`, `memory-embedding-service`, `memory-retrieval-service/hybrid`, `twin-diary-cli`, `memory-maintenance`, `summary-engine`, `history-with-summary`, `prompt-builder`, `extraction-engine`
+- **13 unregistriert** (B2.3 Inventur): `test-conversation-flow/history`, `test-conversations-repo`, `test-mcp-client-manager`, `test-mcp-servers-repo`, `test-mcp-skill-sync`, `test-mcp-tool-execution`, `test-skill-engine`, `test-skill-repo`, `test-telegram-phase2/3`, `test-telegram-repos`, `setup-telegram-manual-smoke`
+
+### #158 Strategy-Doc-Lifecycle-Konvention etablieren (S, nice — Phase B)
+
+**Status:** Offen | Phase B | Aufwand: S (~30 Min Setup-Block, danach laufende Disziplin)
+**Cross-Ref:** `docs/INVENTORY-tag28.md` Beobachtung 9, `docs/archive/README.md`
+
+`131-OAUTH-STRATEGY.md` mit 141 KB und 25 Sub-Sections (§a-§y) zeigt: wenn jedes substantielle Phase-Item ein Live-Tagebuch bekommt, wachsen wir uns mit den Strategy-Docs kaputt. Brauchen Konvention.
+
+**Setzung:** Strategy-Docs leben in `docs/` während ihre Phase aktiv ist. Nach Phase-Closure wandern sie nach `docs/archive/`. Konvention dokumentiert im `docs/archive/README.md` (Block 20).
+
+**Scope-Bauschritte:**
+- Bei nächster Phase-Closure (z.B. Phase 3.5 oder #131 OAuth final-closed) Strategy-Doc nach `docs/archive/` verschieben
+- Live-STAND-Header weist auf Archive-Pfad hin
+- Falls künftige Phase Live-Strategy-Doc braucht: `README.md` im Phase-Folder vermerken, nicht im Repo-Root
+
+**Nicht-Scope:**
+- Retroaktive Archivierung von `131-OAUTH-STRATEGY.md` (Phase A closed seit Tag 27, aber Strategy-Doc ist heute Tag 28 Block 14 + 15 um §x + §y erweitert worden — hat noch live-Spuren). Wenn Phase A komplett closed ist und keine `--auth-json`-Folge-Iteration mehr ansteht, dann Move.
+
+### #159 FK-Cascade-Check für alle User/Twin/Owner-Relations (S, nice — Phase B)
+
+**Status:** Offen | Phase B | Aufwand: S (~30-60 Min Audit + ggf. punktuelle Pragma-Fixes + CLI-Cheat-Sheet)
+**Cross-Ref:** Lesson Tag 29 #4, `apps/runtime/src/scripts/_mcp-cli-helpers.ts:77-78`, `apps/runtime/src/scripts/init-db.ts`
+
+**Befund Tag 29 (27. Mai 2026):** Bei Block-5-Smoke-Cleanups via `sqlite3`-CLI sind Orphan-Rows entstanden — `DELETE FROM users WHERE email='test@…'` hinterließ `twin_profiles` + `audit_log` + `mcp_servers`-Rows ohne User. Wurzel: `sqlite3`-CLI enforced Foreign-Keys per default **nicht**, das Pragma muss pro Connection gesetzt werden. Application-Code macht das schon konsistent (`db.pragma("foreign_keys = ON")` in jedem DB-Connector, siehe `_mcp-cli-helpers.ts`, `init-db.ts`, `runtime/src/index.ts`), aber ad-hoc Shell-Sessions sind blind.
+
+**Scope:**
+1. **Audit aller DB-öffnenden Code-Pfade.** `grep -rn "new Database(" apps/` + `grep -rn "better-sqlite3" apps/` → für jeden Treffer verifizieren, dass `db.pragma("journal_mode = WAL")` und `db.pragma("foreign_keys = ON")` direkt nach dem Open gerufen werden. Fehlende Pragma-Setzungen ergänzen.
+2. **Schema-Audit der FK-Beziehungen.** Welche Tabellen referenzieren `users(user_id)`, `twin_profiles(twin_id)`, `owner_user_id`? `ON DELETE CASCADE` vs. `RESTRICT` vs. `SET NULL` — pro Beziehung dokumentieren, ob die Cascade-Policy gewollt ist (z.B. User-Delete → Twin-Delete? Oder Soft-Lock?).
+3. **DB-CLI-Cheat-Sheet** in `docs/SETUP.md` (oder neuer `docs/DB-CHEATSHEET.md`): "Vor manuellen DELETEs immer `PRAGMA foreign_keys = ON;` setzen. Empfohlener Header-Block für ad-hoc Cleanup-Sessions."
+4. **Optional:** Smoke-Cleanup-Helper-Skript (`pnpm db:cleanup-test-user <email>`) das die Pragma sauber setzt und User + abhängige Rows in einer Transaktion löscht — verhindert künftige Orphan-Drift.
+
+**Nicht-Scope:**
+- Account-Delete-UI (eigenes Item, aus #135 defer)
+- Datenmigration historischer Orphan-Rows (separater Cleanup-Block falls vorhandene Test-DB-Reste relevant werden)
+
+**Wert:** vermeidet stille DB-Drift bei künftigen Smokes, dokumentiert die FK-Semantik für jeden, der manuell in die DB greift. Niedriges Risiko, hoher Cleanliness-Impact für die Phase-B-Self-Hosting-Phase wenn externe Owner ihre Test-Twins iterativ wegputzen.
+
+### CLA/DCO vor den ersten externen Beiträgen (Vorbedingung für Dual-Licensing)
+
+**Status:** OFFEN (jetzt unkritisch, Alleinautor) | **Größe S–M** | **Gate:** vor „erste externe Beiträge annehmen"
+
+Ein **CLA** (Contributor License Agreement) oder mindestens **DCO** (Developer Certificate of Origin) ist die **Vorbedingung für späteres Dual-Licensing**: ohne Rechte-Bündelung an externen Beiträgen kann der Rechteinhaber das Gesamtwerk nicht kommerziell relizenzieren (ein AGPL-Beitrag eines Dritten „infiziert" sonst die kommerzielle Lizenzierbarkeit). Solange Markus Alleinautor ist, **kein Handlungsbedarf** — aber **vor dem ersten gemergten Fremd-PR** muss das Modell stehen (CLA-Bot o.ä.). Als Gate gemerkt.
+
+### Dual-License-Ausgestaltung bei konkreter Managed-Tür (+ Rechtsberatung)
+
+**Status:** OFFEN (D5-Territorium, bewusst vertagt) | **Größe L** | **Trigger:** wenn die Managed-Tür konkret wird
+
+**Dual-Licensing** (AGPL frei **+** kommerzielle Lizenz) ist der **Monetarisierungs-Pfad** für die spätere Managed-Tür: wer Nolmi proprietär/closed betreiben will, kauft eine kommerzielle Lizenz statt unter AGPL offenzulegen. **Ausgestaltung erst, wenn die Managed-Tür konkret wird** (Preis, Lizenztext, Vertrieb). Bei echtem Geld: **Fachkundige(r) für Lizenzrecht** hinzuziehen. Vorbedingung: CLA/DCO (Item oben). Hängt an D5 (Managed = eigenes Unternehmen).
+
+**Neue Items aus Phase 3a (für später):**
+- **`SESSION_COOKIE_NAME`-Konstante konsolidieren:** heute in `apps/runtime/src/auth/session.ts` (Export) **und** `apps/web/middleware.ts` (Local-Const-Duplikat) gepflegt. Cross-App-Import vom Runtime ins Web ist heute strukturell nicht vorgesehen (Runtime exportiert keine Subpaths). Sauberer Pfad: `@nolmi/shared/auth-cookies` mit beiden Konstanten, beide Apps konsumieren von dort. Aufwand S, nice (Phase 5+).
 
