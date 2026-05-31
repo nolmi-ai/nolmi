@@ -463,10 +463,6 @@ Aktuell nicht relevant, weil Thinking im Send-Path nicht aktiviert ist. Wenn kü
 
 Memory-Schichten und Skill-System. Vor Phase 4. Aufwand-Cluster.
 
-### 23. Procedural Memory (Schicht 4 — Procedural)
-Lerngedächtnis. Twin lernt aus Approves/Rejects/Edits. Persona-Iterationen über Zeit, oder feinere Korrekturen. Hermes-style: nach komplexen Tasks (5+ Tool-Calls) schreibt der Twin eine Skill-Markdown selbst.
-**Größe:** XL · **Priorität:** nice · **Aus:** Memory-Diskussion 1.5.
-
 ### 26. agentskills.io-Kompatibilität
 Skills im Hermes/agentskills.io-Format implementieren, damit wir community-Skills nutzen können und eigene Skills portabel sind.
 **Größe:** M · **Priorität:** should · **Aus:** Skills-Diskussion 1.5.
@@ -2781,6 +2777,11 @@ Twin beobachtet eigene Konversationen, erkennt wiederkehrende Patterns ("Owner f
 **Begründung:** Self-Authored Skills sind die *spürbarste* Vision-Eigenschaft — Twin wird mit der Zeit nicht nur "schlauer" sondern *fähiger*. Differenzierungs-Story-Material für Pre-Launch B / Public-Launch.
 
 **Größe:** XL · **Priorität:** vision-kritisch · **Aus:** Strategy-Session Tag 18 Nachmittag · **Spur:** Pre-Launch-Phase B+ / Phase 3.7
+
+### 23. Procedural Memory (Schicht 4 — Procedural)
+Lerngedächtnis. Twin lernt aus Approves/Rejects/Edits. Persona-Iterationen über Zeit, oder feinere Korrekturen. Hermes-style: nach komplexen Tasks (5+ Tool-Calls) schreibt der Twin eine Skill-Markdown selbst.
+**Größe:** XL · **Priorität:** nice · **Aus:** Memory-Diskussion 1.5.
+*(Triage 2b Tag 33 hierher verschoben: nicht gebaut, überlappt #28/#117 Self-Authored Skills — Phase-B-Vision.)*
 
 ### #93 Cognee als optionaler MCP-Skill für Knowledge-Recall (L, nice)
 
