@@ -38,12 +38,11 @@ import { OAuthTokensRepo } from "./oauth/oauth-tokens-repo.js";
 import { encrypt } from "./crypto-utils.js";
 import { LLM_PROVIDERS, type StoredLlmConfig } from "./llm-config.js";
 import { buildPersonaMarkdown } from "./onboarding/persona-builder.js";
-import { loadMandateTemplate } from "./onboarding/mandate-templates.js";
 import { validateApiKey } from "./onboarding/api-key-validator.js";
 import {
-  registerHandleOnBridge,
-  BridgeRegisterError,
-} from "./onboarding/bridge-register.js";
+  createTwin,
+  CreateTwinError,
+} from "./onboarding/create-twin.js";
 import { getCurrentUser } from "./auth/get-current-user.js";
 import { UsersRepo, UserAlreadyExistsError, type User } from "./auth/users-repo.js";
 import { destroySession, setSession } from "./auth/session.js";
@@ -718,141 +717,44 @@ function registerOnboardingRoutes(app: FastifyInstance, deps: ServerDeps) {
     const { persona, mandateTemplate, llmConfig, presetSelections } =
       parsed.data;
 
-    // 1. Defensive Handle-Check (UNIQUE catched es spätestens, aber 409
-    //    früh ist freundlicher).
-    if (deps.profilesRepo.findByHandle(persona.handle)) {
-      return reply.status(409).send({
-        error: `Handle '${persona.handle}' ist bereits vergeben`,
-      });
-    }
-
-    // 2. API-Key validieren
-    const validation = await validateApiKey(
-      llmConfig.provider,
-      llmConfig.apiKey,
-      llmConfig.model,
-    );
-    if (!validation.valid) {
-      return reply.status(400).send({
-        error: `API-Key ungültig: ${validation.reason}`,
-      });
-    }
-
-    // 3. Bridge-Handle registrieren
-    let bridgeToken: string;
-    const bridgeUrl = pickBridgeUrlForOnboarding();
+    // Orchestrierung im geteilten createTwin-Service (Distribution Weg B,
+    // Phase 1) — der Handler bleibt dünn: Auth + Parse + Aufruf. Die typisierten
+    // CreateTwinError-Stati bilden die bisherigen HTTP-Codes 1:1 ab
+    // (409 Handle/Bridge-Kollision, 400 Key, 502 Bridge, 500 Insert). Das
+    // Erfolgs-Objekt (inkl. requiresRestart/presetResults bzw. hotLoadError)
+    // geht unverändert als 201 raus.
     try {
-      const result = await registerHandleOnBridge({
-        bridgeUrl,
-        handle: persona.handle,
-        displayName: persona.fullName,
-      });
-      bridgeToken = result.token;
-    } catch (err) {
-      const status = err instanceof BridgeRegisterError ? err.status : 502;
-      const msg = err instanceof Error ? err.message : String(err);
-      return reply.status(status === 409 ? 409 : 502).send({
-        error: `Bridge-Registrierung fehlgeschlagen: ${msg}`,
-      });
-    }
-
-    // 4. Persona-MD bauen + Mandates laden
-    const personaMd = buildPersonaMarkdown(persona);
-    const mandates = loadMandateTemplate(mandateTemplate);
-
-    // 5. API-Key verschlüsseln — trim aus dem gleichen Grund wie im
-    // Validator (Copy-Paste-Whitespace würde sonst persistiert und der
-    // Live-Chat scheitert später mit "invalid x-api-key").
-    const trimmedKey = llmConfig.apiKey.trim();
-    const storedLlmConfig: StoredLlmConfig = {
-      provider: llmConfig.provider,
-      model: llmConfig.model,
-      apiKeyEncrypted: encrypt(trimmedKey, deps.masterKey),
-      apiKeySource: "user",
-    };
-
-    // 6. INSERT — bei UNIQUE-Race wirft sqlite, fängt's der catch
-    const twinId = `twin_${nanoid(16)}`;
-    let profile;
-    try {
-      profile = deps.profilesRepo.insert({
-        twinId,
-        handle: persona.handle,
-        displayName: persona.fullName,
-        personaMd,
-        // #110 Phase 2B Commit 11: strukturierte Form für späteren Settings-
-        // Pre-Fill mitspeichern. `persona` ist das vom Wizard validierte
-        // PersonaInput-Object (matched PersonaInputSchema in shared).
-        personaInputJson: persona,
-        mandates,
-        llmConfig: storedLlmConfig,
-        bridgeUrl,
-        bridgeToken,
-        ownerUserId: user.userId,
-        isActive: true,
-      });
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      return reply.status(500).send({
-        error: `DB-Insert fehlgeschlagen: ${msg}`,
-      });
-    }
-
-    // 7. Hot-Reload (#37) — Twin direkt in die Registry einklinken, damit
-    // der Wizard-Redirect zu /chat/<handle> ohne Runtime-Restart funktioniert.
-    // Bei Hot-Load-Fehler: Profil bleibt in DB, User bekommt 201 mit
-    // ehrlichem Restart-Hinweis (Restart hilft, weil loadAll() das Profil
-    // dann beim Boot picked). Preset-Activation läuft auch im Fehlerfall
-    // nicht, weil die Pattern-Skills ohne Registry-Eintrag keine Engine
-    // hätten — Twin müsste dann nach Restart neu via Settings ergänzen.
-    try {
-      await deps.registry.addTwin(profile.twinId);
-      const presetResults = await activatePresets({
-        presetSelections,
-        twinId: profile.twinId,
-        twinHandle: profile.handle,
-        examplesDir: deps.examplesDir,
-        mcpServersDir: deps.mcpServersDir,
-        skillRepo: deps.skillRepo,
-        mcpServersRepo: deps.mcpServersRepo,
-        registry: deps.registry,
-        logger: app.log,
-      });
-      return reply.status(201).send({
-        twinId: profile.twinId,
-        handle: profile.handle,
-        requiresRestart: false,
-        presetResults,
-      });
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      app.log.error(
-        { err, twinId: profile.twinId, handle: profile.handle },
-        "[onboarding] Hot-Load fehlgeschlagen — Profil ist in DB, Restart hilft",
+      const result = await createTwin(
+        {
+          ownerUserId: user.userId,
+          persona,
+          mandateTemplate,
+          llmConfig,
+          presetSelections,
+        },
+        {
+          profilesRepo: deps.profilesRepo,
+          registry: deps.registry,
+          skillRepo: deps.skillRepo,
+          mcpServersRepo: deps.mcpServersRepo,
+          masterKey: deps.masterKey,
+          examplesDir: deps.examplesDir,
+          mcpServersDir: deps.mcpServersDir,
+          logger: app.log,
+        },
       );
-      return reply.status(201).send({
-        twinId: profile.twinId,
-        handle: profile.handle,
-        requiresRestart: true,
-        hotLoadError: msg,
-      });
+      return reply.status(201).send(result);
+    } catch (err) {
+      if (err instanceof CreateTwinError) {
+        return reply.status(err.status).send({ error: err.message });
+      }
+      throw err;
     }
   });
 }
 
-/**
- * Bridge-URL für neu angelegte Twin-Profile. Production setzt
- * `NOLMI_DEFAULT_BRIDGE_URL` in der `.env` auf die gehostete Bridge,
- * lokal bleibt sie ungesetzt → Fallback auf den Dev-Bridge-Port.
- * Aliasing: `TWIN_LAB_DEFAULT_BRIDGE_URL` wird via getEnv noch als
- * Fallback gelesen (6–12 Monate, dann Hart-Cut).
- */
-function pickBridgeUrlForOnboarding(): string {
-  return (
-    getEnv("NOLMI_DEFAULT_BRIDGE_URL", "TWIN_LAB_DEFAULT_BRIDGE_URL")?.trim() ||
-    "http://127.0.0.1:5100"
-  );
-}
+// (pickBridgeUrlForOnboarding nach onboarding/create-twin.ts gezogen als
+//  resolveOnboardingBridgeUrl — Default-Logik lebt jetzt beim Service.)
 
 // ─── AUTH ROUTES ─────────────────────────────────────────────────────────────
 //
