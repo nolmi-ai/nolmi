@@ -1082,6 +1082,26 @@ Beim Production-Deploy-Smoke aufgefallen: **`nolmi.ai`** (Root/Apex, **ohne** `a
 
 **Berührungspunkte (zu klären beim Bau):** Verhältnis zum bestehenden Landing-Page-Item **#112** (Self-Hosting-Launch-Landing) — ob die Apex-Route dieselbe Landing serviert oder ein Redirect auf `app.`/Docs. Traefik-Router für Apex (`Host(\`nolmi.ai\`)`) fehlt im `docker/nolmi/docker-compose.yml`.
 
+### NPM-Distribution `npm i -g nolmi` — Wrapper-Bau, an Public-/Etappe-3-Gate gekoppelt
+
+**Status:** OFFEN (Diagnose Tag 33 durch, Bau zurückgestellt — Pfad a) | **Größe S–M** (Bau) | **Priorität:** should | **Trigger:** **erst nach Secret-Gate §5a** (Repo public / Docker-Hub-Push), Teil des Etappe-3-Release-Blocks
+
+Globales npm-Paket (`npm i -g nolmi` → `nolmi onboard`) wie OpenClaw. **Phasenweg:** B jetzt (Wrapper ums Single-Host-Compose) → A später (Single-Process ohne Docker) → C Endbild (beide Modi). Volle Strategie in `DISTRIBUTION-STRATEGY.md §3` (Etappe 2 NPM-Abschnitt + Etappe 3).
+
+**Diagnose-Befund (Tag 33):** B ist **technisch trivial** (7 `install.sh`-Schritte → Node, `node:crypto` ersetzt `openssl`, A-später nicht verbaut). Der Haken ist **nicht** Technik, sondern **Code-Bezug + Repo-Sichtbarkeit**: das Compose baut aus `apps/*` (`build: context ../..`), das **Repo ist privat** (anonym 404).
+
+**Drei B-Pfade:**
+- **B2 (Source ins npm-Paket):** heute baubar ohne neue Infra (~4.6 MB Source), aber = Public-via-npm + lokaler Nutzer-Build. **VERWORFEN** — Public-Freigabe durch den Seiteneingang statt bewusster Etappe-3-Entscheidung.
+- **B1-Clone:** braucht **Repo public** (Gate §5a: PAT-Rotation + Secret-History-Scan). Fallback.
+- **B1-Image-Pull:** braucht **Docker-Hub-Push** + `image:`-Pull-Compose-Variante. **ENDBILD-NAH** — kleinstes Paket, nur Docker beim Nutzer, keine Source-Exposure, entschärft das Secret-History-Problem. **Bevorzugt.**
+
+**Technik-Befund (für den Bau festgehalten):**
+- Eigenes Paket **`nolmi`** (npm-Name **FREI**, Registry-404), `"bin": { "nolmi": "dist/cli.js" }`; **Monorepo-Root bleibt `private:true`**.
+- Secrets via **`node:crypto`**: `NOLMI_ENCRYPTION_KEY` = 32-Byte-**base64** (byte-genaues `loadMasterKey`-Format), Session/Bridge = 32-Byte-hex; `.env` `mode 0o600`, idempotent.
+- `onboard`-Übergabe (`docker compose exec -it … node dist/scripts/onboard.js`) braucht **interaktiven TTY-Passthrough** (`stdio: 'inherit'`).
+
+**Entscheidung (Pfad a):** Bau hinter die Public-Entscheidung — kein B2 jetzt. Bevorzugt B1-Image-Pull (Docker Hub), Fallback B1-Clone (Repo public). Beide nach §5a.
+
 ### 129. .env.example-Default auf Anthropic switchen ✅
 
 **Abgeschlossen Tag 30 (28. Mai 2026, Donnerstag), gemeinsam mit #127 in einem Commit (Tag 30 Block 1).** `.env.example` Provider-Block umgestellt:
