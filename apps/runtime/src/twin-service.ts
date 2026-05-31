@@ -494,10 +494,17 @@ export class TwinService {
     // 6. Auto: direkt zum Modell
     this.deps.bus.emit({ type: "twin.thinking", payload: { capability: detection.capability } });
     try {
-      const reply = await this.runModel(persona, messages);
+      // #3: maxLength-Enforcement aus dem greifenden Mandate (z.B.
+      // respond_to_chat 4000). `check.mandate` ist hier in Scope.
+      const reply = await this.enforceMaxLength(check.mandate, (hint) =>
+        this.runModel(persona, messages, hint ?? undefined),
+      );
       await this.deps.audit.complete(audit.id, {
         reply: reply.content,
         providerMetadata: reply.metadata,
+        ...(reply.lengthEnforced
+          ? { lengthEnforced: reply.lengthEnforced }
+          : {}),
       });
       this.deps.bus.emit({ type: "twin.idle", payload: {} });
       return {
@@ -1415,10 +1422,20 @@ export class TwinService {
     const messages = extractMessages(entry, "messages");
     this.deps.bus.emit({ type: "twin.thinking", payload: { capability: entry.capability } });
     try {
-      const reply = await this.runModel(persona, messages);
+      // #3: maxLength-Enforcement — Mandate aus der Capability ableiten (z.B.
+      // draft_linkedin_post 2000). Ohne maxLength → no-op.
+      const mandate =
+        this.deps.mandates.find((m) => m.capability === entry.capability) ??
+        null;
+      const reply = await this.enforceMaxLength(mandate, (hint) =>
+        this.runModel(persona, messages, hint ?? undefined),
+      );
       await this.deps.audit.complete(entry.id, {
         reply: reply.content,
         providerMetadata: reply.metadata,
+        ...(reply.lengthEnforced
+          ? { lengthEnforced: reply.lengthEnforced }
+          : {}),
       });
       this.deps.bus.emit({ type: "twin.idle", payload: {} });
       return {
@@ -1681,6 +1698,88 @@ export class TwinService {
 
   // ─── private helpers ─────────────────────────────────────────────────────
 
+
+  /**
+   * #3 Mandate-Condition `maxLength` — Premium-Enforcement (zentral).
+   *
+   * `maxLength` (Zeichen, wie in mandates.yaml) ist eine OUTPUT-Bedingung —
+   * prüfbar erst NACH der Generierung. Mechanik:
+   *   1. PRÄVENTIV — Längen-Hinweis als zusätzliche System-Instruktion in den
+   *      Prompt; das Modell trifft das Limit meist beim ersten Versuch.
+   *   2. REAKTIV — ist `reply.content` zu lang: EIN Retry (max. 1) mit
+   *      verschärftem Hinweis. Immer noch zu lang → Truncate am Satz-/Wortende
+   *      (finales Netz). Loop-Cap fix → garantiert eine Antwort, keine
+   *      Endlosschleife.
+   * Ohne `maxLength` auf dem Mandate (oder Mandate null, z.B. Owner-Direct):
+   * 1× `generate(null)`, byte-identisches Verhalten wie vorher.
+   *
+   * `generate(hint)` ruft `runModel` mit `hint` als `extraSystem` auf — jede
+   * Aufrufstelle reicht ihre eigenen messages/options durch (ein Helfer, kein
+   * Stellen-Sonderfall). `lengthEnforced` im Ergebnis → Audit-Flag fürs Tuning.
+   */
+  private async enforceMaxLength(
+    mandate: Mandate | null,
+    generate: (
+      extraHint: string | null,
+    ) => Promise<{
+      content: string;
+      metadata: Record<string, unknown>;
+      prePassSkillName?: string;
+    }>,
+  ): Promise<{
+    content: string;
+    metadata: Record<string, unknown>;
+    prePassSkillName?: string;
+    lengthEnforced?: "retried" | "truncated";
+  }> {
+    const raw = mandate?.conditions?.maxLength;
+    const maxLength = typeof raw === "number" && raw > 0 ? raw : null;
+    if (!maxLength) return generate(null);
+
+    const preventive = `Längenlimit: Antworte in HÖCHSTENS ${maxLength} Zeichen. Bleib innerhalb des Limits, ohne den Gedanken mitten im Satz abzubrechen.`;
+    const first = await generate(preventive);
+    if (first.content.length <= maxLength) return first;
+
+    const stricter = `Deine vorige Antwort war mit ${first.content.length} Zeichen zu lang (erlaubt sind ${maxLength}). Formuliere kürzer — höchstens ${maxLength} Zeichen, vollständiger Gedanke, nicht mitten im Satz abbrechen.`;
+    const retry = await generate(stricter);
+    if (retry.content.length <= maxLength) {
+      return { ...retry, lengthEnforced: "retried" };
+    }
+
+    // Finales Netz: am letzten Satz-/Wortende vor dem Limit schneiden.
+    return {
+      ...retry,
+      content: this.truncateAtBoundary(retry.content, maxLength),
+      lengthEnforced: "truncated",
+    };
+  }
+
+  /**
+   * Schneidet `text` auf <= `maxLength` Zeichen, bevorzugt am letzten
+   * Satz-Ende, sonst Wortende — nie mitten im Wort. Dezenter Kürzungs-Hinweis
+   * ` […]`. Garantiert Länge <= maxLength.
+   */
+  private truncateAtBoundary(text: string, maxLength: number): string {
+    if (text.length <= maxLength) return text;
+    const HINT = " […]";
+    if (maxLength <= HINT.length) return text.slice(0, maxLength);
+    const budget = maxLength - HINT.length;
+    const head = text.slice(0, budget);
+    const sentenceEnd = Math.max(
+      head.lastIndexOf(". "),
+      head.lastIndexOf("! "),
+      head.lastIndexOf("? "),
+      head.lastIndexOf("\n"),
+    );
+    let cut: string;
+    if (sentenceEnd >= budget * 0.5) {
+      cut = text.slice(0, sentenceEnd + 1);
+    } else {
+      const wordEnd = head.lastIndexOf(" ");
+      cut = wordEnd >= budget * 0.5 ? head.slice(0, wordEnd) : head;
+    }
+    return cut.trimEnd() + HINT;
+  }
 
   /**
    * Ein Modell-Call über das Vercel AI SDK. Persona kommt als top-level

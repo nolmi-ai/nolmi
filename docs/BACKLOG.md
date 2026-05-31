@@ -115,9 +115,26 @@ Eigene `twin_conversations`-Tabelle. Jede Nachricht referenziert eine `conversat
 Alle Twin-Nachrichten persistent in der Twin-DB, nicht nur Audits. Bridge wird zum reinen Transport. Authoritative Konversations-Historie liegt lokal.
 **Größe:** XL · **Priorität:** nice · **Aus:** Phase-2-Architektur-Diskussion
 
-### 3. Mandate-Conditions-Auswertung
-`requiresApproval`, `maxLength`, etc. werden aktuell in `mandates.yaml` ignoriert. Sollten in `checkMandate()` ausgewertet werden für feinere Kontrolle.
-**Größe:** M · **Priorität:** should · **Aus:** Phase-1-Limit, dokumentiert in CLAUDE.md
+### 3. Mandate-Conditions-Auswertung — 🔶 weitgehend erledigt (Tag 33)
+`requiresApproval`, `maxLength`, etc. wurden in `checkMandate()` ignoriert. **Diagnose Tag 33:** die zwei Conditions sind semantisch verschieden — `requiresApproval` ist **deklarativ/redundant** (das echte Approval-Gate ist `escalation: always_pending`, die Runtime routet darüber; kein Logikbau nötig), `maxLength` ist die **einzige echt tote** Condition (Output-Cap in Zeichen).
+
+**Gebaut (Tag 33):** zentraler `TwinService.enforceMaxLength`-Helfer — **präventiv** (Längen-Hinweis als System-Instruktion in den Prompt) → **reaktiv** (max. 1 Retry mit verschärftem Hinweis) → **Truncate-Fallback** am Satz-/Wortende (` […]`). Loop-Cap fix, garantiert eine Antwort. Audit-Flag `lengthEnforced: retried|truncated` fürs Tuning. Gehookt an `chat()` (respond_to_chat, 4000) + `approveDefault()` (draft_linkedin_post, 2000). `requiresApproval`-Klarstellung in `mandates.yaml` + `checkMandate`-Kommentar.
+
+**Verifikations-Stand (ehrlich):**
+- ✅ `enforceMaxLength`-Logik **isoliert deterministisch bewiesen** (no-op · präventiv · 1-Retry · Truncate am Satz-/Wortende · Audit-Flag).
+- ✅ **Owner-Direct-Pfad am Verhalten bestätigt** (lokaler Chat, Wegwerf-DB): owner-direct/`mandate_id=null` → maxLength greift bewusst NICHT, kein `lengthEnforced` — wie designt.
+- 🔶 **NICHT live verifiziert:** dass der Hook im `respond_to_chat`-Pfad (Nicht-Owner-Chat **mit** Mandate) mit echtem LLM tatsächlich feuert — der lokale Test lief über owner-direct (unlimitiert). Hook sitzt nachweislich an `chat()`+`approveDefault()`, dieselbe bewiesene Funktion → Risiko gering, aber nicht end-to-end durchgespielt.
+
+**Rest-Item (S, low):** `respond_to_chat`-maxLength **live mit Nicht-Owner-Pfad** (A2A-Reply oder externer Chatter, der durch `checkMandate`+Mandate geht) end-to-end verifizieren — Hook ist platziert, nur der Live-Beleg fehlt.
+**Größe:** ursprünglich M → real S (requiresApproval = 0 Bau, nur maxLength) · **Priorität:** should
+
+### Design-Erkenntnis: maxLength gilt nur für Nicht-Owner-Chats (owner-direct ist unlimitiert)
+**Bestätigt via Audit Tag 33.** `maxLength` (und Mandate-Checks generell) greifen **konzeptionell nur für Nicht-Owner-Chats** (`respond_to_chat` über `checkMandate`+Mandate). Der **Owner-Direct-Chat** (Owner mit dem eigenen Twin) läuft über `capability=owner-direct` / `mandate_id=null` (Owner-Bypass) und ist **bewusst unlimitiert** — der Owner soll keine gekappten Antworten von seinem eigenen Twin bekommen. Das ist die eigentliche Design-Klärung des Features (kein Bug): wer das maxLength-Verhalten testen will, muss den Nicht-Owner-Pfad treffen.
+
+### QuickStart-Mandate-Default: respond_to_chat = always_pending → frischer Twin antwortet nie sofort?
+**Status:** OFFEN (Befund aus #3 Tag 33, **kein Blocker**) | **Größe S** | **Priorität:** klären
+
+Beim #3-Bau aufgefallen: der Mandate-Default (cautious-Template / `mandates.yaml`) setzt `respond_to_chat` auf `escalation: always_pending`. Folge: ein **frisch via `twin:onboard` angelegter Twin** schickt im Chat **jede** Nachricht erst in die Approval-Queue und antwortet nie sofort — **außer** im Owner-Direct-Bypass (eigener Twin). Für einen Self-Hoster, der gerade onboardet und seinen Twin testet, könnte das verwirren (jede externe/Test-Nachricht hängt pending). **Zu klären:** ist `always_pending` für `respond_to_chat` im QuickStart-Default gewollt, oder sollte ein frischer Twin auf normale Chats `escalation: auto` haben (sofort antworten) und nur „heikle" Capabilities (draft_linkedin_post, send_to_twin) pending lassen?
 
 ### 4. Auto-Reply-Mandate für vertraute Twins
 Mandate-Condition wie "Auto-Reply, wenn Absender = vertrauter Handle UND Inhalt enthält keine Sensitiv-Wörter". Aktuell gehen alle eingehenden Nachrichten in Pending.

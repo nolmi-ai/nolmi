@@ -10,6 +10,16 @@
 #   - Verbindliche Zusagen in Markus' Namen
 #   - Externes Kommunizieren ohne explizite Freigabe
 #   - Termine selbständig legen (kommt erst in Phase 2 mit "connected"-Scope)
+#
+# ─── conditions-Semantik (Stand #3) ───────────────────────────────────────────
+#   - requiresApproval: true  → DEKLARATIV/Doku-Wert. Das echte Approval-Gate ist
+#       `escalation: always_pending` (die Runtime routet darüber in die
+#       Pending-Queue). requiresApproval hat KEINE eigene Logik — bleibt nur als
+#       lesbare Absicht stehen. (Beleg: checkMandate wertet es nicht aus.)
+#   - maxLength: <N>          → WIRKSAM (#3): Output-Längenlimit in Zeichen. Die
+#       Runtime gibt den Hinweis präventiv in den Prompt, regeneriert einmal bei
+#       Überlänge und kürzt zur Not am Satz-/Wortende
+#       (TwinService.enforceMaxLength).
 
 mandates:
   - id: mandate_respond_to_chat

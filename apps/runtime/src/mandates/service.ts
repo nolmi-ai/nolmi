@@ -65,9 +65,16 @@ export function checkMandate(
     };
   }
 
-  // Phase 1+2: Mandate vorhanden = erlaubt. Conditions-Auswertung
-  // (maxLength, requiresApproval, …) ist weiterhin nicht implementiert —
-  // `escalation: always_pending` reicht aktuell als Sicherheits-Gate.
+  // Mandate vorhanden = erlaubt. Conditions werden hier BEWUSST nicht
+  // ausgewertet — sie sind keine Allow/Block-Entscheidung:
+  //   - `requiresApproval` ist DEKLARATIV/redundant: das echte Approval-Gate
+  //     ist `escalation: always_pending` (TwinService routet pending darüber,
+  //     siehe twin-service.ts). requiresApproval bleibt nur als Doku-Wert in
+  //     mandates.yaml stehen, hat keine eigene Logik.
+  //   - `maxLength` ist eine OUTPUT-Bedingung → erst NACH der Generierung
+  //     prüfbar; durchgesetzt in TwinService.enforceMaxLength (#3), nicht hier.
+  // Deshalb gibt `check.mandate.conditions` den Wert nur durch (für
+  // enforceMaxLength), ohne ihn im checkMandate-Pfad zu interpretieren.
   return {
     allowed: true,
     mandate,
