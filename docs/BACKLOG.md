@@ -954,7 +954,7 @@ Runtime selbst ist Bridge-resilient (Reconnect-Loop ohne Crash für existing Twi
 - ✅ `auth_mode`-Durchsetzung (D2, Etappe 2.4a, eigenes Item unten DONE): OAuth nur bei `auth_mode='oauth'`, zwei-Ebenen-Gate (CLI + UI), Allowlist nur via Admin-CLI `twin:auth-mode`, kein Self-Service.
 - Onboarding-**Wizard**-Submit-Branch: Solo-Twin via Web anlegen (heute verlangt der Wizard noch eine Bridge — `server.ts` Onboarding-Submit)
 - ✅ Re-Bind Solo→Bound (D3 Stufe 1→2, Etappe 2.4b, eigenes Item unten DONE): CLI `twin:bind-bridge` an die eigene Bridge. Verbleibend: UI-Re-Bind-Knopf (zweite Tür) + Umbinden bereits gebundener Twins + Fremd-Bridge/Föderation (Phase 4).
-- Production-Deploy der Migration 026 (separat, mit Backup)
+- ✅ **Production-Deploy der Migration 026** (Distribution Etappe 2 Schritt 5, eigenes Item unten DONE): Sammeldeploy `c88f0eb` auf `srv1712371`, **026 FK-safe auf Production-Echtdaten** (Log „foreign_keys_off-Modus", `foreign_key_check` leer, Kind-Counts vorher=nachher identisch). Backup B4-Klasse offsite vorab.
 
 ### twin:bootstrap setzt keinen owner_user_id — Solo-Twin ownerlos + im Switcher unsichtbar ✅
 
@@ -1037,6 +1037,38 @@ Keine Migration (Spalte existiert). **End-to-End verifiziert:** api_key (@floria
 **Verifiziert (am Verhalten, Block 27 — Frische-Test von Null):** echter Lauf in einem isolierten `docker:dind`-Wegwerf-Container (srv1046432, getrennt vom Standby, danach restlos entfernt). Code **credential-frei** rein via `git archive` + stdin-tar → **Mode 1** („Im Repo ausgeführt", kein Clone/PAT). **7/7 Skript-Schritte grün** (Build aller 3 Images ~115 s, out-of-the-box, keine stale `@twin-lab`-Referenz; `.env`-Secrets via `openssl` nicht geloggt). **3 Container Up** (kein Restart-Loop). Runtime sauber: **alle 26 Migrationen frisch inkl. 026 im `foreign_keys_off`-Modus auf LEERER DB** (Nebenbefund: FK-Cascade-sicherer Runner-Tweak läuft auch auf frischer Wiese), Onboarding-only/0 Twins, :4000, **kein `EADDRINUSE`, kein Telegram-Crash-Loop**. Isolation gehalten (Standby + alle srv1046432-Stacks unberührt). Bewusst nicht im dind getestet: `twin:onboard`+Browser (2.2 schon end-to-end) + externer Port-Zugang. **KEIN Production-Deploy.**
 
 **Verbleibend:** **Schritt 3b** (Production/TLS: Traefik + ACME + Domain + BasicAuth — der bestehende `docker-compose.yml`); Update-Mechanismus (git pull + rebuild / Image-Tag-Bump); optional Docker-Auto-Install auch für non-apt-Linux.
+
+### Production-Deploy Etappe 2 (Sammeldeploy c88f0eb) — Migration 026 FK-safe auf Echtdaten ✅
+
+**Status:** **DONE** (Distribution Etappe 2 Schritt 5, am Verhalten auf Production verifiziert) | **Größe M** | **Priorität war: must-vor-Self-Hosting-Release** | srv1712371 (`187.124.3.235`), `/docker/nolmi/repo`
+
+Sammeldeploy `main`→`c88f0eb` auf den Production-VPS: **Etappe 1 + 2.1 + 2.2 + 2.4a + 2.4b + 2.3 + Migration 026** in einem Rutsch. Production stand vorher auf Migration 025.
+
+**Befund vorab (Single-Point-of-Failure):** Die Etappe-2-Commits (`24665a1`, `c5f9012`, `a75adbe`, `aaf207a`, `4ee36ad`, `c88f0eb`) waren **lokal committet, aber nicht gepusht** — `origin/main` stand auf `2ad7d3d`. Erst `git push` (FF `2ad7d3d`→`c88f0eb`, kein Force; Pre-Push-Hook `pnpm -r build` grün), dann VPS-`git pull --ff-only` + Rebuild auf dem **vollständigen** Stand. Die nur-lokale Existenz der Etappe-2-Arbeit ist damit beseitigt.
+
+**Migration 026 (destruktiver 12-Schritt-FK-Rebuild von `twin_profiles`) auf Production-Echtdaten SICHER:**
+- Runtime-Log **„026 … angewendet (foreign_keys_off-Modus)"** = der **neue** FK-sichere Runner (aus `6c6032f`) fuhr sie, nicht der alte. Schutz greift, weil das neue Image Runner+026 zusammen bündelt → beim Boot läuft der neue Runner zuerst (`init-db.js && exec index.js`).
+- `foreign_key_check` **leer** (kein verwaister FK in den 11 Kind-Tabellen).
+- `bridge_url`/`bridge_token` jetzt **`notnull=0`** (vorher 1).
+- **Kind-Tabellen-Counts vorher=nachher IDENTISCH** — einzige Differenz `schema_migrations` 25→26 → **kein Cascade-Verlust, Twin-Historie intakt** (der härteste Beweis).
+
+**Pre-Flight B4-Klasse:** `VACUUM INTO`-Konsistenz-Snapshot von `twin.db` **und** `bridge.db`, tar.gz nach `/docker/nolmi`, **offsite auf den Mac** (`nolmi-db-backup-20260531-064823.tar.gz`). Rollback-Image `nolmi-runtime:rollback-025` (+ `web`) getaggt **vor** dem Rebuild, Counts-before festgehalten.
+
+**Live verifiziert (am Verhalten):** Direct-Chat @markus über `app.nolmi.ai` · A2A @markus→@florian Echtzeit (**201**, kein 409, `bridge_url` erhalten) · `auth_mode`-Gate 2.4a live (api_key-Twin **kein** OAuth-Button in Settings). 3 Container Up, **Bridge unangefasst** (kein Bridge-Code-Change — `bridge-register.ts` liegt unter `apps/runtime/`, nicht in der Bridge-App; nur runtime + web rebuilt).
+
+**Aufräum-Reminder (kein Blocker):** Rollback-Images `nolmi-runtime:rollback-025` + `nolmi-web:rollback-025` liegen noch auf dem VPS. **Aufräumen erst nach einer Stabilitäts-Schamfrist** (einige Tage Production-Laufzeit ohne Auffälligkeit), nicht sofort.
+
+**Verbleibend:** Schritt 3b (TLS-Install) bleibt offen; Root-404 separat (Item direkt unten).
+
+### nolmi.ai Root-Domain liefert 404 — Landing-Page fehlt / ungeroutet
+
+**Status:** OFFEN (Backlog, kein Deploy-Fehler, **kein aktueller Blocker**) | **Größe S–M** | **Priorität:** should (relevant **vor öffentlichem Launch**) | Befund Tag 33 (Production-Deploy Etappe 2)
+
+Beim Production-Deploy-Smoke aufgefallen: **`nolmi.ai`** (Root/Apex, **ohne** `app.`) liefert **404**. Die App lebt unter `app.nolmi.ai`, `runtime.nolmi.ai`, `bridge.nolmi.ai` — die Apex-Domain ist im Traefik-Routing nicht belegt / es existiert keine Landing-Page.
+
+**Relevanz:** Ein Besucher, der nackt `nolmi.ai` aufruft (der natürliche Erst-Touchpoint für einen öffentlichen Self-Hosting-Launch), sieht 404 statt eines Einstiegs. **Kein Blocker für den aktuellen Closed-Beta-Betrieb** (alle echten Pfade laufen über die Subdomains), aber **vor dem öffentlichen Launch** zu schließen.
+
+**Berührungspunkte (zu klären beim Bau):** Verhältnis zum bestehenden Landing-Page-Item **#112** (Self-Hosting-Launch-Landing) — ob die Apex-Route dieselbe Landing serviert oder ein Redirect auf `app.`/Docs. Traefik-Router für Apex (`Host(\`nolmi.ai\`)`) fehlt im `docker/nolmi/docker-compose.yml`.
 
 ### 129. .env.example-Default auf Anthropic switchen ✅
 
