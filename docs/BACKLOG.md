@@ -1007,6 +1007,18 @@ Keine Migration (Spalte existiert). **End-to-End verifiziert:** api_key (@floria
 
 **Verbleibend (optional, später):** Managed-Mode-Policy `auth_mode_default` falls nolmi.ai je einen anderen Default als `api_key` bräuchte (heute global `api_key`-Default ausreichend).
 
+### OpenAI/Codex-OAuth-Provider — erst in Weg-B-Onboarding, self-hosted-only
+
+**Status:** OFFEN (Awareness / Folge-Item aus D2-Revision Tag 33) | **Größe S–M** | **Priorität:** nice | **Trigger:** erst wenn **Weg B** (durchgehendes Terminal-Onboarding inkl. Persona/Key, Etappe 2) gebaut wird
+
+Aus der **D2-Revision** (`DISTRIBUTION-STRATEGY.md §2`, Tag 33): Ein OpenAI/Codex-OAuth-Provider (analog zum bestehenden #131-Anthropic-OAuth) ist **kein eigenständiges Item für jetzt**, sondern hängt an Weg B. Die Provider-Lage ist beweglich: Codex-OAuth funktioniert heute in Drittanbieter-Tools (OpenClaw), ist aber **reverse-engineert und nicht offiziell für Dritte gewidmet** — toleriert, nicht garantiert.
+
+**Leitplanken (falls/wenn gebaut):**
+- **Self-hosted-only** — nutzbar, weil der User sein eigenes Abo auf eigener Maschine fährt (Liability beim User). **Auf `nolmi.ai` (Managed) bewusst NICHT** ohne separate Entscheidung — dort trüge Nolmi das Liability (Subscription-Sharing-Optik einer Server-IP).
+- **Keine Architektur-Abhängigkeit** — wie bei Anthropic-OAuth strikt hinter `auth_mode='oauth'` + Admin-CLI-Allowlist (2.4a), bei Provider-Politik-Wechsel via `twin:auth-mode … api_key` widerrufbar, ohne dass etwas bricht. API-Key bleibt der Default-Fels.
+
+Bis Weg B existiert: **keine Aktion**, nur dokumentierte Setzung.
+
 ### Re-Bind Solo-Twin an eigene Bridge (D3 Stufe 1→2) ✅
 
 **Status:** **DONE** (Distribution Etappe 2.4b, Block 25, lokal end-to-end verifiziert) | **Größe S** | D3-Setzung, CLI-only

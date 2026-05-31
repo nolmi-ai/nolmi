@@ -29,15 +29,23 @@ Begründung:
 - **Open-Source-Reichweite** — der Self-Hosting-Markt 2026 (OpenClaw/Hermes) zeigt: One-Liner + Open Source ist der Reichweiten-Hebel.
 - **Managed = eigenes Unternehmen** — gehostet anzubieten ist Betrieb, Support, Abrechnung, Haftung, DSGVO. Das ist ein eigener Schritt mit eigener Entscheidung (D5), nicht ein Nebenprodukt des Self-Hosting-Release.
 
-### D2 — API-Key-Default; OAuth nur self-hosted + manuelle Allowlist
+### D2 — API-Key-Default (der Fels); OAuth als widerrufbare Betreiber-Setzung, provider-differenziert
 
-**Default für alle ist BYO-API-Key.** **OAuth (ChatGPT-Subscription, #131) ist die Ausnahme**, nicht der Default — und nur unter zwei Bedingungen: (a) **self-hosted** (der User trägt sein eigenes Token auf seiner eigenen Infra) oder (b) auf `nolmi.ai` **nur für eine manuelle Allowlist** (Owner + kleine Friends-&-Family-Gruppe, mit **offener Risiko-Kommunikation**). **Anonyme Fremde bekommen API-Key-only**, kein OAuth.
+**Grundsatz:** **API-Key (BYO) ist der Default und der Fels.** Er funktioniert **provider-unabhängig** und hängt von **keiner Drittanbieter-Politik** ab — er trägt das System weiter, egal was ein einzelner Provider mit seinen OAuth-/Subscription-Mustern macht. **OAuth ist IMMER eine bewusste, widerrufbare Betreiber-Setzung** über die Allowlist (`auth_mode` + Admin-CLI `twin:auth-mode`, gebaut in 2.4a) — **nie ein Default**, und **nie ein Code-Pfad, der annimmt, dass ein Provider OAuth dauerhaft stützt**. **Anonyme Fremde bekommen API-Key-only.** Diese Setzung hat **eingebaute Vergänglichkeit**: die Provider-Lage unten ist beweglich, deshalb ist die Robustheit nicht „OAuth sicher machen", sondern „nie davon abhängen".
 
 **Mechanik:** ein `auth_mode`-Flag pro Account/Twin — `api_key` (Default) / `oauth` (manuell gesetzte Ausnahme). UI-Gate blendet den OAuth-Pfad nur bei `oauth` ein. **Kein Self-Service-OAuth** — niemand kann sich selbst OAuth freischalten.
 
 **Durchsetzung gebaut (Etappe 2.4a, Block 24, lokal verifiziert):** Das Flag war vorher nur passiv (Send-Path-Provider-Wahl) + der OAuth-Start war lückenhaft (UI bot api_key-Twins „OAuth aktivieren", CLI `twin:oauth-login` schaltete jeden Twin selbst auf `oauth`). Jetzt **zwei-Ebenen-Gate**: (1) `twin:oauth-login` **lehnt hart ab**, wenn `auth_mode != 'oauth'` (kein Self-Grant mehr). (2) Settings-UI zeigt bei `api_key` **nur Status, keinen Aktivieren-Pfad**. (3) Allowlisting läuft getrennt über den **Admin-CLI `twin:auth-mode <@handle> oauth`** (Shell-only = self-hosted-Admin) — es gibt **keine HTTP-User-Route**, die `auth_mode` ändert (`/full-config` ignoriert das Feld, verifiziert). So ist das Flag echte Vorbedingung statt Login-Nebeneffekt.
 
-**Risiko-Note (warum so streng):** Fremde OAuth-Tokens zentral auf **einer** Infrastruktur einzusammeln ist exakt das OpenClaw-Muster, das Anthropic im April 2026 geblockt hat (Accounts terminiert). Mehrere ChatGPT-Accounts, die von **einer** Server-IP refreshen, sehen für OpenAI nach **Subscription-Sharing** aus — ein Terminierungs-Trigger. Self-hosted verteilt das Risiko; zentral konzentriert es. Deshalb OAuth zentral nur für eine bekannte, klein gehaltene, aufgeklärte Gruppe.
+**Provider-Lage (Stand 31. Mai 2026, beweglich — verifiziert):** OAuth-/Subscription-Reuse ist bei keinem großen Provider offiziell für Dritt-Tools gewidmet; der Status ist ein bewegliches Ziel:
+- **Anthropic:** hat das Subscription-OAuth-Muster (Claude-CLI-Token-Reuse / `claude -p`) zwischenzeitlich **blockiert** (April 2026, Accounts terminiert), **laut OpenClaw-Doku inzwischen wieder toleriert**. Bewegliches Ziel — toleriert heute, nicht garantiert morgen.
+- **OpenAI/Codex:** Codex-OAuth **funktioniert** in Drittanbieter-Tools (OpenClaw nutzt es), ist aber ein **reverse-engineertes Community-Muster**, **nicht offiziell für Dritte gewidmet**, und kann sich laut Quelllage **jederzeit ändern**. Toleriert, nicht garantiert.
+
+**Architektur-Konsequenz (das Robuste):** Nolmi darf **nie** davon abhängen, dass ein bestimmter Provider OAuth erlaubt. Die 2.4a-Allowlist-Mechanik ist genau richtig — sie macht OAuth zu einer **pro-Twin-Betreiber-Entscheidung**, die bei einem Politik-Wechsel **einfach widerrufen** wird (`twin:auth-mode <@handle> api_key`), **ohne dass Architektur bricht**. Der API-Key-Default trägt das System unabhängig davon weiter. Robustheit = die Widerrufbarkeit, nicht die Wette auf Provider-Toleranz.
+
+**Self-Hosting vs. Managed (die Grenze):**
+- **Self-Hosting:** OAuth-Muster **nutzbar** — der Nutzer verwendet sein **eigenes** Abo auf seiner **eigenen** Maschine. Das Liability-Risiko (reverse-engineertes Muster, Politik-Wechsel) liegt **beim Nutzer** und ist überschaubar.
+- **Managed (`nolmi.ai`):** OAuth-Muster **heikel** — hier würde **Nolmi** das Liability tragen (fremde Tokens, zentral von einer Server-IP refreshend = Subscription-Sharing-Optik, ein Terminierungs-Trigger). **Vorsicht; nicht ohne bewusste Entscheidung einbauen.** Der API-Key-Default bleibt im Managed-Kontext die sichere Linie; OAuth dort nur für eine bekannte, klein gehaltene, aufgeklärte Allowlist-Gruppe mit offener Risiko-Kommunikation.
 
 ### D3 — Bridge optional (drei Stufen)
 
