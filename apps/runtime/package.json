@@ -9,6 +9,7 @@
     "build": "tsc",
     "start": "node dist/index.js",
     "db:init": "tsx src/scripts/init-db.ts",
+    "gen:htpasswd": "tsx src/scripts/gen-htpasswd.ts",
     "twin:bootstrap": "tsx src/scripts/bootstrap-twin.ts",
     "twin:onboard": "tsx src/scripts/onboard.ts",
     "twin:reload": "tsx src/scripts/twin-reload.ts",

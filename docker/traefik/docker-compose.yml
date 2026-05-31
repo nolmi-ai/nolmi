@@ -1,0 +1,81 @@
+name: traefik
+
+# ─── TRAEFIK-REVERSE-PROXY (Distribution Schritt 3b — TLS/Domain) ──────────────
+#
+# Korrigierte Traefik-Compose für den Nolmi-TLS-Stack. Ersetzt die VERALTETE
+# Prosa-Vorlage in DEPLOYMENT.md §9.3 — die pinnt `traefik:v3.0` und definiert
+# nur den `le`-Resolver; beides bricht 3b. Hier sind die vier verifizierten
+# §7-Cookbook-Befunde aus dem Phase-4-VPS-Deploy fest eingebaut:
+#
+#   §7-Befund 1  → image `traefik:v3.6` (NICHT v3.0): Docker 29+ hob die min.
+#                  API-Version an; Traefik <v3.6 pinnt clientseitig API 1.24
+#                  → "client version 1.24 is too old", Docker-Provider lädt nie
+#                  (stiller Fehler, Container ist trotzdem `Up`). v3.6 brachte
+#                  die Docker-API-Auto-Negotiation. (traefik/traefik#12253)
+#   §7-Befund 2  → `traefik-proxy` als `external: true` (einmal via
+#                  `docker network create traefik-proxy` angelegt). Compose v5
+#                  verweigert sonst ("incorrect label com.docker.compose.network").
+#   B2-Befund 1  → htpasswd liegt HIER (`./htpasswd:/htpasswd:ro`), NICHT am
+#                  web-Service. BasicAuth wertet TRAEFIK aus; ein Mount am
+#                  web-Container erreicht Traefik nicht → "open /htpasswd: no
+#                  such file", Router 404 statt 401. Die Middleware-Labels
+#                  bleiben am `nolmi-web` (im Nolmi-Stack-Compose).
+#   B2-Befund 4  → ZWEI getrennte ACME-Stores (`acme.json` für `le`,
+#                  `acme-staging.json` für `le-staging`). Der Staging→Prod-Flip
+#                  (`install/tls-promote.sh`) leert gezielt `acme-staging.json`,
+#                  sonst bleibt der Staging-Cert „kleben" (Traefik matcht nach
+#                  Domain, nicht nach Resolver).
+#
+# VORAUSSETZUNGEN (vom install-tls.sh erledigt, hier zur Doku):
+#   - `docker network create traefik-proxy` (einmalig, dieser Stack + Nolmi-Stack
+#     referenzieren es als external).
+#   - `./letsencrypt/acme.json` + `./letsencrypt/acme-staging.json` mit `chmod 600`.
+#   - `./htpasswd` existiert VOR dem Start (sonst schlägt der `:ro`-Mount fehl) —
+#     via Node/bcryptjs erzeugt (`apps/runtime/.../gen-htpasswd.ts`).
+#   - `.env` neben dieser Datei mit `ACME_EMAIL` (s. `.env.example`).
+#
+# Dashboard ist bewusst NICHT exposed (`--api.dashboard` ungesetzt = aus). Wer
+# es zum Debuggen aktiviert, MUSS BasicAuth drauflegen.
+
+services:
+  traefik:
+    image: traefik:v3.6
+    container_name: traefik
+    restart: unless-stopped
+    command:
+      # ─── Docker-Provider ──────────────────────────────────────────────────
+      - "--providers.docker=true"
+      - "--providers.docker.exposedbydefault=false"
+      - "--providers.docker.network=traefik-proxy"
+      # ─── Entrypoints + HTTP→HTTPS-Redirect ────────────────────────────────
+      - "--entrypoints.web.address=:80"
+      - "--entrypoints.web.http.redirections.entrypoint.to=websecure"
+      - "--entrypoints.web.http.redirections.entrypoint.scheme=https"
+      - "--entrypoints.websecure.address=:443"
+      # ─── ACME-Resolver: PROD (`le`) ───────────────────────────────────────
+      - "--certificatesresolvers.le.acme.email=${ACME_EMAIL}"
+      - "--certificatesresolvers.le.acme.storage=/letsencrypt/acme.json"
+      - "--certificatesresolvers.le.acme.httpchallenge.entrypoint=web"
+      # ─── ACME-Resolver: STAGING (`le-staging`, Default fürs Hochfahren) ────
+      # Eigener Store + Staging-CA-URL → Test-Durchläufe ohne Prod-Rate-Limit.
+      # Der Nolmi-Stack referenziert den aktiven Resolver via ${ACME_RESOLVER}.
+      - "--certificatesresolvers.le-staging.acme.email=${ACME_EMAIL}"
+      - "--certificatesresolvers.le-staging.acme.storage=/letsencrypt/acme-staging.json"
+      - "--certificatesresolvers.le-staging.acme.httpchallenge.entrypoint=web"
+      - "--certificatesresolvers.le-staging.acme.caserver=https://acme-staging-v02.api.letsencrypt.org/directory"
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./letsencrypt:/letsencrypt
+      # htpasswd für die BasicAuth-Middleware am Nolmi-Web (B2-Befund 1).
+      - ./htpasswd:/htpasswd:ro
+    networks:
+      - traefik-proxy
+
+networks:
+  # Geteiltes Proxy-Netz — extern angelegt (§7-Befund 2), von Traefik UND dem
+  # Nolmi-Stack referenziert. NICHT compose-managed.
+  traefik-proxy:
+    external: true

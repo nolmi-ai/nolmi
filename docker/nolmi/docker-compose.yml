@@ -15,8 +15,23 @@ name: nolmi
 #   docker build -t nolmi-runtime:latest -f apps/runtime/Dockerfile .
 #   docker build -t nolmi-bridge:latest  -f apps/bridge/Dockerfile  .
 #   docker build -t nolmi-web:latest     -f apps/web/Dockerfile . \
-#     --build-arg NEXT_PUBLIC_RUNTIME_URL=https://runtime.nolmi.ai \
+#     --build-arg NEXT_PUBLIC_RUNTIME_URL=https://runtime.${DOMAIN} \
 #     --build-arg NEXT_PUBLIC_DEPLOYMENT_LABEL=production
+#
+# ─── DOMAIN-PARAMETRISIERUNG (Distribution Schritt 3b) ─────────────────────────
+# Die Traefik-Host()-Regeln + NEXT_PUBLIC_RUNTIME_URL nutzen `${DOMAIN}` aus der
+# `.env` (Compose interpoliert `${...}` in Label-Strings). Ein fremder
+# Self-Hoster setzt `DOMAIN=seine-domain.tld`, der Stack routet dann
+# `app./runtime./bridge.<domain>`. **Default `:-nolmi.ai`** hält die gehostete
+# Referenz-Instanz (`srv1712371`) byte-gleich am Laufen, falls `.env` kein
+# DOMAIN setzt — KEIN Verhaltens-Change für die bestehende Production.
+#
+# ⚠ BUILD-ARG-KONSEQUENZ (#126): `NEXT_PUBLIC_RUNTIME_URL` ist BUILD-Zeit ins
+#   Client-Bundle inlined. Ein Self-Hoster MUSS sein Web-Image mit der EIGENEN
+#   Domain SELBST bauen (`--build-arg NEXT_PUBLIC_RUNTIME_URL=https://runtime.<domain>`)
+#   — es gibt KEIN vorgebautes Image mit fremder Domain. Das `install/install-tls.sh`
+#   injiziert `https://runtime.${DOMAIN}` in den Build-Befehl. (Passt zum
+#   Open-Source/B1-Clone-Weg: Source da, lokaler Build.)
 #
 # ⚠ Die Web-Build-ARGs sind PFLICHT (B1-Cookbook-Befund #126): ohne sie landet
 #   localhost:4000 im Client-Bundle → Browser-Calls schlagen fehl. Der
@@ -68,7 +83,7 @@ services:
     labels:
       - "traefik.enable=true"
       - "traefik.docker.network=traefik-proxy"
-      - "traefik.http.routers.nolmi-runtime.rule=Host(`runtime.nolmi.ai`)"
+      - "traefik.http.routers.nolmi-runtime.rule=Host(`runtime.${DOMAIN:-nolmi.ai}`)"
       - "traefik.http.routers.nolmi-runtime.entrypoints=websecure"
       - "traefik.http.routers.nolmi-runtime.tls=true"
       - "traefik.http.routers.nolmi-runtime.tls.certresolver=${ACME_RESOLVER}"
@@ -94,7 +109,7 @@ services:
     labels:
       - "traefik.enable=true"
       - "traefik.docker.network=traefik-proxy"
-      - "traefik.http.routers.nolmi-bridge.rule=Host(`bridge.nolmi.ai`)"
+      - "traefik.http.routers.nolmi-bridge.rule=Host(`bridge.${DOMAIN:-nolmi.ai}`)"
       - "traefik.http.routers.nolmi-bridge.entrypoints=websecure"
       - "traefik.http.routers.nolmi-bridge.tls=true"
       - "traefik.http.routers.nolmi-bridge.tls.certresolver=${ACME_RESOLVER}"
@@ -115,11 +130,11 @@ services:
       - HOSTNAME=0.0.0.0
       # NEXT_PUBLIC_* sind zur BUILD-Zeit ins Bundle inlined (siehe Header) —
       # diese Runtime-Zeile ist nur Konsistenz/Doku, der Wert kommt aus dem Build-ARG.
-      - NEXT_PUBLIC_RUNTIME_URL=https://runtime.nolmi.ai
+      - NEXT_PUBLIC_RUNTIME_URL=https://runtime.${DOMAIN:-nolmi.ai}
     labels:
       - "traefik.enable=true"
       - "traefik.docker.network=traefik-proxy"
-      - "traefik.http.routers.nolmi-web.rule=Host(`app.nolmi.ai`)"
+      - "traefik.http.routers.nolmi-web.rule=Host(`app.${DOMAIN:-nolmi.ai}`)"
       - "traefik.http.routers.nolmi-web.entrypoints=websecure"
       - "traefik.http.routers.nolmi-web.tls=true"
       - "traefik.http.routers.nolmi-web.tls.certresolver=${ACME_RESOLVER}"

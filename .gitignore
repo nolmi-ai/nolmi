@@ -3,6 +3,11 @@ node_modules
 dist
 .env
 .env.local
+
+# Traefik-State/Secrets (Distribution 3b) — NIE committen
+docker/traefik/htpasswd
+docker/traefik/letsencrypt/
+docker/traefik/acme*.json
 data/*.db
 data/*.db-journal
 apps/bridge/data/*.db

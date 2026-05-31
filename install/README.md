@@ -69,12 +69,36 @@ docker compose -f docker-compose.single-host.yml exec -it nolmi-runtime node dis
 > Netz: auf 3b (Traefik + Domain + HTTPS + BasicAuth) warten oder selbst eine
 > Firewall/Proxy davorsetzen.
 
+## Mit Domain + HTTPS (Schritt 3b)
+
+Wer eine eigene **Domain** hat und **HTTPS + BasicAuth** will (Traefik +
+Let's Encrypt), nutzt **`install/install-tls.sh`** statt des Single-Host-Skripts:
+
+```bash
+# Aus einem Clone (Repo public):
+DOMAIN=nolmi.example.com bash install/install-tls.sh
+```
+
+Voraussetzung: drei **DNS-A-Records** (`app.`/`runtime.`/`bridge.<DOMAIN>` → deine
+Server-IP). Das Skript baut die Images mit deiner Domain (das Web-Bundle ist
+domain-gebunden, #126 — daher lokaler Build, kein vorgebautes Image), erzeugt
+BasicAuth-htpasswd (Node/bcrypt), bringt Traefik mit (oder nutzt ein vorhandenes)
+und startet mit **Staging-Zertifikaten** (kein Rate-Limit-Risiko). Wenn Staging
+grün ist, auf Prod-Certs flippen:
+
+```bash
+DOMAIN=nolmi.example.com bash install/tls-promote.sh
+```
+
+Details: `docker/traefik/docker-compose.yml` (Traefik v3.6, le + le-staging
+Resolver) + `docker/nolmi/docker-compose.yml` (der TLS-Stack mit `${DOMAIN}`).
+
 ## Wichtig
 
 - **`docker/nolmi/.env` sichern** — `NOLMI_ENCRYPTION_KEY` verschlüsselt alle
   API-Keys und OAuth-Tokens in der DB. Bei Verlust sind diese Daten weg.
 - Das Skript ist **idempotent**: eine vorhandene `.env` wird nicht überschrieben
   (Secrets bleiben stabil); ein erneuter Lauf baut den Stack neu auf.
-- **Single-Host vs. Production:** diese Variante nutzt
-  `docker-compose.single-host.yml` (kein Traefik). Der Production-Stack mit
-  TLS/Domain/BasicAuth ist `docker-compose.yml` (Schritt 3b).
+- **Drei Szenarien:** `install.sh` (+ `docker-compose.single-host.yml`) deckt
+  **lokal** + **VPS-ohne-Domain** (http) ab; `install-tls.sh` (+ Traefik +
+  `docker-compose.yml`) ist **VPS-mit-Domain** (HTTPS, Schritt 3b).
