@@ -11,11 +11,15 @@
 # macht, verbrennt das Kontingent und sperrt sich für Tage aus. Staging hat
 # kein scharfes Limit → erst Mechanik beweisen, dann einmal sauber flippen.
 #
-# WARUM dieser Befehl nötig ist (§7 B2-Befund 4): Nur `ACME_RESOLVER` umzustellen
-# reicht NICHT — Traefik matcht vorhandene Certs nach DOMAIN, nicht nach
-# Resolver, findet die Domain im `acme-staging.json` und liefert weiter Staging.
-# Der Store muss geleert + Traefik neugestartet + ein Request pro Host als
-# Bezugs-Trigger gefeuert werden. Genau das macht dieses Skript.
+# WARUM dieser Befehl nötig ist (§7 B2-Befund 4, VM-verifiziert Tag 33): Nur
+# `ACME_RESOLVER` umzustellen reicht NICHT — Traefik matcht vorhandene Certs nach
+# DOMAIN, nicht nach Resolver, und liefert weiter Staging, solange für die Domain
+# irgendein Cert existiert. Und tiefer als ursprünglich dokumentiert: NUR den
+# Staging-Store zu leeren reicht AUCH nicht — der le-Prod-Resolver legt dann nur
+# einen Account an (acme.json = Account-only), bezieht aber keine Certs, weil der
+# neu gefüllte Staging-Store „kein Bezugsbedarf" signalisiert. BEIDE Stores
+# (acme-staging.json UND acme.json) müssen geleert werden → Traefik-Restart →
+# ein Request pro Host als Bezugs-Trigger. Genau das macht dieses Skript.
 #
 #   DOMAIN=deine-domain.tld bash install/tls-promote.sh
 
@@ -61,23 +65,38 @@ else
 fi
 ok "ACME_RESOLVER=le gesetzt"
 
-# ─── 2. Staging-Store leeren (B2-Befund 4 — sonst klebt Staging) ─────────────
-log "2/4  Staging-ACME-Store leeren + Traefik neustarten"
+# ─── 2. BEIDE ACME-Stores leeren (B2-Befund 4, VM-verifiziert Tag 33) ─────────
+# Tiefer als ursprünglich dokumentiert: NUR acme-staging.json zu leeren reicht
+# NICHT. Traefik registriert dann zwar einen le-Prod-ACME-Account (acme.json =
+# Account-only, KEINE Certs), serviert aber WEITER das Staging-Cert — solange
+# für die Domains irgendein Cert existiert (Staging-Store neu gefüllt +
+# in-memory), sieht Traefik "kein Bezugsbedarf". Beide Stores müssen leer sein.
+# Reihenfolge entscheidend: BEIDE leeren → Restart (lädt leere Stores, kein Cert
+# zum Matchen) → Trigger (Schritt 4) erzwingt Neu-Bezug gegen le (Prod).
+#
+# TRADE-OFF: acme.json mitzuleeren wirft auch den Prod-ACME-Account weg → bei
+# JEDEM Flip neuer Account + frischer Bezug. Für den EINMALIGEN Staging→Prod-
+# Flip unkritisch (Account-Anlage ist gratis, kein Rate-Limit darauf). Wer je
+# WIEDERHOLT flippt, sollte das bedenken.
+log "2/4  BEIDE ACME-Stores leeren + Traefik neustarten"
 STAGING_STORE="${TRAEFIK_DIR}/letsencrypt/acme-staging.json"
-if [ -f "${STAGING_STORE}" ]; then
-  : > "${STAGING_STORE}"
-  chmod 600 "${STAGING_STORE}"
-  ok "acme-staging.json geleert (${STAGING_STORE})"
+PROD_STORE="${TRAEFIK_DIR}/letsencrypt/acme.json"
+if [ -f "${STAGING_STORE}" ] || [ -f "${PROD_STORE}" ]; then
+  for store in "${STAGING_STORE}" "${PROD_STORE}"; do
+    : > "${store}"          # create-or-truncate
+    chmod 600 "${store}"
+    ok "geleert: ${store}"
+  done
   if [ -f "${TRAEFIK_DIR}/docker-compose.yml" ] && docker ps --format '{{.Names}}' | grep -qx traefik; then
     ( cd "${TRAEFIK_DIR}" && docker compose restart )
-    ok "Traefik neugestartet"
+    ok "Traefik neugestartet (lädt leere Stores → kein Cert zum Matchen)"
   else
     warn "Traefik-Stack nicht hier verwaltet — starte DEIN Traefik selbst neu."
   fi
 else
-  warn "Kein verwalteter Staging-Store gefunden (externes Traefik?)."
-  warn "Leere SELBST den Staging-acme-Store deiner Traefik-Instanz + Restart,"
-  warn "sonst bleibt Staging kleben (B2-Befund 4)."
+  warn "Keine verwalteten ACME-Stores gefunden (externes Traefik?)."
+  warn "Leere SELBST acme-staging.json UND acme.json deiner Traefik-Instanz + Restart"
+  warn "(BEIDE Stores, nicht nur Staging — B2-Befund 4), sonst bleibt Staging kleben."
 fi
 
 # ─── 3. Nolmi-Stack recreaten (neues certresolver=le-Label greift) ───────────
