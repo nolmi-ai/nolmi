@@ -54,7 +54,7 @@ Dieses Dokument verfeinert Block 4 (Self-Hosting-Polish) der Pre-Launch-Phase A 
 
 | Aspekt | Setzung | Begründung |
 |---|---|---|
-| LICENSE | Apache 2.0 | Industry-Standard, Patent-Schutz, Open-Core-kompatibel (Phase B SaaS möglich), TensorFlow/Kubernetes/Anthropic-konsistent |
+| LICENSE | ~~Apache 2.0~~ → **AGPL-3.0-only** (final, Tag 33) | Tag-24/25-Kandidat war Apache 2.0; **überholt** durch finale Setzung AGPL-3.0-only (Network-Use-Copyleft, s. DISTRIBUTION-STRATEGY.md §5b). Swap vor Going Public vollzogen (LICENSE-Volltext + alle package.json + README). |
 | README-Struktur | Demo-First (Hero-GIF + Story-driven Pitch) | GitHub-Landing als Erst-Eindruck, Differenzierung gegenüber ChatGPT/Claude.ai ist die Story, #113-Reuse-Pattern (60-Sek-GIF aus Block 5) |
 | CONTRIBUTING.md | Standard-Pattern | Code-Style + Sub-Schritt-Workflow + PR-Hinweise |
 | Issue-Templates | Standard-Pattern | Bug + Feature + Question |

@@ -2,7 +2,7 @@
 
 **Self-hosted AI twins that remember, have personality, and talk to each other.**
 
-![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)
+![License](https://img.shields.io/badge/License-AGPL_3.0--only-blue.svg)
 ![Status](https://img.shields.io/badge/status-pre--launch-orange.svg)
 ![Built with Claude](https://img.shields.io/badge/built_with-Claude-D97757.svg)
 
@@ -139,4 +139,4 @@ and [docs/BACKLOG.md](docs/BACKLOG.md) for what's planned.
 
 ## License
 
-Apache 2.0 — see [LICENSE](LICENSE).
+AGPL-3.0-only — see [LICENSE](LICENSE).
