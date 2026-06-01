@@ -672,7 +672,14 @@ Apex-`nolmi.ai` lieferte 404 (kein Traefik-Router). **Gewählt: Option (b)** (Di
 
 ### NPM-Distribution `npm i -g nolmi` — Wrapper-Bau, an Public-/Etappe-3-Gate gekoppelt
 
-**Status:** 🔓 **JETZT BAUBAR** (Gate §5a erfüllt — Repo PUBLIC seit Tag 34/1. Juni; B1-Clone entsperrt) — Diagnose Tag 33 durch, Bau noch offen (Pfad a) | **Größe S–M** (Bau) | **Priorität:** should | **Trigger:** ~~erst nach Secret-Gate §5a~~ **erfüllt**; B1-Image-Pull weiter bevorzugt (Docker-Hub-Push), B1-Clone als Fallback jetzt möglich
+**Status:** 🟡 **Phase 1 GEBAUT + VM-E2E-verifiziert (Tag 34, Commit `2beff2f`)** — `packages/cli` (B1-Clone-Pfad). Noch offen vor Publish: **1 Remote-VPS-Bug (HOCH, s.u.)** + LICENSE-im-Tarball + `npm publish`. | **Größe S–M** (Rest) | **Priorität:** should | **Trigger:** Gate §5a erfüllt (Repo public)
+
+**Phase 1 ✅ (Tag 34, `2beff2f`):** `packages/cli` als einziges publizierbares Paket (`name "nolmi"`, `bin nolmi→dist/cli.js`, `AGPL-3.0-only`, `files: ["dist"]`, nicht `private`). Node-Port der install.sh-7-Schritte mit den drei Abweichungen (public-Clone / `node:crypto` / TTY-Passthrough). **VM-E2E-Test (187.124.7.94) bestätigt:** Klon des public Repos → `docker compose up --build -d` → idempotente `.env` (mode 0600, byte-identisch install.sh) → interaktives `onboard` → User+Twin angelegt. Klon/Build/Onboarding-Pfad **trägt**. `--no-docker` (Phase A) als Groove reserviert. Statisch + auf VM verifiziert.
+
+**Noch offen vor `npm publish`:**
+- **🔴 Remote-VPS-`NEXT_PUBLIC_RUNTIME_URL`-Bug (HOCH)** — eigenes Item unten, blockiert den Haupt-Self-Hoster-Fall (VPS + Browser vom Laptop).
+- **LICENSE-im-Tarball:** `packages/cli` hat **kein eigenes `LICENSE`-File**; `files: ["dist"]` + die root-`LICENSE` liegt eine Ebene drüber → der publizierte npm-Tarball enthält **nur** das `license`-Feld, **nicht** den AGPL-Volltext. Vor Publish: AGPL-3.0-`LICENSE` nach `packages/cli/` kopieren/symlinken (npm packt ein `LICENSE` im Paket-Root automatisch mit) **oder** via `files` explizit aufnehmen — sonst ist der Tarball lizenztext-los (bei AGPL unschön).
+- **`npm publish`** selbst (eigener Schritt nach Bug-Fix + Verifikation).
 
 Globales npm-Paket (`npm i -g nolmi` → `nolmi onboard`) wie OpenClaw. **Phasenweg:** B jetzt (Wrapper ums Single-Host-Compose) → A später (Single-Process ohne Docker) → C Endbild (beide Modi). Volle Strategie in `DISTRIBUTION-STRATEGY.md §3` (Etappe 2 NPM-Abschnitt + Etappe 3).
 
@@ -689,6 +696,25 @@ Globales npm-Paket (`npm i -g nolmi` → `nolmi onboard`) wie OpenClaw. **Phasen
 - `onboard`-Übergabe (`docker compose exec -it … node dist/scripts/onboard.js`) braucht **interaktiven TTY-Passthrough** (`stdio: 'inherit'`).
 
 **Entscheidung (Pfad a):** Bau hinter die Public-Entscheidung — kein B2 jetzt. Bevorzugt B1-Image-Pull (Docker Hub), Fallback B1-Clone (Repo public). Beide nach §5a.
+
+### 🔴 BUG: `nolmi onboard` backt `localhost:4000` ins Web-Bundle → Remote-VPS-Login bricht ("Failed to fetch")
+
+**Status:** **OFFEN** (gefunden im VM-E2E-Test Tag 34, NICHT gefixt) | **Größe M** | **Priorität: HOCH — blockiert den primären Self-Hoster-Fall (VPS + Browser vom Laptop), vor `npm publish` + vor Launch zu fixen**
+
+**Symptom (verifiziert auf VM 187.124.7.94):** `nolmi onboard` schreibt `NEXT_PUBLIC_RUNTIME_URL=http://localhost:4000` in die `.env` (aus install.sh geerbt, für **lokales** Single-Host gedacht). Diese Adresse wird **build-time ins Web-Client-Bundle gebacken** (vgl. #126 Build-Guard). Greift der Browser **von einem anderen Rechner** auf den VPS zu (der Normalfall: VM headless, Zugriff vom Laptop), zeigt das Bundle auf `localhost:4000` = **den Rechner des Browsers**, nicht die VM → der Login-Request erreicht die Runtime nie → **"Failed to fetch"**.
+
+**Diagnose-Befund:** `.env` UND das gebackene Bundle enthalten beide `http://localhost:4000`. Die Runtime selbst ist **gesund** (`localhost:4000/health` → 200 auf der VM, Ports auf `0.0.0.0` offen) — **nur die im Bundle gebackene Adresse ist für Remote falsch**. Es ist kein Runtime-/Netzwerk-Problem, sondern eine **Build-Zeit-Annahme** (localhost) im Wrapper.
+
+**Kern:** `NEXT_PUBLIC_RUNTIME_URL` ist build-time inlined → der Wrapper müsste **VOR dem `compose up --build`** die **browser-erreichbare** Adresse kennen (öffentliche IP/Domain), statt `localhost` anzunehmen. `NOLMI_HOST` existiert im Wrapper bereits (Default `localhost`) — der Bug ist, dass für den Remote-Fall kein sinnvoller Wert gesetzt/abgefragt wird.
+
+**Fix-Optionen (Design-Entscheidung, frischer Kopf):**
+- **(a) onboard fragt** nach der öffentlichen Adresse (IP/Domain) — explizit, robust, ein interaktiver Schritt mehr.
+- **(b) Public-IP auto-erkennen** — bequem, aber **fehleranfällig** (NAT, mehrere IPs, spätere Domain). Riskant als Default.
+- **(c) `localhost`-Default + klarer Hinweis** „für Remote `NOLMI_PUBLIC_HOST` setzen + neu bauen" — minimal, schiebt die Last zum User.
+
+**Berührt außerdem:** `SESSION_COOKIE_SECURE` / Cookie-Domain könnten beim Domain-/HTTPS-Fall mit dran hängen (heute hart `false`/leer für lokales http). Beim Fix mitdenken, nicht separat lösen.
+
+**Cross-Ref:** Hängt an `NEXT_PUBLIC_RUNTIME_URL` (Wrapper `.env` + `docker/nolmi/docker-compose.single-host.yml` Build-ARG) und an #126 (Build-Guard). install.sh hat denselben Default (`NOLMI_HOST` → `localhost`) — der Fix sollte **beide Türen** (bash + Wrapper) konsistent halten (DRY-Kopplung, s. `packages/cli/README.md`).
 
 ### 133. Cross-Channel-Mental-Model-Doku
 
