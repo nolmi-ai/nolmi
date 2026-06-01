@@ -1,0 +1,48 @@
+{
+  "name": "nolmi",
+  "version": "0.1.0",
+  "description": "Self-hosted Nolmi AI-Twins — One-Command-Installer (npm i -g nolmi → nolmi onboard)",
+  "license": "AGPL-3.0-only",
+  "type": "module",
+  "bin": {
+    "nolmi": "dist/cli.js"
+  },
+  "files": [
+    "dist"
+  ],
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "author": {
+    "name": "Markus Baier",
+    "email": "hello@nolmi.ai"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/nolmi-ai/nolmi.git",
+    "directory": "packages/cli"
+  },
+  "homepage": "https://github.com/nolmi-ai/nolmi#readme",
+  "bugs": {
+    "url": "https://github.com/nolmi-ai/nolmi/issues"
+  },
+  "keywords": [
+    "nolmi",
+    "ai",
+    "twin",
+    "self-hosted",
+    "agent",
+    "installer"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "build": "tsc",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "typescript": "^5.6.0"
+  }
+}
