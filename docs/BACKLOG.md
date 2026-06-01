@@ -668,11 +668,11 @@ Apex-`nolmi.ai` lieferte 404 (kein Traefik-Router). **Gewählt: Option (b)** (Di
 **Verifiziert (lokal):** `docker compose config` VALID, Apex-Labels korrekt (Host nackt, Port 80, kein BasicAuth), HTML-Interpolation, app-BasicAuth unverändert, `tls-promote.sh` `bash -n` grün.
 **Offen:** **Production-Live-Verifikation** (Apex liefert die Seite, kein BasicAuth, Cert) — **nicht jetzt isoliert auf Prod**, sondern als Teil des **nächsten Production-Deploys** (mit dem `git pull` + `docker compose up -d nolmi-apex` dort).
 
-**Cross-Ref #112:** Dies ist die **minimale Platzhalter-Seite**, NICHT die volle Launch-Landing. **#112** (Self-Hosting-Launch-Landing, Going Public) bleibt offen — kann die `nolmi-apex`-`index.html` später ersetzen oder auf eine echte Landing umhängen.
+**Cross-Ref #112:** Dies ist die **minimale Platzhalter-Seite**, NICHT die volle Launch-Landing. **#112** (Self-Hosting-Launch-Landing) ist mit Going Public (Tag 34) **🔓 jetzt baubar** und einer der Launch-Blocker — kann die `nolmi-apex`-`index.html` später ersetzen oder auf eine echte Landing umhängen.
 
 ### NPM-Distribution `npm i -g nolmi` — Wrapper-Bau, an Public-/Etappe-3-Gate gekoppelt
 
-**Status:** OFFEN (Diagnose Tag 33 durch, Bau zurückgestellt — Pfad a) | **Größe S–M** (Bau) | **Priorität:** should | **Trigger:** **erst nach Secret-Gate §5a** (Repo public / Docker-Hub-Push), Teil des Etappe-3-Release-Blocks
+**Status:** 🔓 **JETZT BAUBAR** (Gate §5a erfüllt — Repo PUBLIC seit Tag 34/1. Juni; B1-Clone entsperrt) — Diagnose Tag 33 durch, Bau noch offen (Pfad a) | **Größe S–M** (Bau) | **Priorität:** should | **Trigger:** ~~erst nach Secret-Gate §5a~~ **erfüllt**; B1-Image-Pull weiter bevorzugt (Docker-Hub-Push), B1-Clone als Fallback jetzt möglich
 
 Globales npm-Paket (`npm i -g nolmi` → `nolmi onboard`) wie OpenClaw. **Phasenweg:** B jetzt (Wrapper ums Single-Host-Compose) → A später (Single-Process ohne Docker) → C Endbild (beide Modi). Volle Strategie in `DISTRIBUTION-STRATEGY.md §3` (Etappe 2 NPM-Abschnitt + Etappe 3).
 
@@ -1621,9 +1621,11 @@ Der alte Bridge-Container wurde am 1. Mai 2026 mit **Exit-Code 137** (SIGKILL, O
 2. VPS srv1046432 herunterfahren
 3. Falls Hostinger-Mietkosten: VPS-Vertrag kündigen
 
-### Apache-2.0 → AGPL-3.0 — LICENSE-Altlast vor Going Public ersetzen
+### Apache-2.0 → AGPL-3.0 — LICENSE-Altlast vor Going Public ersetzen ✅
 
-**Status:** **OFFEN** | **Größe S** | **Priorität: must-vor-Public** | Lizenz-Setzung Tag 33, s. `DISTRIBUTION-STRATEGY.md §5b`
+**Status:** ✅ **DONE** (Tag 34, 1. Juni 2026, Commit `0d750db`) | **Größe S** | **war: must-vor-Public** | Lizenz-Setzung Tag 33, s. `DISTRIBUTION-STRATEGY.md §5b`
+
+**Erledigt Tag 34 (`0d750db`):** `LICENSE` durch **kanonischen AGPL-3.0-Volltext** (gnu.org, verbatim/unmodifiziert) ersetzt; `license`-Feld auf **`AGPL-3.0-only`** in Root + allen 4 Workspaces (`packages/shared`, `apps/web`, `apps/bridge`, `apps/runtime`); README-Badge + License-Sektion angeglichen; `docs/BLOCK-4-STRATEGY.md` Apache-Kandidat als überholt markiert. Build grün (SPDX-Wert bricht kein Tooling). GitHub erkennt AGPL-3.0 im Repo-Header. Appendix-Platzhalter bewusst **nicht** gefüllt (verbatim-Pflicht + saubere `licensee`-Erkennung). → Teil des Going-Public-Blocks (Tag 34).
 
 **Setzung Tag 33:** Nolmi wird **AGPL-3.0** lizenziert (Network-Use-Copyleft §13 → schließt die SaaS-Lücke, schützt gegen geschlossene Managed-Forks bei vollem offenem Code; 2026-Standard für Open-Source-SaaS: Grafana/Bitwarden/Mattermost/Gitea/Nextcloud/Mastodon/Plausible). Relizenzierungs-Logik: AGPL→MIT jederzeit lockerbar, MIT→AGPL unmöglich → restriktiver Start hält „Weg 3 jetzt, Weg 1 langfristig" offen.
 
@@ -2401,11 +2403,13 @@ spezifischem SSH-Key. Wird heute nur für Production-Deploy genutzt
 Beim Phase-4-Deploy zu nolmi-ai/nolmi: Alias umbenennen zu
 `github.com-nolmi` oder als zweiten Alias parallel anlegen.
 
-### PAT-Rotation + Git-History-Secret-Scan — Release-Gate für Open-Source-Self-Hosting ✅
+### PAT-Rotation + Git-History-Secret-Scan + Repo public schalten (Going Public) — Release-Gate §5a ✅
 
-**Status:** **DONE** (Tag 33) | **Größe S** | **war: must-vor-Release** | siehe [`docs/DISTRIBUTION-STRATEGY.md`](./DISTRIBUTION-STRATEGY.md) §5a
+**Status:** ✅ **DONE — Repo PUBLIC seit 1. Juni 2026 (Tag 34)** | **Größe S** | **war: must-vor-Release** | siehe [`docs/DISTRIBUTION-STRATEGY.md`](./DISTRIBUTION-STRATEGY.md) §5a
 
-**Erledigt Tag 33:** PAT rotiert (alt revoked, neu read-only). Secret-History-Scan 🟢 sauber (gitleaks 8.30.1, volle History 327 Commits + manueller Gegencheck; einziger Treffer = False-Positive `OAuthActivationModal`-Komponentenname; PAT war nie in einem Commit). **Kein `filter-repo` nötig.** Hygiene-Reminder: Scan unmittelbar vor dem tatsächlichen Public-Schalten einmal wiederholen.
+**Going Public vollzogen (Tag 34, 1. Juni 2026):** `nolmi-ai/nolmi` ist **PUBLIC** (AGPL-3.0-only, GitHub-Lizenz-Erkennung bestätigt). **Strategie A „still public"** — Code sichtbar, kein Launch/Announcement (0 stars/forks, pre-launch). Der **Hygiene-Re-Scan unmittelbar vor dem Schalten** lief 🟢: gitleaks 8.30.1 über die **volle History/alle Branches → 341 Commits sauber** (Tag 33: 327 → +14), einziger Treffer = derselbe dokumentierte False-Positive (`OAuthActivationModal`), manueller Gegencheck 0 echte Secrets (`BRIDGE_REGISTER_TOKEN` nur Platzhalter, Advanced-Test-Token nie committet). Davor LICENSE-Swap `0d750db`. **Kein `filter-repo` nötig.**
+
+**Erledigt Tag 33 (Vorlauf):** PAT rotiert (alt revoked, neu read-only). Erster Secret-History-Scan 🟢 (gitleaks 8.30.1, 327 Commits; gleicher False-Positive; PAT war nie in einem Commit).
 
 Ein öffentliches Repo veröffentlicht die **komplette Git-History**, nicht nur den HEAD-Stand. Der für den VPS-Repo-Klon ausgestellte **Fine-grained PAT** (read-only, `nolmi-ai/nolmi`, S5) wurde im Chat-Kontext gepostet und liegt **potenziell in History/Commits/Notizen** — in öffentlicher History wäre er sofort kompromittiert. **Vor dem Öffnen des Repos (Distribution Etappe 3):**
 1. **PAT rotieren** — alten Token bei GitHub widerrufen, neuen ausstellen (entwertet den alten unabhängig davon, wo er liegt)
@@ -2413,6 +2417,12 @@ Ein öffentliches Repo veröffentlicht die **komplette Git-History**, nicht nur 
 3. Erst dann `Repo public`
 
 Kein Hygiene-Nice-to-have, sondern hartes Release-Gate. Aus Distribution-Session Tag 31 (Block 19).
+
+### Repo-Description EN-angleichen vor Launch (GitHub-Settings, kein Repo-File)
+
+**Status:** OFFEN | **Größe XS** | **Priorität:** vor Launch (kosmetisch) | Befund Tag 34
+
+Die GitHub-**Repo-Description** ist noch deutsch („Lab-Setup für persönliche AI-Twins…"), während die README englisch pitcht. Vor dem Launch (nicht jetzt — still public, kein Announcement) EN-angleichen. **Kein Repo-File** — reine GitHub-Settings-Sache (Repo → About → Description), daher nicht via Commit lösbar.
 
 ### Pre-Flight Bridge-DB-Inhalt verifizieren (vor Bridge-Re-Registrierung) — ✅ Tag 31 Block 7 DONE
 
