@@ -672,14 +672,13 @@ Apex-`nolmi.ai` lieferte 404 (kein Traefik-Router). **Gewählt: Option (b)** (Di
 
 ### NPM-Distribution `npm i -g nolmi` — Wrapper-Bau, an Public-/Etappe-3-Gate gekoppelt
 
-**Status:** 🟡 **Phase 1 GEBAUT + VM-E2E-verifiziert (Tag 34, Commit `2beff2f`)** — `packages/cli` (B1-Clone-Pfad). Noch offen vor Publish: **1 Remote-VPS-Bug (HOCH, s.u.)** + LICENSE-im-Tarball + `npm publish`. | **Größe S–M** (Rest) | **Priorität:** should | **Trigger:** Gate §5a erfüllt (Repo public)
+**Status:** 🟢 **Phase 1 FUNKTIONAL VOLLSTÄNDIG + remote-verifiziert (Tag 34)** — `packages/cli` (B1-Clone-Pfad). B1-Clone inkl. **Remote-VPS-Zugriff trägt end-to-end** (VM 187.124.7.94). Vor Publish nur noch **2 bewusste Schritte**: (a) LICENSE ins Tarball, (b) `npm publish`. | **Größe** (Rest): S | **Priorität:** should | **Trigger:** Gate §5a erfüllt (Repo public)
 
-**Phase 1 ✅ (Tag 34, `2beff2f`):** `packages/cli` als einziges publizierbares Paket (`name "nolmi"`, `bin nolmi→dist/cli.js`, `AGPL-3.0-only`, `files: ["dist"]`, nicht `private`). Node-Port der install.sh-7-Schritte mit den drei Abweichungen (public-Clone / `node:crypto` / TTY-Passthrough). **VM-E2E-Test (187.124.7.94) bestätigt:** Klon des public Repos → `docker compose up --build -d` → idempotente `.env` (mode 0600, byte-identisch install.sh) → interaktives `onboard` → User+Twin angelegt. Klon/Build/Onboarding-Pfad **trägt**. `--no-docker` (Phase A) als Groove reserviert. Statisch + auf VM verifiziert.
+**Phase 1 ✅ (Tag 34):** `packages/cli` als einziges publizierbares Paket (`name "nolmi"`, `bin nolmi→dist/cli.js`, `AGPL-3.0-only`, `files: ["dist"]`, nicht `private`). Node-Port der install.sh-7-Schritte mit den drei Abweichungen (public-Clone / `node:crypto` / TTY-Passthrough). **VM-E2E-Test (187.124.7.94):** Klon des public Repos → `docker compose up --build -d` → idempotente `.env` (mode 0600, byte-identisch install.sh) → interaktives `onboard` → User+Twin angelegt → **Browser-Login von außen + echte Twin-Antwort**. Der komplette Klon/Build/Onboarding/**Remote-Zugriff**-Pfad trägt. Commits `2beff2f` (Bau) + `fix(cli)` (Remote-URL-Fix). `--no-docker` (Phase A) als Groove reserviert.
 
-**Noch offen vor `npm publish`:**
-- **🔴 Remote-VPS-`NEXT_PUBLIC_RUNTIME_URL`-Bug (HOCH)** — eigenes Item unten, blockiert den Haupt-Self-Hoster-Fall (VPS + Browser vom Laptop).
+**Noch offen vor `npm publish` (2 bewusste Schritte):**
 - **LICENSE-im-Tarball:** `packages/cli` hat **kein eigenes `LICENSE`-File**; `files: ["dist"]` + die root-`LICENSE` liegt eine Ebene drüber → der publizierte npm-Tarball enthält **nur** das `license`-Feld, **nicht** den AGPL-Volltext. Vor Publish: AGPL-3.0-`LICENSE` nach `packages/cli/` kopieren/symlinken (npm packt ein `LICENSE` im Paket-Root automatisch mit) **oder** via `files` explizit aufnehmen — sonst ist der Tarball lizenztext-los (bei AGPL unschön).
-- **`npm publish`** selbst (eigener Schritt nach Bug-Fix + Verifikation).
+- **`npm publish`** selbst (eigener bewusster Schritt nach LICENSE-Fix).
 
 Globales npm-Paket (`npm i -g nolmi` → `nolmi onboard`) wie OpenClaw. **Phasenweg:** B jetzt (Wrapper ums Single-Host-Compose) → A später (Single-Process ohne Docker) → C Endbild (beide Modi). Volle Strategie in `DISTRIBUTION-STRATEGY.md §3` (Etappe 2 NPM-Abschnitt + Etappe 3).
 
@@ -697,9 +696,17 @@ Globales npm-Paket (`npm i -g nolmi` → `nolmi onboard`) wie OpenClaw. **Phasen
 
 **Entscheidung (Pfad a):** Bau hinter die Public-Entscheidung — kein B2 jetzt. Bevorzugt B1-Image-Pull (Docker Hub), Fallback B1-Clone (Repo public). Beide nach §5a.
 
-### 🔴 BUG: `nolmi onboard` backt `localhost:4000` ins Web-Bundle → Remote-VPS-Login bricht ("Failed to fetch")
+### ✅ BUG (GEFIXT): `nolmi onboard` backte `localhost:4000` ins Web-Bundle → Remote-VPS-Login brach ("Failed to fetch")
 
-**Status:** **OFFEN** (gefunden im VM-E2E-Test Tag 34, NICHT gefixt) | **Größe M** | **Priorität: HOCH — blockiert den primären Self-Hoster-Fall (VPS + Browser vom Laptop), vor `npm publish` + vor Launch zu fixen**
+**Status:** ✅ **DONE — VM-verifiziert (Tag 34, Commit `fix(cli): Remote-URL …`)** | **Größe M** | war: HOCH (primärer Self-Hoster-Fall: VPS + Browser vom Laptop)
+
+**Fix (Option a + Auto-Vorschlag + Repair-Pfad):**
+- **onboard** löst die Browser-Adresse **vor** dem Build auf (`resolveHost`): `--host`/`NOLMI_HOST` explizit → nehmen (kein Prompt); sonst TTY → erkannte IP (`os.networkInterfaces()`) **vorschlagen**, Enter bestätigt, Eingabe überschreibt; kein TTY → erkannte IP + laut geloggt (Fallback localhost). `https://` wird abgelehnt mit 3b-Hinweis (http+IP-Phase).
+- **Repair-Pfad `nolmi reconfigure-host`** (neu): für „localhost schon gebacken, Zugriff ist remote" — löst Adresse neu auf, ersetzt **ausschließlich** die `NEXT_PUBLIC_RUNTIME_URL`-Zeile (zeilenweise; **Secrets/Encryption-Key nie angefasst**), `compose up -d --build`. Idempotent (gleicher Host → no-op).
+- **DRY:** `install.sh` gespiegelt (`detect_ip()` + `resolve_host()`, `[ -t 0 ]`-Prompt). `.env`-Formel `http://<host>:4000` byte-identisch. `SESSION_COOKIE_SECURE=false` bleibt korrekt für http+IP (kein Eingriff nötig). Compose/web-Dockerfile/#126-Guard unangetastet.
+- **Neue Dateien:** `packages/cli/src/lib/{detect-ip,host,repo}.ts` + `commands/reconfigure-host.ts`; geändert: `onboard.ts`, `cli.ts`, `env-template.ts`-Kommentar, `install/install.sh`, `README.md`.
+
+**VM-Beleg (187.124.7.94):** neues Tarball → VM → `reconfigure-host` → IP-Vorschlag **187.124.7.94 korrekt erkannt** + bestätigt → `.env`-URL-Zeile ersetzt → **Secrets intakt (Twin gibt echte LLM-Antwort = `NOLMI_ENCRYPTION_KEY` unversehrt)** → web-Rebuild → **Browser-Login von außen (Mac → http://187.124.7.94:3000) funktioniert, Twin antwortet**. Der komplette B1-Clone-Pfad inkl. Remote-Zugriff trägt end-to-end.
 
 **Symptom (verifiziert auf VM 187.124.7.94):** `nolmi onboard` schreibt `NEXT_PUBLIC_RUNTIME_URL=http://localhost:4000` in die `.env` (aus install.sh geerbt, für **lokales** Single-Host gedacht). Diese Adresse wird **build-time ins Web-Client-Bundle gebacken** (vgl. #126 Build-Guard). Greift der Browser **von einem anderen Rechner** auf den VPS zu (der Normalfall: VM headless, Zugriff vom Laptop), zeigt das Bundle auf `localhost:4000` = **den Rechner des Browsers**, nicht die VM → der Login-Request erreicht die Runtime nie → **"Failed to fetch"**.
 

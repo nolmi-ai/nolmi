@@ -1,19 +1,24 @@
-import { existsSync, readFileSync, writeFileSync, chmodSync, readdirSync } from "node:fs";
+import { existsSync, writeFileSync, chmodSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { step, ok, warn, plain, dim, die } from "../lib/log.js";
 import { silentOk, runInherit } from "../lib/proc.js";
 import { encryptionKey, hex32 } from "../lib/secrets.js";
 import { buildEnvFile } from "../lib/env-template.js";
 import { waitForPort } from "../lib/readiness.js";
+import { resolveHost, readHostFromEnv } from "../lib/host.js";
+import { COMPOSE_FILE, isNolmiRepoRoot } from "../lib/repo.js";
 
-const COMPOSE_FILE = "docker-compose.single-host.yml";
 const RUNTIME_SERVICE = "nolmi-runtime";
 const RUNTIME_PORT = 4000;
 const ONBOARD_CMD = "node dist/scripts/onboard.js"; // WORKDIR im Container: /app/apps/runtime
 
 export interface OnboardOptions {
-  /** Browser-Adresse zum Server (localhost ODER Server-IP). install.sh: NOLMI_HOST. */
-  host: string;
+  /**
+   * Browser-Adresse zum Server. **undefined** = interaktiv auflösen (Prompt +
+   * Auto-Vorschlag der erkannten IP). Gesetzt nur bei explizitem
+   * `--host` / `NOLMI_HOST` (dann ohne Prompt).
+   */
+  host: string | undefined;
   /** Ziel-Clone-Verzeichnis. install.sh: NOLMI_DIR (Default $HOME/nolmi). */
   dir: string;
   /** Repo-URL. install.sh: NOLMI_REPO_URL. */
@@ -86,10 +91,18 @@ export async function runOnboard(opts: OnboardOptions): Promise<void> {
 
   // ── 4/7  Secrets + .env (node:crypto, idempotent) ──────────────────────────
   step("4/7  Secrets + .env");
+  let resolvedHost: string;
   if (existsSync(envFile)) {
     warn(`.env existiert bereits (${envFile}) — Secrets werden NICHT neu erzeugt (idempotent).`);
+    // Host für die Schluss-URLs aus der bestehenden .env lesen (kein Prompt).
+    resolvedHost = readHostFromEnv(envFile) ?? "localhost";
+    dim(`Browser-Adresse aus bestehender .env: ${resolvedHost}`);
+    warn("Falsche Adresse in der .env? → 'nolmi reconfigure-host' (rebaut nur das web-Image).");
   } else {
-    const content = buildEnvFile(opts.host, {
+    // Host VOR dem Build auflösen — dieser Wert wird build-time ins Web-Bundle
+    // gebacken (NEXT_PUBLIC_RUNTIME_URL). Falscher Wert = Remote-Login bricht.
+    resolvedHost = await resolveHost(opts.host);
+    const content = buildEnvFile(resolvedHost, {
       encryptionKey: encryptionKey(),
       sessionSecret: hex32(),
       bridgeToken: hex32(),
@@ -116,7 +129,7 @@ export async function runOnboard(opts: OnboardOptions): Promise<void> {
   step("7/7  Ersten Account anlegen");
   await handoffOnboard(envDir);
 
-  printFinish(opts.host, envDir);
+  printFinish(resolvedHost, envDir);
 }
 
 /** Schritt 3 — Repo-Bereitstellung, Logik 1:1 aus install.sh (in-repo / pull / clone). */
@@ -221,18 +234,6 @@ function printFinish(host: string, envDir: string): void {
   plain("      ohne Reverse-Proxy/Firewall nur für vertrauenswürdige Netze geeignet.");
   plain(`    • Secret-Backup: ${join(envDir, ".env")} sichern (NOLMI_ENCRYPTION_KEY!).`);
   plain("");
-}
-
-/** cwd ist das Repo-Root, wenn package.json name=nolmi UND Single-Host-Compose da ist. */
-function isNolmiRepoRoot(dir: string): boolean {
-  const pkgPath = join(dir, "package.json");
-  if (!existsSync(pkgPath)) return false;
-  if (!existsSync(join(dir, "docker", "nolmi", COMPOSE_FILE))) return false;
-  try {
-    return JSON.parse(readFileSync(pkgPath, "utf8")).name === "nolmi";
-  } catch {
-    return false;
-  }
 }
 
 /** Leeres Verzeichnis? (Fehler beim Lesen → als „nicht leer" behandeln, defensiv.) */

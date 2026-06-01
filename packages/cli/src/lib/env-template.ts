@@ -20,7 +20,14 @@ export interface EnvSecrets {
  * und `SESSION_COOKIE_SECURE=false` liefert das Single-Host-Compose selbst
  * (Build-ARG bzw. hartkodiertes `environment:`) — die .env muss sie nicht
  * setzen. `SESSION_COOKIE_SECURE=false` steht hier trotzdem (1:1 install.sh,
- * Klarheit/Redundanz schadet nicht).
+ * Klarheit/Redundanz schadet nicht). Bleibt für http+IP korrekt; erst der
+ * spätere TLS/Domain-Pfad (3b) braucht `true` + Cookie-Domain.
+ *
+ * `host` ist die **browser-erreichbare** Adresse (IP/Domain), VORHER via
+ * `resolveHost` aufgelöst (Auto-Vorschlag + Prompt, nicht mehr blind localhost).
+ * Sie wird build-time ins Web-Bundle gebacken (NEXT_PUBLIC_RUNTIME_URL) — ein
+ * falscher Wert bricht den Remote-Login. Die Formel `http://${host}:4000` bleibt
+ * byte-identisch zu install.sh.
  */
 export function buildEnvFile(host: string, s: EnvSecrets): string {
   return `# Nolmi Single-Host .env — AUTO-GENERIERT vom npm-Wrapper (nolmi onboard).

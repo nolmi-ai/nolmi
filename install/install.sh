@@ -13,8 +13,11 @@
 #
 # Konfigurierbar über ENV (alle optional):
 #   NOLMI_HOST     Adresse, unter der DEIN BROWSER den Server erreicht.
-#                  Default "localhost". Auf einem VPS: die Server-IP, z.B.
-#                  NOLMI_HOST=203.0.113.10
+#                  Wenn NICHT gesetzt: wird automatisch erkannt (primäre IP) und
+#                  — im interaktiven Terminal — zur Bestätigung vorgeschlagen.
+#                  Diese Adresse wird build-time ins Web-Bundle gebacken; auf
+#                  einem VPS MUSS sie die Server-IP/Domain sein (nicht localhost),
+#                  sonst bricht der Remote-Login. Explizit: NOLMI_HOST=203.0.113.10
 #   NOLMI_DIR      Ziel-Clone-Verzeichnis (Default $HOME/nolmi)
 #   NOLMI_REPO_URL Repo-URL (Default https://github.com/nolmi-ai/nolmi.git)
 #   NOLMI_BRANCH   Branch (Default main)
@@ -26,7 +29,7 @@ set -euo pipefail
 
 NOLMI_REPO_URL="${NOLMI_REPO_URL:-https://github.com/nolmi-ai/nolmi.git}"
 NOLMI_DIR="${NOLMI_DIR:-$HOME/nolmi}"
-NOLMI_HOST="${NOLMI_HOST:-localhost}"
+NOLMI_HOST="${NOLMI_HOST:-}"   # leer = automatisch erkennen/erfragen (s. resolve_host)
 NOLMI_BRANCH="${NOLMI_BRANCH:-main}"
 COMPOSE_FILE="docker-compose.single-host.yml"
 
@@ -34,6 +37,51 @@ log()  { printf '\n\033[1;36m▶ %s\033[0m\n' "$*"; }
 ok()   { printf '  \033[1;32m✓\033[0m %s\n' "$*"; }
 warn() { printf '  \033[1;33m!\033[0m %s\n' "$*"; }
 die()  { printf '\n\033[1;31m✗ %s\033[0m\n' "$*" >&2; exit 1; }
+
+# ─── Host-Auflösung (DRY-Spiegel zu packages/cli) ────────────────────────────
+# Primäre routbare IPv4 dieses Rechners — KEIN externer Dienst (entspricht
+# detect-ip.ts). Linux: `ip route get` / `hostname -I`; macOS: `ipconfig`.
+detect_ip() {
+  local ip=""
+  if command -v ip >/dev/null 2>&1; then
+    ip="$(ip route get 1.1.1.1 2>/dev/null | grep -oE 'src [0-9.]+' | awk '{print $2}' | head -n1 || true)"
+  fi
+  if [ -z "$ip" ] && command -v hostname >/dev/null 2>&1; then
+    ip="$(hostname -I 2>/dev/null | awk '{print $1}' || true)"
+  fi
+  if [ -z "$ip" ] && command -v ipconfig >/dev/null 2>&1; then
+    ip="$(ipconfig getifaddr en0 2>/dev/null || true)"
+  fi
+  printf '%s' "$ip"
+}
+
+# Setzt NOLMI_HOST, falls nicht explizit (ENV) gesetzt: TTY → Vorschlag +
+# Rückfrage (Enter bestätigt), sonst erkannte IP (Fallback localhost) — jeweils
+# LAUT geloggt. Spiegelt resolveHost() im Wrapper. Die .env-Formel bleibt gleich.
+resolve_host() {
+  [ -n "${NOLMI_HOST}" ] && return 0   # explizit gesetzt → kein Prompt
+  local detected; detected="$(detect_ip)"
+  if [ -t 0 ] && [ -t 1 ]; then
+    local def="${detected:-localhost}"
+    [ -n "$detected" ] && printf '  erkannte IP dieses Rechners: %s\n' "$detected"
+    printf '  Adresse, unter der dein Browser den Server erreicht?\n'
+    printf '  (IP oder Domain, ohne http:// und ohne Port) [%s]: ' "$def"
+    local answer=""; read -r answer || answer=""
+    NOLMI_HOST="${answer:-$def}"
+  elif [ -n "$detected" ]; then
+    NOLMI_HOST="$detected"
+    warn "Kein TTY — nehme erkannte IP '${detected}' als Browser-Adresse (Override: NOLMI_HOST=…)."
+  else
+    NOLMI_HOST="localhost"
+    warn "Kein TTY und keine IP erkannt — 'localhost' (für Remote NOLMI_HOST=<ip> setzen)."
+  fi
+  # Nachsichtige Normalisierung (DRY zu tryNormalizeHost): http(s):// + Slash weg.
+  case "$NOLMI_HOST" in
+    https://*) warn "HTTPS/Domain = TLS-Pfad (3b); Phase-1 macht http+IP — nutze die Adresse über http."; NOLMI_HOST="${NOLMI_HOST#https://}";;
+    http://*)  NOLMI_HOST="${NOLMI_HOST#http://}";;
+  esac
+  NOLMI_HOST="${NOLMI_HOST%/}"
+}
 
 # ─── 1. OS / Grund-Tools ─────────────────────────────────────────────────────
 log "1/7  Voraussetzungen prüfen"
@@ -88,7 +136,15 @@ ENV_FILE="${ENV_DIR}/.env"
 log "4/7  Secrets + .env"
 if [ -f "${ENV_FILE}" ]; then
   warn ".env existiert bereits (${ENV_FILE}) — Secrets werden NICHT neu erzeugt (idempotent)."
+  # Host für die Schluss-URLs aus der bestehenden .env lesen (kein Prompt).
+  existing_host="$(grep -E '^NEXT_PUBLIC_RUNTIME_URL=' "${ENV_FILE}" | head -n1 | sed -E 's|^NEXT_PUBLIC_RUNTIME_URL=http://([^:]+):4000.*|\1|' || true)"
+  NOLMI_HOST="${existing_host:-localhost}"
+  warn "Falsche Adresse in der .env? → Zeile NEXT_PUBLIC_RUNTIME_URL anpassen + neu bauen (oder im Wrapper: nolmi reconfigure-host)."
 else
+  # Browser-Adresse VOR dem Build auflösen — sie wird build-time ins Web-Bundle
+  # gebacken (NEXT_PUBLIC_RUNTIME_URL). Falscher Wert = Remote-Login bricht.
+  resolve_host
+  ok "Browser-Adresse: ${NOLMI_HOST}"
   # Lokal generiert, NIE geloggt. Encryption-Key: 32 Byte base64 (= Format aus
   # key:generate / loadMasterKey). Session + Bridge-Token: 32 Byte hex.
   enc_key="$(openssl rand -base64 32)"
