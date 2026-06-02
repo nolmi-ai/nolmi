@@ -119,9 +119,9 @@ fi
 
 # ─── 4. Bezugs-Trigger + Verify ──────────────────────────────────────────────
 log "4/4  Cert-Bezug triggern + verifizieren (~30–90 s)"
-# Host-Liste inkl. NACKTER Apex (${DOMAIN}) — der nolmi-apex-Container braucht
-# sein eigenes Prod-Cert, sonst klebt der Apex beim Flip auf Staging/Default.
-HOSTS="app.${DOMAIN} runtime.${DOMAIN} bridge.${DOMAIN} ${DOMAIN}"
+# Host-Liste: die App-Subdomains. (Die nackte Apex nolmi.ai liegt seit Tag 35
+# auf Vercel, nicht mehr im VPS-Stack — daher KEIN Cert-Trigger für sie hier.)
+HOSTS="app.${DOMAIN} runtime.${DOMAIN} bridge.${DOMAIN}"
 for h in ${HOSTS}; do
   curl -k -s -o /dev/null --max-time 20 "https://${h}/" || true
 done
@@ -162,7 +162,7 @@ if [ "${all_prod}" = "1" ]; then
   for h in ${HOSTS}; do ok "${h}: PROD-Issuer (Let's Encrypt)"; done
   cat <<EOF
 
-  ✓ Prod-Zertifikate aktiv über app/runtime/bridge.${DOMAIN} + Apex ${DOMAIN}.
+  ✓ Prod-Zertifikate aktiv über app/runtime/bridge.${DOMAIN}.
     Browser sollte keine TLS-Warnung mehr zeigen.
 EOF
 else

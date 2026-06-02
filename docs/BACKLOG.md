@@ -698,9 +698,15 @@ Die **Web-Präsenz** (Marketing-Landing + künftige Docs) wird **vom Produkt-Sta
 - **Konsequenz → Apex-Cleanup-Item:** sobald die Vercel-Landing live ist + DNS umgestellt, wird der Übergangs-Container **`nolmi-apex` abgelöst** → Service aus `docker/nolmi/docker-compose.yml` + den Apex-Eintrag aus `install/tls-promote.sh` entfernen (s. Apex-Item unten).
 - **Folge-Item (notiert, kein Muss jetzt):** GitHub-Repo-Description + npm-Description ggf. auf den **stärkeren persönlichen Pitch** angleichen — aktuell führt „agent-to-agent communication" mit dem **Infrastruktur-Feature**, laut Positionierung sollte der **persönliche Nutzen führen**. (Cross-Ref: Repo-Description-Item, Tag 35 ✅ — Wert ggf. nachschärfen.)
 
-### nolmi.ai Root-Domain liefert 404 — minimale Platzhalter-Seite ✅ (Production-Live offen)
+### nolmi.ai Root-Domain — Apex-Platzhalter ✅ ABGELÖST durch Vercel-Landing (Cleanup vollzogen)
 
-**Status:** **GEBAUT + config-validiert (Tag 33)** | Production-Live-Verifikation **beim nächsten Deploy** | **Größe S** | Befund Tag 33 (Production-Deploy Etappe 2)
+**Status:** ✅ **DONE (Tag 35)** — Apex liegt jetzt auf **Vercel** (Landing live), der `nolmi-apex`-Übergangs-Container ist **aus dem Repo entfernt**. | **Größe S** | Befund Tag 33 → abgelöst Tag 35
+
+**Cleanup vollzogen (Tag 35):** `nolmi.ai` zeigt per A-Record auf **Vercel** (Landing live, Repo `nolmi-ai/nolmi-web`). Der Platzhalter-Container ist damit gegenstandslos und **entfernt**: `nolmi-apex`-Service + Top-Level-`configs:`-Block aus `docker/nolmi/docker-compose.yml` raus (verifiziert: `docker compose config` VALID, nur noch runtime/bridge/web, kein `configs:`-Key); Apex aus der `HOSTS`-Liste + Texten in `install/tls-promote.sh` zurückgebaut (`bash -n` grün, Cert-Trigger nur noch app/runtime/bridge). `app./runtime./bridge.` + Traefik + deren Certs **unberührt**. **VPS-Schritt (separat):** `git pull` + `docker compose up -d --remove-orphans` aus `docker/nolmi/` entfernt den laufenden Container. Reversibel (A-Record zurück auf VPS → Diff zurücknehmen).
+
+<details><summary>Historie (Übergangs-Container, Tag 33–35)</summary>
+
+Apex-`nolmi.ai` lieferte 404 (kein Traefik-Router). **Gewählt: Option (b)** (Diagnose) — ein **separater Static-Container `nolmi-apex` (nginx:alpine)**, isoliert von Next-App/Auth/BasicAuth:
 
 Apex-`nolmi.ai` lieferte 404 (kein Traefik-Router). **Gewählt: Option (b)** (Diagnose) — ein **separater Static-Container `nolmi-apex` (nginx:alpine)**, isoliert von Next-App/Auth/BasicAuth:
 - `docker/nolmi/docker-compose.yml`: neuer Service `nolmi-apex` mit Router `Host(\`${DOMAIN:-nolmi.ai}\`)` (nackte Apex), websecure/tls/`${ACME_RESOLVER}`, **bewusst KEIN `nolmi-auth`-Middleware-Label** → öffentlich, kein BasicAuth (verifiziert: app.-Router behält BasicAuth, Apex hat keins). HTML inline via `configs.content` (kein Bind-Mount → kein Symlink-Compose-Relativpfad-Problem, kein Custom-Build). Minimale Platzhalter-Seite („Nolmi" + ein Satz + Link `app.${DOMAIN}`), `${DOMAIN}`-interpoliert (verifiziert: DOMAIN=foo.test → Link app.foo.test).
@@ -711,7 +717,9 @@ Apex-`nolmi.ai` lieferte 404 (kein Traefik-Router). **Gewählt: Option (b)** (Di
 
 **Cross-Ref #112:** Dies ist die **minimale Platzhalter-Seite**, NICHT die volle Launch-Landing. **#112** (Self-Hosting-Launch-Landing) zieht laut **Web-Präsenz-Architektur (Tag 35)** in ein **eigenes Repo auf Vercel** um (s. Item oben), NICHT mehr in den Produkt-Stack.
 
-**ABLÖSE-/CLEANUP (Tag 35, wenn Vercel-Landing live + DNS umgestellt):** Der `nolmi-apex`-Container ist nur ein **Übergangs-Platzhalter**. Sobald `nolmi.ai` (Apex-A-Record) auf Vercel zeigt, wird `nolmi-apex` **abgeschaltet**: Service aus `docker/nolmi/docker-compose.yml` entfernen + den Apex-Eintrag (Host-Liste) aus `install/tls-promote.sh` entfernen. Reversibel (A-Record zurück auf VPS). **Erst nach Live-Verifikation der Vercel-Landing.**
+**ABLÖSE-/CLEANUP:** ✅ vollzogen Tag 35 (s. Status oben) — Service + `configs:` aus dem Compose, Apex aus `tls-promote.sh`.
+
+</details>
 
 ### NPM-Distribution `npm i -g nolmi` — Phase 1 komplett + PUBLIZIERT ✅
 
