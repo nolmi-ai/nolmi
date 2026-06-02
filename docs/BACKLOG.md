@@ -681,6 +681,23 @@ Aus der **D2-Revision** (`DISTRIBUTION-STRATEGY.md §2`, Tag 33): Ein OpenAI/Cod
 
 Bis Weg B existiert: **keine Aktion**, nur dokumentierte Setzung.
 
+### Web-Präsenz-Architektur GESETZT (Tag 35): eigenes Repo + Vercel, getrennt vom Produkt-Stack
+
+**Status:** **GESETZT (Tag 35)** — Architektur-Entscheidung, Umsetzung folgt (Landing = #112) | **Priorität:** prägt #112 + Apex-Cleanup
+
+Die **Web-Präsenz** (Marketing-Landing + künftige Docs) wird **vom Produkt-Stack getrennt** — eigener Lebenszyklus, eigenes Deploy, kein Monorepo-Ballast.
+
+- **Eigenes Repo** (z.B. `nolmi-ai/nolmi-web`), **nicht** im Produkt-Monorepo `nolmi-ai/nolmi`.
+- **Host: Vercel** (Next.js-Nähe, Git-Deploy, CDN, Auto-SSL).
+- **Subdomain-Struktur:**
+  - `nolmi.ai` (Apex) → **Landing auf Vercel**
+  - `app.nolmi.ai` → **Produkt-Web-UI (VPS, unverändert)**
+  - `docs.nolmi.ai` → **Docs (später, auch Vercel)**
+- **DNS-Umstellung (reversibel):** nur der **Apex-A-Record** (`nolmi.ai`) zeigt künftig auf **Vercel** statt VPS (`187.124.3.235`). `app.` / `runtime.` / `bridge.` bleiben auf dem VPS.
+- **Landing-Pitch steht** (englisch): Hero **„Be present, without being always available"**, 3 persönliche Nutzen + A2A als **nachgeordneter 4. Punkt**, Trade-off-Satz, npm-Install, AGPL, pre-launch. Quelle: Positionierungs-Session mit Markus' Nolmi.
+- **Konsequenz → Apex-Cleanup-Item:** sobald die Vercel-Landing live ist + DNS umgestellt, wird der Übergangs-Container **`nolmi-apex` abgelöst** → Service aus `docker/nolmi/docker-compose.yml` + den Apex-Eintrag aus `install/tls-promote.sh` entfernen (s. Apex-Item unten).
+- **Folge-Item (notiert, kein Muss jetzt):** GitHub-Repo-Description + npm-Description ggf. auf den **stärkeren persönlichen Pitch** angleichen — aktuell führt „agent-to-agent communication" mit dem **Infrastruktur-Feature**, laut Positionierung sollte der **persönliche Nutzen führen**. (Cross-Ref: Repo-Description-Item, Tag 35 ✅ — Wert ggf. nachschärfen.)
+
 ### nolmi.ai Root-Domain liefert 404 — minimale Platzhalter-Seite ✅ (Production-Live offen)
 
 **Status:** **GEBAUT + config-validiert (Tag 33)** | Production-Live-Verifikation **beim nächsten Deploy** | **Größe S** | Befund Tag 33 (Production-Deploy Etappe 2)
@@ -692,7 +709,9 @@ Apex-`nolmi.ai` lieferte 404 (kein Traefik-Router). **Gewählt: Option (b)** (Di
 **Verifiziert (lokal):** `docker compose config` VALID, Apex-Labels korrekt (Host nackt, Port 80, kein BasicAuth), HTML-Interpolation, app-BasicAuth unverändert, `tls-promote.sh` `bash -n` grün.
 **Offen:** **Production-Live-Verifikation** (Apex liefert die Seite, kein BasicAuth, Cert) — **nicht jetzt isoliert auf Prod**, sondern als Teil des **nächsten Production-Deploys** (mit dem `git pull` + `docker compose up -d nolmi-apex` dort).
 
-**Cross-Ref #112:** Dies ist die **minimale Platzhalter-Seite**, NICHT die volle Launch-Landing. **#112** (Self-Hosting-Launch-Landing) ist mit Going Public (Tag 34) **🔓 jetzt baubar** und einer der Launch-Blocker — kann die `nolmi-apex`-`index.html` später ersetzen oder auf eine echte Landing umhängen.
+**Cross-Ref #112:** Dies ist die **minimale Platzhalter-Seite**, NICHT die volle Launch-Landing. **#112** (Self-Hosting-Launch-Landing) zieht laut **Web-Präsenz-Architektur (Tag 35)** in ein **eigenes Repo auf Vercel** um (s. Item oben), NICHT mehr in den Produkt-Stack.
+
+**ABLÖSE-/CLEANUP (Tag 35, wenn Vercel-Landing live + DNS umgestellt):** Der `nolmi-apex`-Container ist nur ein **Übergangs-Platzhalter**. Sobald `nolmi.ai` (Apex-A-Record) auf Vercel zeigt, wird `nolmi-apex` **abgeschaltet**: Service aus `docker/nolmi/docker-compose.yml` entfernen + den Apex-Eintrag (Host-Liste) aus `install/tls-promote.sh` entfernen. Reversibel (A-Record zurück auf VPS). **Erst nach Live-Verifikation der Vercel-Landing.**
 
 ### NPM-Distribution `npm i -g nolmi` — Phase 1 komplett + PUBLIZIERT ✅
 
@@ -838,15 +857,13 @@ Items aus dem Strategy-Pivot Tag 18. Block 4 macht das Repo für externe Tech-Af
 Items aus dem Strategy-Pivot Tag 18. Block 5 bringt das Repo öffentlich und koordiniert den Launch-Push. Spec: `docs/PRE-LAUNCH-A-STRATEGY.md`.
 
 ### 112. Landing-Page für Self-Hosting-Launch (minimal)
-Minimale Landing-Page als Anlauf-Stelle für Twitter/HN-Traffic. Kein voll-designtes Marketing-Site, eher README-Style mit visuellen Highlights:
+Minimale Landing-Page als Anlauf-Stelle für Twitter/HN-Traffic. Kein voll-designtes Marketing-Site, eher README-Style mit visuellen Highlights.
 
-- **Hero:** „Twin-Lab — Your Personal AI Twin with Memory Depth and Inter-Twin Communication" (oder besser auf Englisch finalisiert)
-- **Differenzierungs-Story:** 3–4 Punkte (Memory + Persona + A2A + Beta-Recherche)
-- **Screenshots oder Mini-GIFs** der UI
-- **Quick-Start-Button** → GitHub-Repo / DEPLOYMENT.md
-- **Footer** mit Kontakt (Twitter, Email)
+**ARCHITEKTUR GESETZT (Tag 35):** eigenes Repo (`nolmi-ai/nolmi-web`) **auf Vercel**, `nolmi.ai`-Apex → Vercel (s. Item „Web-Präsenz-Architektur"). NICHT im Produkt-Monorepo, NICHT der `nolmi-apex`-Container (der wird danach abgelöst).
 
-Implementierungsoption: einfache Next.js-Page in einem separaten Repo oder Subdomain, oder GitHub-Pages mit Astro/Markdown. Pragmatisch wählen.
+**PITCH STEHT (Tag 35, Positionierungs-Session):** Hero **„Be present, without being always available"**; **3 persönliche Nutzen** führen; **A2A als nachgeordneter 4. Punkt** (nicht der Aufhänger); Trade-off-Satz; npm-Install (`npm i -g nolmi`); AGPL; pre-launch-Hinweis. Quick-Start → GitHub/DEPLOYMENT.md. Footer Kontakt. Screenshots/Mini-GIFs (#113, Light-Branding).
+
+> Hinweis: Der alte Hero-Entwurf („Memory Depth and Inter-Twin Communication") ist **überholt** — er führte mit dem Infrastruktur-Feature; die Positionierung stellt den **persönlichen Nutzen** voran.
 
 **Größe:** M · **Priorität:** must · **Aus:** Pre-Launch-Phase-A-Strategy (Block 5) · **Spur:** Pre-Launch-Phase A
 
