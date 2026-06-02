@@ -115,18 +115,30 @@ Eigene `twin_conversations`-Tabelle. Jede Nachricht referenziert eine `conversat
 Alle Twin-Nachrichten persistent in der Twin-DB, nicht nur Audits. Bridge wird zum reinen Transport. Authoritative Konversations-Historie liegt lokal.
 **Größe:** XL · **Priorität:** nice · **Aus:** Phase-2-Architektur-Diskussion
 
-### 3. Mandate-Conditions-Auswertung — 🔶 weitgehend erledigt (Tag 33)
+### 3. Mandate-Conditions-Auswertung — ✅ erledigt + live verifiziert (Tag 33 Bau, Tag 35 Live)
 `requiresApproval`, `maxLength`, etc. wurden in `checkMandate()` ignoriert. **Diagnose Tag 33:** die zwei Conditions sind semantisch verschieden — `requiresApproval` ist **deklarativ/redundant** (das echte Approval-Gate ist `escalation: always_pending`, die Runtime routet darüber; kein Logikbau nötig), `maxLength` ist die **einzige echt tote** Condition (Output-Cap in Zeichen).
 
 **Gebaut (Tag 33):** zentraler `TwinService.enforceMaxLength`-Helfer — **präventiv** (Längen-Hinweis als System-Instruktion in den Prompt) → **reaktiv** (max. 1 Retry mit verschärftem Hinweis) → **Truncate-Fallback** am Satz-/Wortende (` […]`). Loop-Cap fix, garantiert eine Antwort. Audit-Flag `lengthEnforced: retried|truncated` fürs Tuning. Gehookt an `chat()` (respond_to_chat, 4000) + `approveDefault()` (draft_linkedin_post, 2000). `requiresApproval`-Klarstellung in `mandates.yaml` + `checkMandate`-Kommentar.
 
-**Verifikations-Stand (ehrlich):**
+**Verifikations-Stand:**
 - ✅ `enforceMaxLength`-Logik **isoliert deterministisch bewiesen** (no-op · präventiv · 1-Retry · Truncate am Satz-/Wortende · Audit-Flag).
 - ✅ **Owner-Direct-Pfad am Verhalten bestätigt** (lokaler Chat, Wegwerf-DB): owner-direct/`mandate_id=null` → maxLength greift bewusst NICHT, kein `lengthEnforced` — wie designt.
-- 🔶 **NICHT live verifiziert:** dass der Hook im `respond_to_chat`-Pfad (Nicht-Owner-Chat **mit** Mandate) mit echtem LLM tatsächlich feuert — der lokale Test lief über owner-direct (unlimitiert). Hook sitzt nachweislich an `chat()`+`approveDefault()`, dieselbe bewiesene Funktion → Risiko gering, aber nicht end-to-end durchgespielt.
+- ✅ **LIVE verifiziert (Tag 35, VM 187.124.7.94):** Nicht-Owner-`respond_to_chat`-Pfad (`escalation:auto`, über den deprecated `/chat`-Legacy-Alias gegen einen Test-Twin `@markus` — `LEGACY_HANDLE` ist fest `@markus`). **Zwei der drei Stufen live bewiesen:**
+  - **Präventiv:** `maxLength:50`, 2 Calls → Modell blieb von sich aus ≤50 (43/47 Zeichen, `finishReason:stop`, **kein Flag — by design**).
+  - **Retry:** `maxLength:20` + Langer-Absatz-Prompt → Erstantwort zu lang → 1 Retry → „Kurz halten." (12 Zeichen), **`output.lengthEnforced:"retried"` korrekt protokolliert**.
+  - **Truncate:** **nicht live erzwungen** (erfordert, dass das Modell AUCH den Retry ignoriert — künstlich) → bleibt **isoliert im #3-Bau getestet**, bewusst so belassen.
 
-**Rest-Item (S, low):** `respond_to_chat`-maxLength **live mit Nicht-Owner-Pfad** (A2A-Reply oder externer Chatter, der durch `checkMandate`+Mandate geht) end-to-end verifizieren — Hook ist platziert, nur der Live-Beleg fehlt.
-**Größe:** ursprünglich M → real S (requiresApproval = 0 Bau, nur maxLength) · **Priorität:** should
+**📌 Korrektur fürs Protokoll:** `lengthEnforced` (und `reply`) liegen unter **`audit.data.output.lengthEnforced`** bzw. **`.output.reply`** — NICHT top-level (`AuditService.complete()` legt den Payload als `entry.output` ab). Der ursprüngliche Test-Plan-Verifikationsbefehl las top-level → fälschlich immer `undefined`. **Kein Bug, Mess-Fehler.**
+
+**Abdeckungs-Grenze (bekannte Lücke, beibehalten):** `enforceMaxLength` deckt **nur** den `respond_to_chat`-/default-Branch ab. **A2A wird NICHT längenbegrenzt** — weder Trusted-Auto (`handleTrustedBridgeMessage` → `runModel` direkt, `mandate_id=null`) noch Approve (`approveTwinResponse` → `runModel` direkt). Verwandt mit dem offenen Item „A2A-Empfangspfad respektiert `escalation` nicht".
+
+**Größe:** ursprünglich M → real S · **Status:** ✅ DONE (Live-Beleg Tag 35)
+
+### Optional: Enforcement-Telemetrie — „maxLength aktiv + präventiv eingehalten" sichtbar machen (Design-Beobachtung, kein Bug)
+
+**Status:** OFFEN (notiert, später) | **Größe XS** | **Priorität:** nice
+
+Beim #3-Live-Test (Tag 35) aufgefallen: Im Audit ist **„maxLength war aktiv, aber präventiv eingehalten"** nicht von **„kein maxLength gesetzt"** unterscheidbar — beide haben **kein** `lengthEnforced`-Flag (das Flag entsteht nur bei Retry/Truncate). Falls Enforcement-Telemetrie/Tuning gewünscht: bei aktivem `maxLength` immer ein `maxLengthApplied: true` (+ ggf. Original-Länge vor Kürzung) ins `output` schreiben. Kein Funktions-Bug — die Längen werden eingehalten; nur die Beobachtbarkeit fehlt.
 
 ### Design-Erkenntnis: maxLength gilt nur für Nicht-Owner-Chats (owner-direct ist unlimitiert)
 **Bestätigt via Audit Tag 33.** `maxLength` (und Mandate-Checks generell) greifen **konzeptionell nur für Nicht-Owner-Chats** (`respond_to_chat` über `checkMandate`+Mandate). Der **Owner-Direct-Chat** (Owner mit dem eigenen Twin) läuft über `capability=owner-direct` / `mandate_id=null` (Owner-Bypass) und ist **bewusst unlimitiert** — der Owner soll keine gekappten Antworten von seinem eigenen Twin bekommen. Das ist die eigentliche Design-Klärung des Features (kein Bug): wer das maxLength-Verhalten testen will, muss den Nicht-Owner-Pfad treffen.
@@ -723,17 +735,17 @@ Apex-`nolmi.ai` lieferte 404 (kein Traefik-Router). **Gewählt: Option (b)** (Di
 
 ### ⏳ Nächster regulärer Prod-Deploy — bewusst getaktet, NICHT nebenbei
 
-**Status:** OFFEN (geplant, bewusst zurückgehalten) | **Priorität:** must-vor-Launch | **Gate:** #3-Live-Test (Nicht-Owner) DAVOR
+**Status:** OFFEN (geplant, bewusst zurückgehalten) | **Priorität:** must-vor-Launch | **Gate:** ~~#3-Live-Test (Nicht-Owner) DAVOR~~ → **✅ erfüllt (Tag 35)**, Deploy nicht mehr durch #3 geblockt
 
 Production (`srv1712371`) läuft auf einem Stand **vor** dem Tag-34/35-Stapel. Der nächste reguläre Deploy bringt den **ganzen aufgelaufenen Stapel** auf einmal — bewusst getaktet, nicht versehentlich nebenbei:
-- **#3 maxLength-Enforcement** (`6c836d5`) — **mit #3-Live-Test (Nicht-Owner-Pfad) DAVOR** (s. Launch-Vorbereitung).
+- **#3 maxLength-Enforcement** (`6c836d5`) — **#3-Live-Test (Nicht-Owner) ✅ erledigt (Tag 35)**; deploy-bereit.
 - **Weg-B-Onboarding-Refactor** (createTwin-Extract + CLI, `759fcbf`/`2e61007`).
 - **Apex-Removal** (`37fabdb`) — kommt damit gar nicht erst auf Prod (war dort nie).
 - ggf. weitere Tag-34/35-Commits.
 
 **Deploy-Mechanik (authoritative, s. `DEPLOYMENT.md §3`-Callout):** Prod-VPS-Layout `/docker/nolmi/` (Laufzeit-`.env`/htpasswd/Backups) + `repo/`-Unterverzeichnis; `docker-compose.yml` ist ein **Symlink** → `repo/docker/nolmi/docker-compose.yml`. Sequenz: `cd /docker/nolmi/repo && git pull` → zurück nach `/docker/nolmi` → `docker compose up -d` (nutzt Symlink + Laufzeit-`.env`). Web ggf. mit Build-ARGs (#126).
 
-**Reihenfolge-Gate:** erst **#3-Live-Test (Nicht-Owner)** grün, DANN der getaktete Deploy. Kein Announcement/Launch auf ungetestetem Stand.
+**Reihenfolge-Gate:** **#3-Live-Test (Nicht-Owner) ✅ grün (Tag 35)** — der getaktete Deploy ist nicht mehr durch #3 geblockt. Kein Announcement/Launch auf ungetestetem Stand (übrige Launch-Politur s. Launch-Vorbereitung).
 
 ### NPM-Distribution `npm i -g nolmi` — Phase 1 komplett + PUBLIZIERT ✅
 
@@ -768,7 +780,7 @@ Globales npm-Paket (`npm i -g nolmi` → `nolmi onboard`) wie OpenClaw. **Phasen
 
 - ~~**`always_pending`-Onboarding-Politur**~~ — **ENTSCHÄRFT (Tag 35, diagnostiziert, kein Fix nötig):** der Owner bekommt immer sofort Antworten (Owner-Bypass), untrusted-A2A ist strukturell/hartkodiert pending — nicht Template-bedingt. **Kein Launch-Blocker.** Details + Folge-Items s. „QuickStart-Mandate-Default" (oben, geschlossen).
 - **Volle #112-Launch-Landing** — ersetzt die `nolmi-apex`-Platzhalterseite; braucht Pitch/Story (Demo-First, Hero-GIF #113).
-- **#3 maxLength Live-Test (Nicht-Owner)** — gebaut (`6c836d5`), am laufenden Twin mit echtem Nicht-Owner-Pfad noch zu verifizieren.
+- ~~**#3 maxLength Live-Test (Nicht-Owner)**~~ — **✅ erledigt (Tag 35, VM):** präventiv + retry live bewiesen, Truncate isoliert; s. Item „3. Mandate-Conditions-Auswertung".
 - **Repo-Description EN** — GitHub-Settings (s. eigenes Item), vor Launch angleichen.
 
 **Reihenfolge-Gedanke:** still bleiben, diese vier abräumen, dann lauter Launch. Kein Announcement auf halbgarem Onboarding-Eindruck.
