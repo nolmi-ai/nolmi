@@ -702,7 +702,7 @@ Die **Web-Präsenz** (Marketing-Landing + künftige Docs) wird **vom Produkt-Sta
 
 **Status:** ✅ **DONE (Tag 35)** — Apex liegt jetzt auf **Vercel** (Landing live), der `nolmi-apex`-Übergangs-Container ist **aus dem Repo entfernt**. | **Größe S** | Befund Tag 33 → abgelöst Tag 35
 
-**Cleanup vollzogen (Tag 35):** `nolmi.ai` zeigt per A-Record auf **Vercel** (Landing live, Repo `nolmi-ai/nolmi-web`). Der Platzhalter-Container ist damit gegenstandslos und **entfernt**: `nolmi-apex`-Service + Top-Level-`configs:`-Block aus `docker/nolmi/docker-compose.yml` raus (verifiziert: `docker compose config` VALID, nur noch runtime/bridge/web, kein `configs:`-Key); Apex aus der `HOSTS`-Liste + Texten in `install/tls-promote.sh` zurückgebaut (`bash -n` grün, Cert-Trigger nur noch app/runtime/bridge). `app./runtime./bridge.` + Traefik + deren Certs **unberührt**. **VPS-Schritt (separat):** `git pull` + `docker compose up -d --remove-orphans` aus `docker/nolmi/` entfernt den laufenden Container. Reversibel (A-Record zurück auf VPS → Diff zurücknehmen).
+**Cleanup vollzogen (Tag 35):** `nolmi.ai` zeigt per A-Record auf **Vercel** (Landing live, Repo `nolmi-ai/nolmi-web`). Der Platzhalter-Container ist damit gegenstandslos und **entfernt**: `nolmi-apex`-Service + Top-Level-`configs:`-Block aus `docker/nolmi/docker-compose.yml` raus (verifiziert: `docker compose config` VALID, nur noch runtime/bridge/web, kein `configs:`-Key); Apex aus der `HOSTS`-Liste + Texten in `install/tls-promote.sh` zurückgebaut (`bash -n` grün, Cert-Trigger nur noch app/runtime/bridge). `app./runtime./bridge.` + Traefik + deren Certs **unberührt**. **VPS-Aktion entfiel (Befund Tag 35):** der `nolmi-apex`-Container existiert auf Production **nie** — der Apex wurde im Repo gebaut (Tag 34, `f7e7954`), aber der geplante Sammeldeploy fand nie statt, Prod läuft bewusst auf einem Stand VOR dem Apex (`docker compose ls` = `nolmi running(3)`, nur runtime/bridge/web). Der Code-Diff (`37fabdb`) genügt → Apex kommt beim nächsten regulären Deploy gar nicht erst auf. **Kein offener VPS-Rest.** Reversibel (Diff zurücknehmen + A-Record zurück auf VPS).
 
 <details><summary>Historie (Übergangs-Container, Tag 33–35)</summary>
 
@@ -720,6 +720,20 @@ Apex-`nolmi.ai` lieferte 404 (kein Traefik-Router). **Gewählt: Option (b)** (Di
 **ABLÖSE-/CLEANUP:** ✅ vollzogen Tag 35 (s. Status oben) — Service + `configs:` aus dem Compose, Apex aus `tls-promote.sh`.
 
 </details>
+
+### ⏳ Nächster regulärer Prod-Deploy — bewusst getaktet, NICHT nebenbei
+
+**Status:** OFFEN (geplant, bewusst zurückgehalten) | **Priorität:** must-vor-Launch | **Gate:** #3-Live-Test (Nicht-Owner) DAVOR
+
+Production (`srv1712371`) läuft auf einem Stand **vor** dem Tag-34/35-Stapel. Der nächste reguläre Deploy bringt den **ganzen aufgelaufenen Stapel** auf einmal — bewusst getaktet, nicht versehentlich nebenbei:
+- **#3 maxLength-Enforcement** (`6c836d5`) — **mit #3-Live-Test (Nicht-Owner-Pfad) DAVOR** (s. Launch-Vorbereitung).
+- **Weg-B-Onboarding-Refactor** (createTwin-Extract + CLI, `759fcbf`/`2e61007`).
+- **Apex-Removal** (`37fabdb`) — kommt damit gar nicht erst auf Prod (war dort nie).
+- ggf. weitere Tag-34/35-Commits.
+
+**Deploy-Mechanik (authoritative, s. `DEPLOYMENT.md §3`-Callout):** Prod-VPS-Layout `/docker/nolmi/` (Laufzeit-`.env`/htpasswd/Backups) + `repo/`-Unterverzeichnis; `docker-compose.yml` ist ein **Symlink** → `repo/docker/nolmi/docker-compose.yml`. Sequenz: `cd /docker/nolmi/repo && git pull` → zurück nach `/docker/nolmi` → `docker compose up -d` (nutzt Symlink + Laufzeit-`.env`). Web ggf. mit Build-ARGs (#126).
+
+**Reihenfolge-Gate:** erst **#3-Live-Test (Nicht-Owner)** grün, DANN der getaktete Deploy. Kein Announcement/Launch auf ungetestetem Stand.
 
 ### NPM-Distribution `npm i -g nolmi` — Phase 1 komplett + PUBLIZIERT ✅
 

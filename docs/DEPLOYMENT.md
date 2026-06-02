@@ -137,6 +137,29 @@ Standard-Update-Pfad nach Code-Änderungen (§3.2). Stolpersteine
 aus produktiven Re-Deploys stehen in §3.3 — wer schon einmal ein
 Twin-Lab deployed hat, sollte mit §3.3 anfangen.
 
+> **⚠ AUTHORITATIVE Prod-VPS-Mechanik (`srv1712371` / `187.124.3.235`, Stand Tag 35).**
+> Der laufende Production-Stack folgt diesem Layout (die §3.1-Pfade unten sind
+> die generische Empfehlung mit Alt-Namen — Prod nutzt die `nolmi`-Pfade):
+>
+> ```
+> /docker/nolmi/                     # Laufzeit-Umgebung auf dem VPS
+> ├── repo/                          # das Git-Repo (nolmi-ai/nolmi)
+> ├── docker-compose.yml             # SYMLINK → repo/docker/nolmi/docker-compose.yml
+> ├── .env                           # Laufzeit-Secrets/Config (NICHT im Repo)
+> ├── htpasswd                       # BasicAuth (Traefik)
+> ├── model-cache/ , DB-Backups …    # weitere Laufzeit-Artefakte
+> ```
+>
+> **Authoritative Deploy-Sequenz für reguläre Prod-Deploys:**
+> ```bash
+> cd /docker/nolmi/repo && git pull --ff-only     # Code holen
+> cd /docker/nolmi                                # zurück in die Laufzeit-Ebene
+> docker compose up -d                            # nutzt den Symlink + die Laufzeit-.env
+> ```
+> Der `docker compose`-Aufruf läuft aus `/docker/nolmi/` (nicht aus `repo/`), damit
+> die Laufzeit-`.env` + der Symlink greifen. Web braucht ggf. `--build`/Build-ARGs
+> (siehe §3.2/§3.3). **`docker compose ls` = `nolmi running(3)`** (runtime/bridge/web).
+
 ### 3.1 First-Time-Setup
 
 #### 3.1.1 Pre-Flight
