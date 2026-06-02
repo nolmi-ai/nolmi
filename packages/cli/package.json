@@ -8,7 +8,8 @@
     "nolmi": "dist/cli.js"
   },
   "files": [
-    "dist"
+    "dist",
+    "LICENSE"
   ],
   "engines": {
     "node": ">=20.0.0"
