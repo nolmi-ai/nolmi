@@ -131,10 +131,34 @@ Alle Twin-Nachrichten persistent in der Twin-DB, nicht nur Audits. Bridge wird z
 ### Design-Erkenntnis: maxLength gilt nur für Nicht-Owner-Chats (owner-direct ist unlimitiert)
 **Bestätigt via Audit Tag 33.** `maxLength` (und Mandate-Checks generell) greifen **konzeptionell nur für Nicht-Owner-Chats** (`respond_to_chat` über `checkMandate`+Mandate). Der **Owner-Direct-Chat** (Owner mit dem eigenen Twin) läuft über `capability=owner-direct` / `mandate_id=null` (Owner-Bypass) und ist **bewusst unlimitiert** — der Owner soll keine gekappten Antworten von seinem eigenen Twin bekommen. Das ist die eigentliche Design-Klärung des Features (kein Bug): wer das maxLength-Verhalten testen will, muss den Nicht-Owner-Pfad treffen.
 
-### QuickStart-Mandate-Default: respond_to_chat = always_pending → frischer Twin antwortet nie sofort?
-**Status:** OFFEN (Befund aus #3 Tag 33, **kein Blocker**) | **Größe S** | **Priorität:** klären
+### QuickStart-Mandate-Default: respond_to_chat = always_pending — DIAGNOSTIZIERT, gegenstandslos für den Owner-Fall
 
-Beim #3-Bau aufgefallen: der Mandate-Default (cautious-Template / `mandates.yaml`) setzt `respond_to_chat` auf `escalation: always_pending`. Folge: ein **frisch via `twin:onboard` angelegter Twin** schickt im Chat **jede** Nachricht erst in die Approval-Queue und antwortet nie sofort — **außer** im Owner-Direct-Bypass (eigener Twin). Für einen Self-Hoster, der gerade onboardet und seinen Twin testet, könnte das verwirren (jede externe/Test-Nachricht hängt pending). **Zu klären:** ist `always_pending` für `respond_to_chat` im QuickStart-Default gewollt, oder sollte ein frischer Twin auf normale Chats `escalation: auto` haben (sofort antworten) und nur „heikle" Capabilities (draft_linkedin_post, send_to_twin) pending lassen?
+**Status:** ✅ **GESCHLOSSEN — diagnostiziert, keine Änderung nötig (Tag 35).** Nicht „gefixt" (es wurde nichts geändert): das vermutete Problem ist für den realen Self-Hoster-Fall (= Owner) **gegenstandslos**. | war: should/klären | **Entscheidung (Markus):** nichts ändern.
+
+**Diagnose (Tag 35, read-only):** Die „frischer Twin antwortet Nicht-Ownern nie"-Symptomatik kommt **NICHT** aus dem cautious-Template, sondern ist **strukturell**:
+1. **Owner-Web-Chat antwortet immer sofort** — das Web-UI postet an `/twins/:handle/chat` (hinter `requireOwner`) → `requesterUserId` ist immer der Owner → **Owner-Bypass** (`twin-service.ts:437`) überspringt das Mandate ganz. Auf der VM gesehen.
+2. **Untrusted A2A ist immer pending — HARTKODIERT** (`twin-service.ts:952`, `initialStatus: "pending"`): der A2A-Empfangspfad liest das Mandate-`escalation` gar nicht. → cautious↔trusting macht hier **keinen** Unterschied.
+3. **Trusted A2A ist immer auto** (Trust-Bypass `handleTrustedBridgeMessage`), unabhängig vom Template.
+4. **Es gibt heute keinen Nicht-Owner-Chat-Pfad:** das Web-UI ist komplett `requireOwner`-gated. „Fremde chatten mit meinem Twin" existiert nicht (wäre ein neues Feature). Der einzige nicht-bypassende `respond_to_chat`-Pfad ist der **deprecated `/chat`-Legacy-Alias**, den das UI nicht nutzt.
+
+**Folge:** Ein Wechsel cautious→trusting würde am Chat-/A2A-Ersteindruck **fast nichts** ändern (nur `delegate_research`/`share_profile`-Autonomie + der tote Legacy-`/chat`). Der normale Self-Hoster (= Owner) bekommt **sofort** Antworten; der cautious-Default schadet der Erste-Erfahrung **nicht**. War ein vermuteter, kein realer Blocker. Die zwei echten (kleineren) Fäden, die die Diagnose freilegte, sind als eigene Items unten notiert.
+
+### Tote Enum-/Pfad-Reste rund um Mandate-Escalation (Cleanup) — aus always_pending-Diagnose Tag 35
+
+**Status:** OFFEN (notiert, nicht jetzt bauen) | **Größe XS–S** | **Priorität:** nice (Hygiene)
+
+Die `always_pending`-Diagnose (Tag 35) legte mehrere tote/inkonsistente Reste frei — Cleanup-Kandidaten, kein Funktionsfehler:
+- **`above_threshold`-Escalation:** im Enum (`packages/shared` `z.enum(["auto","always_pending","above_threshold"])`, `mandates/service.ts:20`), aber **nirgends ausgewertet** und in keinem Template verwendet → totes Enum.
+- **deprecated `/chat`-Legacy-Alias** (`server.ts:510`): einziger nicht-owner-bypassender `respond_to_chat`-Pfad, vom Web-UI nicht genutzt → Kandidat zum Entfernen (oder bewusst als Test-Hook dokumentieren).
+- **`requiresApprovalIfMatches`** (trusting-Template, `mandate-templates.ts:95`): definiert, aber **nicht ausgewertet** (gleicher Cluster wie #3 / `requiresApproval`/`maxLength`-Conditions). Entweder auswerten (Inhalts-Matching) oder als „noch nicht aktiv" markieren.
+
+### A2A-Empfangspfad respektiert Mandate-`escalation` nicht (untrusted = hartkodiert pending) — OFFENE Produktfrage
+
+**Status:** OFFEN — **bewusste Produkt-/Sicherheitsfrage, kein Bau jetzt** | **Größe M** | **Priorität:** klären, falls A2A-Auto-Antworten je gewünscht | aus Diagnose Tag 35 (Option D-i)
+
+**Befund:** `receiveBridgeMessage` setzt für untrusted Sender `initialStatus: "pending"` **hartkodiert** (`twin-service.ts:952`) und liest das `escalation`-Feld von `respond_to_twin_message` **nicht**. Heißt: das trusting-Template (`respond_to_twin_message: auto`) hat auf dem A2A-**Empfangs**pfad **keine Wirkung** — Auto-Reply auf eingehende A2A geht heute **ausschließlich** über die Trust-Liste (`handleTrustedBridgeMessage`).
+
+**Die eigentliche Frage:** Soll der A2A-Empfangspfad das Mandate-`escalation` **respektieren** (dann wirkt ein „auto"-Template wirklich, und ein Twin könnte untrusted-Twins autonom antworten), oder bleibt **untrusted = immer pending** die bewusste Sicherheitslinie (Auto nur für explizit getrustete Handles)? Das ist **die** Sicherheits-/Produktentscheidung hinter „sollen Twins einander spontan antworten". **Bewusst offen** — erst entscheiden, dann ggf. bauen. Verwandt mit „Auto-Reply-Mandate für vertraute Twins" (unten) und #39 (Classifier-Preflight).
 
 ### 4. Auto-Reply-Mandate für vertraute Twins
 Mandate-Condition wie "Auto-Reply, wenn Absender = vertrauter Handle UND Inhalt enthält keine Sensitiv-Wörter". Aktuell gehen alle eingehenden Nachrichten in Pending.
@@ -696,7 +720,7 @@ npm hat beim `nolmi@0.1.0`-Publish `repository.url` auf `git+https://…` normal
 
 **Kontext:** npm-Paket ist **real** (`npm i -g nolmi`), Repo public, Wrapper remote-verifiziert. Damit werden die folgenden Politur-Items **launch-relevant**, bevor es einen **lauten** Launch (HN/Twitter) gibt. Erst wenn die rund sind: Announcement.
 
-- **`always_pending`-Onboarding-Politur** — **jetzt live-relevant** (da `npm i -g` real ist): ein frisch via `onboard` angelegter Twin antwortet wegen `respond_to_chat: always_pending` nie sofort (außer Owner-Bypass). Erster Eindruck für Self-Hoster. Klären: `auto`-Default für QuickStart? (s. Item „QuickStart-Mandate-Default").
+- ~~**`always_pending`-Onboarding-Politur**~~ — **ENTSCHÄRFT (Tag 35, diagnostiziert, kein Fix nötig):** der Owner bekommt immer sofort Antworten (Owner-Bypass), untrusted-A2A ist strukturell/hartkodiert pending — nicht Template-bedingt. **Kein Launch-Blocker.** Details + Folge-Items s. „QuickStart-Mandate-Default" (oben, geschlossen).
 - **Volle #112-Launch-Landing** — ersetzt die `nolmi-apex`-Platzhalterseite; braucht Pitch/Story (Demo-First, Hero-GIF #113).
 - **#3 maxLength Live-Test (Nicht-Owner)** — gebaut (`6c836d5`), am laufenden Twin mit echtem Nicht-Owner-Pfad noch zu verifizieren.
 - **Repo-Description EN** — GitHub-Settings (s. eigenes Item), vor Launch angleichen.
