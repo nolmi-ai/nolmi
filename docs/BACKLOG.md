@@ -710,11 +710,11 @@ Apex-`nolmi.ai` lieferte 404 (kein Traefik-Router). **Gewählt: Option (b)** (Di
 
 Globales npm-Paket (`npm i -g nolmi` → `nolmi onboard`) wie OpenClaw. **Phasenweg:** B jetzt (Wrapper ums Single-Host-Compose) → A später (Single-Process ohne Docker) → C Endbild (beide Modi). Volle Strategie in `DISTRIBUTION-STRATEGY.md §3` (Etappe 2 NPM-Abschnitt + Etappe 3).
 
-### `npm pkg fix` — repository.url-Normalisierung nachziehen (kosmetisch)
+### `npm pkg fix` — repository.url-Normalisierung nachziehen ✅
 
-**Status:** OFFEN | **Größe XS** | **Priorität:** nice (kosmetisch) | Befund beim Publish Tag 35
+**Status:** ✅ **DONE (Tag 35, Commit `874be65`)** | **Größe XS** | Befund beim Publish Tag 35
 
-npm hat beim `nolmi@0.1.0`-Publish `repository.url` auf `git+https://…` normalisiert (Warnung). In `packages/cli/package.json` (und ggf. Root) `npm pkg fix` ausführen / `url` auf das `git+https://`-Format nachziehen, damit künftige Publishes die Warnung nicht mehr werfen. Rein kosmetisch, kein Funktions-Einfluss.
+`packages/cli/package.json` `repository.url` gezielt auf `git+https://github.com/nolmi-ai/nolmi.git` gesetzt (Objekt-Form behalten, nur das eine Feld geändert — nicht `npm pkg fix`, das auch bin/version anfassen könnte). Behebt die npm-Normalisierungs-Warnung für künftige Publishes (0.1.1+); `version` blieb 0.1.0, kein Republish.
 
 ### Launch-Vorbereitung — die nächsten Fronten (NICHT heute zwingend)
 
@@ -2496,11 +2496,17 @@ Ein öffentliches Repo veröffentlicht die **komplette Git-History**, nicht nur 
 
 Kein Hygiene-Nice-to-have, sondern hartes Release-Gate. Aus Distribution-Session Tag 31 (Block 19).
 
-### Repo-Description EN-angleichen vor Launch (GitHub-Settings, kein Repo-File)
+### Repo-Description EN-angleichen vor Launch (GitHub-Settings, kein Repo-File) ✅
 
-**Status:** OFFEN | **Größe XS** | **Priorität:** vor Launch (kosmetisch) | Befund Tag 34
+**Status:** ✅ **DONE (Tag 35)** | **Größe XS** | Befund Tag 34
 
-Die GitHub-**Repo-Description** ist noch deutsch („Lab-Setup für persönliche AI-Twins…"), während die README englisch pitcht. Vor dem Launch (nicht jetzt — still public, kein Announcement) EN-angleichen. **Kein Repo-File** — reine GitHub-Settings-Sache (Repo → About → Description), daher nicht via Commit lösbar.
+GitHub-Repo-Description auf Englisch gesetzt: **„Self-hosted AI twins with memory, personality, and agent-to-agent communication"** (deckt sich mit dem README-Pitch). About-Seitenleiste aufgeräumt — leere Module (Releases/Packages/Deployments) abgewählt. Reine GitHub-Settings, kein Repo-File. *(Releases-Modul wird wieder eingeschaltet, sobald GitHub-Releases eingeführt sind — s. Folge-Item.)*
+
+### GitHub-Releases einführen — Versionshistorie parallel zum npm-Publish
+
+**Status:** OFFEN (Folge-Item, NICHT jetzt) | **Größe S** | **Priorität:** nice | **Trigger:** ab dem nächsten npm-Publish (0.1.1+)
+
+Ab dem nächsten npm-Publish parallel eine **GitHub-Release** anlegen: getaggte Version (`v0.1.1`) + **Release-Notes/Changelog**, damit npm-Nutzer, die ins Repo schauen, eine **Versionshistorie** sehen (heute: keine Releases, das About-Modul war leer → abgewählt). Koppelt sich an den **Publish-Rhythmus** (jeder `npm publish` ⇒ ein Git-Tag + eine GitHub-Release). Beim ersten Release das **Releases-Modul in der About-Seitenleiste wieder einschalten**. Optional später automatisierbar (Tag-Push → Action), aber Phase 1 manuell reicht.
 
 ### Pre-Flight Bridge-DB-Inhalt verifizieren (vor Bridge-Re-Registrierung) — ✅ Tag 31 Block 7 DONE
 
