@@ -733,19 +733,19 @@ Apex-`nolmi.ai` lieferte 404 (kein Traefik-Router). **Gewählt: Option (b)** (Di
 
 </details>
 
-### ⏳ Nächster regulärer Prod-Deploy — bewusst getaktet, NICHT nebenbei
+### Prod-Deploy Tag 35 ✅ VOLLZOGEN — aufgelaufener Stapel (86ed1e4 → 6e32813)
 
-**Status:** OFFEN (geplant, bewusst zurückgehalten) | **Priorität:** must-vor-Launch | **Gate:** ~~#3-Live-Test (Nicht-Owner) DAVOR~~ → **✅ erfüllt (Tag 35)**, Deploy nicht mehr durch #3 geblockt
+**Status:** ✅ **DONE (Tag 35)** — `srv1712371` von `86ed1e4` auf `6e32813` deployt (29 Commits). | war: must-vor-Launch
 
-Production (`srv1712371`) läuft auf einem Stand **vor** dem Tag-34/35-Stapel. Der nächste reguläre Deploy bringt den **ganzen aufgelaufenen Stapel** auf einmal — bewusst getaktet, nicht versehentlich nebenbei:
-- **#3 maxLength-Enforcement** (`6c836d5`) — **#3-Live-Test (Nicht-Owner) ✅ erledigt (Tag 35)**; deploy-bereit.
-- **Weg-B-Onboarding-Refactor** (createTwin-Extract + CLI, `759fcbf`/`2e61007`).
-- **Apex-Removal** (`37fabdb`) — kommt damit gar nicht erst auf Prod (war dort nie).
-- ggf. weitere Tag-34/35-Commits.
+**Deployt + live verifiziert (Tag 35):** **#3 maxLength** (`6c836d5`), **Weg-B-Onboarding-Refactor** (`759fcbf`/`2e61007`), **Apex-Removal** (`37fabdb`, war auf Prod nie), Lizenz/Going-Public-Doku, 3b-TLS-Tooling. **KEINE Migration** (Runner: 26 bereits angewendet/skipped → kein Schema-Risiko). **runtime + web neu gebaut, bridge unberührt.** Web-Bundle korrekt auf `runtime.nolmi.ai` (Literal-Build-Arg). **Verifiziert:** Owner-Direct-Chat (@markus) · A2A (@markus→@florian) · **Weg-B-Onboarding-Smoke** (Test-Twin angelegt→geantwortet→gelöscht). Container stabil. **Rollback-Artefakte auf VPS:** Images `rollback-86ed1e4` + DB-Backups `*.preflight-bak` (später aufräumen).
 
-**Deploy-Mechanik (authoritative, s. `DEPLOYMENT.md §3`-Callout):** Prod-VPS-Layout `/docker/nolmi/` (Laufzeit-`.env`/htpasswd/Backups) + `repo/`-Unterverzeichnis; `docker-compose.yml` ist ein **Symlink** → `repo/docker/nolmi/docker-compose.yml`. Sequenz: `cd /docker/nolmi/repo && git pull` → zurück nach `/docker/nolmi` → `docker compose up -d` (nutzt Symlink + Laufzeit-`.env`). Web ggf. mit Build-ARGs (#126).
+**Deploy-Mechanik korrigiert (DEPLOYMENT.md §3):** Der Prod-Stack nutzt `image:latest` **ohne `build:`** → `docker compose up -d` baut nichts. Korrekte Sequenz: `git pull` → **explizit `docker build` aus dem Repo-Root** (runtime + web; web mit **Literal** `--build-arg NEXT_PUBLIC_RUNTIME_URL=https://runtime.nolmi.ai` + `…DEPLOYMENT_LABEL=production`) → Bundle verifizieren → `docker compose up -d --force-recreate nolmi-runtime nolmi-web`. **🔴 Stolperstein:** `docker build` lädt die `.env` nicht → `${DOMAIN}` leer → `https://runtime.` (kaputt); der #126-Guard fängt das NICHT (nur localhost/leer) → **immer das Literal setzen + Bundle prüfen**. (Deckt sich mit der Tag-17-Lesson „Compose ist image-tag-only, Build via `docker build`".)
 
-**Reihenfolge-Gate:** **#3-Live-Test (Nicht-Owner) ✅ grün (Tag 35)** — der getaktete Deploy ist nicht mehr durch #3 geblockt. Kein Announcement/Launch auf ungetestetem Stand (übrige Launch-Politur s. Launch-Vorbereitung).
+### Twin-Löschfunktion fehlt in der Web-UI
+
+**Status:** OFFEN | **Größe M** | **Priorität:** should — **vor breiterem Self-Hosting/Launch** | Befund: Prod-Deploy-Smoke Tag 35
+
+Beim Weg-B-Onboarding-Smoke (Tag 35) aufgefallen: ein im Wizard angelegter Twin lässt sich über die **UI nicht löschen** — der Test-Twin musste **per DB-Skript** im Container entfernt werden. Wer Twins anlegen kann, muss sie auch löschen können (Erwartung jedes Self-Hosters, besonders relevant sobald externe Nutzer onboarden). **Zu bauen:** Lösch-Flow in der UI (Settings/Twin-Switcher) + Owner-gegateter Endpoint (`DELETE /twins/:handle` o.ä.) mit sauberem Cascade (twin_profiles + zugehörige audit/conversations/facts/oauth_tokens/trust-Zeilen — FK-Verhalten beachten, vgl. Migration 026) + Bridge-Deregistrierung, falls gebunden. Bestätigungs-Dialog (irreversibel). **Größe M** (UI + Endpoint + Cascade + A2A/Bridge-Sauberkeit).
 
 ### NPM-Distribution `npm i -g nolmi` — Phase 1 komplett + PUBLIZIERT ✅
 

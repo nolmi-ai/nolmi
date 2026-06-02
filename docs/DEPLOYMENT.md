@@ -150,15 +150,47 @@ Twin-Lab deployed hat, sollte mit §3.3 anfangen.
 > ├── model-cache/ , DB-Backups …    # weitere Laufzeit-Artefakte
 > ```
 >
-> **Authoritative Deploy-Sequenz für reguläre Prod-Deploys:**
+> **⚠ Die Services nutzen `image: …:latest` OHNE `build:`-Block** (Build-Kontext
+> `../..` scheitert an der Symlink-Konvention). **`docker compose up -d` baut
+> daher NICHTS** — die Images werden separat via `docker build` **aus dem
+> Repo-Root** gebaut (Kontext `.`, wo `pnpm-workspace.yaml` liegt), DANN per
+> `up -d` aufgenommen.
+>
+> **Authoritative Deploy-Sequenz für reguläre Prod-Deploys (verifiziert Tag 35):**
 > ```bash
-> cd /docker/nolmi/repo && git pull --ff-only     # Code holen
-> cd /docker/nolmi                                # zurück in die Laufzeit-Ebene
-> docker compose up -d                            # nutzt den Symlink + die Laufzeit-.env
+> # 0) Rollback-Versicherung: alte :latest-Images taggen (VOR dem Build!)
+> docker tag nolmi-runtime:latest nolmi-runtime:rollback-<alterCommit>
+> docker tag nolmi-web:latest     nolmi-web:rollback-<alterCommit>
+>
+> # 1) Code holen
+> cd /docker/nolmi/repo && git pull --ff-only
+>
+> # 2) Images bauen — AUS DEM REPO-ROOT (Kontext "." = wo pnpm-workspace.yaml liegt)
+> docker build -t nolmi-runtime:latest -f apps/runtime/Dockerfile .
+> docker build -t nolmi-web:latest -f apps/web/Dockerfile . \
+>   --build-arg NEXT_PUBLIC_RUNTIME_URL=https://runtime.nolmi.ai \
+>   --build-arg NEXT_PUBLIC_DEPLOYMENT_LABEL=production
+> #   (bridge nur bei Code-Änderung: docker build -t nolmi-bridge:latest -f apps/bridge/Dockerfile .)
+>
+> # 3) Bundle VERIFIZIEREN, bevor es live geht — erwartet: https://runtime.nolmi.ai
+> docker run --rm nolmi-web:latest sh -c "grep -rhoE 'https://runtime\.[a-z.]*' apps/web/.next | sort -u"
+>
+> # 4) Neue Images aufnehmen (kein --build; --force-recreate, weil Tag gleich/ID neu)
+> cd /docker/nolmi && docker compose up -d --force-recreate nolmi-runtime nolmi-web
 > ```
+>
+> **🔴 STOLPERSTEIN — Web-Build-Arg LITERAL, nicht `${DOMAIN}`:** `docker build`
+> lädt die `.env` **NICHT** (anders als `docker compose`). Steht im Build-Befehl
+> `…runtime.${DOMAIN}` und ist `DOMAIN` in der Shell leer (Prod-`.env` setzt es
+> nicht) → expandiert zu **`https://runtime.`** = kaputtes Bundle. **Der
+> #126-Build-Guard fängt das NICHT** (er prüft nur auf `localhost`/leer, nicht auf
+> `https://runtime.`). Daher **IMMER das Literal `https://runtime.nolmi.ai`** setzen
+> + das Bundle in Schritt 3 verifizieren, BEVOR `up -d` läuft.
+>
 > Der `docker compose`-Aufruf läuft aus `/docker/nolmi/` (nicht aus `repo/`), damit
-> die Laufzeit-`.env` + der Symlink greifen. Web braucht ggf. `--build`/Build-ARGs
-> (siehe §3.2/§3.3). **`docker compose ls` = `nolmi running(3)`** (runtime/bridge/web).
+> die Laufzeit-`.env` + der Symlink greifen. **`docker compose ls` = `nolmi
+> running(3)`** (runtime/bridge/web). Bridge braucht nur bei Code-Änderung einen
+> Rebuild.
 
 ### 3.1 First-Time-Setup
 
