@@ -696,7 +696,7 @@ Die **Web-Präsenz** (Marketing-Landing + künftige Docs) wird **vom Produkt-Sta
 - **DNS-Umstellung (reversibel):** nur der **Apex-A-Record** (`nolmi.ai`) zeigt künftig auf **Vercel** statt VPS (`187.124.3.235`). `app.` / `runtime.` / `bridge.` bleiben auf dem VPS.
 - **Landing-Pitch steht** (englisch): Hero **„Be present, without being always available"**, 3 persönliche Nutzen + A2A als **nachgeordneter 4. Punkt**, Trade-off-Satz, npm-Install, AGPL, pre-launch. Quelle: Positionierungs-Session mit Markus' Nolmi.
 - **Konsequenz → Apex-Cleanup-Item:** sobald die Vercel-Landing live ist + DNS umgestellt, wird der Übergangs-Container **`nolmi-apex` abgelöst** → Service aus `docker/nolmi/docker-compose.yml` + den Apex-Eintrag aus `install/tls-promote.sh` entfernen (s. Apex-Item unten).
-- **Folge-Item (notiert, kein Muss jetzt):** GitHub-Repo-Description + npm-Description ggf. auf den **stärkeren persönlichen Pitch** angleichen — aktuell führt „agent-to-agent communication" mit dem **Infrastruktur-Feature**, laut Positionierung sollte der **persönliche Nutzen führen**. (Cross-Ref: Repo-Description-Item, Tag 35 ✅ — Wert ggf. nachschärfen.)
+- **Folge-Item — Descriptions auf persönlichen Pitch:** **GitHub ✅ erledigt (Tag 35):** Repo-Description gesetzt auf **„Be present, without being always available — your self-hosted personal AI twin."** (ersetzt die A2A-/Infra-geführte Fassung, konsistent zur Landing, persönlicher Nutzen führt). **npm OFFEN** → beim nächsten CLI-Publish (0.1.1) mitnehmen, s. NPM-Distribution-Item.
 
 ### nolmi.ai Root-Domain — Apex-Platzhalter ✅ ABGELÖST durch Vercel-Landing (Cleanup vollzogen)
 
@@ -746,6 +746,11 @@ Production (`srv1712371`) läuft auf einem Stand **vor** dem Tag-34/35-Stapel. D
 - **(b) `npm publish` ✅** (Tag 35): aus `packages/cli/` publiziert.
 
 **Phase 1 ✅ (Tag 34):** `packages/cli` als einziges publizierbares Paket. Node-Port der install.sh-7-Schritte mit den drei Abweichungen (public-Clone / `node:crypto` / TTY-Passthrough). **VM-E2E (187.124.7.94):** Klon → `docker compose up --build -d` → idempotente `.env` → interaktives `onboard` → User+Twin → **Browser-Login von außen + echte Twin-Antwort**. Plus Remote-URL-Fix (Host-Prompt + Auto-Detect + `reconfigure-host`). Commits `2beff2f` (Bau) + `fix(cli)` (Remote-URL) + `a315b08` (LICENSE). `--no-docker` (Phase A) als Groove reserviert.
+
+**📌 Beim nächsten CLI-Publish (0.1.1) mitnehmen — NICHT extra republishen:**
+- **`packages/cli/package.json:"description"` angleichen:** aktuell „Self-hosted Nolmi AI-Twins — One-Command-Installer (npm i -g nolmi → nolmi onboard)". Auf die **persönliche Pitch-Linie** umstellen (konsistent zur GitHub-Description/Landing „Be present, without being always available — your self-hosted personal AI twin." — Claim oder knappe Nutzen-Fassung). **Finaler Wortlaut beim Publish festlegen.**
+- **GitHub-Release** anlegen (s. eigenes Item „GitHub-Releases einführen") — getaggte `v0.1.1` + Changelog.
+- (`repository.url`-Normalisierung ist bereits gefixt, `874be65`.)
 
 **Folge (nicht jetzt):** Phase A (Single-Process, `--no-docker`) + Phase C (beide Modi) bleiben Folge-Phasen. B1-Image-Pull (Docker-Hub) optional als schlankster Weg.
 
@@ -2539,7 +2544,7 @@ Kein Hygiene-Nice-to-have, sondern hartes Release-Gate. Aus Distribution-Session
 
 **Status:** ✅ **DONE (Tag 35)** | **Größe XS** | Befund Tag 34
 
-GitHub-Repo-Description auf Englisch gesetzt: **„Self-hosted AI twins with memory, personality, and agent-to-agent communication"** (deckt sich mit dem README-Pitch). About-Seitenleiste aufgeräumt — leere Module (Releases/Packages/Deployments) abgewählt. Reine GitHub-Settings, kein Repo-File. *(Releases-Modul wird wieder eingeschaltet, sobald GitHub-Releases eingeführt sind — s. Folge-Item.)*
+GitHub-Repo-Description auf Englisch gesetzt; **Tag 35 nachgeschärft auf die persönliche Pitch-Linie:** **„Be present, without being always available — your self-hosted personal AI twin."** (zunächst A2A-/Infra-geführt, dann konsistent zur Landing umgestellt — persönlicher Nutzen führt). About-Seitenleiste aufgeräumt — leere Module (Releases/Packages/Deployments) abgewählt. Reine GitHub-Settings, kein Repo-File. *(Releases-Modul wird wieder eingeschaltet, sobald GitHub-Releases eingeführt sind — s. Folge-Item. npm-Description-Angleich folgt beim nächsten CLI-Publish 0.1.1 — s. NPM-Distribution-Item.)*
 
 ### GitHub-Releases einführen — Versionshistorie parallel zum npm-Publish
 

@@ -286,7 +286,7 @@ Die Marketing-Landing (+ künftige Docs) wird **vom Produkt-Monorepo getrennt** 
 - **DNS (reversibel):** nur der Apex-A-Record (`nolmi.ai`) zeigt künftig auf Vercel statt VPS (`187.124.3.235`); `app./runtime./bridge.` bleiben am VPS.
 - **Folge:** der Übergangs-Container **`nolmi-apex` wird abgelöst**, sobald die Vercel-Landing live + DNS umgestellt ist (Service aus `docker-compose.yml` + Apex-Eintrag aus `tls-promote.sh` — Cleanup-Item).
 - **Landing-Pitch steht** (englisch, Positionierungs-Session): Hero **„Be present, without being always available"**, 3 persönliche Nutzen führen, A2A als nachgeordneter 4. Punkt, Trade-off-Satz, npm-Install, AGPL, pre-launch. #112 zieht entsprechend in das neue Repo um (alter „Memory Depth + Inter-Twin"-Hero überholt — führte mit dem Infra-Feature statt dem persönlichen Nutzen).
-- **Folge-Item (notiert):** GitHub/npm-Description ggf. auf den stärkeren persönlichen Pitch nachschärfen (aktuell führt „agent-to-agent communication" mit dem Infrastruktur-Feature).
+- **Descriptions auf persönlichen Pitch:** **GitHub ✅ (Tag 35)** — Repo-Description gesetzt auf „Be present, without being always available — your self-hosted personal AI twin." (ersetzt die A2A-/Infra-geführte Fassung, konsistent zur Landing). **npm offen** → beim nächsten CLI-Publish (0.1.1) mitnehmen (`packages/cli/package.json:"description"`), an das NPM-Distribution-Item gekoppelt.
 
 ### Landing live auf nolmi.ai (Vercel) + Apex-Platzhalter abgelöst/entfernt
 
