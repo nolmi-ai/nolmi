@@ -670,17 +670,38 @@ Apex-`nolmi.ai` lieferte 404 (kein Traefik-Router). **Gewählt: Option (b)** (Di
 
 **Cross-Ref #112:** Dies ist die **minimale Platzhalter-Seite**, NICHT die volle Launch-Landing. **#112** (Self-Hosting-Launch-Landing) ist mit Going Public (Tag 34) **🔓 jetzt baubar** und einer der Launch-Blocker — kann die `nolmi-apex`-`index.html` später ersetzen oder auf eine echte Landing umhängen.
 
-### NPM-Distribution `npm i -g nolmi` — Wrapper-Bau, an Public-/Etappe-3-Gate gekoppelt
+### NPM-Distribution `npm i -g nolmi` — Phase 1 komplett + PUBLIZIERT ✅
 
-**Status:** 🟢 **Phase 1 FUNKTIONAL VOLLSTÄNDIG + remote-verifiziert (Tag 34)** — `packages/cli` (B1-Clone-Pfad). B1-Clone inkl. **Remote-VPS-Zugriff trägt end-to-end** (VM 187.124.7.94). Vor Publish nur noch **2 bewusste Schritte**: (a) LICENSE ins Tarball, (b) `npm publish`. | **Größe** (Rest): S | **Priorität:** should | **Trigger:** Gate §5a erfüllt (Repo public)
+**Status:** ✅ **DONE — `nolmi@0.1.0` LIVE auf npm (Tag 35, 2. Juni 2026)**. Der B1-Clone-Distributionsweg steht: **`npm i -g nolmi` → `nolmi onboard`**. | war: should | **Trigger:** Gate §5a erfüllt (Repo public)
 
-**Phase 1 ✅ (Tag 34):** `packages/cli` als einziges publizierbares Paket (`name "nolmi"`, `bin nolmi→dist/cli.js`, `AGPL-3.0-only`, `files: ["dist"]`, nicht `private`). Node-Port der install.sh-7-Schritte mit den drei Abweichungen (public-Clone / `node:crypto` / TTY-Passthrough). **VM-E2E-Test (187.124.7.94):** Klon des public Repos → `docker compose up --build -d` → idempotente `.env` (mode 0600, byte-identisch install.sh) → interaktives `onboard` → User+Twin angelegt → **Browser-Login von außen + echte Twin-Antwort**. Der komplette Klon/Build/Onboarding/**Remote-Zugriff**-Pfad trägt. Commits `2beff2f` (Bau) + `fix(cli)` (Remote-URL-Fix). `--no-docker` (Phase A) als Groove reserviert.
+**Publiziert (Tag 35):** `nolmi@0.1.0` auf `registry.npmjs.org` — **AGPL-3.0-only**, **deps: none**, `bin: nolmi`, Maintainer `markusbaier`, **LICENSE im Tarball (34,5 kB AGPL)**, 14 Dateien (nur `dist/` + LICENSE + README + package.json, kein Source/.env). `npm view nolmi` bestätigt öffentliche Abrufbarkeit. Pre-Flight 6/6 grün (Name frei, Tarball sauber, nur `packages/cli` nicht-private). **Still** — kein Launch/Announcement.
 
-**Noch offen vor `npm publish` (2 bewusste Schritte):**
-- **LICENSE-im-Tarball:** `packages/cli` hat **kein eigenes `LICENSE`-File**; `files: ["dist"]` + die root-`LICENSE` liegt eine Ebene drüber → der publizierte npm-Tarball enthält **nur** das `license`-Feld, **nicht** den AGPL-Volltext. Vor Publish: AGPL-3.0-`LICENSE` nach `packages/cli/` kopieren/symlinken (npm packt ein `LICENSE` im Paket-Root automatisch mit) **oder** via `files` explizit aufnehmen — sonst ist der Tarball lizenztext-los (bei AGPL unschön).
-- **`npm publish`** selbst (eigener bewusster Schritt nach LICENSE-Fix).
+**Vor-Publish-Schritte (beide ✅):**
+- **(a) LICENSE-im-Tarball ✅** (Commit `a315b08`): byte-gleiche Kopie nach `packages/cli/LICENSE` + explizit in `files`. `npm pack --dry-run` bestätigt 34,5 kB AGPL im Artefakt.
+- **(b) `npm publish` ✅** (Tag 35): aus `packages/cli/` publiziert.
+
+**Phase 1 ✅ (Tag 34):** `packages/cli` als einziges publizierbares Paket. Node-Port der install.sh-7-Schritte mit den drei Abweichungen (public-Clone / `node:crypto` / TTY-Passthrough). **VM-E2E (187.124.7.94):** Klon → `docker compose up --build -d` → idempotente `.env` → interaktives `onboard` → User+Twin → **Browser-Login von außen + echte Twin-Antwort**. Plus Remote-URL-Fix (Host-Prompt + Auto-Detect + `reconfigure-host`). Commits `2beff2f` (Bau) + `fix(cli)` (Remote-URL) + `a315b08` (LICENSE). `--no-docker` (Phase A) als Groove reserviert.
+
+**Folge (nicht jetzt):** Phase A (Single-Process, `--no-docker`) + Phase C (beide Modi) bleiben Folge-Phasen. B1-Image-Pull (Docker-Hub) optional als schlankster Weg.
 
 Globales npm-Paket (`npm i -g nolmi` → `nolmi onboard`) wie OpenClaw. **Phasenweg:** B jetzt (Wrapper ums Single-Host-Compose) → A später (Single-Process ohne Docker) → C Endbild (beide Modi). Volle Strategie in `DISTRIBUTION-STRATEGY.md §3` (Etappe 2 NPM-Abschnitt + Etappe 3).
+
+### `npm pkg fix` — repository.url-Normalisierung nachziehen (kosmetisch)
+
+**Status:** OFFEN | **Größe XS** | **Priorität:** nice (kosmetisch) | Befund beim Publish Tag 35
+
+npm hat beim `nolmi@0.1.0`-Publish `repository.url` auf `git+https://…` normalisiert (Warnung). In `packages/cli/package.json` (und ggf. Root) `npm pkg fix` ausführen / `url` auf das `git+https://`-Format nachziehen, damit künftige Publishes die Warnung nicht mehr werfen. Rein kosmetisch, kein Funktions-Einfluss.
+
+### Launch-Vorbereitung — die nächsten Fronten (NICHT heute zwingend)
+
+**Kontext:** npm-Paket ist **real** (`npm i -g nolmi`), Repo public, Wrapper remote-verifiziert. Damit werden die folgenden Politur-Items **launch-relevant**, bevor es einen **lauten** Launch (HN/Twitter) gibt. Erst wenn die rund sind: Announcement.
+
+- **`always_pending`-Onboarding-Politur** — **jetzt live-relevant** (da `npm i -g` real ist): ein frisch via `onboard` angelegter Twin antwortet wegen `respond_to_chat: always_pending` nie sofort (außer Owner-Bypass). Erster Eindruck für Self-Hoster. Klären: `auto`-Default für QuickStart? (s. Item „QuickStart-Mandate-Default").
+- **Volle #112-Launch-Landing** — ersetzt die `nolmi-apex`-Platzhalterseite; braucht Pitch/Story (Demo-First, Hero-GIF #113).
+- **#3 maxLength Live-Test (Nicht-Owner)** — gebaut (`6c836d5`), am laufenden Twin mit echtem Nicht-Owner-Pfad noch zu verifizieren.
+- **Repo-Description EN** — GitHub-Settings (s. eigenes Item), vor Launch angleichen.
+
+**Reihenfolge-Gedanke:** still bleiben, diese vier abräumen, dann lauter Launch. Kein Announcement auf halbgarem Onboarding-Eindruck.
 
 **Diagnose-Befund (Tag 33):** B ist **technisch trivial** (7 `install.sh`-Schritte → Node, `node:crypto` ersetzt `openssl`, A-später nicht verbaut). Der Haken ist **nicht** Technik, sondern **Code-Bezug + Repo-Sichtbarkeit**: das Compose baut aus `apps/*` (`build: context ../..`), das **Repo ist privat** (anonym 404).
 
