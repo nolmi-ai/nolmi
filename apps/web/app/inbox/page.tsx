@@ -478,6 +478,16 @@ function extractLastMessage(entry: AuditEntry): string {
     );
     return `${display.label}\n${display.argsPreview}`;
   }
+  // Selbst-Reflexion: der Vorschlagstext lebt in input.reflectionText (kein
+  // lastMessage). Evidenz darunter, damit der Owner die Stütze sieht.
+  if (entry.capability === "self-reflection-write") {
+    const r = entry.input as { reflectionText?: string; reasoning?: string };
+    if (typeof r.reflectionText === "string") {
+      return r.reasoning
+        ? `${r.reflectionText}\n\nEvidenz: ${r.reasoning}`
+        : r.reflectionText;
+    }
+  }
   if (typeof input.lastMessage === "string") return input.lastMessage;
   if (Array.isArray(input.messages)) {
     const last = input.messages[input.messages.length - 1];
@@ -510,6 +520,9 @@ function formatPendingHeader(entry: AuditEntry): string {
       input.toolCall.args,
     );
     return display.label;
+  }
+  if (entry.capability === "self-reflection-write") {
+    return "Selbst-Reflexion über dich";
   }
   return entry.capability;
 }
@@ -567,6 +580,8 @@ function formatCapability(entry: AuditEntry): string {
         ? `Fakt-Vorschlag: ${factInput.factKey}`
         : "Fakt-Vorschlag";
     }
+    case "self-reflection-write":
+      return "Selbst-Reflexion";
     default:
       return entry.capability;
   }

@@ -64,6 +64,12 @@ import {
   ExtractionResultSchema,
   type ExtractionResult,
 } from "./facts/extraction-engine.js";
+import {
+  ReflectionEngine,
+  ReflectionOutputSchema,
+  REFLECTION_CAPABILITY,
+  type ReflectionOutput,
+} from "./reflection/reflection-engine.js";
 import { McpClientManager } from "./mcp/client-manager.js";
 import { McpSkillSync } from "./mcp/skill-sync.js";
 import { buildMcpToolsFromSkills } from "./mcp/tool-bridge.js";
@@ -262,6 +268,14 @@ export class TwinService {
   public readonly extractionEngine: ExtractionEngine;
 
   /**
+   * Selbst-Reflexion Stufe 1 (über Markus): Twin-getriebene Inferenz über den
+   * Owner. Vom CLI `twin:reflect` getriggert. Einziger Effekt eines Laufs ist
+   * ein PENDING-Audit (`capability='self-reflection-write'`) — Approve schreibt
+   * erst ins Diary (`approveSelfReflectionWrite`). NIE autonom wirksam.
+   */
+  public readonly reflectionEngine: ReflectionEngine;
+
+  /**
    * 3.4.D: Memory-Embedding-Service. Public, damit der Server-Reset-Pfad
    * über `entry.service.memoryEmbeddingService.embedConversation()` darauf
    * zugreifen kann. Send-Path benutzt es intern nach `summaryEngine`.
@@ -341,6 +355,25 @@ export class TwinService {
           prompt,
         });
         return result.object as ExtractionResult;
+      },
+    });
+    this.reflectionEngine = new ReflectionEngine({
+      facts: deps.facts,
+      conversationSummaries: deps.conversationSummaries,
+      auditService: deps.audit,
+      twinId: deps.twinId,
+      twinName: deps.persona.name,
+      ownerName: deps.persona.name,
+      reflect: async ({ system, prompt }) => {
+        // Strukturierter Output via Zod-Schema, Twin-eigener Provider/Model —
+        // analog ExtractionEngine/SummaryEngine.
+        const result = await generateObject({
+          model: deps.model,
+          schema: ReflectionOutputSchema,
+          system,
+          prompt,
+        });
+        return result.object as ReflectionOutput;
       },
     });
     this.memoryEmbeddingService = deps.memoryEmbeddingService;
@@ -1072,6 +1105,8 @@ export class TwinService {
         return this.approveMcpToolUse(entry, persona);
       case "semantic-fact-write":
         return this.approveSemanticFactWrite(entry);
+      case REFLECTION_CAPABILITY:
+        return this.approveSelfReflectionWrite(entry);
       default:
         return this.approveDefault(entry, persona);
     }
@@ -1114,6 +1149,13 @@ export class TwinService {
           "rejected",
         );
       }
+      return;
+    }
+
+    // Selbst-Reflexion (über Markus): Reject = verwerfen. Der Pending-Audit ist
+    // bereits auf 'rejected' (audit.reject oben). KEIN Diary-Write, kein Rest-
+    // Effekt — nichts bleibt. Explizit früh raus, damit kein Fall-Through.
+    if (entry.capability === REFLECTION_CAPABILITY) {
       return;
     }
 
@@ -1419,6 +1461,40 @@ export class TwinService {
     return {
       auditId: entry.id,
     };
+  }
+
+  /**
+   * Selbst-Reflexion Stufe 1: Approve eines `self-reflection-write`-Pending.
+   * ERST hier wird der Reflexions-Text wirksam — als Diary-Eintrag. Das ist die
+   * Leitplanke: der Generator hat NUR den Pending-Audit erzeugt; ohne diesen
+   * Approve gibt es keinen Diary-/State-Write. `triggeredBy: 'post_extract'`
+   * (vorhandener Enum-Wert) — ein dedizierter 'reflection'-Wert wäre eine
+   * Schema/Enum-Änderung und ist bewusst NICHT Teil dieses Schritts (🟡).
+   */
+  private async approveSelfReflectionWrite(
+    entry: AuditEntry,
+  ): Promise<ApproveResult> {
+    const input = entry.input as { reflectionText?: string; reasoning?: string };
+    const text = input.reflectionText?.trim();
+    if (!text) {
+      throw new Error(
+        `Audit ${entry.id} hat keinen reflectionText im Input — self-reflection-write nicht approvable`,
+      );
+    }
+
+    // EINZIGER Wirksam-Werden-Pfad: Diary-Eintrag. Insert ist atomar VOR dem
+    // Embedding (twin-diary-service); Embedding-Fehler werden geschluckt.
+    await this.deps.twinDiaryService.addEntry({
+      twinId: this.deps.twinId,
+      content: text,
+      triggeredBy: "post_extract",
+    });
+
+    await this.deps.audit.complete(entry.id, {
+      reflectionText: text,
+      reasoning: input.reasoning ?? null,
+    });
+    return { auditId: entry.id };
   }
 
   private async approveDefault(entry: AuditEntry, persona: Persona): Promise<ApproveResult> {
