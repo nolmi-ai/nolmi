@@ -7,8 +7,8 @@ npm i -g nolmi
 nolmi onboard
 ```
 
-> **Status: Phase 1 (Gerüst + Kern).** Noch **nicht** auf npm publiziert — das ist
-> ein eigener späterer Schritt nach VM-End-to-End-Verifikation.
+> **Status:** live auf npm — `nolmi@0.1.0` ist publiziert. `npm i -g nolmi`
+> (oben) ist der reale Installationsweg.
 
 ## Was `nolmi onboard` tut
 
@@ -77,7 +77,6 @@ bash↔TS können keinen Code teilen — geteilt bleibt die **Formel**
 
 ## Noch nicht in dieser Phase
 
-- **`npm publish`** — eigener Schritt nach Verifikation.
 - **`--no-docker` (Phase A, Single-Process)** — Flag ist reserviert (Groove
   gelegt), meldet aktuell „noch nicht implementiert".
 - **B1-Image-Pull** — entfällt als primärer Weg (B1-Clone ist der Pfad).

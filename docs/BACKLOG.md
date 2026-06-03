@@ -2047,6 +2047,18 @@ Keine Migration (Spalte existiert). **End-to-End verifiziert:** api_key (@floria
 
 **Verbleibend:** **Schritt 3b** (Production/TLS: Traefik + ACME + Domain + BasicAuth — der bestehende `docker-compose.yml`); Update-Mechanismus (git pull + rebuild / Image-Tag-Bump); optional Docker-Auto-Install auch für non-apt-Linux.
 
+### First-Run: Port-Pre-Check vor `compose up` (3000/4000/5100)
+
+**Status:** OFFEN | **Größe:** S | **Priorität:** nice | **Aus:** First-Run-Hygiene-Diagnose Tag 36
+
+`onboard.ts:121` ruft `compose up` direkt; bei belegtem Port kommt der rohe Docker-Fehler („Bind for 0.0.0.0:3000 failed: port is already allocated") via `runInherit` durch. Legibel, dev-affines Frühpublikum verkraftet's — aber eine freundliche NOLMI-Pre-Check-Diagnose (Ports frei? sonst klarer Hinweis) wäre erstnutzer-freundlicher, konsistent zu den schon sauberen Vorbedingungs-Checks (OS/git/docker/daemon).
+
+### SETUP.md: Provider-Framing auf Anthropic-Default angleichen
+
+**Status:** OFFEN | **Größe:** S | **Priorität:** nice | **Aus:** First-Run-Hygiene-Diagnose Tag 36
+
+`docs/SETUP.md` (~:10/:25) rahmt OpenAI als primär (`OPENAI_API_KEY`, „oder später: Anthropic"), während der ausgelieferte Stack `ACTIVE_PROVIDER=anthropic` defaultet (`env-template.ts:48`). SETUP.md ist Dev-Doc (`pnpm dev`), nicht Tarball-Erstkontakt → gering. Beim nächsten SETUP.md-Anfassen mit angleichen.
+
 ### Production-Deploy Etappe 2 (Sammeldeploy c88f0eb) — Migration 026 FK-safe auf Echtdaten ✅
 
 **Status:** **DONE** (Distribution Etappe 2 Schritt 5, am Verhalten auf Production verifiziert) | **Größe M** | **Priorität war: must-vor-Self-Hosting-Release** | srv1712371 (`187.124.3.235`), `/docker/nolmi/repo`
@@ -2246,6 +2258,16 @@ Typecheck 4/4 grün, Husky-Build 4/4 grün (Push-Hook), Local-Smoke 7/7 grün (L
 **Größe ursprünglich:** S (~0.5 Bautag — Page + Form + 1-2 Backend-Endpoints für Email-Change + Password-Change). **Final:** ~3h 40 Min netto (Backend ~30 Min, Frontend ~1h, Middleware + ProfileMenu + Doku ~30 Min, Diagnose-First ~15 Min, Closure-Doku ~10 Min, Production-Deploy + Smoke ~20 Min, Production-Closure-Doku ~10 Min). **Spur:** Pre-Launch-Phase A Block 4 (Self-Hosting-Polish).
 
 **Status-Notiz Tag 26:** Angelegt aus Phase 4 Tag-26-Strategy-Session. Out-of-Scope für #130 Phase 4 (Tab-Restructuring war Channel-Adapter-Fokussiert).
+
+### Account-/User-Löschung fehlt komplett (UI + CLI) — #744-Muster eine Ebene höher
+
+**Status:** OFFEN | **Größe:** M–L | **Priorität:** should — **🔴 sobald externe Nutzer onboarden** (heute 🟡: kein Schmerz für den Solo-Owner) | **Aus:** First-Run-Hygiene-Diagnose Tag 36
+
+Anlegen geht (`nolmi onboard` → `onboarding/onboard.ts:258` + `POST /auth/register`, `server.ts:860`), **entfernen gar nicht**: keine UI, kein CLI, kein Endpoint — nur manuelles SQL. `users-repo.ts` hat `create/findBy*/verify/updateEmail/updatePassword`, **kein `delete`**. Exakt das #744-Muster (CREATE ohne Gegenstück), eine Ebene über dem Twin. Wird scharf, sobald fremde Self-Hoster iterieren und ihren Account/Reset wieder loswerden wollen — Launch-relevant, aber nicht Erst-Tag-blockierend.
+
+**Semantisch heavy (daher M–L, nicht S wie #744 am Ende):** User-Delete kaskadiert über `owner_user_id` → alle Twins des Users → je Twin der volle #744-Löschpfad (geordnete Tx, Bridge-Deregister, Registry-Hot-Unload, Telegram-Teardown). **Vorbedingung:** FK-Audit auf `users(user_id)` — welche Tabellen referenzieren den User, mit welcher ON-DELETE-Policy (vgl. #159 FK-Cascade-Check + die Migration-026-Lehre: nicht alles ist CASCADE). Diagnose statt Briefing-aus-dem-Gedächtnis, wie bei #744.
+
+**Bau-Skizze (für später, nicht jetzt):** (1) read-only FK-/Cascade-Diagnose `users(user_id)`; (2) `deleteUserAccount`-Service = pro Owner-Twin `deleteTwinLocal` + Bridge-Deregister, dann User-Row + abhängige Auth-Rows in geordneter Tx; (3) Owner-gegateter Endpoint + Self-Service-UI (Account-Settings, Type-to-confirm wie #744) ODER zunächst nur Admin-CLI `account:delete <email>` als schlanker erster Schritt. Cross-Ref: #135 (Account-Settings, Delete dort bewusst deferred), #159 (FK-Cascade-Check), #744 (Twin-Löschpfad als Baustein).
 
 ### 137. Production-Build-Test im Pre-Push-Workflow ✅
 
