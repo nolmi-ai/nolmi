@@ -2157,6 +2157,39 @@ function registerFactRoutes(
       }
     },
   );
+
+  // ─── REFLECT (Selbst-Reflexion Stufe 1 — UI-Trigger) ─────────────────────
+  // Owner-gegateter HTTP-Trigger für den fertigen ReflectionEngine (b6702c6/
+  // c344d52). Macht die Selbst-Reflexion ohne tsx-CLI auslösbar (Prod-tauglich).
+  // KEIN autonomer Effekt: erzeugt — wie der CLI-Pfad — nur einen Pending-Audit
+  // (capability='self-reflection-write', output=null); erst Approve in der Inbox
+  // schreibt ins Diary. subject: 'owner' (über Markus, Default) | 'self' (über
+  // das eigene Twin-Verhalten). Approve/Reject läuft über die generischen
+  // audit/:id/approve|reject-Routes (Capability-Switch kennt den Branch schon).
+  app.post<{ Params: { handle: string } }>(
+    "/twins/:handle/reflect",
+    async (request, reply) => {
+      const ctx = await requireOwner(request, reply, request.params.handle);
+      if (!ctx) return;
+      const { entry } = ctx;
+
+      const parsed = z
+        .object({ subject: z.enum(["owner", "self"]).optional() })
+        .safeParse(request.body ?? {});
+      if (!parsed.success) {
+        return reply.status(400).send({ error: parsed.error.message });
+      }
+      try {
+        const result = await entry.service.reflectionEngine.reflect(
+          parsed.data.subject ?? "owner",
+        );
+        return reply.send(result);
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : "Unknown error";
+        return reply.status(500).send({ error: msg });
+      }
+    },
+  );
 }
 
 // ─── CONVERSATION ROUTES (2.5.4.3) ───────────────────────────────────────────

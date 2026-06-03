@@ -481,8 +481,32 @@ function DirectChatActions({
   const [busy, setBusy] = useState(false);
   const [extracting, setExtracting] = useState(false);
   const [modalOpen, setModalOpen] = useState(false);
+  // Echter Selbst-Reflexions-Trigger (≠ Fakten-Extraktion). Twin-weit, daher
+  // NICHT an eine aktive Konversation gebunden.
+  const [reflecting, setReflecting] = useState(false);
+  const [reflectMenuOpen, setReflectMenuOpen] = useState(false);
+  const reflectRef = useRef<HTMLDivElement>(null);
 
   const hasConversation = conversationId !== null;
+
+  // Outside-Click + ESC schließen das Reflektieren-Menü (Idiom wie TwinSwitcher).
+  useEffect(() => {
+    if (!reflectMenuOpen) return;
+    const onDown = (e: MouseEvent) => {
+      if (reflectRef.current && !reflectRef.current.contains(e.target as Node)) {
+        setReflectMenuOpen(false);
+      }
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setReflectMenuOpen(false);
+    };
+    document.addEventListener("mousedown", onDown);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onDown);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [reflectMenuOpen]);
 
   // UX.1.A.1 (#94): showToast → toast.success/.error/.info pro Call-Site.
   // Der lokale Wrapper wurde mit der Toast-Migration entfernt; siehe
@@ -514,7 +538,7 @@ function DirectChatActions({
     } catch (err) {
       return {
         extracted: 0,
-        error: err instanceof Error ? err.message : "Reflexion fehlgeschlagen",
+        error: err instanceof Error ? err.message : "Extraktion fehlgeschlagen",
       };
     }
   }
@@ -543,7 +567,7 @@ function DirectChatActions({
     try {
       const result = await performExtract();
       if (result.error) {
-        toast.error(`Reflexion fehlgeschlagen: ${result.error}`);
+        toast.error(`Fakten-Extraktion fehlgeschlagen: ${result.error}`);
       } else if (result.extracted === 0) {
         toast.info("Keine neuen Facts extrahiert.");
       } else {
@@ -553,6 +577,53 @@ function DirectChatActions({
       }
     } finally {
       setExtracting(false);
+      setBusy(false);
+    }
+  }
+
+  // Echter Reflexions-Trigger: POST /reflect → erzeugt NUR einen Pending-Audit
+  // (Approve/Reject in der Inbox). subject 'owner' = über dich, 'self' = über
+  // das eigene Twin-Verhalten. Kein Auto-Effekt — Output bleibt Pending.
+  async function performReflect(
+    subject: "owner" | "self",
+  ): Promise<{ created: boolean; error?: string }> {
+    try {
+      const res = await fetch(`${RUNTIME_URL}/twins/${handle}/reflect`, {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ subject }),
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({ error: "Unknown error" }));
+        return { created: false, error: body.error ?? `HTTP ${res.status}` };
+      }
+      const data = (await res.json()) as { created?: boolean };
+      return { created: !!data.created };
+    } catch (err) {
+      return {
+        created: false,
+        error: err instanceof Error ? err.message : "Reflexion fehlgeschlagen",
+      };
+    }
+  }
+
+  async function handleReflect(subject: "owner" | "self") {
+    if (busy || reflecting) return;
+    setReflectMenuOpen(false);
+    setReflecting(true);
+    setBusy(true);
+    try {
+      const r = await performReflect(subject);
+      if (r.error) {
+        toast.error(`Reflexion fehlgeschlagen: ${r.error}`);
+      } else if (!r.created) {
+        toast.info("Zu wenig Substanz — keine Reflexion erzeugt.");
+      } else {
+        toast.success("Reflexion als Pending erzeugt — Review in der Inbox.");
+      }
+    } finally {
+      setReflecting(false);
       setBusy(false);
     }
   }
@@ -578,7 +649,7 @@ function DirectChatActions({
       // wollte beenden, Extract war Nebenziel. Toast informiert über Lücke.
       if (result.error) {
         toast.error(
-          `Reflexion fehlgeschlagen: ${result.error}\nKonversation wird trotzdem beendet.`,
+          `Fakten-Extraktion fehlgeschlagen: ${result.error}\nKonversation wird trotzdem beendet.`,
         );
       } else if (result.extracted > 0) {
         toast.success(
@@ -608,12 +679,59 @@ function DirectChatActions({
         title={
           !hasConversation
             ? "Noch keine Konversation aktiv"
-            : "Twin reflektiert und schlägt neue Facts vor"
+            : "Twin durchsucht die Konversation und schlägt neue Facts vor"
         }
         className="text-xs text-muted border border-border rounded px-2 py-1 hover:border-accent hover:text-accent disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
       >
-        {extracting ? "Reflektiere…" : "Reflektieren"}
+        {extracting ? "Extrahiere…" : "Fakten extrahieren"}
       </button>
+
+      {/* Echter Selbst-Reflexions-Trigger (Pending → Inbox). Zwei Modi. Nicht
+          an eine aktive Konversation gebunden — reflektiert twin-weit. */}
+      <div ref={reflectRef} className="relative">
+        <button
+          type="button"
+          onClick={() => setReflectMenuOpen((o) => !o)}
+          disabled={busy || reflecting}
+          aria-haspopup="menu"
+          aria-expanded={reflectMenuOpen}
+          title="Twin bildet eine Reflexion — landet als Vorschlag in der Inbox"
+          className="text-xs text-muted border border-border rounded px-2 py-1 hover:border-accent hover:text-accent disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+        >
+          {reflecting ? "Reflektiere…" : "Reflektieren ▾"}
+        </button>
+        {reflectMenuOpen && (
+          <div
+            role="menu"
+            className="absolute right-0 mt-1 w-56 bg-surface border border-border rounded shadow-lg z-50 overflow-hidden"
+          >
+            <button
+              type="button"
+              role="menuitem"
+              onClick={() => void handleReflect("owner")}
+              className="w-full text-left px-3 py-2 hover:bg-bg transition-colors focus:outline-none focus:bg-bg"
+            >
+              <span className="block text-sm text-text">Über dich</span>
+              <span className="block text-xs text-muted">
+                Beobachtung über dich (den Owner)
+              </span>
+            </button>
+            <div className="border-t border-border" />
+            <button
+              type="button"
+              role="menuitem"
+              onClick={() => void handleReflect("self")}
+              className="w-full text-left px-3 py-2 hover:bg-bg transition-colors focus:outline-none focus:bg-bg"
+            >
+              <span className="block text-sm text-text">Über sich selbst</span>
+              <span className="block text-xs text-muted">
+                Twin über sein eigenes Verhalten
+              </span>
+            </button>
+          </div>
+        )}
+      </div>
+
       <button
         onClick={() => setModalOpen(true)}
         disabled={busy}
@@ -641,8 +759,8 @@ function DirectChatActions({
               </button>
             </div>
             <p className="text-sm text-muted leading-relaxed">
-              Soll der Twin noch über die Konversation reflektieren? Er kann
-              dabei neue Facts vorschlagen, die du in{" "}
+              Soll der Twin die Konversation noch auf neue Facts durchgehen? Er
+              kann dabei neue Facts vorschlagen, die du in{" "}
               <Link
                 href={`/facts?twin=${encodeURIComponent(handle)}`}
                 className="text-accent hover:underline"
@@ -653,13 +771,13 @@ function DirectChatActions({
             </p>
             {extracting && (
               <div className="text-xs text-accent italic">
-                Twin reflektiert… bitte warten.
+                Twin extrahiert… bitte warten.
               </div>
             )}
             {!hasConversation && (
               <div className="text-xs text-muted">
-                (Reflektieren ist nicht verfügbar, weil noch keine Konversation
-                aktiv ist.)
+                (Fakten extrahieren ist nicht verfügbar, weil noch keine
+                Konversation aktiv ist.)
               </div>
             )}
             <div className="flex items-center justify-end gap-2 pt-1 flex-wrap">
@@ -685,7 +803,7 @@ function DirectChatActions({
                 disabled={extracting || busy || !hasConversation}
                 className="px-3 py-1.5 text-xs border border-accent text-accent rounded hover:bg-accent hover:text-bg transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
               >
-                {extracting ? "Reflektiere…" : "Reflektieren + Beenden"}
+                {extracting ? "Extrahiere…" : "Fakten extrahieren + Beenden"}
               </button>
             </div>
           </div>
