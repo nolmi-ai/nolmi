@@ -14,6 +14,7 @@ import { MaturityDetail } from "../../components/MaturityDetail";
 import { SkillEditorModal } from "../../components/SkillEditorModal";
 import { McpServerAddModal } from "../../components/McpServerAddModal";
 import { OAuthActivationModal } from "../../components/OAuthActivationModal";
+import { ConfirmDeleteTwinModal } from "../../components/ConfirmDeleteTwinModal";
 import { Tabs, TabList, Tab, TabPanel } from "../../components/Tabs";
 import { TelegramChannelTab } from "../../components/TelegramChannelTab";
 import { toast } from "../../lib/toast";
@@ -122,6 +123,9 @@ function SettingsInner() {
   // #131 Phase 5.2: OAuth-Activation-Modal. Öffnet sich aus der Auth-Row
   // in der Profile-Übersicht, zeigt den Phase-4-CLI-Befehl mit Copy-Button.
   const [oauthModalOpen, setOauthModalOpen] = useState(false);
+
+  // #744 Schritt 3: Twin-Löschen-Modal (Danger-Zone in der Profil-Section).
+  const [deleteModalOpen, setDeleteModalOpen] = useState(false);
 
   // #110 Phase 2B Commit 11B: Settings-Edit-Sections (Persona / LLM / Presets).
   // `settingsData` ist die Server-Snapshot, `personaForm` / `llmForm` /
@@ -411,6 +415,31 @@ function SettingsInner() {
       setSavingFullConfig(false);
     }
   }
+
+  // #744 Schritt 3: Nach erfolgreichem Löschen. Twin-Liste frisch holen
+  // (autoritativ: der gelöschte Twin ist aus GET /twins raus) und auf einen
+  // verbleibenden Twin navigieren — oder in den Onboarding-Flow, wenn keiner
+  // mehr da ist. Soft-Navigation; der TwinSwitcher refetcht bei Routenwechsel,
+  // damit kein Geist im Dropdown bleibt. Keine tote ?twin=<gelöscht>-URL.
+  const handleTwinDeleted = useCallback(async () => {
+    setDeleteModalOpen(false);
+    toast.success("Twin gelöscht");
+    let remaining: TwinSummary[] = [];
+    try {
+      const res = await fetch(`${RUNTIME_URL}/twins`, { credentials: "include" });
+      if (res.ok) {
+        const data = (await res.json()) as { twins: TwinSummary[] };
+        remaining = data.twins.filter((t) => t.handle !== selectedHandle);
+      }
+    } catch {
+      // Netzwerk-Hänger beim Refetch — konservativ in den Onboarding-Flow.
+    }
+    if (remaining[0]) {
+      router.push(`/settings?twin=${remaining[0].handle}`);
+    } else {
+      router.push("/onboarding");
+    }
+  }, [router, selectedHandle]);
 
   // Bei Twin-Wechsel: Profil + Trusts + Skills neu. Pollen entfällt — alle
   // drei ändern sich nur über lokale User-Aktionen oder die CLI (Skills).
@@ -755,6 +784,33 @@ function SettingsInner() {
           />
         ) : null}
       </Section>
+
+      {/* #744 Schritt 3: Danger-Zone — visuell abgesetzt (roter Rahmen). Der
+          Button ist nur für den aktuell geladenen Twin aktiv; GET /twins ist
+          server-seitig owner-gescoped (nur eigene Twins), also wird der Button
+          ohnehin nur für eigene Twins angeboten. requireOwner gated zusätzlich
+          serverseitig; ein 403 fängt das Modal als Fehlertext ab. */}
+      {profile && selectedHandle && (
+        <section className="mt-6 bg-surface border border-warn rounded p-5">
+          <h2 className="text-sm font-semibold text-warn mb-2 tracking-tight">
+            Danger Zone
+          </h2>
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <p className="text-sm text-muted leading-relaxed flex-1">
+              Diesen Twin unwiderruflich löschen — inklusive aller Daten
+              (Konversationen, Facts, Memory, Skills, Telegram, OAuth) und
+              Deregistrierung von der Bridge.
+            </p>
+            <button
+              type="button"
+              onClick={() => setDeleteModalOpen(true)}
+              className="px-4 py-2 text-sm border border-warn text-warn rounded hover:bg-warn hover:text-bg disabled:opacity-30 disabled:cursor-not-allowed transition-colors flex-shrink-0 font-mono"
+            >
+              Diesen Twin löschen
+            </button>
+          </div>
+        </section>
+      )}
         </TabPanel>
 
         <TabPanel id="reife">
@@ -1209,6 +1265,13 @@ function SettingsInner() {
               handle={selectedHandle}
               onRefresh={() => loadSettingsData(selectedHandle)}
               onClose={() => setOauthModalOpen(false)}
+            />
+          )}
+          {deleteModalOpen && (
+            <ConfirmDeleteTwinModal
+              handle={selectedHandle}
+              onClose={() => setDeleteModalOpen(false)}
+              onDeleted={() => void handleTwinDeleted()}
             />
           )}
         </>

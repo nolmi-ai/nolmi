@@ -35,12 +35,21 @@ export function TwinSwitcher() {
   const [open, setOpen] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
 
+  // Twin-Liste bei jedem Routenwechsel neu holen. Wichtig nach einem Twin-
+  // Löschen (#744): die Navigation weg vom gelöschten Twin triggert den
+  // Refetch, sodass der gelöschte Twin nicht als Geist im Dropdown bleibt.
+  // GET /twins ist leichtgewichtig + owner-gescoped; häufigeres Laden hält
+  // die Liste frisch (z.B. auch nach Twin-Anlage anderswo).
+  const routeKey = `${pathname}?${searchParams.toString()}`;
   useEffect(() => {
     let cancelled = false;
     fetch(`${RUNTIME_URL}/twins`, { credentials: "include" })
       .then((res) => (res.ok ? res.json() : Promise.reject(`HTTP ${res.status}`)))
       .then((data: { twins: TwinSummary[] }) => {
-        if (!cancelled) setTwins(data.twins);
+        if (!cancelled) {
+          setTwins(data.twins);
+          setError(null);
+        }
       })
       .catch((err) => {
         if (!cancelled) setError(typeof err === "string" ? err : "Failed");
@@ -48,7 +57,7 @@ export function TwinSwitcher() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [routeKey]);
 
   // Outside-Click + ESC schließen das Dropdown — gleiche Mechanik wie
   // ProfileMenu.
