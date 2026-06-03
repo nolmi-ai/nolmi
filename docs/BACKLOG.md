@@ -2301,6 +2301,12 @@ Begründung Hybrid-Branch statt `parseBoolEnv`-Refactor: zwar ist `parseBoolEnv`
 
 **Größe ursprünglich:** S — final: ~30 LoC + drei Doku-Files. **Aus:** Tag-27-Nachmittag Smoke-2-Aufsetz-Friction · **Spur:** Pre-Launch-Phase A Polish
 
+### Telegram Re-Connect setzt Webhook nicht automatisch — OFFEN (launch-relevant)
+
+**Status:** OFFEN (Workaround dokumentiert) | **Größe:** S–M | **Priorität:** hoch (launch-relevant) | **Aus:** Telegram-Debug Tag 36
+
+**Telegram Re-Connect setzt Webhook nicht automatisch** — beim Neu-Verbinden/Re-Pairing eines Telegram-Bots wird `setWebhook` NICHT ausgelöst (`bot-registry.ts:21` setzt ihn beim Eager-Load bewusst nicht; nur die Token-PUT-Route `api-routes.ts:143` triggert ihn). Folge: Pairing meldet Erfolg, aber der Bot empfängt keine Nachrichten, bis manuell „Token ändern" geklickt wird. Workaround dokumentiert (STAND Tag 36). Echter Fix offen: Re-Pairing / „Telegram verbinden" soll `setWebhook` selbst auslösen, ODER ein expliziter „Webhook neu setzen"-Knopf. Launch-relevant — jeder Self-Hoster, der Telegram (neu) verbindet, trifft das. (Der separate UNIQUE-Insert-Bug ist mit `0438c5d` gefixt — hier NICHT mehr offen.)
+
 ### #139 OAuth-Token-Refresh-Latenz bei Multi-Step-Tool-Use untersuchen — ✅ Tag 28 DONE
 
 **Status-Notiz Tag 28 (26. Mai 2026):** Tracking-Pfad gebaut. `OAuthRefreshService.recordSuccess` analog `recordFailure` schreibt einen `oauth-refresh-success`-Audit mit `output: { latencyMs, oldExpiresAt, newExpiresAt, triggeredBy }`. `doRefreshIfNeeded` misst Latenz um den `refreshAccessToken`-Roundtrip. `ensureFresh(twinId, triggeredBy)` neu signiert (Default `"lazy"`), `pollAllTokens` markiert seinen Pfad als `"background"`. Plus Block-6-Sicherung: `OAUTH_REFRESH_POLL_DISABLED=true`-env-Guard in `start()` (Default unverändert, Lazy-Refresh bleibt aktiv), eingeführt nach zwei Token-Invalidierungs-Smokes (`refresh_token_reused` + `refresh_token_invalidated`). Phase-A-Diagnose (Block 7): H1 (refresh_token-Rotation nicht atomar) widerlegt, H2 (refreshAccessToken-Parsing-Bug) widerlegt, H3 (Race-Condition) unverifiziert, via Guard pragmatisch entschärft. Live-Smoke `audit_FuawriTsQd1j`: `latencyMs: 446`, `triggeredBy: "lazy"`, atomare Token-Rotation, `newExpiresAt` 10 Tage future. **Codex-Refresh-Token-Lifetime ist 10 Tage** (`expires_in: 863999`), nicht durch Code limitiert — siehe #150 für Doku-Klarstellung. Folge-Items: #149 (Mutex-Hardening), #150 (Token-Lifetime-Doku), #151 (id_token-/scope-Evaluation).
