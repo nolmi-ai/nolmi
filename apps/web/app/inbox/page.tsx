@@ -488,6 +488,15 @@ function extractLastMessage(entry: AuditEntry): string {
         : r.reflectionText;
     }
   }
+  // Sozialer Vorschlag: suggestionText + letzter Kontakt (relativ).
+  if (entry.capability === "social-suggestion") {
+    const s = entry.input as { suggestionText?: string; relativeText?: string };
+    if (typeof s.suggestionText === "string") {
+      return s.relativeText
+        ? `${s.suggestionText}\n\nLetzter Kontakt: ${s.relativeText}`
+        : s.suggestionText;
+    }
+  }
   if (typeof input.lastMessage === "string") return input.lastMessage;
   if (Array.isArray(input.messages)) {
     const last = input.messages[input.messages.length - 1];
@@ -527,6 +536,9 @@ function formatPendingHeader(entry: AuditEntry): string {
     return subject === "self"
       ? "Selbst-Reflexion (über sich selbst)"
       : "Selbst-Reflexion über dich";
+  }
+  if (entry.capability === "social-suggestion") {
+    return "Beziehungs-Vorschlag";
   }
   return entry.capability;
 }
@@ -590,6 +602,8 @@ function formatCapability(entry: AuditEntry): string {
         ? "Selbst-Reflexion (über sich selbst)"
         : "Selbst-Reflexion";
     }
+    case "social-suggestion":
+      return "Sozialer Vorschlag";
     default:
       return entry.capability;
   }

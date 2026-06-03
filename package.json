@@ -33,6 +33,7 @@
     "twin:facts-import": "pnpm --filter @nolmi/runtime twin:facts-import",
     "twin:facts-extract": "pnpm --filter @nolmi/runtime twin:facts-extract",
     "twin:reflect": "pnpm --filter @nolmi/runtime twin:reflect",
+    "twin:social-nudge": "pnpm --filter @nolmi/runtime twin:social-nudge",
     "twin:diary-add": "pnpm --filter @nolmi/runtime twin:diary-add",
     "twin:diary-list": "pnpm --filter @nolmi/runtime twin:diary-list",
     "twin:memory-embed-all": "pnpm --filter @nolmi/runtime twin:memory-embed-all",

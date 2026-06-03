@@ -71,6 +71,7 @@ import {
   REFLECTION_CAPABILITY,
   type ReflectionOutput,
 } from "./reflection/reflection-engine.js";
+import { SOCIAL_SUGGESTION_CAPABILITY } from "./social/social-suggestion-service.js";
 import { McpClientManager } from "./mcp/client-manager.js";
 import { McpSkillSync } from "./mcp/skill-sync.js";
 import { buildMcpToolsFromSkills } from "./mcp/tool-bridge.js";
@@ -1110,6 +1111,8 @@ export class TwinService {
         return this.approveSemanticFactWrite(entry);
       case REFLECTION_CAPABILITY:
         return this.approveSelfReflectionWrite(entry);
+      case SOCIAL_SUGGESTION_CAPABILITY:
+        return this.approveSocialSuggestion(entry);
       default:
         return this.approveDefault(entry, persona);
     }
@@ -1159,6 +1162,12 @@ export class TwinService {
     // bereits auf 'rejected' (audit.reject oben). KEIN Diary-Write, kein Rest-
     // Effekt — nichts bleibt. Explizit früh raus, damit kein Fall-Through.
     if (entry.capability === REFLECTION_CAPABILITY) {
+      return;
+    }
+
+    // Sozialer Vorschlag (Stufe 1): Reject = verwerfen. Audit ist rejected, KEIN
+    // Send, kein Rest-Effekt — nichts bleibt (subject-unabhängig, wie Reflexion).
+    if (entry.capability === SOCIAL_SUGGESTION_CAPABILITY) {
       return;
     }
 
@@ -1505,6 +1514,24 @@ export class TwinService {
       subject,
       reflectionText: text,
       reasoning: input.reasoning ?? null,
+    });
+    return { auditId: entry.id };
+  }
+
+  /**
+   * Soziale Proaktivität Stufe 1: Approve eines `social-suggestion`-Pending.
+   * KONSERVATIV / NO-OP: setzt den Audit nur auf `executed` — KEIN Send an den
+   * Partner, KEINE A2A-Message, KEIN Diary-Effekt Richtung Partner. Das ist die
+   * Stufe-1/2-Grenze: „Twin schlägt vor, Markus entscheidet" — der MENSCH meldet
+   * sich, nicht der Twin. Ein autonomer Send hier wäre Stufe 2.
+   */
+  private async approveSocialSuggestion(
+    entry: AuditEntry,
+  ): Promise<ApproveResult> {
+    const input = entry.input as { partnerHandle?: string };
+    await this.deps.audit.complete(entry.id, {
+      partnerHandle: input.partnerHandle ?? null,
+      acknowledged: true,
     });
     return { auditId: entry.id };
   }

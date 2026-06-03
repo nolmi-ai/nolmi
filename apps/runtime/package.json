@@ -28,6 +28,7 @@
     "twin:facts-import": "tsx src/scripts/facts-import.ts",
     "twin:facts-extract": "tsx src/scripts/facts-extract.ts",
     "twin:reflect": "tsx src/scripts/reflect.ts",
+    "twin:social-nudge": "tsx src/scripts/social-nudge.ts",
     "twin:diary-add": "tsx src/scripts/diary-add.ts",
     "twin:diary-list": "tsx src/scripts/diary-list.ts",
     "twin:memory-embed-all": "tsx src/scripts/memory-embed-all.ts",
