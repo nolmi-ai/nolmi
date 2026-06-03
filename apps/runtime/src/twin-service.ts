@@ -58,6 +58,7 @@ import {
 import type { MemoryRetrievalService } from "./episodic/memory-retrieval-service.js";
 import { buildEpisodicBlock } from "./episodic/prompt-builder.js";
 import type { TwinDiaryService } from "./episodic/twin-diary-service.js";
+import { TwinDiaryRepo } from "./episodic/twin-diary-repo.js";
 import { buildFactsBlock } from "./facts/prompt-builder.js";
 import {
   ExtractionEngine,
@@ -364,6 +365,8 @@ export class TwinService {
       twinId: deps.twinId,
       twinName: deps.persona.name,
       ownerName: deps.persona.name,
+      // 'self'-Modus: jüngste Diary-Reflexionen als „schon beobachtet"-Kontext.
+      diaryRepo: new TwinDiaryRepo(deps.db),
       reflect: async ({ system, prompt }) => {
         // Strukturierter Output via Zod-Schema, Twin-eigener Provider/Model —
         // analog ExtractionEngine/SummaryEngine.

@@ -21,6 +21,7 @@ import { TelegramBotRegistry } from "./telegram/bot-registry.js";
 import { TelegramMessageRouter } from "./telegram/message-router.js";
 import { OAuthTokensRepo } from "./oauth/oauth-tokens-repo.js";
 import { OAuthRefreshService } from "./oauth/refresh-service.js";
+import { ReflectionLoopService } from "./reflection/reflection-loop-service.js";
 
 // ─── BOOTSTRAP ───────────────────────────────────────────────────────────────
 //
@@ -195,15 +196,25 @@ async function main() {
   // verfügbar (kein Boot-Wait), aber Background-Tick erst ab jetzt.
   oauthRefreshService.start(app.log);
 
+  // Selbst-Reflexion Stufe 2 — autonomer 'self'-Reflexions-Loop. OPT-IN:
+  // ohne REFLECTION_LOOP_ENABLED=true tut start() nichts. Output bleibt Pending
+  // (Leitplanke); dedupliziert (max 1 offenes Pending + nur bei neuer Substanz).
+  const reflectionLoopService = new ReflectionLoopService({
+    db: repo.db,
+    registry,
+  });
+  reflectionLoopService.start(app.log);
+
   // 9. Graceful Shutdown
   const shutdown = async (signal: string) => {
     console.log(`[shutdown] ${signal} empfangen — fahre runter`);
-    // Reihenfolge: erst Bridge-Streams + Telegram-Bots + OAuth-Polling
-    // (kein neuer Inbound + kein neuer Refresh-Tick), dann MCP-Subprocesses
-    // disposen (kein neuer Outbound an Tools), dann Fastify schließen.
+    // Reihenfolge: erst Bridge-Streams + Telegram-Bots + OAuth-Polling +
+    // Reflexions-Loop (kein neuer Inbound + kein neuer Tick), dann MCP-
+    // Subprocesses disposen (kein neuer Outbound an Tools), dann Fastify.
     await registry.shutdown();
     telegramBotRegistry.shutdown();
     oauthRefreshService.stop();
+    reflectionLoopService.stop();
     await registry.disposeAll();
     try {
       await app.close();

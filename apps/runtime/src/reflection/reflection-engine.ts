@@ -6,6 +6,7 @@ import type {
   ConversationSummary,
 } from "../conversations/summaries-repo.js";
 import type { AuditService } from "../audit/service.js";
+import type { TwinDiaryRepo } from "../episodic/twin-diary-repo.js";
 
 // ─── REFLECTION ENGINE (Selbst-Reflexion Stufe 1) ───────────────────────────
 //
@@ -61,7 +62,18 @@ export interface ReflectionEngineDeps {
   twinName: string;
   ownerName: string;
   reflect: ReflectionGenerator;
+  /**
+   * Optional: Diary-Repo für den "schon beobachtet"-Kontext im 'self'-Modus —
+   * die jüngsten Diary-Reflexionen werden dem Prompt als „nicht wiederholen,
+   * nur bei etwas Neuem"-Hinweis mitgegeben (Vorbild: ExtractionEngine reicht
+   * existierende Facts als „nicht erneut vorschlagen" durch). Fehlt das Repo
+   * (z.B. alter Aufrufer), läuft der Pfad wie bisher — leerer Kontext.
+   */
+  diaryRepo?: TwinDiaryRepo;
 }
+
+/** Wie viele jüngste Diary-Einträge als „schon beobachtet"-Kontext (self). */
+const SELF_DIARY_CONTEXT_LIMIT = 5;
 
 export interface ReflectionResult {
   /** true → ein Pending-Audit wurde erzeugt. false → nichts erzeugt. */
@@ -101,6 +113,16 @@ export class ReflectionEngine {
       limit: 40,
     });
 
+    // 'self': jüngste Diary-Reflexionen als „schon beobachtet"-Kontext, damit der
+    // Twin keine Wiederholung produziert (relevant v.a. für den Loop). Nur bei
+    // subject='self' + vorhandenem Repo; sonst leer (manueller Pfad unverändert).
+    const recentDiary =
+      subject === "self" && this.deps.diaryRepo
+        ? this.deps.diaryRepo
+            .listByTwin(this.deps.twinId, { limit: SELF_DIARY_CONTEXT_LIMIT })
+            .map((d) => d.content)
+        : [];
+
     // 2. Prompt + LLM-Call
     const system = buildSystemPrompt({
       twinName: this.deps.twinName,
@@ -113,6 +135,7 @@ export class ReflectionEngine {
       summaries,
       recentAudits,
       subject,
+      recentDiary,
     });
 
     let out: ReflectionOutput;
@@ -208,9 +231,10 @@ VERMEIDE:
 - Aussagen über ${input.ownerName} (den Menschen) — das ist hier NICHT das Thema.
 - Pauschale Selbst-Urteile ohne Beleg im Verlauf.
 - Mehrere Beobachtungen auf einmal.
+- WIEDERHOLUNGEN: wenn du etwas unten schon notiert hast (Abschnitt „Schon notiert"), formuliere es NICHT erneut. Nur eine NEUE Beobachtung — sonst hasEnoughSubstance=false.
 
 Ausgabe-Felder:
-- hasEnoughSubstance: ist genug belastbare Evidenz (eigene Antworten) da?
+- hasEnoughSubstance: ist genug belastbare Evidenz (eigene Antworten) da UND ist die Beobachtung neu (nicht schon notiert)?
 - reflection: der Vorschlags-Text über dein eigenes Verhalten (leer, wenn hasEnoughSubstance=false).
 - evidence: worauf du dich konkret stützt (welche eigenen Turns/Muster).`;
 }
@@ -221,6 +245,7 @@ function buildUserPrompt(input: {
   summaries: ConversationSummary[];
   recentAudits: AuditEntry[];
   subject: ReflectionSubject;
+  recentDiary?: string[];
 }): string {
   const parts: string[] = [];
 
@@ -231,6 +256,14 @@ function buildUserPrompt(input: {
         "]-Zeilen). Die Facts/Summaries sind nur Kontext.",
       "",
     );
+    if (input.recentDiary && input.recentDiary.length > 0) {
+      parts.push(
+        "**Schon notiert (frühere Reflexionen — NICHT wiederholen, nur etwas NEUES):**",
+        "",
+      );
+      for (const d of input.recentDiary) parts.push(`- ${d}`);
+      parts.push("");
+    }
   }
 
   parts.push("**Bestätigte Facts über den Owner:**", "");

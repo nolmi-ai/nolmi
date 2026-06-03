@@ -7,6 +7,7 @@ import { SqliteAuditRepository } from "../repository/sqlite.js";
 import { AuditService } from "../audit/service.js";
 import { EventBus } from "../events/bus.js";
 import { ConversationSummariesRepo } from "../conversations/summaries-repo.js";
+import { TwinDiaryRepo } from "../episodic/twin-diary-repo.js";
 import {
   ReflectionEngine,
   ReflectionOutputSchema,
@@ -67,6 +68,7 @@ async function main() {
       twinId: ctx.twin.twinId,
       twinName: ctx.twin.displayName,
       ownerName: ctx.twin.displayName,
+      diaryRepo: new TwinDiaryRepo(ctx.db),
       reflect: async ({ system, prompt }) => {
         const result = await generateObject({
           model,
