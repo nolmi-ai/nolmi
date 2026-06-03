@@ -81,3 +81,52 @@ export async function registerHandleOnBridge(opts: {
   }
   return { token: body.apiToken };
 }
+
+// ─── BRIDGE HANDLE-DEREGISTRATION ────────────────────────────────────────────
+//
+// Gegenstück zu `registerHandleOnBridge` (#744): entfernt einen Handle wieder
+// von der Bridge. Genutzt vom späteren Twin-Lösch-Flow (Schritt 2) — best-
+// effort: der Caller fängt einen Throw ab, loggt laut, löscht den Twin lokal
+// trotzdem.
+//
+// Auth: Der Twin weist sich mit seinem eigenen `bridge_token` aus
+// (`Authorization: Bearer <token>`) — dasselbe Modell wie alle authentifizierten
+// Bridge-Routen. Die Bridge prüft Owner-Scope (Token muss zum Handle gehören).
+//
+// 404 = Erfolg: ist der Handle an der Bridge schon weg, ist das Ziel erreicht
+// (idempotent). Jeder andere Non-2xx wirft mit klarer Diagnose.
+export async function deregisterHandleFromBridge(opts: {
+  bridgeUrl: string;
+  handle: string;
+  /** Der `bridge_token` des Twins (pre-shared API-Token von der Registrierung). */
+  token: string;
+}): Promise<void> {
+  const url = `${opts.bridgeUrl.replace(/\/$/, "")}/twins/${encodeURIComponent(
+    opts.handle,
+  )}`;
+  const res = await fetch(url, {
+    method: "DELETE",
+    headers: {
+      Authorization: `Bearer ${opts.token}`,
+    },
+  });
+
+  // 2xx → gelöscht. 404 → Row schon weg, Ziel erreicht (idempotent).
+  if (res.ok || res.status === 404) {
+    return;
+  }
+
+  let detail = "";
+  try {
+    const errBody = (await res.json()) as { error?: string };
+    detail = errBody.error ?? "";
+  } catch {
+    detail = await res.text().catch(() => "");
+  }
+  throw new BridgeRegisterError(
+    `Bridge DELETE /twins/${opts.handle} → HTTP ${res.status}${
+      detail ? `: ${detail}` : ""
+    }`,
+    res.status,
+  );
+}

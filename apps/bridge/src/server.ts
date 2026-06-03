@@ -14,6 +14,7 @@ import { requireTwinAuth } from "./auth.js";
 // Endpoints:
 //   POST /twins/register             → neuen Twin anlegen, Token vergeben
 //                                       (Allowlist via X-Register-Token)
+//   DELETE /twins/:handle            → Handle deregistrieren (auth, Owner-Scope)
 //   GET  /twins                      → alle Twins listen (auth)
 //   POST /messages                   → Nachricht an anderen Twin senden (auth)
 //   GET  /messages/inbox?since=...   → ungelieferte Nachrichten holen (auth)
@@ -119,6 +120,40 @@ export async function createServer(deps: ServerDeps) {
       })),
     };
   });
+
+  // ─── Deregister ──────────────────────────────────────────────────────────────
+  //
+  // Gegenstück zu POST /twins/register: entfernt einen Handle restlos aus der
+  // Bridge-Registry. Gerufen vom Runtime-Client `deregisterHandleFromBridge`,
+  // wenn ein Owner seinen Twin löscht (#744).
+  //
+  // Auth-Modell: identisch zu allen anderen authentifizierten Routen
+  // (requireTwinAuth → Bearer-Token → getByToken). Anders als beim Register
+  // gibt es hier KEINEN shared X-Register-Token — der Twin existiert ja schon
+  // und weist sich mit seinem eigenen api_token aus. Zusätzlich Owner-Scope:
+  // der Token muss zum :handle gehören, sonst 403 (kein Twin löscht einen
+  // anderen). Idempotent gedacht: existiert der Handle nicht mehr → 404, der
+  // Client schluckt das als Erfolg.
+  app.delete<{ Params: { handle: string } }>(
+    "/twins/:handle",
+    { preHandler: auth },
+    async (request, reply) => {
+      const caller = request.twin!;
+      const target = request.params.handle;
+      if (caller.handle !== target) {
+        return reply.status(403).send({
+          error: "Token gehört nicht zu diesem Handle",
+        });
+      }
+      const deleted = deps.twins.delete(target);
+      if (!deleted) {
+        // Sollte nach erfolgreicher Auth kaum vorkommen (Token resolved ja auf
+        // genau diesen Handle), aber sauber 404 für den idempotenten Pfad.
+        return reply.status(404).send({ error: "Handle nicht gefunden" });
+      }
+      return reply.status(204).send();
+    },
+  );
 
   // ─── Nachricht senden ──────────────────────────────────────────────────────
   app.post<{

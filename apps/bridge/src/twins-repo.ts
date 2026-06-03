@@ -75,6 +75,21 @@ export class TwinsRepo {
       .prepare("UPDATE twins SET last_seen_at = ? WHERE handle = ?")
       .run(new Date().toISOString(), handle);
   }
+
+  /**
+   * Entfernt einen Twin restlos aus der Registry (Gegenstück zu `register`).
+   * Gerufen vom Deregister-Endpoint, wenn ein Owner seinen Twin löscht.
+   *
+   * Rückgabe: `true`, wenn eine Zeile gelöscht wurde, `false`, wenn der Handle
+   * gar nicht (mehr) existierte — der Endpoint behandelt beide Fälle als
+   * Erfolg (idempotent), nutzt das Flag aber für 204-vs-404-Differenzierung.
+   */
+  delete(handle: string): boolean {
+    const result = this.db
+      .prepare("DELETE FROM twins WHERE handle = ?")
+      .run(handle);
+    return result.changes > 0;
+  }
 }
 
 export class TwinAlreadyExistsError extends Error {
