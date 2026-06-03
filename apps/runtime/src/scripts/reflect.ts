@@ -11,6 +11,7 @@ import {
   ReflectionEngine,
   ReflectionOutputSchema,
   type ReflectionOutput,
+  type ReflectionSubject,
 } from "../reflection/reflection-engine.js";
 
 // ─── twin:reflect (CLI) — Selbst-Reflexion Stufe 1 (über Markus) ─────────────
@@ -24,13 +25,15 @@ import {
 // KEIN Background-Loop ('scheduled' bleibt Stufe-2-reserviert).
 //
 // Aufruf:
-//   pnpm twin:reflect @markus
+//   pnpm twin:reflect @markus            → über den Owner (Default)
+//   pnpm twin:reflect @markus --self     → über das eigene Twin-Verhalten
 
-const USAGE = "Nutzung:\n  pnpm twin:reflect <handle>";
+const USAGE = "Nutzung:\n  pnpm twin:reflect <handle> [--self]";
 
 async function main() {
-  const args = process.argv.slice(2).filter((a) => !a.startsWith("--"));
-  const rawHandle = args[0];
+  const rawArgs = process.argv.slice(2);
+  const subject: ReflectionSubject = rawArgs.includes("--self") ? "self" : "owner";
+  const rawHandle = rawArgs.find((a) => !a.startsWith("--"));
   if (!rawHandle) {
     console.error(USAGE);
     process.exit(1);
@@ -75,10 +78,12 @@ async function main() {
       },
     });
 
+    const modusLabel = subject === "self" ? "über das eigene Twin-Verhalten" : "über den Owner";
     console.log(`[reflect] Twin: ${ctx.twin.handle}, LLM: ${llmConfig.provider}/${llmConfig.model}`);
-    console.log(`[reflect] Bilde eine Reflexion über den Owner …`);
+    console.log(`[reflect] Modus: ${subject} (${modusLabel})`);
+    console.log(`[reflect] Bilde eine Reflexion …`);
 
-    const result = await engine.reflectAboutOwner();
+    const result = await engine.reflect(subject);
 
     if (!result.created) {
       console.log(`[reflect] Keine Reflexion erzeugt: ${result.skippedReason ?? "unbekannt"}`);
@@ -87,7 +92,7 @@ async function main() {
     }
 
     console.log("");
-    console.log(`[reflect] ✓ Reflexion als PENDING erzeugt (NICHT wirksam bis Approve):`);
+    console.log(`[reflect] ✓ Reflexion (${subject}) als PENDING erzeugt (NICHT wirksam bis Approve):`);
     console.log(`  "${result.reflectionText}"`);
     if (result.reasoning) console.log(`  Evidenz: ${result.reasoning}`);
     console.log("");

@@ -522,7 +522,11 @@ function formatPendingHeader(entry: AuditEntry): string {
     return display.label;
   }
   if (entry.capability === "self-reflection-write") {
-    return "Selbst-Reflexion über dich";
+    // Schritt-1-Pending ohne subject → defensiv 'owner' (Header unverändert).
+    const subject = (entry.input as { subject?: string }).subject ?? "owner";
+    return subject === "self"
+      ? "Selbst-Reflexion (über sich selbst)"
+      : "Selbst-Reflexion über dich";
   }
   return entry.capability;
 }
@@ -580,8 +584,12 @@ function formatCapability(entry: AuditEntry): string {
         ? `Fakt-Vorschlag: ${factInput.factKey}`
         : "Fakt-Vorschlag";
     }
-    case "self-reflection-write":
-      return "Selbst-Reflexion";
+    case "self-reflection-write": {
+      const subject = (entry.input as { subject?: string }).subject ?? "owner";
+      return subject === "self"
+        ? "Selbst-Reflexion (über sich selbst)"
+        : "Selbst-Reflexion";
+    }
     default:
       return entry.capability;
   }

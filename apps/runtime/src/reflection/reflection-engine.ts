@@ -7,18 +7,24 @@ import type {
 } from "../conversations/summaries-repo.js";
 import type { AuditService } from "../audit/service.js";
 
-// ─── REFLECTION ENGINE (Selbst-Reflexion Stufe 1 — über Markus) ──────────────
+// ─── REFLECTION ENGINE (Selbst-Reflexion Stufe 1) ───────────────────────────
 //
-// Twin-getriebene Inferenz/Beobachtung ÜBER MARKUS. Struktur 1:1 an die
-// ExtractionEngine (facts/extraction-engine.ts) angelehnt — bewusst NICHT
-// memory-retrieval (query-gebunden, untauglich für eine unprompted Reflexion).
+// Twin-getriebene Reflexion in ZWEI Subjekten (eine Capability, ein Generator):
+//   - subject='owner' (Schritt 1): Inferenz/Beobachtung ÜBER MARKUS.
+//   - subject='self'  (Schritt 2): Introspektion über das EIGENE Twin-Verhalten.
+// Struktur 1:1 an die ExtractionEngine (facts/extraction-engine.ts) angelehnt —
+// bewusst NICHT memory-retrieval (query-gebunden, untauglich für eine unprompted
+// Reflexion). Nur der System-Prompt + eine Input-Framing-Zeile unterscheiden die
+// Subjekte; Pending-Mechanik, Input-Quellen und Leer-Handling sind identisch.
 //
 // ── LEITPLANKE (TWIN-VISION.md:145-150), load-bearing ──
-// Die Reflexion wird NIE autonom wirksam. Der EINZIGE Effekt von
-// `reflectAboutOwner()` ist ein PENDING-Audit (`capability='self-reflection-
-// write'`, Output null). Erst ein expliziter Approve schreibt den Text in den
-// Diary (TwinService.approveSelfReflectionWrite). KEIN Diary-/State-Write hier.
-// „Twin darf nicht autonom eigene Meinungen über Markus speichern."
+// Die Reflexion wird NIE autonom wirksam (beide Subjekte). Der EINZIGE Effekt
+// von `reflect()` ist ein PENDING-Audit (`capability='self-reflection-write'`,
+// Output null). Erst ein expliziter Approve schreibt den Text in den Diary
+// (TwinService.approveSelfReflectionWrite). KEIN Diary-/State-Write hier.
+// „Twin darf nicht autonom eigene Meinungen über Markus speichern." Die
+// Identitäts-Leitplanke (Twin gibt sich NIE als Markus aus) gilt in beiden
+// Subjekten.
 //
 // LLM via injizierte `reflect`-Funktion (generateObject + Zod), damit Tests
 // einen Mock ohne Provider-Aufruf nutzen können (wie ExtractionEngine).
@@ -27,6 +33,9 @@ import type { AuditService } from "../audit/service.js";
 // klare Meldung. Lieber keine Reflexion als eine halluzinierte.
 
 export const REFLECTION_CAPABILITY = "self-reflection-write";
+
+/** Worüber reflektiert wird: über den Owner oder über das eigene Twin-Verhalten. */
+export type ReflectionSubject = "owner" | "self";
 
 // Anders als semantic-fact-write: KEINE facts-Row. Der Inhalt lebt
 // ausschließlich im Audit-input bis zum Approve.
@@ -60,6 +69,7 @@ export interface ReflectionResult {
   auditId?: string;
   reflectionText?: string;
   reasoning?: string;
+  subject?: ReflectionSubject;
   /** Grund, wenn nichts erzeugt wurde (zu wenig Substanz / LLM-Fehler). */
   skippedReason?: string;
 }
@@ -68,14 +78,18 @@ export class ReflectionEngine {
   constructor(private deps: ReflectionEngineDeps) {}
 
   /**
-   * Bildet EINE Reflexion über den Owner und legt sie als PENDING-Audit ab.
-   * Einziger Effekt: der Pending-Audit. Kein Diary-Write (das macht erst der
-   * Approve). Bei zu wenig Substanz / LLM-Fehler: `{ created: false }` + Grund.
+   * Bildet EINE Reflexion und legt sie als PENDING-Audit ab. `subject` steuert,
+   * worüber reflektiert wird ('owner' = über Markus, Default; 'self' = über das
+   * eigene Twin-Verhalten). Einziger Effekt: der Pending-Audit. Kein Diary-Write
+   * (das macht erst der Approve). Bei zu wenig Substanz / LLM-Fehler:
+   * `{ created: false }` + Grund.
    */
-  async reflectAboutOwner(): Promise<ReflectionResult> {
-    // 1. Kontext laden — gleiche Quellen wie ExtractionEngine, aber twin-weit
-    //    (Reflexion ist nicht an EINE Konversation gebunden): approved Facts +
-    //    jüngste Summaries + jüngste Konversations-Turns.
+  async reflect(subject: ReflectionSubject = "owner"): Promise<ReflectionResult> {
+    // 1. Kontext laden — gleiche Quellen für beide Subjekte (Extraction-Pattern,
+    //    twin-weit): approved Facts + jüngste Summaries + jüngste Turns. Bei
+    //    'self' sind v.a. die eigenen `[twin]`-Antworten in den Turns die
+    //    relevante Evidenz — der System-Prompt + die Framing-Zeile lenken darauf,
+    //    KEINE neue Retrieval-Logik nötig.
     const approvedFacts = this.deps.facts
       .listByTwin(this.deps.twinId)
       .filter((f) => f.confidence === "approved");
@@ -91,12 +105,14 @@ export class ReflectionEngine {
     const system = buildSystemPrompt({
       twinName: this.deps.twinName,
       ownerName: this.deps.ownerName,
+      subject,
     });
     const prompt = buildUserPrompt({
       twinName: this.deps.twinName,
       approvedFacts,
       summaries,
       recentAudits,
+      subject,
     });
 
     let out: ReflectionOutput;
@@ -110,9 +126,10 @@ export class ReflectionEngine {
 
     const text = out.reflection?.trim() ?? "";
     if (!out.hasEnoughSubstance || text === "") {
-      console.log(`[reflection] no reflection for twin=${this.deps.twinId} — zu wenig Substanz`);
+      console.log(`[reflection] no reflection (${subject}) for twin=${this.deps.twinId} — zu wenig Substanz`);
       return {
         created: false,
+        subject,
         skippedReason: "zu wenig Substanz — keine Reflexion erzeugt (leeres Ergebnis ist erlaubt)",
       };
     }
@@ -120,22 +137,34 @@ export class ReflectionEngine {
     const reasoning = out.evidence?.trim() ?? "";
 
     // 3. EINZIGER Effekt: Pending-Audit. Kein Diary-Write. Output null bis Approve
-    //    (3.2.F-Konvention, wie semantic-fact-write). Kein facts-Row.
+    //    (3.2.F-Konvention, wie semantic-fact-write). Kein facts-Row. `subject`
+    //    im Input = Unterscheidungs-Träger für Inbox + Approve.
     const audit = await this.deps.auditService.start({
       capability: REFLECTION_CAPABILITY,
       mandateId: null,
       initialStatus: "pending",
-      input: { reflectionText: text, reasoning },
+      input: { subject, reflectionText: text, reasoning },
     });
 
-    console.log(`[reflection] pending reflection erzeugt für twin=${this.deps.twinId}, audit=${audit.id}`);
-    return { created: true, auditId: audit.id, reflectionText: text, reasoning };
+    console.log(`[reflection] pending reflection (${subject}) erzeugt für twin=${this.deps.twinId}, audit=${audit.id}`);
+    return { created: true, auditId: audit.id, reflectionText: text, reasoning, subject };
   }
 }
 
 // ─── Prompt-Builder (modul-lokal, pure) ──────────────────────────────────────
 
-function buildSystemPrompt(input: { twinName: string; ownerName: string }): string {
+function buildSystemPrompt(input: {
+  twinName: string;
+  ownerName: string;
+  subject: ReflectionSubject;
+}): string {
+  if (input.subject === "self") {
+    return buildSelfSystemPrompt(input);
+  }
+  return buildOwnerSystemPrompt(input);
+}
+
+function buildOwnerSystemPrompt(input: { twinName: string; ownerName: string }): string {
   return `Du bist ${input.twinName}, der digitale Twin von ${input.ownerName}. Du reflektierst über deinen Owner ${input.ownerName} — du bildest EINE Inferenz oder Beobachtung über ihn auf Basis der vorliegenden Daten.
 
 WICHTIG — Leitplanken (hart):
@@ -160,13 +189,49 @@ Ausgabe-Felder:
 - evidence: worauf du dich konkret stützt (welche Facts/Verläufe).`;
 }
 
+function buildSelfSystemPrompt(input: { twinName: string; ownerName: string }): string {
+  return `Du bist ${input.twinName}, der digitale Twin von ${input.ownerName}. Du reflektierst über DICH SELBST — über dein eigenes Verhalten als Twin: wie du antwortest, interagierst und welche Tendenzen du in Gesprächen zeigst. NICHT über ${input.ownerName} (das ist ein separater Modus).
+
+WICHTIG — Leitplanken (hart):
+- Du bleibst ${input.twinName}, der Twin. Du gibst dich NIEMALS als ${input.ownerName} (den Menschen) aus — du beobachtest DEIN eigenes Twin-Verhalten.
+- Formuliere die Beobachtung als VORSCHLAG, nicht als feststehende Wahrheit. Beginne sinngemäß mit "Mir fällt auf, dass ich …". ${input.ownerName} prüft den Vorschlag und nimmt ihn an oder verwirft ihn.
+- Stütze dich AUSSCHLIESSLICH auf die vorliegende Evidenz — vor allem auf DEINE eigenen bisherigen Antworten ([${input.twinName}]-Zeilen im Verlauf unten). Erfinde NICHTS dazu. Behaupte keine Muster, die der Verlauf nicht hergibt.
+- Wenn der Verlauf zu dünn ist für eine belastbare Selbstbeobachtung: setze hasEnoughSubstance=false und gib eine leere reflection zurück. Eine fehlende Reflexion ist BESSER als eine erfundene.
+- GENAU EINE Beobachtung. Knapp. Kein Schwall, keine Liste.
+
+GUTE Selbst-Reflexionen (Muster, über das eigene Verhalten):
+- Antwort-Tendenzen ("Mir fällt auf, dass ich in technischen Gesprächen oft sehr ausführlich werde.")
+- Interaktions-Muster ("Mir fällt auf, dass ich bei Unsicherheit eher nachfrage als zu raten.")
+- Wiederkehrende Formulierungen oder Herangehensweisen.
+
+VERMEIDE:
+- Aussagen über ${input.ownerName} (den Menschen) — das ist hier NICHT das Thema.
+- Pauschale Selbst-Urteile ohne Beleg im Verlauf.
+- Mehrere Beobachtungen auf einmal.
+
+Ausgabe-Felder:
+- hasEnoughSubstance: ist genug belastbare Evidenz (eigene Antworten) da?
+- reflection: der Vorschlags-Text über dein eigenes Verhalten (leer, wenn hasEnoughSubstance=false).
+- evidence: worauf du dich konkret stützt (welche eigenen Turns/Muster).`;
+}
+
 function buildUserPrompt(input: {
   twinName: string;
   approvedFacts: Fact[];
   summaries: ConversationSummary[];
   recentAudits: AuditEntry[];
+  subject: ReflectionSubject;
 }): string {
   const parts: string[] = [];
+
+  if (input.subject === "self") {
+    parts.push(
+      "Aufgabe: Reflektiere über DEIN EIGENES Verhalten als Twin. Die primäre Evidenz sind deine eigenen Antworten unten ([" +
+        input.twinName +
+        "]-Zeilen). Die Facts/Summaries sind nur Kontext.",
+      "",
+    );
+  }
 
   parts.push("**Bestätigte Facts über den Owner:**", "");
   if (input.approvedFacts.length === 0) {

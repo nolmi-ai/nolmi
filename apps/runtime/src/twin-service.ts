@@ -1474,16 +1474,24 @@ export class TwinService {
   private async approveSelfReflectionWrite(
     entry: AuditEntry,
   ): Promise<ApproveResult> {
-    const input = entry.input as { reflectionText?: string; reasoning?: string };
+    const input = entry.input as {
+      subject?: "owner" | "self";
+      reflectionText?: string;
+      reasoning?: string;
+    };
     const text = input.reflectionText?.trim();
     if (!text) {
       throw new Error(
         `Audit ${entry.id} hat keinen reflectionText im Input — self-reflection-write nicht approvable`,
       );
     }
+    // Subtyp: Schritt-1-Einträge tragen kein subject → defensiv 'owner'.
+    const subject = input.subject ?? "owner";
 
-    // EINZIGER Wirksam-Werden-Pfad: Diary-Eintrag. Insert ist atomar VOR dem
-    // Embedding (twin-diary-service); Embedding-Fehler werden geschluckt.
+    // EINZIGER Wirksam-Werden-Pfad (beide Subjekte gleich): Diary-Eintrag. Insert
+    // ist atomar VOR dem Embedding (twin-diary-service); Embedding-Fehler werden
+    // geschluckt. Content verbatim — der 'Mir fällt auf …'-Ton macht den
+    // Reflexions-Charakter selbst erkennbar (keine Überarchitektur).
     await this.deps.twinDiaryService.addEntry({
       twinId: this.deps.twinId,
       content: text,
@@ -1491,6 +1499,7 @@ export class TwinService {
     });
 
     await this.deps.audit.complete(entry.id, {
+      subject,
       reflectionText: text,
       reasoning: input.reasoning ?? null,
     });
