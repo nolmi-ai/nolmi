@@ -743,7 +743,7 @@ Apex-`nolmi.ai` lieferte 404 (kein Traefik-Router). **Gewählt: Option (b)** (Di
 
 ### Twin-Löschfunktion fehlt in der Web-UI
 
-**Status:** OFFEN | **Größe M** | **Priorität:** should — **vor breiterem Self-Hosting/Launch** | Befund: Prod-Deploy-Smoke Tag 35
+**Status:** ✅ **DONE (Tag 36)** — 3 Schritte: Bridge-Deregister `ef2b832` · Runtime-Löschkern `f5cb42c` · UI `77b9812`. Owner-gegateter `DELETE /twins/:handle`, geordnete Tx (`foreign_keys=ON`, audit+trust manuell, conversation_summaries→audit-Reihenfolge), Registry-Hot-Unload inkl. Telegram-Teardown, Type-to-confirm-UI. **Rest (eigenes, bereits getracktes Item):** Bridge-Orphan-Cleanup bei nicht erreichbarer Bridge → „Bridge-DB-Cleanup als Bootstrap-Schritt". **Offen:** manueller Browser-Durchklick (app.inject deckt HTTP-Contract, nicht DOM).
 
 Beim Weg-B-Onboarding-Smoke (Tag 35) aufgefallen: ein im Wizard angelegter Twin lässt sich über die **UI nicht löschen** — der Test-Twin musste **per DB-Skript** im Container entfernt werden. Wer Twins anlegen kann, muss sie auch löschen können (Erwartung jedes Self-Hosters, besonders relevant sobald externe Nutzer onboarden). **Zu bauen:** Lösch-Flow in der UI (Settings/Twin-Switcher) + Owner-gegateter Endpoint (`DELETE /twins/:handle` o.ä.) mit sauberem Cascade (twin_profiles + zugehörige audit/conversations/facts/oauth_tokens/trust-Zeilen — FK-Verhalten beachten, vgl. Migration 026) + Bridge-Deregistrierung, falls gebunden. Bestätigungs-Dialog (irreversibel). **Größe M** (UI + Endpoint + Cascade + A2A/Bridge-Sauberkeit).
 
