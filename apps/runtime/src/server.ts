@@ -43,6 +43,9 @@ import {
   createTwin,
   CreateTwinError,
 } from "./onboarding/create-twin.js";
+import { deleteTwinLocal } from "./onboarding/delete-twin.js";
+import { deregisterHandleFromBridge } from "./onboarding/bridge-register.js";
+import { EmbeddingsRepo } from "./episodic/embeddings-repo.js";
 import { getCurrentUser } from "./auth/get-current-user.js";
 import { UsersRepo, UserAlreadyExistsError, type User } from "./auth/users-repo.js";
 import { destroySession, setSession } from "./auth/session.js";
@@ -286,6 +289,82 @@ export async function createServer(deps: ServerDeps) {
       if (!ctx) return;
       const { entry } = ctx;
       return profileToResponse(entry);
+    },
+  );
+
+  // ─── Twin löschen (#744) ───────────────────────────────────────────────────
+  // Owner-gegateter, destruktiver Löschpfad. Reihenfolge:
+  //   a. requireOwner (401/404/403)
+  //   b. bridgeUrl/bridgeToken sichern, SOLANGE die Row existiert
+  //   c. Bridge-Deregister GENAU EINMAL, best-effort (Throw → bridgeOrphan=true,
+  //      lokaler Löschvorgang läuft trotzdem). Idempotenz scheitert unter
+  //      Per-Twin-Auth an 401 statt 404 (Schritt-1-Befund) — darum Einmal-Call
+  //      mit lebendem Token VOR dem Löschen.
+  //   d. deleteTwinLocal — geordnete Tx (foreign_keys bleibt ON).
+  //   e. removeTwin — Hot-Unload aus der Registry (+ Telegram-Bot-Teardown).
+  //   f. 200 { deleted, handle, bridgeOrphan } — bridgeOrphan sichtbar für die UI.
+  app.delete<{ Params: { handle: string } }>(
+    "/twins/:handle",
+    async (request, reply) => {
+      const ctx = await requireOwner(request, reply, request.params.handle);
+      if (!ctx) return;
+      const { entry } = ctx;
+      const { twinId, handle } = entry;
+
+      // b. Bridge-Konfig sichern, bevor die Row weg ist.
+      const bridgeUrl = entry.profile.bridgeUrl;
+      const bridgeToken = entry.profile.bridgeToken;
+
+      // c. Bridge-Deregister (best-effort). bridgeOrphan=true heißt: der Handle
+      //    bleibt auf der Bridge registriert, Cleanup nötig — die UI zeigt das.
+      let bridgeOrphan = false;
+      if (bridgeUrl && bridgeToken) {
+        try {
+          await deregisterHandleFromBridge({
+            bridgeUrl,
+            handle,
+            token: bridgeToken,
+          });
+        } catch (err) {
+          bridgeOrphan = true;
+          request.log.error(
+            { err, handle, bridgeUrl },
+            `[twin-delete] Bridge-Deregister fehlgeschlagen — Handle ${handle} ` +
+              `bleibt auf der Bridge registriert (Cleanup nötig)`,
+          );
+        }
+      }
+
+      // d. Lokale Löschung in geordneter Transaktion.
+      let deletedTables: Record<string, number>;
+      try {
+        const result = deleteTwinLocal(twinId, {
+          db: deps.db,
+          embeddingsRepo: new EmbeddingsRepo(deps.db),
+        });
+        deletedTables = result.deletedTables;
+      } catch (err) {
+        request.log.error(
+          { err, handle, twinId },
+          "[twin-delete] Lokale Löschung fehlgeschlagen — Rollback, Twin unverändert",
+        );
+        return reply.status(500).send({
+          error: "Twin-Löschung fehlgeschlagen — keine Änderung vorgenommen",
+        });
+      }
+
+      // e. Hot-Unload aus der Registry (+ Telegram-Bot-Teardown best-effort).
+      await deps.registry.removeTwin(handle, {
+        telegramBotTeardown: deps.telegramBotRegistry,
+      });
+
+      request.log.info(
+        { handle, twinId, bridgeOrphan, deletedTables },
+        `[twin-delete] Twin ${handle} gelöscht`,
+      );
+
+      // f. bridgeOrphan im Response — Schritt 3 (UI) zeigt den Cleanup-Hinweis.
+      return reply.status(200).send({ deleted: true, handle, bridgeOrphan });
     },
   );
 

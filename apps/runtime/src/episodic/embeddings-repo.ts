@@ -543,6 +543,42 @@ export class EmbeddingsRepo {
     tx();
     return removed;
   }
+
+  /**
+   * #744: Löscht ALLE Embeddings eines Twins plus die zugehörigen vec0- und
+   * FTS5-Shadow-Einträge. Gerufen vom Twin-Lösch-Service (deleteTwinLocal).
+   *
+   * Spiegelt die Shadow-Logik von {@link deleteByTarget} exakt, nur auf
+   * twin_id skopiert — die Stamm-Tabelle `embeddings` hängt zwar per FK
+   * ON DELETE CASCADE am twin_profiles-DELETE, aber `embeddings_vec` (vec0)
+   * und `memory_fts` (FTS5) sind virtuelle Tabellen OHNE FK und würden sonst
+   * verwaisen. Darum müssen alle drei hier von Hand zusammen weg.
+   *
+   * Atomar in einer Transaction; als Savepoint sicher schachtelbar in der
+   * äußeren deleteTwinLocal-Transaction.
+   */
+  deleteByTwin(twinId: string): number {
+    let removed = 0;
+    const tx = this.db.transaction(() => {
+      const rowidRows = this.db
+        .prepare(`SELECT rowid FROM embeddings WHERE twin_id = ?`)
+        .all(twinId) as Array<{ rowid: number }>;
+      for (const r of rowidRows) {
+        this.db
+          .prepare(`DELETE FROM embeddings_vec WHERE rowid = ?`)
+          .run(BigInt(r.rowid));
+      }
+      const result = this.db
+        .prepare(`DELETE FROM embeddings WHERE twin_id = ?`)
+        .run(twinId);
+      removed = result.changes;
+      this.db
+        .prepare(`DELETE FROM memory_fts WHERE twin_id = ?`)
+        .run(twinId);
+    });
+    tx();
+    return removed;
+  }
 }
 
 function rowToRecord(row: EmbeddingRow): EmbeddingRecord {

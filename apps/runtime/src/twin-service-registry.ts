@@ -83,6 +83,17 @@ export interface TwinSummary {
   displayName: string;
 }
 
+/**
+ * #744: Minimaler Strukturvertrag für den Telegram-Bot-Teardown beim Twin-
+ * Löschen. Strukturell statt Import von `TelegramBotRegistry`, damit die
+ * Registry nicht ans Telegram-Modul gekoppelt wird (das `message-router`
+ * wiederum auf die Registry zeigt — Zyklus-Vermeidung).
+ */
+export interface TelegramBotTeardown {
+  unregisterWebhook(twinId: string): Promise<void>;
+  stopBotForTwin(twinId: string): void;
+}
+
 interface RegistryDeps {
   db: Database.Database;
   auditRepo: AuditRepository;
@@ -281,6 +292,89 @@ export class TwinServiceRegistry {
       }
       entry.bridgeStream.connect();
     }
+  }
+
+  /**
+   * #744: Gegenstück zu {@link addTwin} — entfernt die Live-Instanz eines
+   * Twins aus der Registry, damit ein gelöschter Twin nicht bis zum nächsten
+   * Restart im Prozess weiterlebt. Reine In-Memory-/Netzwerk-Teardown-Operation;
+   * die DB-Löschung passiert separat (deleteTwinLocal) VOR diesem Aufruf.
+   *
+   * Reihenfolge analog zum Shutdown: erst Inbound stoppen (Telegram-Bot +
+   * Bridge-Stream), dann MCP-Subprocesses disposen, zuletzt aus der Map.
+   * Alle Teardown-Schritte sind best-effort — ein Fehler beim Bot-Stop oder
+   * MCP-Dispose darf den Entfernungs-Vorgang nicht kippen (der Twin ist in der
+   * DB ja schon weg). No-op, wenn der Handle nicht (mehr) geführt wird.
+   *
+   * `telegramBotTeardown`: optional injiziert vom Route-Handler
+   * (`deps.telegramBotRegistry`). Der Bot lebt als Telegraf-Instanz in einer
+   * `Map<twin_id, Telegraf>` der BotRegistry und muss separat gestoppt werden
+   * (im Webhook-Mode zusätzlich `deleteWebhook` bei Telegram) — sonst bliebe
+   * ein Zombie-Bot zurück. Die Map arbeitet rein in-memory, also funktioniert
+   * der Teardown auch nach dem DB-Cascade-Delete der telegram_configs-Row.
+   */
+  async removeTwin(
+    handle: string,
+    opts?: { telegramBotTeardown?: TelegramBotTeardown },
+  ): Promise<void> {
+    const entry = this.entries.get(handle);
+    if (!entry) {
+      this.deps?.logger.debug(
+        { handle },
+        "[registry] removeTwin: Twin nicht in der Registry — no-op",
+      );
+      return;
+    }
+    const logger = this.deps?.logger;
+
+    // 1. Telegram-Bot stoppen (best-effort). unregisterWebhook ist ein
+    //    Netzwerk-Call (deleteWebhook bei Telegram) → eigener try/catch, damit
+    //    ein Telegram-Outage den Teardown nicht blockt.
+    if (opts?.telegramBotTeardown) {
+      try {
+        await opts.telegramBotTeardown.unregisterWebhook(entry.twinId);
+      } catch (err) {
+        logger?.error(
+          { err, handle, twinId: entry.twinId },
+          "[registry] removeTwin: Telegram unregisterWebhook fehlgeschlagen — fahre fort",
+        );
+      }
+      try {
+        opts.telegramBotTeardown.stopBotForTwin(entry.twinId);
+      } catch (err) {
+        logger?.error(
+          { err, handle, twinId: entry.twinId },
+          "[registry] removeTwin: Telegram stopBotForTwin fehlgeschlagen — fahre fort",
+        );
+      }
+    }
+
+    // 2. Bridge-Stream trennen (Solo-Twin: kein Stream).
+    try {
+      entry.bridgeStream?.disconnect();
+    } catch (err) {
+      logger?.error(
+        { err, handle },
+        "[registry] removeTwin: Bridge-Stream disconnect fehlgeschlagen — fahre fort",
+      );
+    }
+
+    // 3. MCP-Subprocesses disposen (sonst verwaiste Child-Prozesse).
+    try {
+      await entry.service.dispose();
+    } catch (err) {
+      logger?.error(
+        { err, handle },
+        "[registry] removeTwin: MCP dispose fehlgeschlagen — fahre fort",
+      );
+    }
+
+    // 4. Aus der Map nehmen — ab jetzt liefert getByHandle null.
+    this.entries.delete(handle);
+    logger?.info(
+      { handle, twinId: entry.twinId },
+      `[registry] Twin ${handle} aus der Registry entfernt (hot-unload)`,
+    );
   }
 
   getByHandle(handle: string): TwinService | null {
