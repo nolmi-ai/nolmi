@@ -747,6 +747,12 @@ Apex-`nolmi.ai` lieferte 404 (kein Traefik-Router). **Gewählt: Option (b)** (Di
 
 Beim Weg-B-Onboarding-Smoke (Tag 35) aufgefallen: ein im Wizard angelegter Twin lässt sich über die **UI nicht löschen** — der Test-Twin musste **per DB-Skript** im Container entfernt werden. Wer Twins anlegen kann, muss sie auch löschen können (Erwartung jedes Self-Hosters, besonders relevant sobald externe Nutzer onboarden). **Zu bauen:** Lösch-Flow in der UI (Settings/Twin-Switcher) + Owner-gegateter Endpoint (`DELETE /twins/:handle` o.ä.) mit sauberem Cascade (twin_profiles + zugehörige audit/conversations/facts/oauth_tokens/trust-Zeilen — FK-Verhalten beachten, vgl. Migration 026) + Bridge-Deregistrierung, falls gebunden. Bestätigungs-Dialog (irreversibel). **Größe M** (UI + Endpoint + Cascade + A2A/Bridge-Sauberkeit).
 
+### Bridge-Orphan-Cleanup bei nicht erreichbarer Bridge (aus #744)
+
+**Status:** OFFEN | **Größe:** S | **Priorität:** should — vor breiterem Self-Hosting/Launch | **Aus:** #744 Schritt 2/3 (Tag 36)
+
+Beim Twin-Löschen (#744) ist die Bridge-Deregistrierung bewusst **best-effort**: ist die Bridge im Lösch-Moment nicht erreichbar (oder lehnt unter Per-Twin-Auth mit 401 ab, weil der Token-Resolve fehlschlägt), wird der Twin **lokal trotzdem vollständig gelöscht** und die Antwort setzt `bridgeOrphan:true`; die UI zeigt den Cleanup-Hinweis. Zurück bleibt eine verwaiste Handle-Row in der Bridge-DB (`apps/bridge/data/bridge.db`, Tabelle `twins`). Diese Waise blockt später ein Re-Onboarding mit demselben Handle (Bridge meldet „existiert bereits", 409). **Zu bauen:** ein Bridge-seitiger Cleanup-Pfad für verwaiste Handles — z.B. ein Admin-/Bootstrap-Schritt oder CLI, der Handles ohne lebenden Runtime-Twin findet und deregistriert (`TwinsRepo.delete` existiert seit #744 Schritt 1). Verwandt mit der bestehenden Architektur-Notiz „Bridge-DB-Cleanup als Production-Bootstrap-Schritt" (alte Handles via Volume-Mount löschen) — dort als manueller Pfad beschrieben, hier als wiederholbarer Cleanup.
+
 ### NPM-Distribution `npm i -g nolmi` — Phase 1 komplett + PUBLIZIERT ✅
 
 **Status:** ✅ **DONE — `nolmi@0.1.0` LIVE auf npm (Tag 35, 2. Juni 2026)**. Der B1-Clone-Distributionsweg steht: **`npm i -g nolmi` → `nolmi onboard`**. | war: should | **Trigger:** Gate §5a erfüllt (Repo public)
