@@ -551,7 +551,9 @@ async function runSameConvFilterTest(
 function runEpisodicBlockTest(): number {
   banner("TEST 9 — buildEpisodicBlock Markdown + leerer Input");
   let issues = 0;
-  const empty = buildEpisodicBlock([]);
+  // Fixes „jetzt" für die Recency-Annotation (Zeit-Erleben Stufe 1).
+  const now = new Date("2026-05-26T09:00:00.000Z");
+  const empty = buildEpisodicBlock([], now);
   if (empty !== null) {
     issues += 1;
     log("  ⚠ Leerer Input sollte null liefern.");
@@ -578,7 +580,7 @@ function runEpisodicBlockTest(): number {
       vectorSimilarity: 0.85,
       vectorRank: 2,
     },
-  ]);
+  ], now);
   if (!block) {
     issues += 1;
     log("  ⚠ Block fehlt bei nicht-leerem Input.");
@@ -599,6 +601,12 @@ function runEpisodicBlockTest(): number {
   if (!block.includes("Maria's Workshop")) {
     issues += 1;
     log("  ⚠ Content fehlt im Block.");
+  }
+  // Zeit-Erleben Stufe 1: Recency-Annotation in der Überschrift. Beide Memories
+  // (2026-05-10/-12) sind gegen now=2026-05-26 ~2 Wochen alt.
+  if (!block.includes("(vor 2 Wochen)")) {
+    issues += 1;
+    log("  ⚠ Recency-Annotation '(vor 2 Wochen)' fehlt im Block.");
   }
   if (issues === 0) log("  Block ✓");
   return issues;

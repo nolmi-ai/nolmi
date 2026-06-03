@@ -1,4 +1,5 @@
 import type { RetrievalResult } from "./memory-retrieval-service.js";
+import { relativeTime } from "./relative-time.js";
 
 // ─── EPISODIC PROMPT-BLOCK (3.4.E + 3.4.I #99) ──────────────────────────────
 //
@@ -23,6 +24,7 @@ import type { RetrievalResult } from "./memory-retrieval-service.js";
 
 export function buildEpisodicBlock(
   memories: RetrievalResult[],
+  now: Date,
 ): string | null {
   if (memories.length === 0) return null;
 
@@ -38,7 +40,17 @@ export function buildEpisodicBlock(
   ];
 
   for (const memory of memories) {
-    lines.push(`### Mögliche Erinnerung — ${labelForTarget(memory.targetType)}`);
+    // Zeit-Erleben Stufe 1: Relativ-Zeit als knappe Annotation in der
+    // Überschrift (NICHT im Content — der bleibt byte-verbatim, sonst lädt der
+    // Anti-Halluzinations-Tenor zum Konstruieren ein). Nur wenn createdAt da +
+    // relativeTime nicht-leer; sonst heutiges Verhalten (Label ohne Zeit).
+    const rel = memory.createdAt ? relativeTime(memory.createdAt, now) : "";
+    const label = labelForTarget(memory.targetType);
+    lines.push(
+      rel
+        ? `### Mögliche Erinnerung — ${label} (${rel})`
+        : `### Mögliche Erinnerung — ${label}`,
+    );
     lines.push(memory.content.trim());
     lines.push("");
   }

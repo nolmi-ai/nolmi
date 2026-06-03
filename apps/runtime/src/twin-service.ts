@@ -662,7 +662,10 @@ export class TwinService {
       currentConversationId: conversationId,
       excludeSummarySegmentIds: summaries.map((s) => s.id),
     });
-    const episodicBlock = buildEpisodicBlock(episodicMemories);
+    // Zeit-Erleben Stufe 1: Request-Zeitpunkt als „jetzt"-Anker für die
+    // Relativ-Zeit-Annotation der episodischen Erinnerungen.
+    const now = new Date();
+    const episodicBlock = buildEpisodicBlock(episodicMemories, now);
 
     try {
       const reply = await this.runModel(
