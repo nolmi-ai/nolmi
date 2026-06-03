@@ -113,15 +113,35 @@ export class TelegramMessageRouter {
       config.twin_id,
     );
 
-    // 2. Inbound Persistence
-    this.messagesRepo.insert({
-      twin_id: config.twin_id,
-      telegram_chat_id: chatId,
-      telegram_message_id: telegramMessageId,
-      conversation_id: conversation.id,
-      direction: "inbound",
-      text,
-    });
+    // 2. Inbound Persistence. Der Insert ist seit #130-Idempotenz-Fix
+    // ON-CONFLICT-DO-NOTHING — Telegram-Redelivery dedupt also still. Diese
+    // Kapselung ist die Versicherung gegen SONSTIGE DB-Fehler: ein Insert-Throw
+    // liegt außerhalb des LLM-try/catch (unten ab dem persistentChatAction) und
+    // würde sonst ungefangen bis bot.catch propagieren → "handler-error", keine
+    // Reply. Persistenz ist Audit-Trail, kein Hard-Gate für die Antwort: bei
+    // Insert-Fehler loggen wir und verarbeiten trotzdem weiter.
+    try {
+      this.messagesRepo.insert({
+        twin_id: config.twin_id,
+        telegram_chat_id: chatId,
+        telegram_message_id: telegramMessageId,
+        conversation_id: conversation.id,
+        direction: "inbound",
+        text,
+      });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      if (logger) {
+        logger.error(
+          { twin_id: config.twin_id, chat_id: chatId, err: msg },
+          "[message-router] inbound persist failed — processing continues",
+        );
+      } else {
+        console.error(
+          `[message-router ${config.twin_id}] inbound persist failed, processing continues: ${msg}`,
+        );
+      }
+    }
 
     // 3. Twin-Service-Lookup. registry.getEntry kommt mit Handle (matched
     // existing requireOwner-Pattern); falls Cache-Miss (Twin grade entfernt),

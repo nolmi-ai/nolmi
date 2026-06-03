@@ -54,20 +54,31 @@ export class TelegramMessagesRepo {
    * Insert einer Inbound- oder Outbound-Message. ID und `sent_at` werden
    * Repo-seitig gesetzt. UNIQUE(twin_id, telegram_chat_id, telegram_message_id)
    * verhindert Duplikate bei Telegram-Webhook-Retries (Telegram retried bei
-   * non-200, deshalb Idempotenz-Schutz auf Schema-Ebene).
+   * non-200 und liefert Updates ausdrücklich „best effort, may deliver more
+   * than once").
+   *
+   * Idempotent via `ON CONFLICT(twin_id, telegram_chat_id, telegram_message_id)
+   * DO NOTHING`: eine doppelt zugestellte Message wirft NICHT mehr, sondern
+   * wird übersprungen. Erst- und Wiederzustellung verhalten sich identisch —
+   * beide geben die (jetzt oder früher) gespeicherte Row zurück. Bei
+   * Konflikt (changes === 0) liefert die generierte `id` keine Row; wir holen
+   * dann die existierende Row über das UNIQUE-Tripel statt blind auf `id` zu
+   * suchen (sonst wäre der UNIQUE-Throw nur zu einem NotFound-Throw verschoben).
    */
   insert(input: TelegramMessageInsert): TelegramMessageRow {
     const id = `tg_msg_${nanoid(16)}`;
     const sent_at = new Date().toISOString();
 
-    this.db
+    const result = this.db
       .prepare(
         `INSERT INTO telegram_messages
            (id, twin_id, telegram_chat_id, telegram_message_id,
             conversation_id, direction, text, sent_at)
          VALUES
            (@id, @twin_id, @telegram_chat_id, @telegram_message_id,
-            @conversation_id, @direction, @text, @sent_at)`,
+            @conversation_id, @direction, @text, @sent_at)
+         ON CONFLICT(twin_id, telegram_chat_id, telegram_message_id)
+           DO NOTHING`,
       )
       .run({
         id,
@@ -79,6 +90,16 @@ export class TelegramMessagesRepo {
         text: input.text,
         sent_at,
       });
+
+    // changes === 0 → Konflikt griff (Telegram-Redelivery): die existierende
+    // Row über das UNIQUE-Tripel zurückgeben, nicht über die nie-geschriebene id.
+    if (result.changes === 0) {
+      return this.findByUniqueTripleOrThrow(
+        input.twin_id,
+        input.telegram_chat_id,
+        input.telegram_message_id,
+      );
+    }
 
     return this.findByIdOrThrow(id);
   }
@@ -156,6 +177,34 @@ export class TelegramMessagesRepo {
   private findByIdOrThrow(id: string): TelegramMessageRow {
     const row = this.findById(id);
     if (!row) throw new TelegramMessageNotFoundError(id);
+    return row;
+  }
+
+  /**
+   * Holt die Row über das UNIQUE-Tripel — der changes===0-Pfad in `insert()`,
+   * wenn `ON CONFLICT DO NOTHING` gegriffen hat. Die Row MUSS existieren (der
+   * Konflikt beweist es), deshalb Throw als Sanity-Guard statt null.
+   */
+  private findByUniqueTripleOrThrow(
+    twin_id: string,
+    telegram_chat_id: number,
+    telegram_message_id: number,
+  ): TelegramMessageRow {
+    const row = this.db
+      .prepare(
+        `SELECT * FROM telegram_messages
+         WHERE twin_id = ?
+           AND telegram_chat_id = ?
+           AND telegram_message_id = ?`,
+      )
+      .get(twin_id, telegram_chat_id, telegram_message_id) as
+      | TelegramMessageRow
+      | undefined;
+    if (!row) {
+      throw new TelegramMessageNotFoundError(
+        `${twin_id}/${telegram_chat_id}/${telegram_message_id}`,
+      );
+    }
     return row;
   }
 }
