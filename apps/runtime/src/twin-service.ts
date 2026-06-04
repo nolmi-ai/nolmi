@@ -306,11 +306,13 @@ export class TwinService {
   public readonly focusEngine: FocusEngine;
 
   /**
-   * Schritt 2: derselbe Repo wie im FocusEngine, gehoisted als Feld, damit der
-   * Owner-Send-Pfad den jüngsten Snapshot (`getCurrent`) für den Prompt-Block
-   * lesen kann, ohne eine zweite Repo-Instanz zu erzeugen.
+   * Schritt 2/3: derselbe Repo wie im FocusEngine, gehoisted als Feld. Schritt 2
+   * nutzt `getCurrent` im Owner-Send-Pfad für den Prompt-Block; Schritt 3
+   * (Sichtbarkeit/Reset) liest ihn aus den Routen `GET /focus` / `POST
+   * /focus/reset` über `entry.service.focusRepo` (daher public, wie
+   * reflectionEngine/socialSuggestionService).
    */
-  private readonly focusRepo: FocusSnapshotsRepo;
+  public readonly focusRepo: FocusSnapshotsRepo;
 
   /**
    * 3.4.D: Memory-Embedding-Service. Public, damit der Server-Reset-Pfad

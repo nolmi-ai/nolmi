@@ -2247,6 +2247,43 @@ export function registerFactRoutes(
       }
     },
   );
+
+  // ─── FOCUS SICHTBARKEIT + RESET (Stufe 1 — Schritt 3, Leitplanke) ───────────
+  // Pflicht-Leitplanke für den autonom-gepflegten Fokus: Owner kann SEHEN, was
+  // der Twin als Fokus gespeichert hat, und ihn ZURÜCKSETZEN. Erst das macht
+  // Schritt 4 (autonomer Loop) verantwortbar. Beide owner-gegated.
+
+  // GET — nur lesen: aktueller Fokus oder null (kein Fehler bei „kein Fokus").
+  app.get<{ Params: { handle: string } }>(
+    "/twins/:handle/focus",
+    async (request, reply) => {
+      const ctx = await requireOwner(request, reply, request.params.handle);
+      if (!ctx) return;
+      const snap = ctx.entry.service.focusRepo.getCurrent(ctx.entry.twinId);
+      return reply.send({
+        focus: snap
+          ? {
+              focusText: snap.focusText,
+              themes: snap.themes,
+              basisSummary: snap.basisSummary,
+              derivedAt: snap.derivedAt,
+            }
+          : null,
+      });
+    },
+  );
+
+  // POST reset — schreibender Eingriff (supersede, non-destruktiv). Owner-Gate
+  // ist Pflicht. Idempotent: kein aktiver Fokus → ok:true, supersededt: false.
+  app.post<{ Params: { handle: string } }>(
+    "/twins/:handle/focus/reset",
+    async (request, reply) => {
+      const ctx = await requireOwner(request, reply, request.params.handle);
+      if (!ctx) return;
+      const superseded = ctx.entry.service.focusRepo.supersede(ctx.entry.twinId);
+      return reply.send({ ok: true, superseded });
+    },
+  );
 }
 
 // ─── CONVERSATION ROUTES (2.5.4.3) ───────────────────────────────────────────

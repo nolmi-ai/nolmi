@@ -94,6 +94,28 @@ export class FocusSnapshotsRepo {
       .get(twinId) as FocusSnapshotRow | undefined;
     return row ? rowToSnapshot(row) : null;
   }
+
+  /**
+   * Schritt 3 (Leitplanke): setzt den aktuell aktiven Snapshot auf superseded
+   * (Owner-Reset). NON-DESTRUKTIV — UPDATE statt DELETE, die Row bleibt für die
+   * History erhalten. Idempotent: kein aktiver Snapshot → no-op (kein Fehler).
+   * Gibt true zurück, wenn eine Row supersedet wurde.
+   */
+  supersede(twinId: string): boolean {
+    const result = this.db
+      .prepare(
+        `UPDATE focus_snapshots
+           SET superseded_at = ?
+         WHERE id = (
+           SELECT id FROM focus_snapshots
+             WHERE twin_id = ? AND superseded_at IS NULL
+             ORDER BY derived_at DESC
+             LIMIT 1
+         )`,
+      )
+      .run(new Date().toISOString(), twinId);
+    return result.changes > 0;
+  }
 }
 
 function rowToSnapshot(row: FocusSnapshotRow): FocusSnapshot {

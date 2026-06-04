@@ -17,6 +17,7 @@ import { OAuthActivationModal } from "../../components/OAuthActivationModal";
 import { ConfirmDeleteTwinModal } from "../../components/ConfirmDeleteTwinModal";
 import { Tabs, TabList, Tab, TabPanel } from "../../components/Tabs";
 import { TelegramChannelTab } from "../../components/TelegramChannelTab";
+import { FocusTab } from "../../components/FocusTab";
 import { toast } from "../../lib/toast";
 
 const RUNTIME_URL = process.env.NEXT_PUBLIC_RUNTIME_URL ?? "http://localhost:4000";
@@ -756,6 +757,7 @@ function SettingsInner() {
           <Tab id="vertraute">Vertraute</Tab>
           <Tab id="mcp-servers">MCP-Server</Tab>
           <Tab id="skills">Skills</Tab>
+          <Tab id="fokus">Fokus</Tab>
           <Tab id="konfiguration">Konfiguration</Tab>
           <Tab id="channels">Channels</Tab>
         </TabList>
@@ -1122,6 +1124,16 @@ function SettingsInner() {
           </div>
         )}
       </Section>
+        </TabPanel>
+
+        <TabPanel id="fokus">
+          {selectedHandle ? (
+            <FocusTab twinHandle={selectedHandle} />
+          ) : (
+            <div className="bg-surface border border-border rounded p-5">
+              <p className="text-sm text-muted">Kein Twin ausgewählt.</p>
+            </div>
+          )}
         </TabPanel>
 
         <TabPanel id="konfiguration">
