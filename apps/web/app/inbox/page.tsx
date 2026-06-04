@@ -54,6 +54,10 @@ function InboxInner() {
   const [pending, setPending] = useState<AuditEntry[]>([]);
   const [busy, setBusy] = useState<Record<string, boolean>>({});
   const [error, setError] = useState<string | null>(null);
+  // Soziale Proaktivität Stufe 1: „Beziehungen prüfen"-Trigger. Eigener
+  // busy-State (kein Audit-id) + transienter Erfolgs-Hinweis.
+  const [nudging, setNudging] = useState(false);
+  const [nudgeNotice, setNudgeNotice] = useState<string | null>(null);
   // UX.1.A.1 (#91): Reject-Reason-Modal-State statt window.prompt().
   const [rejectModal, setRejectModal] = useState<{
     open: boolean;
@@ -218,6 +222,50 @@ function InboxInner() {
     }
   }
 
+  // Beziehungen prüfen: scannt twin-global alle A2A-Partner, erzeugt pro
+  // fälligem Partner ein PENDING (kein Send — Approve ist NO-OP). Erfolg →
+  // Toast je nach created; Leer-Fall sauber (dünner A2A-Graph = Normalfall).
+  async function runNudge() {
+    if (!selectedHandle || nudging) return;
+    setNudging(true);
+    setError(null);
+    setNudgeNotice(null);
+    try {
+      const res = await fetch(
+        `${RUNTIME_URL}/twins/${selectedHandle}/social-nudge`,
+        { method: "POST", credentials: "include" },
+      );
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({ error: "Unknown error" }));
+        throw new Error(body.error ?? `HTTP ${res.status}`);
+      }
+      const result = (await res.json()) as {
+        created: unknown[];
+        skippedExistingPending: string[];
+        partnersChecked: number;
+      };
+      const n = result.created.length;
+      if (n > 0) {
+        setNudgeNotice(
+          `${n} Beziehungs-Vorschlag${n === 1 ? "" : "/Vorschläge"} erzeugt — ` +
+            `Review unten unter „Pending".`,
+        );
+      } else if (result.skippedExistingPending.length > 0) {
+        setNudgeNotice(
+          "Alle fälligen Kontakte haben schon einen offenen Vorschlag.",
+        );
+      } else {
+        setNudgeNotice("Keine fälligen Kontakte — alles aktuell.");
+      }
+      await loadPending(selectedHandle);
+      await loadAudit(selectedHandle);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Beziehungen prüfen fehlgeschlagen");
+    } finally {
+      setNudging(false);
+    }
+  }
+
   const recentApprovals = audit
     .filter((e) => (e.status === "executed" || e.status === "rejected") && hasReply(e))
     .slice(0, 5);
@@ -229,11 +277,27 @@ function InboxInner() {
         {selectedHandle && (
           <span className="text-xs text-muted font-mono">{selectedHandle}</span>
         )}
+        {/* Soziale Proaktivität Stufe 1: scannt alle A2A-Partner, legt fällige
+            als Pending an (kein Send). Twin-global, daher hier statt im Chat. */}
+        <button
+          onClick={runNudge}
+          disabled={nudging || !selectedHandle}
+          title="Schlägt vor, dich bei A2A-Partnern zu melden, deren letzter Kontakt länger her ist. Erzeugt nur Vorschläge — nichts wird gesendet."
+          className="ml-auto self-center px-3 py-1.5 text-xs border border-accent text-accent rounded hover:bg-accent hover:text-bg disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+        >
+          {nudging ? "Prüfe…" : "Beziehungen prüfen"}
+        </button>
       </div>
 
       {error && (
         <div className="text-xs text-warn border border-warn rounded px-3 py-2">
           {error}
+        </div>
+      )}
+
+      {nudgeNotice && (
+        <div className="text-xs text-accent border border-accent rounded px-3 py-2">
+          {nudgeNotice}
         </div>
       )}
 

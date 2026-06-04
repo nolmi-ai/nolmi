@@ -71,7 +71,10 @@ import {
   REFLECTION_CAPABILITY,
   type ReflectionOutput,
 } from "./reflection/reflection-engine.js";
-import { SOCIAL_SUGGESTION_CAPABILITY } from "./social/social-suggestion-service.js";
+import {
+  SOCIAL_SUGGESTION_CAPABILITY,
+  SocialSuggestionService,
+} from "./social/social-suggestion-service.js";
 import { McpClientManager } from "./mcp/client-manager.js";
 import { McpSkillSync } from "./mcp/skill-sync.js";
 import { buildMcpToolsFromSkills } from "./mcp/tool-bridge.js";
@@ -278,6 +281,15 @@ export class TwinService {
   public readonly reflectionEngine: ReflectionEngine;
 
   /**
+   * Soziale Proaktivität Stufe 1: datengetriebener Beziehungs-Vorschlag (KEIN
+   * LLM). Vom CLI `twin:social-nudge` und der Route `POST /twins/:handle/
+   * social-nudge` getriggert. `nudge()` scannt ALLE A2A-Partner des Twins und
+   * erzeugt pro fälligem Partner ein PENDING-Audit (`capability=
+   * 'social-suggestion'`) — Approve ist NO-OP/acknowledge, KEIN autonomer Send.
+   */
+  public readonly socialSuggestionService: SocialSuggestionService;
+
+  /**
    * 3.4.D: Memory-Embedding-Service. Public, damit der Server-Reset-Pfad
    * über `entry.service.memoryEmbeddingService.embedConversation()` darauf
    * zugreifen kann. Send-Path benutzt es intern nach `summaryEngine`.
@@ -383,6 +395,16 @@ export class TwinService {
     this.memoryEmbeddingService = deps.memoryEmbeddingService;
     this.memoryRetrievalService = deps.memoryRetrievalService;
     this.twinDiaryService = deps.twinDiaryService;
+    // Soziale Proaktivität Stufe 1: rein datengetrieben, kein Model-Dep. Schwelle
+    // aus derselben env-Quelle wie der CLI (scripts/social-nudge.ts), gleicher
+    // Default 21 — nicht neu erfinden.
+    this.socialSuggestionService = new SocialSuggestionService({
+      db: deps.db,
+      auditService: deps.audit,
+      twinId: deps.twinId,
+      ownHandle: deps.persona.handle,
+      thresholdDays: Number(process.env.SOCIAL_NUDGE_THRESHOLD_DAYS) || 21,
+    });
     this.profilesRepo = new TwinProfilesRepo(deps.db);
   }
 

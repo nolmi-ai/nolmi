@@ -2009,7 +2009,7 @@ function toFactItem(f: {
   };
 }
 
-function registerFactRoutes(
+export function registerFactRoutes(
   app: FastifyInstance,
   deps: ServerDeps,
   requireOwner: (
@@ -2183,6 +2183,36 @@ function registerFactRoutes(
         const result = await entry.service.reflectionEngine.reflect(
           parsed.data.subject ?? "owner",
         );
+        return reply.send(result);
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : "Unknown error";
+        return reply.status(500).send({ error: msg });
+      }
+    },
+  );
+
+  // ─── SOCIAL-NUDGE (Soziale Proaktivität Stufe 1 — UI-Trigger) ────────────
+  // Owner-gegateter HTTP-Trigger für den fertigen SocialSuggestionService
+  // (7c871be). Macht das Pattern ohne tsx-CLI auslösbar (Prod-tauglich) — die
+  // letzte CLI-only-Lücke der drei Vision-Patterns.
+  //
+  // KEIN Body: nudge() scannt ALLE A2A-Partner des Twins selbst (kein Partner-
+  // Param, kein Picker). KEIN autonomer Effekt: erzeugt nur Pending-Audits
+  // (capability='social-suggestion'); Approve in der Inbox ist NO-OP/acknowledge
+  // (approveSocialSuggestion), KEIN Send an den Partner. Die Leitplanke
+  // (Mensch meldet sich, nicht der Twin) bleibt damit unangetastet.
+  app.post<{ Params: { handle: string } }>(
+    "/twins/:handle/social-nudge",
+    async (request, reply) => {
+      const ctx = await requireOwner(request, reply, request.params.handle);
+      if (!ctx) return;
+      const { entry } = ctx;
+
+      try {
+        const result = await entry.service.socialSuggestionService.nudge(
+          new Date(),
+        );
+        // result: { created[], skippedExistingPending[], partnersChecked }
         return reply.send(result);
       } catch (err) {
         const msg = err instanceof Error ? err.message : "Unknown error";
