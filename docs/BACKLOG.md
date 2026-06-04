@@ -3032,6 +3032,10 @@ Substantiell — eigene Phase, vermutlich nach 3.4 oder mit Pattern-Phase „Zei
 
 Aus Tag-14-Recherche.
 
+### Vision-Pattern „Gewohnheiten/Rituale" — vertagt bis organische Nutzung (Daten-blockiert)
+
+**Status:** vertagt (Tag 37 read-only diagnostiziert, nicht gebaut). **Grund:** Datenschicht misst heute Build-Aktivität statt Lebensrhythmus (audit-Timestamps = Claude-Code-Sessions; conversation_summaries @markus = 0). Pending-gated (Inferenz über Markus, Vorbild self-reflection-write) → schwache Muster würden Approval-Müll erzeugen. **Wann baubar:** nach Akkumulation echter (Nicht-Build-)Nutzung über mehrere Wochen/Monate — Längsschnitt nötig. **Maschinerie steht bereit (wenn Daten tragen):** Audit-Pending-Klasse, hybrid (deterministische Timestamp-Aggregation + optional LLM für sprachliche Fassung), vermutlich keine Migration (approved Audits/Diary). **Cross-Ref:** dieselbe Daten-Klasse wie Werte-Drift; Schlaf/Träume (#94) wäre datenSCHAFFEND (erzeugt die fehlenden Summaries) und damit der sinnvollere nächste Vision-Bau.
+
 ### #143 Web-OAuth-Production-Flow ohne CLI-Subprocess (XL, should — Phase B)
 
 **Phase-A-Variante:** OAuth läuft über `pnpm twin:oauth-login` CLI-Wrapper (Phase 4). User braucht Codex Desktop App + Terminal-Zugang zum twin-lab-Repo. Akzeptabel für drei dev-fitte Owner (florian/heiko/markus), aber Mass-User-Onboarding-Friction.
