@@ -3028,7 +3028,7 @@ MemPalace hat das gelöst via Temporal-Knowledge-Graph mit Validity-Windows: Ent
 Direktes Substrate für Vision-Patterns:
 - **Werte-Drift** (TWIN-VISION Pattern 5): Twin kann beobachten wie sich Markus' Werte über Zeit verschieben
 - **Zeit-Erleben** (Pattern 2): „Was war 2025 wichtig, was ist heute wichtig?"
-- **Lebens-Narrativ** (Pattern 7): Kohärente Story-Linie aus zeitlich verorteten Facts
+- **Lebens-Narrativ** (Pattern 7): primär Lesart (A) Twin-über-sich (Verdichtung der Diary-Selbstreflexionen zu einem Bogen — Source of Truth TWIN-VISION :79/:205); Facts-Validity wäre nur für die sekundäre (B)-Lesart (Markus-Biografie) relevant
 
 Substantiell — eigene Phase, vermutlich nach 3.4 oder mit Pattern-Phase „Zeit-Erleben" gebündelt. MemPalace's Implementation als Referenz nutzen, keine direkte Code-Übernahme (Python → TypeScript).
 
@@ -3037,6 +3037,10 @@ Aus Tag-14-Recherche.
 ### Vision-Pattern „Gewohnheiten/Rituale" — vertagt bis organische Nutzung (Daten-blockiert)
 
 **Status:** vertagt (Tag 37 read-only diagnostiziert, nicht gebaut). **Grund:** Datenschicht misst heute Build-Aktivität statt Lebensrhythmus (audit-Timestamps = Claude-Code-Sessions; conversation_summaries @markus = 0). Pending-gated (Inferenz über Markus, Vorbild self-reflection-write) → schwache Muster würden Approval-Müll erzeugen. **Wann baubar:** nach Akkumulation echter (Nicht-Build-)Nutzung über mehrere Wochen/Monate — Längsschnitt nötig. **Maschinerie steht bereit (wenn Daten tragen):** Audit-Pending-Klasse, hybrid (deterministische Timestamp-Aggregation + optional LLM für sprachliche Fassung), vermutlich keine Migration (approved Audits/Diary). **Cross-Ref:** dieselbe Daten-Klasse wie Werte-Drift; Schlaf/Träume (#94) wäre datenSCHAFFEND (erzeugt die fehlenden Summaries) und damit der sinnvollere nächste Vision-Bau.
+
+### Vision-Pattern „Lebens-Narrativ" (#7) — vertagt bis Diary-Tiefe (daten-blockiert, aber intern freischaltbar)
+
+**Status:** vertagt (Tag 37 read-only diagnostiziert). **Scope geklärt:** Lesart (A) Twin-über-sich (Vision :79/:205), NICHT Markus-Biografie. **Grund:** Quelle Twin-Diary = real 1 Eintrag → keine „Story, die sich entwickelt" (Bogen braucht mehrere Selbst-Snapshots über Zeit). **Leitplanke:** (A) leitplanken-entspannt, autonom-fähig (Klasse self-reflection subject='self'). **Wann baubar — interner Hebel (Unterschied zu den anderen drei!):** Reflexions-Loop scharf schalten (gebaut, default aus) → Diary wächst autonom über Wochen → dann trägt das Pattern. Selbst-erzeugbar, braucht NICHT Markus' organische Nutzung. **Maschinerie:** Verdichtung N Diary-Entries → Bogen (self-reflection-Generator Vorbild, neuer Modus); Speicher append-only wie focus_snapshots; Migration vermutlich ja.
 
 ### #143 Web-OAuth-Production-Flow ohne CLI-Subprocess (XL, should — Phase B)
 
