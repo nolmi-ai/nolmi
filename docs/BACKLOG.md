@@ -3014,6 +3014,8 @@ Aus Tag-14-Recherche + Pre-Check-Befund.
 
 ### #97 Facts mit Validity-Windows + History-Tracking (L, should)
 
+**Status Tag 37:** ✅ gebaut (4 Sub-Schritte: Schema 028 / atomare Capture / owner-gated Route / UI-Verlauf-Aufklappen), lokal end-to-end verifiziert. Umgesetzt als SEPARATE facts_history-Tabelle (nicht valid_from/valid_until-Spalten in facts — risikoärmer, kein Rebuild). Semantik: nur fact_value-Drift + delete, change_type-Spalte hält confidence-History additiv offen. Noch nicht deployt (Deploy folgt, erste Prod-Migration seit 027). getAsOf-Route + Twin-weite Sicht + confidence-History zurückgestellt (additiv nachrüstbar).
+
 Erweiterung des Facts-Systems (`facts`-Tabelle aus 3.3) um temporale Dimension. Heute überschreibt ein neuer Fact den alten — keine History, kein Audit, kein Drift-Tracking möglich.
 
 MemPalace hat das gelöst via Temporal-Knowledge-Graph mit Validity-Windows: Entity-Relationship-Graph mit Zeit-Stempeln pro Fact, alte Einträge werden invalidated (nicht überschrieben), Timeline-Queries möglich (z.B. „Wie war Markus' Beziehungsstatus 2015?").
