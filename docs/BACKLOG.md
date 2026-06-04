@@ -2301,9 +2301,11 @@ Begründung Hybrid-Branch statt `parseBoolEnv`-Refactor: zwar ist `parseBoolEnv`
 
 **Größe ursprünglich:** S — final: ~30 LoC + drei Doku-Files. **Aus:** Tag-27-Nachmittag Smoke-2-Aufsetz-Friction · **Spur:** Pre-Launch-Phase A Polish
 
-### Telegram Re-Connect setzt Webhook nicht automatisch — OFFEN (launch-relevant)
+### Telegram Re-Connect setzt Webhook nicht automatisch — ✅ DONE (Tag 37)
 
-**Status:** OFFEN (Workaround dokumentiert) | **Größe:** S–M | **Priorität:** hoch (launch-relevant) | **Aus:** Telegram-Debug Tag 36
+**Status:** ✅ DONE (Tag 37, `9ef57ba`) — POST /pairing-code löst jetzt registerWebhook automatisch aus (Auto-Heal-Variante a; ein expliziter „Webhook neu setzen"-Knopf wäre additiv möglich, war nicht nötig). Re-Connect ist selbstheilend.
+
+**Status (ursprünglich):** OFFEN (Workaround dokumentiert) | **Größe:** S–M | **Priorität:** hoch (launch-relevant) | **Aus:** Telegram-Debug Tag 36
 
 **Telegram Re-Connect setzt Webhook nicht automatisch** — beim Neu-Verbinden/Re-Pairing eines Telegram-Bots wird `setWebhook` NICHT ausgelöst (`bot-registry.ts:21` setzt ihn beim Eager-Load bewusst nicht; nur die Token-PUT-Route `api-routes.ts:143` triggert ihn). Folge: Pairing meldet Erfolg, aber der Bot empfängt keine Nachrichten, bis manuell „Token ändern" geklickt wird. Workaround dokumentiert (STAND Tag 36). Echter Fix offen: Re-Pairing / „Telegram verbinden" soll `setWebhook` selbst auslösen, ODER ein expliziter „Webhook neu setzen"-Knopf. Launch-relevant — jeder Self-Hoster, der Telegram (neu) verbindet, trifft das. (Der separate UNIQUE-Insert-Bug ist mit `0438c5d` gefixt — hier NICHT mehr offen.)
 
