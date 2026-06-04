@@ -330,6 +330,30 @@ export function registerTelegramApiRoutes(
         });
       }
 
+      // Self-Healing-Re-Connect: vor der Code-Ausgabe den Webhook (neu)
+      // setzen. Chicken-and-Egg — `/start <code>` kommt selbst über den
+      // Webhook rein, also muss der Empfangskanal stehen, BEVOR der Owner den
+      // Code in Telegram schickt. Ein Twin mit bestehender Config, dessen
+      // Webhook bei Telegram verloren/stale ist (Domain-Wechsel, Drift), hatte
+      // sonst nur den manuellen „Token ändern"-Workaround (PUT /config).
+      //
+      // startBotForTwin ist idempotent (stop+restart) und sichert den Bot im
+      // Map — registerWebhook wirft sonst, wenn der Bot fehlt. registerWebhook
+      // liest config.webhook_secret FRISCH aus der DB und rotiert es NICHT
+      // (nur updateToken/PUT rotiert); bestehende Verbindungen brechen also
+      // nicht. Telegram-setWebhook ist idempotent. Fehler hier dürfen die
+      // Code-Ausgabe NICHT killen — Code-Erfolg hängt nicht am Webhook.
+      try {
+        deps.botRegistry.startBotForTwin(ctx.entry.twinId);
+        await deps.botRegistry.registerWebhook(ctx.entry.twinId);
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        request.log.error(
+          { twin_id: ctx.entry.twinId, err: msg },
+          "[telegram-api] pairing-code: webhook-register fehlgeschlagen — Code wird trotzdem ausgegeben",
+        );
+      }
+
       const code = deps.pairingService.generatePairingCode(ctx.entry.twinId);
       const refreshed = deps.configsRepo.findByTwinId(ctx.entry.twinId);
       return {
