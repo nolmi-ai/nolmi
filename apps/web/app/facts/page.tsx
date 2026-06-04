@@ -330,6 +330,7 @@ function FactsInner() {
         title="Pending"
         count={pending.length}
         facts={pending}
+        twinHandle={selectedHandle ?? ""}
         busy={busy}
         onApprove={handleApprove}
         onReject={handleReject}
@@ -339,6 +340,7 @@ function FactsInner() {
         title="Approved"
         count={approved.length}
         facts={approved}
+        twinHandle={selectedHandle ?? ""}
         busy={busy}
         onEdit={setEditing}
         onDelete={handleDelete}
@@ -347,6 +349,7 @@ function FactsInner() {
         title="Rejected"
         count={rejected.length}
         facts={rejected}
+        twinHandle={selectedHandle ?? ""}
         busy={busy}
         onReactivate={handleReactivate}
         onDelete={handleDelete}
@@ -357,6 +360,7 @@ function FactsInner() {
         title="Auto"
         count={autoFacts.length}
         facts={autoFacts}
+        twinHandle={selectedHandle ?? ""}
         busy={busy}
         onDelete={handleDelete}
       />
@@ -398,6 +402,8 @@ interface FactSectionProps {
   title: string;
   count: number;
   facts: FactWithAudit[];
+  /** #97 Schritt 4: für die Verlauf-Route pro Fact durchgereicht. */
+  twinHandle: string;
   busy: Record<string, boolean>;
   onApprove?: (fact: FactWithAudit) => void;
   onReject?: (fact: FactWithAudit) => void;
@@ -418,6 +424,7 @@ function FactSection(props: FactSectionProps) {
           <FactRow
             key={fact.id}
             fact={fact}
+            twinHandle={props.twinHandle}
             busy={props.busy[fact.id] ?? false}
             onApprove={props.onApprove}
             onReject={props.onReject}
@@ -450,6 +457,7 @@ function statusMarker(confidence: FactItem["confidence"]): {
 
 interface FactRowProps {
   fact: FactWithAudit;
+  twinHandle: string;
   busy: boolean;
   onApprove?: (fact: FactWithAudit) => void;
   onReject?: (fact: FactWithAudit) => void;
@@ -460,6 +468,7 @@ interface FactRowProps {
 
 function FactRow({
   fact,
+  twinHandle,
   busy,
   onApprove,
   onReject,
@@ -537,7 +546,95 @@ function FactRow({
           )}
         </div>
       </div>
+      <FactHistory twinHandle={twinHandle} factKey={fact.factKey} />
     </li>
+  );
+}
+
+// ─── Verlauf-Aufklappen pro Fact (#97 Schritt 4) ────────────────────────────
+//
+// Lazy: dezenter Trigger immer sichtbar; beim ersten Aufklappen wird
+// GET /twins/:handle/facts/:key/history geladen. Leere History → ruhige Zeile
+// „Keine früheren Werte." (nicht jeder Fact hat Drift). Sekundär zum aktuellen
+// Wert: kleine, gedämpfte Schrift, eingerückt — der Current-Value dominiert.
+
+interface FactHistoryItem {
+  id: string;
+  factKey: string;
+  oldValue: string | null;
+  oldSource: string;
+  oldConfidence: string;
+  changeType: "value_change" | "delete";
+  recordedAt: string;
+}
+
+function FactHistory({ twinHandle, factKey }: { twinHandle: string; factKey: string }) {
+  const [open, setOpen] = useState(false);
+  const [loaded, setLoaded] = useState(false);
+  const [rows, setRows] = useState<FactHistoryItem[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function toggle() {
+    const next = !open;
+    setOpen(next);
+    if (!next || loaded || !twinHandle) return;
+    setLoading(true);
+    setError(null);
+    try {
+      const res = await fetch(
+        `${RUNTIME_URL}/twins/${encodeURIComponent(twinHandle)}/facts/${encodeURIComponent(factKey)}/history`,
+        { credentials: "include" },
+      );
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = (await res.json()) as { history: FactHistoryItem[] };
+      setRows(data.history);
+      setLoaded(true);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Verlauf konnte nicht geladen werden");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  // API liefert ASC (älteste zuerst) → für die „Verlauf"-Lesart neueste oben.
+  const ordered = [...rows].reverse();
+
+  return (
+    <div>
+      <button
+        onClick={() => void toggle()}
+        className="text-[11px] text-muted hover:text-text transition-colors font-mono"
+        aria-expanded={open}
+      >
+        {open ? "▾" : "▸"} Verlauf
+      </button>
+      {open && (
+        <div className="mt-1.5 ml-1 border-l border-border pl-3 space-y-1">
+          {loading && <div className="text-[11px] text-muted">Lade Verlauf…</div>}
+          {error && <div className="text-[11px] text-warn">{error}</div>}
+          {!loading && !error && loaded && ordered.length === 0 && (
+            <div className="text-[11px] text-muted">Keine früheren Werte.</div>
+          )}
+          {ordered.map((h) => (
+            <div key={h.id} className="text-[11px] text-muted">
+              {h.changeType === "delete" ? (
+                <>
+                  gelöscht (war:{" "}
+                  <span className="text-text">{h.oldValue ?? "—"}</span>)
+                </>
+              ) : (
+                <>
+                  geändert von:{" "}
+                  <span className="text-text">{h.oldValue ?? "—"}</span>
+                </>
+              )}
+              <span className="text-muted"> · {formatDate(h.recordedAt)}</span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
   );
 }
 
