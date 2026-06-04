@@ -2977,6 +2977,8 @@ Periodischer LLM-Job pro Twin der die Facts-Sammlung verdichtet, dedupliziert un
 
 Vorbedingung: 3.3 komplett ✅, plus Pilot-Phase mit ~50+ Fakten pro Twin gelaufen, damit der Job sinnvolle Eingangsdaten hat. Aktuell @markus mit ~8 Facts — noch zu wenig für Job-Auslastung. Aus Tag-12-Recherche.
 
+**Update Tag 37:** Vor Bau geprüft — Vorbedingung „~50+ Facts" weiter unerfüllt (@markus ~8 Facts, conversation_summaries=0). Gehört in dieselbe daten-blockierte Klasse wie Gewohnheiten/Rituale + Werte-Drift: braucht organische Längs-Historie, erst post-launch baubar. Nicht gebaut.
+
 ---
 
 ### #95 MemPalace-Patterns als Inspirationsquelle dokumentiert (S, nice)
