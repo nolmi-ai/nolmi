@@ -2220,6 +2220,33 @@ export function registerFactRoutes(
       }
     },
   );
+
+  // ─── FOCUS REFRESH (Aufmerksamkeit/Fokus Stufe 1 — Schritt 1, Test-Trigger) ─
+  // Owner-gegateter HTTP-Trigger für den FocusEngine. Leitet den aktuellen
+  // Fokus aus jüngsten Summaries+Turns ab und schreibt ihn — bei Erfolg — DIREKT
+  // als Snapshot (KEIN Pending, KEIN Approval: peripheres Wissen, autonom
+  // gepflegt). Kein Body. Dient in Schritt 1 dem Prüfen gegen echte Daten, BEVOR
+  // Prompt-Integration (Schritt 2) und Loop (Schritt 4) folgen.
+  //
+  // NOCH NICHT prompt-wirksam: der geschriebene Snapshot wird in Schritt 2 in
+  // den System-Prompt gehängt; hier nur Ableitung + Persistenz.
+  app.post<{ Params: { handle: string } }>(
+    "/twins/:handle/focus/refresh",
+    async (request, reply) => {
+      const ctx = await requireOwner(request, reply, request.params.handle);
+      if (!ctx) return;
+      const { entry } = ctx;
+
+      try {
+        const result = await entry.service.focusEngine.deriveFocus();
+        // result: { created, snapshot? } | { created:false, skipped:true, reason }
+        return reply.send(result);
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : "Unknown error";
+        return reply.status(500).send({ error: msg });
+      }
+    },
+  );
 }
 
 // ─── CONVERSATION ROUTES (2.5.4.3) ───────────────────────────────────────────

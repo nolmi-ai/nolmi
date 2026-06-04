@@ -75,6 +75,12 @@ import {
   SOCIAL_SUGGESTION_CAPABILITY,
   SocialSuggestionService,
 } from "./social/social-suggestion-service.js";
+import {
+  FocusEngine,
+  FocusOutputSchema,
+  type FocusOutput,
+} from "./focus/focus-engine.js";
+import { FocusSnapshotsRepo } from "./focus/focus-snapshots-repo.js";
 import { McpClientManager } from "./mcp/client-manager.js";
 import { McpSkillSync } from "./mcp/skill-sync.js";
 import { buildMcpToolsFromSkills } from "./mcp/tool-bridge.js";
@@ -290,6 +296,15 @@ export class TwinService {
   public readonly socialSuggestionService: SocialSuggestionService;
 
   /**
+   * Aufmerksamkeit/Fokus Stufe 1: leitet den „aktuellen Fokus" des Owners per
+   * LLM aus jüngsten Summaries+Turns ab und schreibt ihn DIREKT als Snapshot
+   * (kein Approval-Gate — peripheres Wissen, autonom gepflegt). Schritt 1:
+   * via Route `POST /twins/:handle/focus/refresh` getriggert; Prompt-Integration
+   * (Schritt 2), Loop (4) und Sichtbarkeit/Reset (3) folgen separat.
+   */
+  public readonly focusEngine: FocusEngine;
+
+  /**
    * 3.4.D: Memory-Embedding-Service. Public, damit der Server-Reset-Pfad
    * über `entry.service.memoryEmbeddingService.embedConversation()` darauf
    * zugreifen kann. Send-Path benutzt es intern nach `summaryEngine`.
@@ -404,6 +419,25 @@ export class TwinService {
       twinId: deps.twinId,
       ownHandle: deps.persona.handle,
       thresholdDays: Number(process.env.SOCIAL_NUDGE_THRESHOLD_DAYS) || 21,
+    });
+    // Aufmerksamkeit/Fokus: braucht den LLM-Client (wie reflectionEngine) —
+    // injizierte derive-Funktion über deps.model + generateObject + Zod.
+    this.focusEngine = new FocusEngine({
+      auditService: deps.audit,
+      summariesRepo: deps.conversationSummaries,
+      focusRepo: new FocusSnapshotsRepo(deps.db),
+      twinId: deps.twinId,
+      twinName: deps.persona.name,
+      ownerName: deps.persona.name,
+      derive: async ({ system, prompt }) => {
+        const result = await generateObject({
+          model: deps.model,
+          schema: FocusOutputSchema,
+          system,
+          prompt,
+        });
+        return result.object as FocusOutput;
+      },
     });
     this.profilesRepo = new TwinProfilesRepo(deps.db);
   }
