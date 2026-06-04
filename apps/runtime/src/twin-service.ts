@@ -81,6 +81,7 @@ import {
   type FocusOutput,
 } from "./focus/focus-engine.js";
 import { FocusSnapshotsRepo } from "./focus/focus-snapshots-repo.js";
+import { buildFocusBlock } from "./focus/prompt-builder.js";
 import { McpClientManager } from "./mcp/client-manager.js";
 import { McpSkillSync } from "./mcp/skill-sync.js";
 import { buildMcpToolsFromSkills } from "./mcp/tool-bridge.js";
@@ -305,6 +306,13 @@ export class TwinService {
   public readonly focusEngine: FocusEngine;
 
   /**
+   * Schritt 2: derselbe Repo wie im FocusEngine, gehoisted als Feld, damit der
+   * Owner-Send-Pfad den jüngsten Snapshot (`getCurrent`) für den Prompt-Block
+   * lesen kann, ohne eine zweite Repo-Instanz zu erzeugen.
+   */
+  private readonly focusRepo: FocusSnapshotsRepo;
+
+  /**
    * 3.4.D: Memory-Embedding-Service. Public, damit der Server-Reset-Pfad
    * über `entry.service.memoryEmbeddingService.embedConversation()` darauf
    * zugreifen kann. Send-Path benutzt es intern nach `summaryEngine`.
@@ -422,10 +430,11 @@ export class TwinService {
     });
     // Aufmerksamkeit/Fokus: braucht den LLM-Client (wie reflectionEngine) —
     // injizierte derive-Funktion über deps.model + generateObject + Zod.
+    this.focusRepo = new FocusSnapshotsRepo(deps.db);
     this.focusEngine = new FocusEngine({
       auditService: deps.audit,
       summariesRepo: deps.conversationSummaries,
-      focusRepo: new FocusSnapshotsRepo(deps.db),
+      focusRepo: this.focusRepo,
       twinId: deps.twinId,
       twinName: deps.persona.name,
       ownerName: deps.persona.name,
@@ -760,6 +769,16 @@ export class TwinService {
     const now = new Date();
     const episodicBlock = buildEpisodicBlock(episodicMemories, now);
 
+    // Aufmerksamkeit/Fokus Stufe 1 — Schritt 2: gespeicherter Fokus (jüngster
+    // Snapshot) als Prompt-Block. NUR im Owner-Pfad (hier) — A2A-runModel-Calls
+    // reichen den focusBlock bewusst NICHT (Owner-Kontext, kein Fremd-Wissen).
+    // Defensiv: kein Snapshot → buildFocusBlock liefert null → .filter(Boolean)
+    // im Helper wirft ihn raus (kein leerer Header).
+    const focusBlock = buildFocusBlock(
+      this.focusRepo.getCurrent(this.deps.twinId),
+      this.deps.persona.name,
+    );
+
     try {
       const reply = await this.runModel(
         this.deps.persona,
@@ -771,6 +790,7 @@ export class TwinService {
           summaryBlock: buildSummaryBlock(summaries),
           factsBlock,
           episodicBlock,
+          focusBlock,
         },
       );
       // #100: Slim-Projektion der konsultierten Memory-Hits für die UI. Score-
@@ -2009,6 +2029,13 @@ export class TwinService {
        * filter(Boolean)-Schritt es raus, kein leerer Header im Prompt.
        */
       episodicBlock?: string | null;
+      /**
+       * Aufmerksamkeit/Fokus Stufe 1 — Schritt 2: gespeicherter „aktueller
+       * Fokus" als Prompt-Block. Wird NUR vom Owner-Send-Pfad (runOwnerDirect)
+       * gesetzt — A2A-/Fremd-Calls lassen ihn weg (Owner-Kontext). Bei `null`
+       * fällt er im composeOwnerSystemPrompt-`.filter(Boolean)` raus.
+       */
+      focusBlock?: string | null;
     } = {},
   ): Promise<{
     content: string;
@@ -2119,6 +2146,7 @@ REGEL 6: Wenn der User dich explizit bittet, ein Tool zu nutzen ("rufe das X-Too
       persona,
       extraSystem,
       factsBlock: options.factsBlock,
+      focusBlock: options.focusBlock,
       skillsBlock,
       toolUseDirective: TOOL_USE_DIRECTIVE,
       summaryBlock: options.summaryBlock,
@@ -2455,18 +2483,20 @@ Auch nicht "ae" für Eigennamen wie "Bär" oder Begriffe wie
 /**
  * Composition des Owner-Direct-System-Prompts.
  *
- * Sieben Schichten, Reihenfolge bewusst:
+ * Acht Schichten, Reihenfolge bewusst:
  *   1. extraSystem (situativer Bridge-Kontext, optional)
  *   2. persona.systemPrompt + factsBlock (combined — Facts sind Persona-
  *      konstitutiv und profitieren von der Attention-Position am
  *      Prompt-Anfang, 3.3.E)
- *   3. skillsBlock (Skill-Erweiterungen, ergänzen Persona — nur Manual-Skills,
+ *   3. focusBlock (Fokus Stufe 1 Schritt 2 — „aktueller Fokus", hohe Attention
+ *      direkt nach Persona+Facts; nur Owner-Pfad, A2A lässt ihn null)
+ *   4. skillsBlock (Skill-Erweiterungen, ergänzen Persona — nur Manual-Skills,
  *      `null` im Codex-Pfad bis Phase 3.3 Tool-Use nachzieht)
- *   4. toolUseDirective (Anti-Halluzination-Regeln, nur bei aktivem Tool-Set,
+ *   5. toolUseDirective (Anti-Halluzination-Regeln, nur bei aktivem Tool-Set,
  *      `null` im Codex-Pfad bis Phase 3.3)
- *   5. LANGUAGE_DIRECTIVE (Anti-„weiss"-statt-„weiß", gilt für alle Twins)
- *   6. summaryBlock (3.3.C — verdichtete Vorgeschichte der LAUFENDEN Konv)
- *   7. episodicBlock (3.4.E — Top-K Erinnerungen aus VERGANGENEN Konv + Diary)
+ *   6. LANGUAGE_DIRECTIVE (Anti-„weiss"-statt-„weiß", gilt für alle Twins)
+ *   7. summaryBlock (3.3.C — verdichtete Vorgeschichte der LAUFENDEN Konv)
+ *   8. episodicBlock (3.4.E — Top-K Erinnerungen aus VERGANGENEN Konv + Diary)
  *
  * `null`-Schichten werden via `.filter(Boolean)` rausgeworfen. Konsumenten:
  * `runModel` (Vercel-AI-SDK-Pfad mit allen 7 Schichten) und
@@ -2476,10 +2506,16 @@ Auch nicht "ae" für Eigennamen wie "Bär" oder Begriffe wie
  * dieselbe Composition haben und neue Schichten nicht nur in einem Pfad
  * eingebaut werden (Drift-Prevention).
  */
-function composeOwnerSystemPrompt(parts: {
+export function composeOwnerSystemPrompt(parts: {
   persona: Persona;
   extraSystem: string | null | undefined;
   factsBlock: string | null | undefined;
+  /**
+   * Aufmerksamkeit/Fokus Stufe 1 — Schritt 2: „aktueller Fokus"-Block. Position
+   * direkt nach Persona+Facts (hohe Attention, konstitutiver Gegenwarts-Kontext).
+   * Nur der Owner-Pfad (runOwnerDirect) setzt ihn; A2A-Calls lassen ihn null.
+   */
+  focusBlock: string | null | undefined;
   skillsBlock: string | null | undefined;
   toolUseDirective: string | null | undefined;
   summaryBlock: string | null | undefined;
@@ -2491,6 +2527,7 @@ function composeOwnerSystemPrompt(parts: {
   return [
     parts.extraSystem,
     personaWithFacts,
+    parts.focusBlock,
     parts.skillsBlock,
     parts.toolUseDirective,
     LANGUAGE_DIRECTIVE,
