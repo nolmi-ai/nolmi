@@ -1,7 +1,7 @@
 import type Database from "better-sqlite3";
 import { nanoid } from "nanoid";
 import type { FactConfidence, FactSource } from "@nolmi/shared";
-import type { FactsHistoryRepo } from "./facts-history-repo.js";
+import type { FactsHistoryRepo, FactsHistoryRow } from "./facts-history-repo.js";
 
 // ─── FACTS REPOSITORY (3.3.A) ────────────────────────────────────────────────
 //
@@ -141,6 +141,16 @@ export class FactsRepo {
       .prepare("SELECT * FROM facts WHERE twin_id = ? AND fact_key = ?")
       .get(twinId, factKey) as FactRow | undefined;
     return row ? rowToFact(row) : null;
+  }
+
+  /**
+   * #97 Schritt 3: dünner Delegate auf die injizierte facts_history. Hält den
+   * Lese-Zugang zur History an EINER Stelle (FactsRepo) — Routen lesen Facts +
+   * History über dasselbe Repo, statt facts_history separat durchzureichen.
+   * Chronologisch ASC (älteste Ablösung zuerst); leeres Array, wenn keine.
+   */
+  getHistory(twinId: string, factKey: string): FactsHistoryRow[] {
+    return this.history.getTimeline(twinId, factKey);
   }
 
   /**

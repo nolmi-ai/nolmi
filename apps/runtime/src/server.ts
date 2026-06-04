@@ -2009,6 +2009,36 @@ function toFactItem(f: {
   };
 }
 
+// #97 Schritt 3: API-Shape einer facts_history-Row. camelCase + OHNE twin_id
+// (interne ID, gehört nicht in die API-Oberfläche — wie toFactItem).
+function toFactHistoryItem(h: {
+  id: string;
+  factKey: string;
+  oldValue: string | null;
+  oldSource: string;
+  oldConfidence: string;
+  changeType: string;
+  recordedAt: string;
+}): {
+  id: string;
+  factKey: string;
+  oldValue: string | null;
+  oldSource: string;
+  oldConfidence: string;
+  changeType: string;
+  recordedAt: string;
+} {
+  return {
+    id: h.id,
+    factKey: h.factKey,
+    oldValue: h.oldValue,
+    oldSource: h.oldSource,
+    oldConfidence: h.oldConfidence,
+    changeType: h.changeType,
+    recordedAt: h.recordedAt,
+  };
+}
+
 export function registerFactRoutes(
   app: FastifyInstance,
   deps: ServerDeps,
@@ -2126,6 +2156,24 @@ export function registerFactRoutes(
         return reply.status(404).send({ error: `Fact '${factKey}' nicht gefunden` });
       }
       return reply.status(204).send();
+    },
+  );
+
+  // ─── HISTORY (#97 Schritt 3 — Drift-Timeline pro Key, read-only) ─────────
+  // Owner-gated, wie die übrigen Facts-Routen. Liefert die abgelösten Zustände
+  // eines Keys (facts_history) chronologisch ASC. „Keine History" ist ein
+  // gültiger Zustand → leeres Array + 200 (kein 404), auch bei nicht-existentem
+  // Key. Response ohne twin_id (interne ID, wie toFactItem sie weglässt).
+  app.get<{ Params: { handle: string; factKey: string } }>(
+    "/twins/:handle/facts/:factKey/history",
+    async (request, reply) => {
+      const ctx = await requireOwner(request, reply, request.params.handle);
+      if (!ctx) return;
+      const { entry } = ctx;
+
+      const factKey = decodeURIComponent(request.params.factKey);
+      const rows = deps.factsRepo.getHistory(entry.twinId, factKey);
+      return reply.send({ history: rows.map(toFactHistoryItem) });
     },
   );
 
