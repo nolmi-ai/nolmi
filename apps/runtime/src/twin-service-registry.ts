@@ -27,6 +27,7 @@ import type { ConversationsRepo } from "./conversations/repo.js";
 import { ConversationSummariesRepo } from "./conversations/summaries-repo.js";
 import type { McpServersRepo } from "./mcp/repo.js";
 import { FactsRepo } from "./facts/repo.js";
+import { FactsHistoryRepo } from "./facts/facts-history-repo.js";
 import {
   defaultMcpClientFactory,
   type McpClientFactory,
@@ -506,7 +507,7 @@ export class TwinServiceRegistry {
     // vermeiden nur, sie durch die RegistryDeps-Plumbing zu schleifen.
     const db = this.deps!.db;
     const conversationSummaries = new ConversationSummariesRepo(db);
-    const facts = new FactsRepo(db);
+    const facts = new FactsRepo(db, new FactsHistoryRepo(db));
     const embeddingsRepo = new EmbeddingsRepo(db);
     const twinDiaryRepo = new TwinDiaryRepo(db);
 

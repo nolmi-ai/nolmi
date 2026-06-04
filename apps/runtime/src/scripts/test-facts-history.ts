@@ -38,8 +38,8 @@ function main(): void {
 
   const tl = repo.getTimeline(T, K);
   assert(tl.length === 2, "getTimeline liefert 2 Rows");
-  assert(tl[0].oldValue === "Anna" && tl[1].oldValue === "Sabine", "chronologisch ASC (Anna vor Sabine)");
-  assert(tl[0].changeType === "value_change", "changeType durchgereicht");
+  assert(tl[0]?.oldValue === "Anna" && tl[1]?.oldValue === "Sabine", "chronologisch ASC (Anna vor Sabine)");
+  assert(tl[0]?.changeType === "value_change", "changeType durchgereicht");
 
   console.log("\n── getAsOf (welcher Wert galt wann?)");
   // Vor der ersten Ablösung: erste Ablösung >= Datum ist die vom 2026-05-01 → old_value 'Anna'.
@@ -51,7 +51,7 @@ function main(): void {
 
   console.log("\n── delete-changeType + Leer-Fall");
   repo.record({ twinId: T, factKey: "city", oldValue: "Berlin", oldSource: "user", oldConfidence: "approved", changeType: "delete", recordedAt: "2026-06-02T00:00:00.000Z" });
-  assert(repo.getTimeline(T, "city")[0].changeType === "delete", "delete-Row gespeichert");
+  assert(repo.getTimeline(T, "city")[0]?.changeType === "delete", "delete-Row gespeichert");
   assert(repo.getTimeline(T, "unbekannt").length === 0, "unbekannter Key → leere Timeline (kein Fehler)");
 
   // Cleanup (Wegwerf-DB, aber sauber halten falls jemand dieselbe DB nochmal nutzt).

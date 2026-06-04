@@ -79,12 +79,10 @@ async function main() {
   const skillRepo = new SkillRepo(repo.db);
   const conversationsRepo = new ConversationsRepo(repo.db);
   const mcpServersRepo = new McpServersRepo(repo.db, masterKey);
-  const factsRepo = new FactsRepo(repo.db);
-  // #97 Schritt 1/4: facts_history-Store auf derselben db-Connection. Existiert +
-  // ist instanziierbar/testbar, wird aber NOCH VON NIEMANDEM aufgerufen — die
-  // Capture-Verdrahtung in FactsRepo.upsert/delete ist Schritt 2 (der riskante).
+  // #97 Schritt 2/4: facts_history-Store + in FactsRepo injiziert — Capture von
+  // Wert-Drift/Delete läuft jetzt atomar in FactsRepo.upsert/delete.
   const factsHistoryRepo = new FactsHistoryRepo(repo.db);
-  void factsHistoryRepo;
+  const factsRepo = new FactsRepo(repo.db, factsHistoryRepo);
   // #101: TwinMaturityService — server-weite Instanz auf der geteilten
   // db-Connection. Stateless, daher kein Per-Twin-Setup nötig wie in der
   // Registry (Embeddings/Facts werden per twinId-Filter in den Queries

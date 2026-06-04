@@ -8,6 +8,7 @@ import { SkillRepo } from "../skills/repo.js";
 import { ConversationsRepo } from "../conversations/repo.js";
 import { ConversationSummariesRepo } from "../conversations/summaries-repo.js";
 import { FactsRepo } from "../facts/repo.js";
+import { FactsHistoryRepo } from "../facts/facts-history-repo.js";
 import { TwinService } from "../twin-service.js";
 import { AuditService } from "../audit/service.js";
 import { EventBus } from "../events/bus.js";
@@ -56,7 +57,7 @@ async function main() {
   const trustRepo = new TrustRepo(db);
   const conversationsRepo = new ConversationsRepo(db);
   const conversationSummariesRepo = new ConversationSummariesRepo(db);
-  const factsRepo = new FactsRepo(db);
+  const factsRepo = new FactsRepo(db, new FactsHistoryRepo(db));
   const masterKey = loadMasterKey();
   const mcpServersRepo = new McpServersRepo(db, masterKey);
   const repo = createSqliteRepository(config.dbPath);

@@ -5,6 +5,7 @@ import { resolve } from "node:path";
 import { nanoid } from "nanoid";
 import { loadRuntimeConfig } from "../config.js";
 import { FactsRepo } from "../facts/repo.js";
+import { FactsHistoryRepo } from "../facts/facts-history-repo.js";
 import {
   ExtractionEngine,
   type ExtractedFact,
@@ -41,7 +42,7 @@ async function main() {
   const fx = createFixtures(db);
   log(`Fixtures: twin=${fx.twinId} conv=${fx.conversationId}`);
 
-  const factsRepo = new FactsRepo(db);
+  const factsRepo = new FactsRepo(db, new FactsHistoryRepo(db));
   const summariesRepo = new ConversationSummariesRepo(db);
   const auditRepoImpl = new SqliteAuditRepository(db);
 

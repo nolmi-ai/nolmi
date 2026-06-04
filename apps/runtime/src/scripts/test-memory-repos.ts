@@ -6,6 +6,7 @@ import { nanoid } from "nanoid";
 import { loadRuntimeConfig } from "../config.js";
 import { ConversationSummariesRepo } from "../conversations/summaries-repo.js";
 import { FactsRepo } from "../facts/repo.js";
+import { FactsHistoryRepo } from "../facts/facts-history-repo.js";
 
 // ─── TEST: MEMORY-REPOS (Phase 3.3 Sub-Schritt A) ───────────────────────────
 //
@@ -171,7 +172,7 @@ function runSummariesTests(
 // ─── TEST 2: FactsRepo ──────────────────────────────────────────────────────
 
 async function runFactsTests(db: Database.Database): Promise<number> {
-  const repo = new FactsRepo(db);
+  const repo = new FactsRepo(db, new FactsHistoryRepo(db));
   let issues = 0;
 
   // Zwei Twins anlegen, damit Multi-Twin-Isolation testbar ist. Das in

@@ -8,6 +8,7 @@ import type { FactConfidence } from "@nolmi/shared";
 import { loadRuntimeConfig } from "../config.js";
 import { TwinProfilesRepo, type TwinProfile } from "../twin-profiles-repo.js";
 import { FactsRepo, type Fact } from "../facts/repo.js";
+import { FactsHistoryRepo } from "../facts/facts-history-repo.js";
 
 // ─── FACTS CLI HELPERS (Phase 3.3 Sub-Schritt D) ────────────────────────────
 //
@@ -59,7 +60,7 @@ export async function loadFactsCliContext(
     );
   }
 
-  const factsRepo = new FactsRepo(db);
+  const factsRepo = new FactsRepo(db, new FactsHistoryRepo(db));
 
   const cleanup = async () => {
     db.close();

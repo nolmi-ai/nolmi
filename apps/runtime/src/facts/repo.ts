@@ -1,6 +1,7 @@
 import type Database from "better-sqlite3";
 import { nanoid } from "nanoid";
 import type { FactConfidence, FactSource } from "@nolmi/shared";
+import type { FactsHistoryRepo } from "./facts-history-repo.js";
 
 // ─── FACTS REPOSITORY (3.3.A) ────────────────────────────────────────────────
 //
@@ -57,14 +58,29 @@ export interface ListFactsOptions {
 }
 
 export class FactsRepo {
-  constructor(private db: Database.Database) {}
+  // #97 Schritt 2: FactsHistoryRepo injiziert (gleiche db-Connection), damit
+  // Capture + Overwrite in EINER Transaktion laufen. Required — jede
+  // Konstruktions-Stelle muss ihn übergeben (Compile-Garantie für Coverage).
+  constructor(
+    private db: Database.Database,
+    private history: FactsHistoryRepo,
+  ) {}
 
   /**
    * Upsert via ON CONFLICT(twin_id, fact_key). Bei Konflikt überschreiben
    * wir fact_value, source, confidence und setzen updated_at neu — created_at
    * und id bleiben. Damit gibt's pro Twin+Key immer genau eine Row; eine
    * Neu-Belegung („wife_name war Anna, jetzt Sabine") ist ein UPDATE, kein
-   * neuer Eintrag (Historisierung wäre Phase-3.4+-Thema).
+   * neuer Eintrag im facts-Store.
+   *
+   * #97 Schritt 2 — Wert-Drift-Capture (atomar): Wenn der Upsert einen
+   * bestehenden Fact mit ANDEREM fact_value ablöst, wird der alte Zustand
+   * VORHER in facts_history geschrieben (change_type='value_change'). Capture
+   * + Overwrite laufen in EINER db.transaction — schlägt das Capturen fehl,
+   * rollt der Overwrite mit zurück (kein halber State). KEIN Capture bei
+   * Erst-Anlage (kein abgelöster Zustand) oder bei gleichem Wert (No-op) oder
+   * reiner source/confidence-Änderung — extern verhält sich upsert dann exakt
+   * wie zuvor.
    */
   upsert(input: UpsertFactInput): Fact {
     const now = new Date().toISOString();
@@ -81,16 +97,33 @@ export class FactsRepo {
          confidence = excluded.confidence,
          updated_at = excluded.updated_at`,
     );
-    stmt.run({
-      id,
-      twin_id: input.twinId,
-      fact_key: input.factKey,
-      fact_value: input.factValue,
-      source: input.source,
-      confidence: input.confidence,
-      created_at: now,
-      updated_at: now,
+
+    // Atomar: erst lesen + (bei echter Wert-Änderung) capturen, DANN überschreiben.
+    const tx = this.db.transaction((): void => {
+      const existing = this.get(input.twinId, input.factKey);
+      if (existing && existing.factValue !== input.factValue) {
+        this.history.record({
+          twinId: input.twinId,
+          factKey: input.factKey,
+          oldValue: existing.factValue,
+          oldSource: existing.source,
+          oldConfidence: existing.confidence,
+          changeType: "value_change",
+          recordedAt: now,
+        });
+      }
+      stmt.run({
+        id,
+        twin_id: input.twinId,
+        fact_key: input.factKey,
+        fact_value: input.factValue,
+        source: input.source,
+        confidence: input.confidence,
+        created_at: now,
+        updated_at: now,
+      });
     });
+    tx();
 
     // Nach Upsert immer neu laden — bei UPDATE-Pfad liefert excluded.id NICHT
     // die gespeicherte ID zurück, also über get() den autoritativen State holen.
@@ -161,10 +194,32 @@ export class FactsRepo {
    * wäre Overhead ohne klaren Nutzen.
    */
   delete(twinId: string, factKey: string): boolean {
-    const result = this.db
-      .prepare("DELETE FROM facts WHERE twin_id = ? AND fact_key = ?")
-      .run(twinId, factKey);
-    return result.changes > 0;
+    const now = new Date().toISOString();
+    // #97 Schritt 2 — Delete-Capture (atomar): existierte der Key, wird sein
+    // Zustand VORHER in facts_history geschrieben (change_type='delete'), dann
+    // gelöscht — beides in EINER Transaktion. delete auf nicht-existenten Key:
+    // kein Capture, kein Fehler (changes=0, extern wie zuvor).
+    let changed = false;
+    const tx = this.db.transaction((): void => {
+      const existing = this.get(twinId, factKey);
+      if (existing) {
+        this.history.record({
+          twinId,
+          factKey,
+          oldValue: existing.factValue,
+          oldSource: existing.source,
+          oldConfidence: existing.confidence,
+          changeType: "delete",
+          recordedAt: now,
+        });
+      }
+      const result = this.db
+        .prepare("DELETE FROM facts WHERE twin_id = ? AND fact_key = ?")
+        .run(twinId, factKey);
+      changed = result.changes > 0;
+    });
+    tx();
+    return changed;
   }
 
   count(twinId: string): number {
