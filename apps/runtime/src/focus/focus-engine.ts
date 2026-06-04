@@ -120,7 +120,16 @@ export class FocusEngine {
     }
 
     // 3. DIREKT schreiben — kein Pending (bewusste Abweichung zur Reflexion).
+    // Snapshot-Lifecycle: erst den bisherigen aktiven Snapshot supersedieren,
+    // DANN den neuen inserten → Invariante „genau ein aktiver Snapshot"
+    // (superseded_at IS NULL) bleibt erhalten, die History (alte als superseded)
+    // bleibt sauber. Reihenfolge ist load-bearing: supersede-THEN-insert; bei
+    // insert-then-supersede würde supersede() den GERADE eingefügten (= jüngsten
+    // aktiven) wieder supersedieren. Idempotent — kein aktiver → no-op.
+    // Gilt für beide Pfade (manuelles focus/refresh + Loop Schritt 4),
+    // konsistent zum Reset-Verhalten (Schritt 3).
     const basisSummary = `aus ${summaries.length} Summaries + ${turnCount} Turns`;
+    this.deps.focusRepo.supersede(this.deps.twinId);
     const snapshot = this.deps.focusRepo.insert({
       twinId: this.deps.twinId,
       focusText: text,

@@ -22,6 +22,7 @@ import { TelegramMessageRouter } from "./telegram/message-router.js";
 import { OAuthTokensRepo } from "./oauth/oauth-tokens-repo.js";
 import { OAuthRefreshService } from "./oauth/refresh-service.js";
 import { ReflectionLoopService } from "./reflection/reflection-loop-service.js";
+import { FocusLoopService } from "./focus/focus-loop-service.js";
 
 // ─── BOOTSTRAP ───────────────────────────────────────────────────────────────
 //
@@ -205,6 +206,16 @@ async function main() {
   });
   reflectionLoopService.start(app.log);
 
+  // Aufmerksamkeit/Fokus Stufe 1 — Schritt 4: autonomer Fokus-Loop. OPT-IN:
+  // ohne FOCUS_LOOP_ENABLED=true tut start() nichts. Schreibt DIREKT einen
+  // Snapshot (kein Pending — Leitplanke ist Sichtbarkeit+Reset, Schritt 3);
+  // Substanz-Guard = Token-Bremse (kein LLM-Call ohne neue Turns/Summaries).
+  const focusLoopService = new FocusLoopService({
+    db: repo.db,
+    registry,
+  });
+  focusLoopService.start(app.log);
+
   // 9. Graceful Shutdown
   const shutdown = async (signal: string) => {
     console.log(`[shutdown] ${signal} empfangen — fahre runter`);
@@ -215,6 +226,7 @@ async function main() {
     telegramBotRegistry.shutdown();
     oauthRefreshService.stop();
     reflectionLoopService.stop();
+    focusLoopService.stop();
     await registry.disposeAll();
     try {
       await app.close();
