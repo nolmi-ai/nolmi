@@ -164,6 +164,12 @@ Die `always_pending`-Diagnose (Tag 35) legte mehrere tote/inkonsistente Reste fr
 - **deprecated `/chat`-Legacy-Alias** (`server.ts:510`): einziger nicht-owner-bypassender `respond_to_chat`-Pfad, vom Web-UI nicht genutzt → Kandidat zum Entfernen (oder bewusst als Test-Hook dokumentieren).
 - **`requiresApprovalIfMatches`** (trusting-Template, `mandate-templates.ts:95`): definiert, aber **nicht ausgewertet** (gleicher Cluster wie #3 / `requiresApproval`/`maxLength`-Conditions). Entweder auswerten (Inhalts-Matching) oder als „noch nicht aktiv" markieren.
 
+### isTrusted ohne verhaltenswirksamen Aufrufer seit Phase 4.3 Schritt 5 (Cleanup)
+
+**Status:** OFFEN (notiert) | **Größe XS** | **Priorität:** nice (Hygiene), kein Verhalten betroffen
+
+`canAutoRespond` (Phase 4.3 Schritt 5, `1378a71`) hat im Dispatch (`twin-service.ts:1035`) den row-basierten `isTrusted`-Check abgelöst. `TrustRepo.isTrusted` hat seitdem **keinen verhaltenswirksamen Aufrufer** mehr (bewusst behalten — das Konzept „steht in der Vertraute-Liste" bleibt gültig; tsc grün). Entscheiden: entweder von der UI/list-Semantik aktiv nutzen (z.B. „in Liste"-Anzeige) ODER als toten Code entfernen. Niedrige Prio.
+
 ### A2A-Empfangspfad respektiert Mandate-`escalation` nicht (untrusted = hartkodiert pending) — OFFENE Produktfrage
 
 **Status:** OFFEN — **bewusste Produkt-/Sicherheitsfrage, kein Bau jetzt** | **Größe M** | **Priorität:** klären, falls A2A-Auto-Antworten je gewünscht | aus Diagnose Tag 35 (Option D-i)
