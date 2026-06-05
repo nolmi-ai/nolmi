@@ -163,9 +163,15 @@ export class TrustRepo {
   }
 
   /**
-   * Hot-Path. Bei jedem eingehenden Bridge-Call aufgerufen, bevor der
-   * Mandate-Check anspringt. SELECT EXISTS über den Composite-Index
-   * (twin_id, trusted_handle) — unter 1ms.
+   * Listen-/UI-Prädikat: existiert eine Trust-Row für (twinId, trustedHandle)?
+   * SELECT EXISTS über den Composite-Index (twin_id, trusted_handle) — unter 1ms.
+   * Beantwortet „steht dieser Partner in der Vertraute-Liste?" (Row-Existenz,
+   * kein Level) — für UI/list-Semantik.
+   *
+   * 🔴 NICHT der Autonomie-Dispatch: seit Phase 4.3 Schritt 5 entscheidet
+   * `canAutoRespond` (level-basiert), ob autonom geantwortet wird. `isTrusted`
+   * und `canAutoRespond` sind bewusst getrennte Konzepte: ein 'bekannt'-Partner
+   * ist isTrusted=true, aber canAutoRespond=false.
    */
   isTrusted(twinId: string, trustedHandle: string): boolean {
     const row = this.db
