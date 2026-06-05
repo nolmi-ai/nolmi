@@ -1031,9 +1031,15 @@ export class TwinService {
       return;
     }
 
-    // 3. Trust-Level checken — Hot-Path-Lookup über (twin_id, trusted_handle).
-    const trusted = this.deps.trustRepo.isTrusted(this.deps.twinId, msg.fromHandle);
-    if (trusted) {
+    // 3. Phase 4.3 Schritt 5: Autonomie-Weiche jetzt LEVEL-basiert. canAutoRespond
+    // = familiarity_level ∈ {vertraut, eng} (AUTO_RESPONABLE_LEVELS). Ersetzt den
+    // alten row-basierten isTrusted-Check — konservativ, reproduziert das frühere
+    // binäre Verhalten (Bestands-Trusts sind 'vertraut' → autonom; keine Row →
+    // 'fremd' → pending). 'bekannt' (Row da, aber unter der Schwelle) fällt in den
+    // ELSE-Zweig (checkMandate → pending) = graded Mitte. handleTrustedBridgeMessage
+    // heißt intern weiter so (kein Verhaltens-Change durch den Namen).
+    const mayAuto = this.deps.trustRepo.canAutoRespond(this.deps.twinId, msg.fromHandle);
+    if (mayAuto) {
       await this.handleTrustedBridgeMessage(msg);
       return;
     }

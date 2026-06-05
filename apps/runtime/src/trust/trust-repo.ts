@@ -20,6 +20,24 @@ import { nanoid } from "nanoid";
  */
 export type FamiliarityLevel = "fremd" | "bekannt" | "vertraut" | "eng";
 
+/**
+ * 🔴 SICHERHEITSENTSCHEIDUNG (Phase 4.3 Schritt 5, Tag 38): welche
+ * Vertrautheits-Stufen dürfen AUTONOM auf eine eingehende A2A-Nachricht
+ * antworten (ohne Owner-Approval)? {vertraut, eng} = konservativ — reproduziert
+ * das frühere BINÄRE trusted-Verhalten exakt (alle aus binärem Trust migrierten
+ * Rows sind 'vertraut' → autonom wie zuvor; 'fremd'-Default ohne Row → pending
+ * wie zuvor). 'bekannt'/'fremd' → pending (graded Mitte über den bestehenden
+ * pending-Pfad).
+ *
+ * DAS IST DIE EINE STELLE, an der die Autonomie-Politik lebt. Diese Menge zu
+ * ändern = die Sicherheitslinie ändern (z.B. nur {eng} = strenger, würde aber
+ * bestehenden 'vertraut'-Trusts ihre heutige Autonomie nehmen).
+ */
+export const AUTO_RESPONABLE_LEVELS: ReadonlySet<FamiliarityLevel> = new Set([
+  "vertraut",
+  "eng",
+]);
+
 export interface TrustRelationship {
   trustId: string;
   twinId: string;
@@ -199,6 +217,21 @@ export class TrustRepo {
     if (result.changes === 0) {
       throw new TrustNotFoundError(`${twinId}/${partnerHandle}`);
     }
+  }
+
+  /**
+   * Phase 4.3 Schritt 5: Darf der Twin auf eine eingehende A2A-Nachricht dieses
+   * Partners AUTONOM antworten (ohne Owner-Approval)? = Level ∈
+   * AUTO_RESPONABLE_LEVELS. Ersetzt im Dispatch (twin-service handleBridgeMessage)
+   * den alten row-basierten isTrusted-Check. getFamiliarity liefert immer einen
+   * der vier Werte ('fremd'-Default ohne Row → nicht in der Menge → pending).
+   *
+   * 🔴 Anderes Konzept als isTrusted: isTrusted = „steht in der Vertraute-Liste"
+   * (Row da, für UI/list/add/remove); canAutoRespond = „Level hoch genug für
+   * autonom". Ein 'bekannt'-Partner ist isTrusted=true, aber canAutoRespond=false.
+   */
+  canAutoRespond(twinId: string, partnerHandle: string): boolean {
+    return AUTO_RESPONABLE_LEVELS.has(this.getFamiliarity(twinId, partnerHandle));
   }
 }
 
