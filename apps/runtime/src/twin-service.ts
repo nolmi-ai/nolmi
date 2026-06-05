@@ -25,6 +25,7 @@ import type { BridgeClient } from "./bridge/client.js";
 import { BridgeError, BridgeDisabledError } from "./bridge/client.js";
 import type { BridgeMessage } from "./bridge/types.js";
 import type { TrustRepo } from "./trust/trust-repo.js";
+import { buildFamiliarityBlock } from "./trust/prompt-builder.js";
 import type { SkillRepo } from "./skills/repo.js";
 import { buildSkillsBlock } from "./skills/prompt-builder.js";
 import {
@@ -1655,9 +1656,17 @@ export class TwinService {
     }
     const messages = extractMessages(entry, "messages");
 
+    // Phase 4.3 Schritt 2: Vertrautheits-Ton auch für AUSGEHENDE Sends — sonst
+    // klänge der Twin beim Antworten vertraut, beim Selbst-Schreiben neutral.
+    // Hier kein bridgeContextHint (das ist Antwort-Kontext „du führst eine
+    // Konversation MIT"); für ausgehend reicht der reine Ton-Block als
+    // extraSystem. NUR Stil — keine Dispatch-/Autonomie-Wirkung.
+    const famLevel = this.deps.trustRepo.getFamiliarity(this.deps.twinId, targetHandle);
+    const famBlock = buildFamiliarityBlock(famLevel, targetHandle);
+
     this.deps.bus.emit({ type: "twin.thinking", payload: { capability: entry.capability } });
     try {
-      const reply = await this.runModel(persona, messages);
+      const reply = await this.runModel(persona, messages, famBlock ?? undefined);
       const sent = await this.deps.bridgeClient.sendMessage({
         to: targetHandle,
         content: reply.content,
@@ -1884,12 +1893,17 @@ export class TwinService {
   }
 
   private bridgeContextHint(fromHandle: string): string {
-    return (
+    const base =
       `Du führst gerade eine Konversation mit dem Twin ${fromHandle} über die Bridge.\n` +
       `Beziehe dich auf den Verlauf. Wenn der andere Twin auf eine deiner früheren\n` +
       `Nachrichten antwortet, geh konkret darauf ein — frag nicht nach dem Worum-geht's,\n` +
-      `das weißt du selbst.`
-    );
+      `das weißt du selbst.`;
+    // Phase 4.3 Schritt 2: Vertrautheits-Ton an den A2A-Kontext anhängen. NUR
+    // Stil — keine Dispatch-/Autonomie-Wirkung (isTrusted bleibt row-basiert).
+    // getFamiliarity liefert immer einen der vier Werte ('fremd'-Default ohne Row).
+    const level = this.deps.trustRepo.getFamiliarity(this.deps.twinId, fromHandle);
+    const famBlock = buildFamiliarityBlock(level, fromHandle);
+    return famBlock ? `${base}\n\n${famBlock}` : base;
   }
 
   // ─── private helpers ─────────────────────────────────────────────────────
