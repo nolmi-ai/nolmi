@@ -61,6 +61,8 @@ export interface ProactiveNudgeResult {
   auditId?: string;
   thema?: string;
   message?: string;
+  /** 2b: true = autonom per Telegram gepusht (Status 'sent'); false = Pending. */
+  pushed?: boolean;
   /** Grund, wenn nichts erzeugt wurde (für Loop-Log/Tests). */
   reason?:
     | "not-stuck"
@@ -68,6 +70,23 @@ export interface ProactiveNudgeResult {
     | "already-nudged-this-episode"
     | "twin-declined"
     | "llm-error";
+}
+
+/**
+ * 2b: Aktiver Owner-Push (BotRegistry.sendToOwner), per-Call injiziert vom
+ * Fokus-Loop. Per-Call statt Konstruktor-Dep, weil der ProactiveNudgeService im
+ * TwinService gebaut wird, BEVOR die BotRegistry existiert (Boot-Reihenfolge);
+ * der Loop kennt beide und reicht den Sender beim Tick durch. KEIN Singleton.
+ */
+export type NudgeSender = (
+  twinId: string,
+  text: string,
+) => Promise<{ sent: boolean; reason?: string }>;
+
+/** Minimaler Bool-ENV-Parse (analog focus-/reflection-loop, dort modul-lokal). */
+function envEnabled(raw: string | undefined): boolean {
+  const v = raw?.trim().toLowerCase();
+  return v === "true" || v === "1" || v === "yes";
 }
 
 export interface ProactiveNudgeDeps {
@@ -138,11 +157,18 @@ export class ProactiveNudgeService {
   }
 
   /**
-   * Voller Stufe-1-Durchlauf: detektieren → Guards → texten (LLM) → Pending.
-   * Wird vom Fokus-Loop pro Tick aufgerufen. Erzeugt höchstens EINEN Pending-
-   * Audit; sendet selbst NIE etwas.
+   * Voller Durchlauf: detektieren → Guards → texten (LLM) → Pending ODER Push.
+   * Wird vom Fokus-Loop pro Tick aufgerufen. Erzeugt höchstens EINEN Audit-
+   * Eintrag.
+   *
+   * 2b — ENV-Gate `PROACTIVE_NUDGE_AUTOSEND_ENABLED` (Default AUS):
+   *   - AUS → Pending in der Inbox (Verhalten wie Stufe 1, unverändert).
+   *   - AN + `sendToOwner` da → Push-Versuch:
+   *       erfolgreich → Audit-Status 'sent' (stille Spur, KEIN offenes To-do).
+   *       fehlgeschlagen → FALLBACK auf Pending (der Nudge geht nie verloren).
+   *   - AN ohne `sendToOwner` → defensiv ebenfalls Pending.
    */
-  async nudge(): Promise<ProactiveNudgeResult> {
+  async nudge(sendToOwner?: NudgeSender): Promise<ProactiveNudgeResult> {
     // 1. Detektion (Token-Bremse Stufe 1: reine SQL+JS).
     const detection = this.detectStuck(this.deps.twinId);
     if (!detection.isStuck || !detection.thema) {
@@ -195,25 +221,59 @@ export class ProactiveNudgeService {
       return { created: false, reason: "twin-declined" };
     }
 
-    // 4. Pending — EINZIGER Effekt. Kein Send (Stufe-1/2-Grenze). Output null
-    //    bis Approve (wie social-suggestion / self-reflection-write).
+    // 4. Effekt — Pending ODER Push, je nach ENV-Gate. Gemeinsamer Payload.
+    const input = {
+      anlass: "fokus",
+      thema: detection.thema,
+      tageStabil: detection.tageStabil ?? 0,
+      message,
+      reasoning: out.reasoning?.trim() ?? "",
+    };
+    const autosend = envEnabled(process.env.PROACTIVE_NUDGE_AUTOSEND_ENABLED);
+
+    // 4a. AUTOSEND (Flag AN + Sender da): Push versuchen.
+    if (autosend && sendToOwner) {
+      let res: { sent: boolean; reason?: string };
+      try {
+        res = await sendToOwner(this.deps.twinId, message);
+      } catch (err) {
+        // sendToOwner ist eigentlich graceful (kein Throw) — defensiv trotzdem.
+        const msg = err instanceof Error ? err.message : String(err);
+        console.warn(`[nudge] sendToOwner warf für twin=${this.deps.twinId}: ${msg}`);
+        res = { sent: false, reason: "send-failed" };
+      }
+      if (res.sent) {
+        // Stille Audit-Spur: Status 'sent' (NICHT pending) → kein offenes To-do
+        //   in der Inbox, aber nachvollziehbar was/wann gepusht wurde.
+        const audit = await this.deps.auditService.start({
+          capability: PROACTIVE_NUDGE_CAPABILITY,
+          mandateId: null,
+          initialStatus: "sent",
+          input,
+        });
+        console.log(
+          `[nudge] autonom an Owner gepusht für twin=${this.deps.twinId}, audit=${audit.id} (thema="${detection.thema}", Status 'sent')`,
+        );
+        return { created: true, pushed: true, auditId: audit.id, thema: detection.thema, message };
+      }
+      // 🔴 FALLBACK: Push fehlgeschlagen → Pending, der Nudge geht nicht verloren.
+      console.warn(
+        `[nudge] autosend fehlgeschlagen (${res.reason}) für twin=${this.deps.twinId} → Fallback auf Pending`,
+      );
+    }
+
+    // 4b. PENDING — Flag AUS, oder Push-Fallback. Output null bis Approve
+    //     (wie social-suggestion / self-reflection-write).
     const audit = await this.deps.auditService.start({
       capability: PROACTIVE_NUDGE_CAPABILITY,
       mandateId: null,
       initialStatus: "pending",
-      input: {
-        anlass: "fokus",
-        thema: detection.thema,
-        tageStabil: detection.tageStabil ?? 0,
-        message,
-        reasoning: out.reasoning?.trim() ?? "",
-      },
+      input,
     });
-
     console.log(
       `[nudge] pending proaktiver Anstoß erzeugt für twin=${this.deps.twinId}, audit=${audit.id} (thema="${detection.thema}", ${detection.tageStabil} stabil)`,
     );
-    return { created: true, auditId: audit.id, thema: detection.thema, message };
+    return { created: true, pushed: false, auditId: audit.id, thema: detection.thema, message };
   }
 }
 

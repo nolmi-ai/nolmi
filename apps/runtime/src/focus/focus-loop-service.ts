@@ -59,6 +59,15 @@ export interface FocusLoopDeps {
    * Engine `proactiveNudgeService.nudge()`. Tests injizieren einen Spy/Mock.
    */
   triggerNudge?: (handle: string) => Promise<ProactiveNudgeResult | null>;
+  /**
+   * 2b: aktiver Owner-Push für autonome Nudges (BotRegistry). Optional — ohne
+   * ihn (oder mit Flag AUS) bleibt der Nudge ein Pending. Wird hier durchgereicht
+   * statt in den TwinService, weil die BotRegistry erst NACH der Twin-Registry
+   * existiert (Boot-Reihenfolge); der Loop kennt beide.
+   */
+  botRegistry?: {
+    sendToOwner(twinId: string, text: string): Promise<{ sent: boolean; reason?: string }>;
+  };
 }
 
 export interface FocusForTwinOutcome {
@@ -96,7 +105,13 @@ export class FocusLoopService {
       (async (handle) => {
         const twin = this.deps.registry.getByHandle(handle);
         if (!twin) return null;
-        return twin.proactiveNudgeService.nudge();
+        // 2b: Sender nur durchreichen, wenn die BotRegistry da ist. Das ENV-Gate
+        // selbst liest nudge() — ohne Flag bleibt der Sender ungenutzt.
+        const sender = this.deps.botRegistry
+          ? (twinId: string, text: string) =>
+              this.deps.botRegistry!.sendToOwner(twinId, text)
+          : undefined;
+        return twin.proactiveNudgeService.nudge(sender);
       });
   }
 

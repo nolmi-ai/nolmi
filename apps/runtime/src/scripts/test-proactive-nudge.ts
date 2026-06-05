@@ -86,6 +86,29 @@ const okGen = async (): Promise<NudgeOutput> => ({
   reasoning: "stabiles Thema über 3 Snapshots",
 });
 
+/** :memory:-DB mit 3 stabilen Snapshots zum selben Thema (Stuck-Fall). */
+function seedStuck(theme: string): Database.Database {
+  const db = new Database(":memory:"); db.exec(SCHEMA);
+  seed(db, "f1", [theme], "2026-06-01T10:00:00Z", "2026-06-02T10:00:00Z");
+  seed(db, "f2", [theme], "2026-06-02T10:00:00Z", "2026-06-03T10:00:00Z");
+  seed(db, "f3", [theme], "2026-06-03T10:00:00Z", null);
+  return db;
+}
+
+/** Spy-Sender für den 2b-Push-Pfad: zählt Calls, liefert ein festes Ergebnis. */
+function spySender(result: { sent: boolean; reason?: string }) {
+  const calls: Array<{ twinId: string; text: string }> = [];
+  return {
+    calls,
+    fn: async (twinId: string, text: string) => { calls.push({ twinId, text }); return result; },
+  };
+}
+
+async function pendingCount(audit: AuditService): Promise<number> {
+  return (await audit.repo.list({ twinId: T, limit: 200 }))
+    .filter((a) => a.capability === PROACTIVE_NUDGE_CAPABILITY && a.status === "pending").length;
+}
+
 async function main(): Promise<void> {
   // ── 1) Detektion: 3× stabiles Thema → isStuck=true, thema, tageStabil=3 ──
   console.log("\n── 1) Festhängen erkannt (3 stabile Snapshots)");
@@ -171,8 +194,68 @@ async function main(): Promise<void> {
     assert(r.created === false && r.reason === "twin-declined", "shouldNudge=false → twin-declined, kein Pending");
   }
 
+  // ════════ Stufe 2b: ENV-Gate + autonomer Push ════════
+
+  // ── 8) Flag AUS (Default): Pending wie bisher, KEIN Push-Versuch ──
+  console.log("\n── 8) Flag AUS → Pending, kein Push");
+  {
+    delete process.env.PROACTIVE_NUDGE_AUTOSEND_ENABLED;
+    const audit = makeAudit();
+    const spy = spySender({ sent: true });
+    const r = await makeService(seedStuck("Beziehungs-Modell"), audit, okGen).nudge(spy.fn);
+    assert(r.created === true && r.pushed === false, "Flag AUS → Pending (pushed=false)");
+    assert(spy.calls.length === 0, "Flag AUS → sendToOwner NICHT aufgerufen");
+    assert((await pendingCount(audit)) === 1, "Flag AUS → 1 offenes Pending");
+  }
+
+  // ── 9) 🔴 Flag AN + Push-Fehlschlag → FALLBACK auf Pending (Nudge nicht verloren) ──
+  console.log("\n── 9) Flag AN + Push-Fehler → Fallback Pending");
+  {
+    process.env.PROACTIVE_NUDGE_AUTOSEND_ENABLED = "true";
+    const audit = makeAudit();
+    const spy = spySender({ sent: false, reason: "send-failed" });
+    const r = await makeService(seedStuck("Beziehungs-Modell"), audit, okGen).nudge(spy.fn);
+    assert(spy.calls.length === 1, "Push wurde versucht (sender 1×)");
+    assert(r.created === true && r.pushed === false, "Push-Fehler → Fallback Pending (pushed=false)");
+    assert((await pendingCount(audit)) === 1, "Fallback → 1 Pending (Nudge nicht verschluckt)");
+    delete process.env.PROACTIVE_NUDGE_AUTOSEND_ENABLED;
+  }
+
+  // ── 10) Flag AN + Push OK → Status 'sent', KEIN offenes Pending ──
+  console.log("\n── 10) Flag AN + Push OK → Status 'sent'");
+  {
+    process.env.PROACTIVE_NUDGE_AUTOSEND_ENABLED = "true";
+    const audit = makeAudit();
+    const spy = spySender({ sent: true });
+    const r = await makeService(seedStuck("Beziehungs-Modell"), audit, okGen).nudge(spy.fn);
+    assert(r.created === true && r.pushed === true, "Push OK → pushed=true");
+    const all = await audit.repo.list({ twinId: T, limit: 200 });
+    const sent = all.filter((a) => a.capability === PROACTIVE_NUDGE_CAPABILITY && a.status === "sent");
+    assert(sent.length === 1, "genau 1 Audit mit Status 'sent'");
+    assert((await pendingCount(audit)) === 0, "KEIN offenes Pending (nicht in Inbox-Liste)");
+    delete process.env.PROACTIVE_NUDGE_AUTOSEND_ENABLED;
+  }
+
+  // ── 11) 🔴 Dedup im Push-Modus: zweiter Tick selbes Thema → kein zweiter Push ──
+  //      Beweist: Episode-Cooldown stützt sich auf die sent-Historie, NICHT auf
+  //      offene Pendings (im Push-Modus gibt es keine).
+  console.log("\n── 11) Dedup im Push-Modus (Episode-Cooldown via sent-Historie)");
+  {
+    process.env.PROACTIVE_NUDGE_AUTOSEND_ENABLED = "true";
+    const audit = makeAudit();
+    const spy = spySender({ sent: true });
+    const svc2 = makeService(seedStuck("Dedup-Thema"), audit, okGen);
+    const a = await svc2.nudge(spy.fn);
+    const b = await svc2.nudge(spy.fn);
+    assert(a.created === true && a.pushed === true, "erster Tick → Push (Status 'sent')");
+    assert(b.created === false && b.reason === "already-nudged-this-episode",
+      "zweiter Tick → Episode-Cooldown (kein zweiter Push)");
+    assert(spy.calls.length === 1, "sendToOwner nur 1× — kein täglicher Wiederhol-Push");
+    delete process.env.PROACTIVE_NUDGE_AUTOSEND_ENABLED;
+  }
+
   console.log(failures === 0
-    ? "\n✅ ALLE CHECKS GRÜN — Detektion (≥3 stabil), Überlappung, Negativfälle, Guards, Pending.\n"
+    ? "\n✅ ALLE CHECKS GRÜN — Stufe 1 (Detektion/Guards/Pending) + 2b (Flag AUS→Pending, AN+Fehler→Fallback, AN+OK→'sent', Dedup im Push-Modus).\n"
     : `\n❌ ${failures} FEHLER\n`);
   process.exit(failures === 0 ? 0 : 1);
 }

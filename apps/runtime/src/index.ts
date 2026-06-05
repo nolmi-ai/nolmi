@@ -217,6 +217,10 @@ async function main() {
   const focusLoopService = new FocusLoopService({
     db: repo.db,
     registry,
+    // 2b: Owner-Push-Pfad für autonome Nudges. ENV-gated in nudge() selbst
+    // (PROACTIVE_NUDGE_AUTOSEND_ENABLED, Default aus) — durchgereicht, weil die
+    // BotRegistry erst hier (nach der Twin-Registry) konstruiert ist.
+    botRegistry: telegramBotRegistry,
   });
   focusLoopService.start(app.log);
 

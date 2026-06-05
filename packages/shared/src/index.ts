@@ -59,6 +59,7 @@ export const AuditStatusSchema = z.enum([
   "rejected",    // Vom Menschen abgelehnt vor Ausführung
   "blocked",     // Vom Mandate-System blockiert
   "failed",      // Technischer Fehler
+  "sent",        // Autonom an den Owner gepusht (kein offenes To-do) — Proaktiv-Nudge 2b
 ]);
 
 export const AuditEntrySchema = z.object({
