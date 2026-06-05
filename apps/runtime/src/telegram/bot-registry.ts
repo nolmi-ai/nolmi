@@ -5,6 +5,14 @@ import type { PairingService } from "./pairing-service.js";
 import type { TelegramMessageRouter } from "./message-router.js";
 import type { TwinProfilesRepo } from "../twin-profiles-repo.js";
 import { createTelegrafBot } from "./telegraf-setup.js";
+import { markdownToTelegramHtml } from "./markdown-to-telegram-html.js";
+
+/** Ergebnis von {@link TelegramBotRegistry.sendToOwner}. */
+export interface SendToOwnerResult {
+  sent: boolean;
+  /** Grund, wenn NICHT gesendet — für graceful Aufrufer (Loop, 2b). */
+  reason?: "no-bot" | "not-paired" | "send-failed";
+}
 
 // ─── TELEGRAM BOT REGISTRY (#130 Phase 2) ───────────────────────────────────
 //
@@ -298,5 +306,60 @@ export class TelegramBotRegistry {
     const bot = this.bots.get(twin_id);
     if (!bot) return;
     await bot.telegram.deleteWebhook();
+  }
+
+  /**
+   * Proaktiv-Nudge Stufe 2a: AKTIVER Owner-Push — sendet dem gepairten Owner
+   * UNAUFGEFORDERT eine Telegram-Nachricht (anders als der gesamte sonstige
+   * Telegram-Pfad, der ausschließlich request-response via `ctx.reply` läuft).
+   * Telegram erlaubt Bot→User, weil das Pairing impliziert, dass der Owner den
+   * Bot gestartet hat.
+   *
+   * 🔴 NUR die Sende-Fähigkeit (2a). KEINE Verdrahtung an den Nudge, KEIN
+   * ENV-Gate — das ist 2b. Diese Methode entscheidet NICHT, OB gepusht wird;
+   * sie pusht, wenn der Aufrufer es will.
+   *
+   * Graceful by design — der Aufrufer (autonomer Loop in 2b) darf an einem
+   * fehlgeschlagenen Push NICHT sterben:
+   *   - kein Bot für den Twin (kein Telegram konfiguriert) → {sent:false, 'no-bot'}
+   *   - nicht gepairt (keine Owner-Chat-ID)               → {sent:false, 'not-paired'}
+   *   - Telegram-API wirft (User hat Bot blockiert etc.)  → {sent:false, 'send-failed'}
+   * In allen Fällen: kein Throw, Fehler geloggt.
+   *
+   * Markdown→Telegram-HTML wie im message-router (wiederverwendet, nicht
+   * dupliziert), inkl. Plain-Text-Fallback bei HTML-Reject — so kommt die
+   * Nachricht auch bei Marker-Glitch durch.
+   */
+  async sendToOwner(twinId: string, text: string): Promise<SendToOwnerResult> {
+    const bot = this.bots.get(twinId);
+    if (!bot) return { sent: false, reason: "no-bot" };
+
+    const config = this.configsRepo.findByTwinId(twinId);
+    const chatId = config?.paired_owner_telegram_user_id ?? null;
+    if (chatId === null) return { sent: false, reason: "not-paired" };
+
+    try {
+      const html = markdownToTelegramHtml(text);
+      try {
+        await bot.telegram.sendMessage(chatId, html, { parse_mode: "HTML" });
+      } catch (htmlErr) {
+        // HTML-Reject (unbalanced Tag etc.) → Plain-Fallback, wie message-router.
+        const msg = htmlErr instanceof Error ? htmlErr.message : String(htmlErr);
+        this.logger?.warn(
+          { twin_id: twinId, err: msg },
+          "[bot-registry] sendToOwner HTML rejected — Plain-Fallback",
+        );
+        await bot.telegram.sendMessage(chatId, text);
+      }
+      return { sent: true };
+    } catch (err) {
+      // Auch der Plain-Send schlug fehl (z.B. Bot vom User blockiert).
+      const msg = err instanceof Error ? err.message : String(err);
+      this.logger?.error(
+        { twin_id: twinId, err: msg },
+        "[bot-registry] sendToOwner fehlgeschlagen",
+      );
+      return { sent: false, reason: "send-failed" };
+    }
   }
 }
