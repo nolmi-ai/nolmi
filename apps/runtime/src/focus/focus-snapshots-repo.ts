@@ -96,6 +96,25 @@ export class FocusSnapshotsRepo {
   }
 
   /**
+   * Proaktiver Fokus-Nudge: die jüngsten Snapshots eines Twins — AKTIV UND
+   * SUPERSEDED (die ganze Fokus-Historie), absteigend nach derived_at. Die
+   * Festhäng-Detektion (ProactiveNudgeService) vergleicht die Themen über die
+   * jüngsten N Snapshots; anders als getCurrent braucht sie die supersedierten
+   * Vorgänger mit. Indiziert über (twin_id, derived_at).
+   */
+  listRecent(twinId: string, limit: number): FocusSnapshot[] {
+    const rows = this.db
+      .prepare(
+        `SELECT * FROM focus_snapshots
+           WHERE twin_id = ?
+           ORDER BY derived_at DESC
+           LIMIT ?`,
+      )
+      .all(twinId, limit) as FocusSnapshotRow[];
+    return rows.map(rowToSnapshot);
+  }
+
+  /**
    * Schritt 3 (Leitplanke): setzt den aktuell aktiven Snapshot auf superseded
    * (Owner-Reset). NON-DESTRUKTIV — UPDATE statt DELETE, die Row bleibt für die
    * History erhalten. Idempotent: kein aktiver Snapshot → no-op (kein Fehler).

@@ -561,6 +561,24 @@ function extractLastMessage(entry: AuditEntry): string {
         : s.suggestionText;
     }
   }
+  // Proaktiver Fokus-Anstoß: die message ist der Kern (das, was der Twin sagen
+  // würde), darunter das festhängende Thema + wie lange stabil.
+  if (entry.capability === "proactive-nudge") {
+    const n = entry.input as {
+      message?: string;
+      thema?: string;
+      tageStabil?: number;
+    };
+    if (typeof n.message === "string") {
+      const kontext =
+        n.thema && typeof n.tageStabil === "number"
+          ? `\n\nThema: ${n.thema} (seit ${n.tageStabil} Erhebungen stabil)`
+          : n.thema
+            ? `\n\nThema: ${n.thema}`
+            : "";
+      return `${n.message}${kontext}`;
+    }
+  }
   if (typeof input.lastMessage === "string") return input.lastMessage;
   if (Array.isArray(input.messages)) {
     const last = input.messages[input.messages.length - 1];
@@ -603,6 +621,10 @@ function formatPendingHeader(entry: AuditEntry): string {
   }
   if (entry.capability === "social-suggestion") {
     return "Beziehungs-Vorschlag";
+  }
+  if (entry.capability === "proactive-nudge") {
+    const thema = (entry.input as { thema?: string }).thema;
+    return thema ? `Proaktiver Anstoß: ${thema}` : "Proaktiver Anstoß";
   }
   return entry.capability;
 }
@@ -668,6 +690,8 @@ function formatCapability(entry: AuditEntry): string {
     }
     case "social-suggestion":
       return "Sozialer Vorschlag";
+    case "proactive-nudge":
+      return "Proaktiver Anstoß";
     default:
       return entry.capability;
   }

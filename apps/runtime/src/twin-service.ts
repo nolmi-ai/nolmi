@@ -83,6 +83,12 @@ import {
 } from "./focus/focus-engine.js";
 import { FocusSnapshotsRepo } from "./focus/focus-snapshots-repo.js";
 import { buildFocusBlock } from "./focus/prompt-builder.js";
+import {
+  PROACTIVE_NUDGE_CAPABILITY,
+  ProactiveNudgeService,
+  NudgeOutputSchema,
+  type NudgeOutput,
+} from "./focus/proactive-nudge-service.js";
 import { McpClientManager } from "./mcp/client-manager.js";
 import { McpSkillSync } from "./mcp/skill-sync.js";
 import { buildMcpToolsFromSkills } from "./mcp/tool-bridge.js";
@@ -316,6 +322,16 @@ export class TwinService {
   public readonly focusRepo: FocusSnapshotsRepo;
 
   /**
+   * Proaktiver Fokus-Nudge Stufe 1: detektiert „Owner hängt seit ≥3 Snapshots
+   * am selben Thema", lässt den Twin einen Anstoß TEXTEN (LLM) und legt ihn als
+   * PENDING ab (`capability='proactive-nudge'`). KEIN Versand — Approve =
+   * acknowledge (Owner liest den Vorschlag in der Inbox). Vom Fokus-Loop-Tick
+   * getriggert (nicht separat opt-in — hängt an FOCUS_LOOP_ENABLED). Public, weil
+   * der Loop ihn über `entry.service.proactiveNudgeService.nudge()` erreicht.
+   */
+  public readonly proactiveNudgeService: ProactiveNudgeService;
+
+  /**
    * 3.4.D: Memory-Embedding-Service. Public, damit der Server-Reset-Pfad
    * über `entry.service.memoryEmbeddingService.embedConversation()` darauf
    * zugreifen kann. Send-Path benutzt es intern nach `summaryEngine`.
@@ -449,6 +465,25 @@ export class TwinService {
           prompt,
         });
         return result.object as FocusOutput;
+      },
+    });
+    // Proaktiver Fokus-Nudge: teilt den focusRepo (liest die Snapshot-Historie)
+    // und braucht — wie focusEngine — den LLM-Client für den Anstoß-Text.
+    this.proactiveNudgeService = new ProactiveNudgeService({
+      db: deps.db,
+      auditService: deps.audit,
+      focusRepo: this.focusRepo,
+      twinId: deps.twinId,
+      twinName: deps.persona.name,
+      ownerName: deps.persona.name,
+      generate: async ({ system, prompt }) => {
+        const result = await generateObject({
+          model: deps.model,
+          schema: NudgeOutputSchema,
+          system,
+          prompt,
+        });
+        return result.object as NudgeOutput;
       },
     });
     this.profilesRepo = new TwinProfilesRepo(deps.db);
@@ -1198,6 +1233,8 @@ export class TwinService {
         return this.approveSelfReflectionWrite(entry);
       case SOCIAL_SUGGESTION_CAPABILITY:
         return this.approveSocialSuggestion(entry);
+      case PROACTIVE_NUDGE_CAPABILITY:
+        return this.approveProactiveNudge(entry);
       default:
         return this.approveDefault(entry, persona);
     }
@@ -1616,6 +1653,25 @@ export class TwinService {
     const input = entry.input as { partnerHandle?: string };
     await this.deps.audit.complete(entry.id, {
       partnerHandle: input.partnerHandle ?? null,
+      acknowledged: true,
+    });
+    return { auditId: entry.id };
+  }
+
+  /**
+   * Proaktiver Fokus-Nudge Stufe 1: Approve eines `proactive-nudge`-Pending.
+   * KONSERVATIV / ACKNOWLEDGE: setzt den Audit nur auf `executed` — KEIN Send an
+   * den Owner (kein Telegram), KEIN Effekt nach außen. Die Stufe-1-Wirkung IST,
+   * dass der Owner den Anstoß in der Inbox gelesen hat. Der echte Versand
+   * (sendToOwner via Telegram) ist die spätere Freischaltung und käme GENAU hier
+   * rein — jetzt bewusst nicht. Reject = verwerfen (rejectPending, kein Sonderfall).
+   */
+  private async approveProactiveNudge(
+    entry: AuditEntry,
+  ): Promise<ApproveResult> {
+    const input = entry.input as { thema?: string };
+    await this.deps.audit.complete(entry.id, {
+      thema: input.thema ?? null,
       acknowledged: true,
     });
     return { auditId: entry.id };

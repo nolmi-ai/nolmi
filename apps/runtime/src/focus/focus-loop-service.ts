@@ -2,6 +2,7 @@ import type { FastifyBaseLogger } from "fastify";
 import type Database from "better-sqlite3";
 import type { TwinServiceRegistry, TwinSummary } from "../twin-service-registry.js";
 import type { FocusResult } from "./focus-engine.js";
+import type { ProactiveNudgeResult } from "./proactive-nudge-service.js";
 
 // ─── FOCUS LOOP SERVICE (Aufmerksamkeit/Fokus Stufe 1 — Schritt 4/4) ─────────
 //
@@ -25,6 +26,14 @@ import type { FocusResult } from "./focus-engine.js";
 // hasNewSubstanceSince: nur neu ableiten, wenn seit dem letzten aktiven
 // Snapshot neue Substanz da ist (neue Turns/Audits ODER neue Summary). Kein
 // aktiver Snapshot (noch nie abgeleitet) → Guard passiert (immer ableiten).
+//
+// ── ANGEHÄNGT (additiv): Proaktiver Fokus-Nudge Stufe 1 ──
+// Nach der Fokus-Ableitung prüft jeder Tick zusätzlich, ob der Owner lang am
+// selben Thema festhängt (ProactiveNudgeService.nudge()) und legt ggf. einen
+// Pending-Anstoß ab. KEIN eigener Loop, KEIN separates Gate — das Feature hängt
+// an diesem (FOCUS_LOOP_ENABLED-gateten) Loop. Eigener try/catch pro Twin, damit
+// ein Nudge-Fehler weder die Fokus-Ableitung noch die anderen Twins killt.
+// „Still, bis Historie da ist": <3 Snapshots → detectStuck=false, 0 Token.
 
 const DEFAULT_INTERVAL_HOURS = 24;
 
@@ -45,6 +54,11 @@ export interface FocusLoopDeps {
    * NICHT aufgerufen" (Skip) bzw. „aufgerufen" zu prüfen.
    */
   triggerFocus?: (handle: string) => Promise<FocusResult | null>;
+  /**
+   * Test-Hook: pro-Twin-Nudge-Trigger. Default ruft die in-process Registry-
+   * Engine `proactiveNudgeService.nudge()`. Tests injizieren einen Spy/Mock.
+   */
+  triggerNudge?: (handle: string) => Promise<ProactiveNudgeResult | null>;
 }
 
 export interface FocusForTwinOutcome {
@@ -60,6 +74,9 @@ export class FocusLoopService {
   private logger: FastifyBaseLogger | null = null;
   private readonly intervalMs: number;
   private readonly trigger: (handle: string) => Promise<FocusResult | null>;
+  private readonly nudgeTrigger: (
+    handle: string,
+  ) => Promise<ProactiveNudgeResult | null>;
 
   constructor(private deps: FocusLoopDeps) {
     const envHours = Number(process.env.FOCUS_LOOP_INTERVAL_HOURS);
@@ -73,6 +90,13 @@ export class FocusLoopService {
         const twin = this.deps.registry.getByHandle(handle);
         if (!twin) return null; // Race: Twin zwischen list() und Trigger entfernt
         return twin.focusEngine.deriveFocus();
+      });
+    this.nudgeTrigger =
+      deps.triggerNudge ??
+      (async (handle) => {
+        const twin = this.deps.registry.getByHandle(handle);
+        if (!twin) return null;
+        return twin.proactiveNudgeService.nudge();
       });
   }
 
@@ -131,6 +155,20 @@ export class FocusLoopService {
           "[focus-loop] deriveFocus failed for twin",
         );
       }
+      // Additiv: proaktiver Fokus-Nudge. Eigener try/catch — ein Nudge-Fehler
+      // soll die Fokus-Ableitung (oben) und die anderen Twins nicht killen.
+      try {
+        await this.nudgeForTwin(twin);
+      } catch (err) {
+        this.logger?.error(
+          {
+            twinId: twin.twinId,
+            handle: twin.handle,
+            err: err instanceof Error ? err.message : String(err),
+          },
+          "[focus-loop] proactive-nudge failed for twin",
+        );
+      }
     }
   }
 
@@ -162,6 +200,28 @@ export class FocusLoopService {
       "[focus-loop] neuer Fokus-Snapshot erzeugt",
     );
     return { skipped: false, created: true, snapshotId: result.snapshot?.id };
+  }
+
+  /**
+   * Proaktiver Fokus-Nudge (additiv, nach focusForTwin). Detektion + Guards +
+   * LLM + Pending stecken im ProactiveNudgeService; hier nur Trigger + Logging.
+   * Rückgabe für Tests.
+   */
+  async nudgeForTwin(twin: TwinSummary): Promise<ProactiveNudgeResult | null> {
+    const result = await this.nudgeTrigger(twin.handle);
+    if (!result) return null; // Race: Twin zwischen list() und Trigger entfernt
+    if (!result.created) {
+      this.logger?.info(
+        { handle: twin.handle, reason: result.reason },
+        "[focus-loop] kein proaktiver Anstoß erzeugt",
+      );
+      return result;
+    }
+    this.logger?.info(
+      { handle: twin.handle, auditId: result.auditId, thema: result.thema },
+      "[focus-loop] proaktiver Fokus-Anstoß als Pending erzeugt",
+    );
+    return result;
   }
 
   // ─── Guard-Queries ──────────────────────────────────────────────────────
