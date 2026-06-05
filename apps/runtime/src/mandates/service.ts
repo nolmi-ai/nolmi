@@ -17,7 +17,7 @@ interface MandateYamlEntry {
   description: string;
   scope: string[];
   conditions?: Record<string, unknown>;
-  escalation: "auto" | "always_pending" | "above_threshold";
+  escalation: "auto" | "always_pending";
 }
 
 export async function loadMandatesFromYaml(path: string): Promise<Mandate[]> {

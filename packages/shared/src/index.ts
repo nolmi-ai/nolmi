@@ -40,7 +40,7 @@ export const MandateSchema = z.object({
   description: z.string(),
   scope: z.array(MandateScopeSchema),
   conditions: z.record(z.string(), z.unknown()).default({}),
-  escalation: z.enum(["auto", "always_pending", "above_threshold"]),
+  escalation: z.enum(["auto", "always_pending"]),
   createdAt: z.string().datetime(),
 });
 
