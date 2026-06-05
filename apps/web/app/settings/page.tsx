@@ -55,6 +55,14 @@ interface TwinSummary {
   displayName: string;
 }
 
+type FamiliarityLevel = "fremd" | "bekannt" | "vertraut" | "eng";
+const FAMILIARITY_LEVELS: { value: FamiliarityLevel; label: string }[] = [
+  { value: "fremd", label: "fremd" },
+  { value: "bekannt", label: "bekannt" },
+  { value: "vertraut", label: "vertraut" },
+  { value: "eng", label: "eng" },
+];
+
 interface TrustRelationship {
   trustId: string;
   twinId: string;
@@ -62,6 +70,7 @@ interface TrustRelationship {
   note: string | null;
   createdAt: string;
   createdByUserId: string;
+  familiarityLevel: FamiliarityLevel;
 }
 
 interface Skill {
@@ -553,6 +562,39 @@ function SettingsInner() {
     }
   }
 
+  // Phase 4.3 Schritt 3: Vertrautheits-Level eines getrusteten Partners setzen.
+  // Trifft immer eine bestehende Trust-Row (die Liste zeigt nur getrustete
+  // Partner) → die Route wirft hier nie. Nur Ton-Wirkung (Schritt 2), keine
+  // Autonomie.
+  async function setFamiliarity(trust: TrustRelationship, level: FamiliarityLevel) {
+    if (!selectedHandle) return;
+    setTrustError(null);
+    setTrustInfo(null);
+    setTrustBusy(true);
+    try {
+      const res = await fetch(
+        `${RUNTIME_URL}/twins/${selectedHandle}/trust/${trust.trustId}/familiarity`,
+        {
+          method: "POST",
+          credentials: "include",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ level }),
+        },
+      );
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({ error: `HTTP ${res.status}` }));
+        setTrustError((body as { error?: string }).error ?? `HTTP ${res.status}`);
+        return;
+      }
+      await loadTrusts(selectedHandle);
+      setTrustInfo(`Vertrautheit zu ${trust.trustedHandle} auf „${level}" gesetzt.`);
+    } catch (err) {
+      setTrustError(err instanceof Error ? err.message : "Vertrautheit setzen fehlgeschlagen");
+    } finally {
+      setTrustBusy(false);
+    }
+  }
+
   async function toggleSkill(skill: Skill) {
     if (!selectedHandle) return;
     const next = !skill.isActive;
@@ -830,6 +872,9 @@ function SettingsInner() {
         <p className="text-sm text-muted leading-relaxed mb-4">
           Twins die du in dieser Liste hast können dir direkt anfragen, ohne dass Approval nötig ist. Owner-Direkt-Chats laufen ohnehin ohne Approval.
         </p>
+        <p className="text-xs text-muted leading-relaxed mb-4">
+          Die Vertrautheit beeinflusst den Ton, in dem dein Twin mit diesem Gegenüber spricht — von zurückhaltend (fremd) bis sehr direkt (eng). Die Substanz bleibt gleich.
+        </p>
         {trusts.length === 0 ? (
           <div className="text-sm text-muted mb-4">
             Noch keine vertrauten Twins. Trag unten einen Handle ein, um anzufangen.
@@ -847,6 +892,23 @@ function SettingsInner() {
                     <div className="text-xs text-muted mt-0.5">{trust.note}</div>
                   )}
                 </div>
+                <label className="flex items-center gap-1.5 text-xs text-muted flex-shrink-0">
+                  Vertrautheit:
+                  <select
+                    value={trust.familiarityLevel}
+                    onChange={(e) =>
+                      void setFamiliarity(trust, e.target.value as FamiliarityLevel)
+                    }
+                    disabled={trustBusy}
+                    className="px-2 py-1 bg-bg border border-border rounded text-xs text-text focus:outline-none focus:border-accent disabled:opacity-50"
+                  >
+                    {FAMILIARITY_LEVELS.map((l) => (
+                      <option key={l.value} value={l.value}>
+                        {l.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
                 <button
                   onClick={() => removeTrust(trust)}
                   disabled={trustBusy}

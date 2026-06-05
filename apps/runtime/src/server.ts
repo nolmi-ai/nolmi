@@ -999,7 +999,12 @@ const TrustAddSchema = z.object({
   note: z.string().max(500).optional(),
 });
 
-function registerTrustRoutes(
+// Phase 4.3 Schritt 3: manuelles Setzen des Vertrautheits-Levels.
+const FamiliaritySetSchema = z.object({
+  level: z.enum(["fremd", "bekannt", "vertraut", "eng"]),
+});
+
+export function registerTrustRoutes(
   app: FastifyInstance,
   deps: ServerDeps,
   requireOwner: (
@@ -1129,6 +1134,58 @@ function registerTrustRoutes(
           return reply.status(404).send({ error: err.message });
         }
         throw err;
+      }
+    },
+  );
+
+  // Familiarity-Level setzen (Phase 4.3 Schritt 3 — die Leitplanke).
+  // Owner sieht das Level via GET /trust, setzt es hier manuell. Variante 1:
+  // annotiert eine bestehende Trust-Row; KEINE Dispatch-/Autonomie-Wirkung
+  // (isTrusted bleibt row-basiert), nur der A2A-Ton (Schritt 2) liest den Wert.
+  app.post<{ Params: { handle: string; trustId: string } }>(
+    "/twins/:handle/trust/:trustId/familiarity",
+    async (request, reply) => {
+      const ctx = await requireOwner(request, reply, request.params.handle);
+      if (!ctx) return;
+      const { entry } = ctx;
+
+      const parsed = FamiliaritySetSchema.safeParse(request.body);
+      if (!parsed.success) {
+        return reply.status(400).send({ error: parsed.error.message });
+      }
+      const { level } = parsed.data;
+
+      // Twin-Ownership-Check wie bei DELETE — fremde trustId via eigenen Handle
+      // darf nicht getroffen werden.
+      const existing = deps.trustRepo.findById(request.params.trustId);
+      if (!existing || existing.twinId !== entry.twinId) {
+        return reply.status(404).send({ error: "Trust-Eintrag nicht für diesen Twin" });
+      }
+
+      try {
+        // Keyed by (twinId, trustedHandle); die Row existiert (findById fand sie),
+        // setFamiliarity wirft also hier nicht — defensiv trotzdem gefangen.
+        deps.trustRepo.setFamiliarity(entry.twinId, existing.trustedHandle, level);
+        await deps.audit.append({
+          id: `audit_${nanoid(12)}`,
+          twinId: entry.twinId,
+          timestamp: new Date().toISOString(),
+          capability: "familiarity-set",
+          mandateId: null,
+          status: "executed",
+          input: { trustedHandle: existing.trustedHandle, level },
+          output: null,
+          reason: null,
+        });
+        return reply.status(200).send({
+          trustId: existing.trustId,
+          trustedHandle: existing.trustedHandle,
+          familiarityLevel: level,
+        });
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        request.log.error({ err: msg }, "[trust] setFamiliarity fehlgeschlagen");
+        return reply.status(500).send({ error: `Vertrautheit setzen fehlgeschlagen: ${msg}` });
       }
     },
   );

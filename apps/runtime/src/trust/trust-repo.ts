@@ -27,6 +27,8 @@ export interface TrustRelationship {
   note: string | null;
   createdAt: string;
   createdByUserId: string;
+  /** Phase 4.3: Vertrautheits-Level dieser Beziehung (Schritt 1). */
+  familiarityLevel: FamiliarityLevel;
 }
 
 interface TrustRow {
@@ -36,6 +38,7 @@ interface TrustRow {
   note: string | null;
   created_at: string;
   created_by_user_id: string;
+  familiarity_level: FamiliarityLevel;
 }
 
 export class TrustAlreadyExistsError extends Error {
@@ -68,6 +71,9 @@ export class TrustRepo {
       note: note?.trim() || null,
       createdAt: new Date().toISOString(),
       createdByUserId: userId,
+      // Spiegelt den DB-DEFAULT (029): der INSERT setzt familiarity_level nicht,
+      // die Spalte defaultet auf 'vertraut' — das zurückgegebene Objekt auch.
+      familiarityLevel: "vertraut",
     };
     try {
       this.db
@@ -204,5 +210,8 @@ function rowToTrust(row: TrustRow): TrustRelationship {
     note: row.note,
     createdAt: row.created_at,
     createdByUserId: row.created_by_user_id,
+    // Phase 4.3 Schritt 3: Spalte existiert seit 029, SELECT * holt sie —
+    // hier nur ins Domain-Objekt mappen (für GET /trust).
+    familiarityLevel: row.familiarity_level,
   };
 }
