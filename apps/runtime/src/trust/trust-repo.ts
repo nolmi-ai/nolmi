@@ -11,6 +11,15 @@ import { nanoid } from "nanoid";
 // Implementierung als simpler EXISTS-Lookup über den Composite-Index
 // (twin_id, trusted_handle) → unter 1ms auch bei tausenden Einträgen.
 
+/**
+ * Phase 4.3 Schritt 1: graded Vertrautheits-Level pro Partner. 'fremd' ist der
+ * LESE-DEFAULT bei fehlender Row (kein gespeicherter Wert für untrusted
+ * Partner); Rows tragen 'bekannt'/'vertraut'/'eng' (bzw. 'fremd', wenn ein
+ * bestehender Partner bewusst herabgestuft wird — Schritt 3). Schema-Guard:
+ * CHECK in migrations/029_familiarity_level.sql.
+ */
+export type FamiliarityLevel = "fremd" | "bekannt" | "vertraut" | "eng";
+
 export interface TrustRelationship {
   trustId: string;
   twinId: string;
@@ -141,6 +150,49 @@ export class TrustRepo {
       )
       .get(twinId, trustedHandle) as { 1: number } | undefined;
     return row !== undefined;
+  }
+
+  /**
+   * Phase 4.3 Schritt 1: Vertrautheits-Level eines Partners. Existiert eine
+   * Trust-Row → deren familiarity_level. Existiert KEINE Row (kein Trust-
+   * Verhältnis) → 'fremd' als Lese-Default (D7-Semantik: fremd ist kein
+   * gespeicherter Wert, sondern die Abwesenheit einer Beziehung).
+   *
+   * 🔴 Schritt 1 ist reine Datenschicht — diese Funktion hat KEINE Dispatch-
+   * Wirkung. `isTrusted` (oben) bleibt unverändert row-basiert; die Reconci-
+   * liation isTrusted-vs-level ist Schritt 5.
+   */
+  getFamiliarity(twinId: string, partnerHandle: string): FamiliarityLevel {
+    const row = this.db
+      .prepare(
+        "SELECT familiarity_level FROM trust_relationships WHERE twin_id = ? AND trusted_handle = ? LIMIT 1",
+      )
+      .get(twinId, partnerHandle) as { familiarity_level: FamiliarityLevel } | undefined;
+    return row?.familiarity_level ?? "fremd";
+  }
+
+  /**
+   * Setzt das Level einer BESTEHENDEN Trust-Row. 🔴 KISS für Schritt 1: kein
+   * Auto-Insert bei fehlender Row — eine Row anzulegen hieße „trusten" (Row-
+   * Existenz = trusted im heutigen Dispatch), das wäre eine Wirkung, die
+   * Schritt 1 nicht haben darf. Wer ein Level für einen fremden Partner setzen
+   * will, muss ihn erst über add() trusten; die saubere Auflösung dieser
+   * Kollision (Level ohne Trust) ist Schritt 3/5. Wirft TrustNotFoundError,
+   * wenn keine Row existiert.
+   */
+  setFamiliarity(
+    twinId: string,
+    partnerHandle: string,
+    level: FamiliarityLevel,
+  ): void {
+    const result = this.db
+      .prepare(
+        "UPDATE trust_relationships SET familiarity_level = ? WHERE twin_id = ? AND trusted_handle = ?",
+      )
+      .run(level, twinId, partnerHandle);
+    if (result.changes === 0) {
+      throw new TrustNotFoundError(`${twinId}/${partnerHandle}`);
+    }
   }
 }
 
