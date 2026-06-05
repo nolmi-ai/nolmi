@@ -159,6 +159,8 @@ Beim #3-Live-Test (Tag 35) aufgefallen: Im Audit ist **„maxLength war aktiv, a
 
 **Status:** OFFEN (notiert, nicht jetzt bauen) | **Größe XS–S** | **Priorität:** nice (Hygiene)
 
+**Status Tag 38 (read-only verifiziert):** (a) `above_threshold` ENTFERNT (war nirgends ausgewertet, 0 DB-Rows, strukturell unerzeugbar). (b) `/chat`-Legacy-Alias bleibt — KEIN Einzelrest, sondern eine von 7 Routen in `registerLegacyAliases()`; Geschwister-Alias `/stream` wird noch live genutzt (`stream/page.tsx:22` bare `EventSource(RUNTIME_URL/stream)`). Ganzer Block erst entfernbar, wenn `stream/page.tsx` auf `/twins/<handle>/stream` migriert ist → dann `registerLegacyAliases` komplett raus als EINE Aktion (verschmilzt mit BACKLOG-Legacy-Alias-Cluster). (c) `requiresApprovalIfMatches` bleibt — KEIN verwaister Wert, sondern Teil des Conditions-Clusters (mit `requiresApproval`/`maxLength`, service.ts:70-76), Platzhalter mit Inline-Zeiger auf Backlog #3 (Content-Matching geplant, nie verdrahtet). Der Beispiel-Wert dokumentiert die Absicht — gehört unter ein gemeinsames „Conditions-Auswertung (#3) — definiert, nicht verdrahtet"-Item, NICHT einzeln löschen.
+
 Die `always_pending`-Diagnose (Tag 35) legte mehrere tote/inkonsistente Reste frei — Cleanup-Kandidaten, kein Funktionsfehler:
 - **`above_threshold`-Escalation:** im Enum (`packages/shared` `z.enum(["auto","always_pending","above_threshold"])`, `mandates/service.ts:20`), aber **nirgends ausgewertet** und in keinem Template verwendet → totes Enum.
 - **deprecated `/chat`-Legacy-Alias** (`server.ts:510`): einziger nicht-owner-bypassender `respond_to_chat`-Pfad, vom Web-UI nicht genutzt → Kandidat zum Entfernen (oder bewusst als Test-Hook dokumentieren).
