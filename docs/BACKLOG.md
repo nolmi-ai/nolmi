@@ -2723,6 +2723,36 @@ Separater Hostinger-VPS Frankfurt, Ubuntu 24.04 LTS, IP `187.124.3.235`. Neu-Auf
 
 **Markus' parallele Arbeit (Stand Tag 31):** ✅ Foundation gesichert (Domain + VPS + GitHub-Org `nolmi-ai` + npm `@nolmi` + PyPI + Docker Hub `nolmi` + Mail-Stack + Trademark-Quick-Search). Verbleibend: Social-Handles + Brand-Assets-Produktion. Details siehe Strategy-Doc §9.
 
+### #97 Facts mit Validity-Windows + History-Tracking (L, should) ✅
+
+✅ **Erledigt** (Tag 37, Hygiene Welle 1 hierher umsortiert; Beleg: Migration `028_facts_history` + `apps/runtime/src/facts/facts-history-repo.ts`; deployt mit dem Tag-39-Migrations-Stapel). Rest (getAsOf-Query / Twin-weite Sicht / confidence-History) als offenes **#97b** abgespalten. Original-Text unverändert:
+
+**Status Tag 37:** ✅ gebaut (4 Sub-Schritte: Schema 028 / atomare Capture / owner-gated Route / UI-Verlauf-Aufklappen), lokal end-to-end verifiziert. Umgesetzt als SEPARATE facts_history-Tabelle (nicht valid_from/valid_until-Spalten in facts — risikoärmer, kein Rebuild). Semantik: nur fact_value-Drift + delete, change_type-Spalte hält confidence-History additiv offen. Noch nicht deployt (Deploy folgt, erste Prod-Migration seit 027). getAsOf-Route + Twin-weite Sicht + confidence-History zurückgestellt (additiv nachrüstbar).
+
+Erweiterung des Facts-Systems (`facts`-Tabelle aus 3.3) um temporale Dimension. Heute überschreibt ein neuer Fact den alten — keine History, kein Audit, kein Drift-Tracking möglich.
+
+MemPalace hat das gelöst via Temporal-Knowledge-Graph mit Validity-Windows: Entity-Relationship-Graph mit Zeit-Stempeln pro Fact, alte Einträge werden invalidated (nicht überschrieben), Timeline-Queries möglich (z.B. „Wie war Markus' Beziehungsstatus 2015?").
+
+Übertragung auf twin-lab:
+
+- `facts`-Tabelle bekommt `valid_from`, `valid_until`, `invalidated_by_fact_id` Spalten
+- Plus neue `facts_history`-Tabelle für vollständigen Audit-Trail bei Updates
+- Repo-Methoden: `factsRepo.invalidate(factId, by)`, `factsRepo.getAsOf(date)`, `factsRepo.getTimeline(key)`
+- UI: Facts-Page bekommt Toggle „aktuell" vs „historisch", Timeline-Ansicht pro Fact-Key
+
+Direktes Substrate für Vision-Patterns:
+- **Werte-Drift** (TWIN-VISION Pattern 5): Twin kann beobachten wie sich Markus' Werte über Zeit verschieben
+- **Zeit-Erleben** (Pattern 2): „Was war 2025 wichtig, was ist heute wichtig?"
+- **Lebens-Narrativ** (Pattern 7): primär Lesart (A) Twin-über-sich (Verdichtung der Diary-Selbstreflexionen zu einem Bogen — Source of Truth TWIN-VISION :79/:205); Facts-Validity wäre nur für die sekundäre (B)-Lesart (Markus-Biografie) relevant
+
+Substantiell — eigene Phase, vermutlich nach 3.4 oder mit Pattern-Phase „Zeit-Erleben" gebündelt. MemPalace's Implementation als Referenz nutzen, keine direkte Code-Übernahme (Python → TypeScript).
+
+Aus Tag-14-Recherche.
+
+### Proaktiv-Nudge Anlass 3 (unbeantwortete Twin-Frage) ✅
+
+✅ **Erledigt** (Tag 39; Beleg: `a59b4af` — `proactive-nudge`-Audit mit `input.anlass='offene_frage'`, Detektor `detectOpenQuestion` + Generator-Prompt + anlass-bewusstes Dedup in `apps/runtime/src/focus/proactive-nudge-service.ts`, am Fokus-Loop-Tick verdrahtet; STAND Tag 39 Forts.). Sichere Sorte (a) Twin-Frage-unbeantwortet: das „offen-vs-erledigt"-Signal kam aus der Audit-Turn-Reihenfolge (jüngste Audit-Row pro Konv = letztes Wort; reply endet auf „?" + keine neuere Row = offen), KEINE Migration. Eigenes Autosend-Gate `PROACTIVE_NUDGE_ANLASS3_AUTOSEND_ENABLED` (Default aus). Aus dem früheren Bundle „Anlass 2+3" abgespalten — Anlass 2 (Werte-Widerspruch) bleibt vertagt (siehe Phase-B-Block).
+
 ---
 
 
@@ -3030,47 +3060,30 @@ Andockpunkt: Pattern-Phase „Aufmerksamkeit/Fokus" (TWIN-VISION) oder dedicated
 
 Aus Tag-14-Recherche + Pre-Check-Befund.
 
-### #97 Facts mit Validity-Windows + History-Tracking (L, should)
+### #97b getAsOf-Query / Twin-weite Sicht auf Fact-History (S, nice)
 
-**Status Tag 37:** ✅ gebaut (4 Sub-Schritte: Schema 028 / atomare Capture / owner-gated Route / UI-Verlauf-Aufklappen), lokal end-to-end verifiziert. Umgesetzt als SEPARATE facts_history-Tabelle (nicht valid_from/valid_until-Spalten in facts — risikoärmer, kein Rebuild). Semantik: nur fact_value-Drift + delete, change_type-Spalte hält confidence-History additiv offen. Noch nicht deployt (Deploy folgt, erste Prod-Migration seit 027). getAsOf-Route + Twin-weite Sicht + confidence-History zurückgestellt (additiv nachrüstbar).
-
-Erweiterung des Facts-Systems (`facts`-Tabelle aus 3.3) um temporale Dimension. Heute überschreibt ein neuer Fact den alten — keine History, kein Audit, kein Drift-Tracking möglich.
-
-MemPalace hat das gelöst via Temporal-Knowledge-Graph mit Validity-Windows: Entity-Relationship-Graph mit Zeit-Stempeln pro Fact, alte Einträge werden invalidated (nicht überschrieben), Timeline-Queries möglich (z.B. „Wie war Markus' Beziehungsstatus 2015?").
-
-Übertragung auf twin-lab:
-
-- `facts`-Tabelle bekommt `valid_from`, `valid_until`, `invalidated_by_fact_id` Spalten
-- Plus neue `facts_history`-Tabelle für vollständigen Audit-Trail bei Updates
-- Repo-Methoden: `factsRepo.invalidate(factId, by)`, `factsRepo.getAsOf(date)`, `factsRepo.getTimeline(key)`
-- UI: Facts-Page bekommt Toggle „aktuell" vs „historisch", Timeline-Ansicht pro Fact-Key
-
-Direktes Substrate für Vision-Patterns:
-- **Werte-Drift** (TWIN-VISION Pattern 5): Twin kann beobachten wie sich Markus' Werte über Zeit verschieben
-- **Zeit-Erleben** (Pattern 2): „Was war 2025 wichtig, was ist heute wichtig?"
-- **Lebens-Narrativ** (Pattern 7): primär Lesart (A) Twin-über-sich (Verdichtung der Diary-Selbstreflexionen zu einem Bogen — Source of Truth TWIN-VISION :79/:205); Facts-Validity wäre nur für die sekundäre (B)-Lesart (Markus-Biografie) relevant
-
-Substantiell — eigene Phase, vermutlich nach 3.4 oder mit Pattern-Phase „Zeit-Erleben" gebündelt. MemPalace's Implementation als Referenz nutzen, keine direkte Code-Übernahme (Python → TypeScript).
-
-Aus Tag-14-Recherche.
+Additiver Rest aus #97 (Hauptteil ✅ gebaut Tag 37 → Archiv). Offen: `factsRepo.getAsOf(date)` (Fact-Stand zu einem Datum) + Twin-weite History-Sicht (statt nur pro Key) + confidence-History (`change_type`-Spalte hält das additiv offen). Nachrüstbar OHNE Migration auf der bestehenden `facts_history`-Tabelle (028).
+**Größe:** S · **Priorität:** nice · **Aus:** #97-Rest
 
 ### Vision-Pattern „Gewohnheiten/Rituale" — vertagt bis organische Nutzung (Daten-blockiert)
 
-**Status:** vertagt (Tag 37 read-only diagnostiziert, nicht gebaut). **Grund:** Datenschicht misst heute Build-Aktivität statt Lebensrhythmus (audit-Timestamps = Claude-Code-Sessions; conversation_summaries @markus = 0). Pending-gated (Inferenz über Markus, Vorbild self-reflection-write) → schwache Muster würden Approval-Müll erzeugen. **Wann baubar:** nach Akkumulation echter (Nicht-Build-)Nutzung über mehrere Wochen/Monate — Längsschnitt nötig. **Maschinerie steht bereit (wenn Daten tragen):** Audit-Pending-Klasse, hybrid (deterministische Timestamp-Aggregation + optional LLM für sprachliche Fassung), vermutlich keine Migration (approved Audits/Diary). **Cross-Ref:** dieselbe Daten-Klasse wie Werte-Drift; Schlaf/Träume (#94) wäre datenSCHAFFEND (erzeugt die fehlenden Summaries) und damit der sinnvollere nächste Vision-Bau.
+**Status Tag 39:** Blockade-Prämisse (conversation_summaries @markus = 0) wird durch G2 (Telegram-Konversations-Lifecycle, Tag 39) adressiert — Längsschnitt entsteht aus echtem Verkehr. Wiederaufnahme: nach G2-Beweis (Tag-40-Tick) neu vermessen. **(Tag 37, read-only diagnostiziert, nicht gebaut.)** **Grund:** Datenschicht misst heute Build-Aktivität statt Lebensrhythmus (audit-Timestamps = Claude-Code-Sessions; conversation_summaries @markus = 0). Pending-gated (Inferenz über Markus, Vorbild self-reflection-write) → schwache Muster würden Approval-Müll erzeugen. **Wann baubar:** nach Akkumulation echter (Nicht-Build-)Nutzung über mehrere Wochen/Monate — Längsschnitt nötig. **Maschinerie steht bereit (wenn Daten tragen):** Audit-Pending-Klasse, hybrid (deterministische Timestamp-Aggregation + optional LLM für sprachliche Fassung), vermutlich keine Migration (approved Audits/Diary). **Cross-Ref:** dieselbe Daten-Klasse wie Werte-Drift; Schlaf/Träume (#94) wäre datenSCHAFFEND (erzeugt die fehlenden Summaries) und damit der sinnvollere nächste Vision-Bau.
 
 ### Vision-Pattern „Lebens-Narrativ" (#7) — vertagt bis Diary-Tiefe (daten-blockiert, aber intern freischaltbar)
 
-**Status:** vertagt (Tag 37 read-only diagnostiziert). **Scope geklärt:** Lesart (A) Twin-über-sich (Vision :79/:205), NICHT Markus-Biografie. **Grund:** Quelle Twin-Diary = real 1 Eintrag → keine „Story, die sich entwickelt" (Bogen braucht mehrere Selbst-Snapshots über Zeit). **Leitplanke:** (A) leitplanken-entspannt, autonom-fähig (Klasse self-reflection subject='self'). **Wann baubar — interner Hebel (Unterschied zu den anderen drei!):** Reflexions-Loop scharf schalten (gebaut, default aus) → Diary wächst autonom über Wochen → dann trägt das Pattern. Selbst-erzeugbar, braucht NICHT Markus' organische Nutzung. **Maschinerie:** Verdichtung N Diary-Entries → Bogen (self-reflection-Generator Vorbild, neuer Modus); Speicher append-only wie focus_snapshots; Migration vermutlich ja.
+**Status Tag 39:** interner Hebel gezogen — Reflexions-Loop scharf (Tag 38), Stufe 1 Reverse-Memory-Query gebaut (a59b4af), Stufe-3-Muster-Nudge strategiert (docs/STUFE-3-MUSTER-NUDGE-STRATEGY.md, e56ab31). Stufe-1-Güte + Stufe-3-Prüfstein reifen mit G2 (verdichtete Episoden, ab Tag-40-Tick). **(Tag 37, read-only diagnostiziert: vertagt.)** **Scope geklärt:** Lesart (A) Twin-über-sich (Vision :79/:205), NICHT Markus-Biografie. **Grund:** Quelle Twin-Diary = real 1 Eintrag → keine „Story, die sich entwickelt" (Bogen braucht mehrere Selbst-Snapshots über Zeit). **Leitplanke:** (A) leitplanken-entspannt, autonom-fähig (Klasse self-reflection subject='self'). **Wann baubar — interner Hebel (Unterschied zu den anderen drei!):** Reflexions-Loop scharf schalten (gebaut, default aus) → Diary wächst autonom über Wochen → dann trägt das Pattern. Selbst-erzeugbar, braucht NICHT Markus' organische Nutzung. **Maschinerie:** Verdichtung N Diary-Entries → Bogen (self-reflection-Generator Vorbild, neuer Modus); Speicher append-only wie focus_snapshots; Migration vermutlich ja.
 
 ### Phase 4.3 Schritt 4 — familiarity-Auto-Ableitung (Hybrid-Vorschläge) — vertagt bis organischer A2A-Verkehr (daten-blockiert)
 
-**Status Tag 38:** ⏸️ vertagt (read-only diagnostiziert). Teil der Phase-4.3-Achse (docs/PHASE-4.3-BEZIEHUNGS-MODELL-STRATEGY.md, dort die ausführliche Status-Zeile am Schritt-4-Block). **Foundation fertig** (Schritte 1–3 gebaut: Schema/Ton/manuelle Kontrolle), aber die Auto-Ableitung des familiarity_level aus Kontakt-Häufigkeit/Historie ist **daten-blockiert**: echte A2A-Daten zu dünn (@florian = 1 Konversation, ~7 Interaktionen, ein Tag, keine Zeitspanne) → jede Heuristik wäre Rauschen. Muster wiederverwendbar (Social-Suggestion 1:1; einzige Abweichung: Approve ruft real `setFamiliarity` statt no-op). 🔴 **Kein interner Hebel** (anders als Lebens-Narrativ): braucht echten Twin-zu-Twin-Verkehr über Zeit (Föderations-nah). **Wiederaufnahme-Trigger:** organischer A2A-Verkehr über Wochen/Monate → dann deterministische Variante-A-Heuristik (Frequenz+Recency+Dauer; NICHT LLM), manuelle Route als Trigger (kein Loop). **Nicht vorbauen** (Gerüst + triviale Heuristik = Rausch-Pendings/Approval-Müll). Schritt 5 (Autonomie) ist NICHT daten-blockiert (hängt an manuell gesetzten Levels) → der sinnvollere nächste Schritt der Achse.
+**Status Tag 38:** ⏸️ vertagt (read-only diagnostiziert). Teil der Phase-4.3-Achse (docs/PHASE-4.3-BEZIEHUNGS-MODELL-STRATEGY.md, dort die ausführliche Status-Zeile am Schritt-4-Block). **Foundation fertig** (Schritte 1–3 gebaut: Schema/Ton/manuelle Kontrolle), aber die Auto-Ableitung des familiarity_level aus Kontakt-Häufigkeit/Historie ist **daten-blockiert**: echte A2A-Daten zu dünn (@florian = 1 Konversation, ~7 Interaktionen, ein Tag, keine Zeitspanne) → jede Heuristik wäre Rauschen. Muster wiederverwendbar (Social-Suggestion 1:1; einzige Abweichung: Approve ruft real `setFamiliarity` statt no-op). 🔴 **Kein interner Hebel** (anders als Lebens-Narrativ): braucht echten Twin-zu-Twin-Verkehr über Zeit (Föderations-nah). **Wiederaufnahme-Trigger:** organischer A2A-Verkehr über Wochen/Monate → dann deterministische Variante-A-Heuristik (Frequenz+Recency+Dauer; NICHT LLM), manuelle Route als Trigger (kein Loop). **Nicht vorbauen** (Gerüst + triviale Heuristik = Rausch-Pendings/Approval-Müll). Schritt 5 (Autonomie) ist NICHT daten-blockiert (hängt an manuell gesetzten Levels) → der sinnvollere nächste Schritt der Achse. **Foundation (Schritte 1–3 = Beziehungs-Modell, Migration 029) gebaut + deployt Tag 38; Schritt 4 (Auto-Ableitung) bleibt daten-blockiert.**
 
-### Proaktiv-Nudge Anlass 2 (Muster/Widerspruch) + Anlass 3 (offene Frage) — vertagt (daten- + konzept-blockiert)
+### Proaktiv-Nudge Anlass 2 (Werte-Widerspruch) — vertagt (daten- + konzept-blockiert)
+
+> Anlass 3 (offene Frage / unbeantwortete Twin-Frage) ist seit Tag 39 GEBAUT (`a59b4af`) → siehe Archiv. Dieses Item hält nur noch den distinkten Anlass-2-Kern (Werte-Widerspruch).
 
 Dritter/zweiter Proaktivitäts-Anlass (b „von-selbst-kommen"). Anlass 1 (Fokus-Festhängen) ist gebaut + scharf (STAND Tag 38). Anlass 2 = Twin erkennt ein Muster/einen Widerspruch in den Owner-Memories und stößt proaktiv an; würde dieselbe proactive-nudge-Pipeline nutzen (andere Detektion + Generator-Prompt).
 
-**Status Tag 39: Anlass 2 (Muster/Widerspruch) ⏸️ VERTAGT — daten- UND konzept-blockiert (read-only an echten Daten gemessen).** 🔴 Daten: @markus hat 11 Facts, ALLE statische Identitäts-/Beziehungsdaten (Wohnort, Firma, Frau, Partner, Toskana-Plan); 0 vergessene Absichten, 0 Werte-Aussagen, 0 Verhaltens-Zeitreihe; twin_diary 1 Eintrag (über Twin-Verhalten, kein Owner-Lebensmuster), 0 Summaries. Beide Muster-Sorten null reale Beispiele → daten-blockiert wie Schritt 4 / Procedural Memory. 🔴 Konzept (die saubere Zerlegung): die SICHERE Sorte „vergessene Absicht" (faktenbasiert, kein Werturteil) IST in Wahrheit Anlass 3 (offene Frage) — beide brauchen dasselbe fehlende „offen-vs-erledigt"-Signal im Datenmodell (Facts haben kein solches Flag, facts_history trackt nur Wert-Drift). Der DISTINKTE Anlass-2-Kern ist NUR die riskante Sorte: Werte-Widerspruch, bei dem der Twin Owner-Verhalten BEWERTET (übergriffig, darf nicht auf dünner Inferenz gebaut werden). 🟢 Mechanik (proactive-nudge-Pipeline aus Tag 38) wäre 1:1 wiederverwendbar — nur Detektion + Generator-Prompt neu; die Bremse ist Daten + Konzept, nicht Code. **Konsequenz für die Roadmap:** der nächste baubare Proaktiv-Anlass ist Anlass 3 (offene Frage/vergessene Absicht), NICHT Anlass 2 — und Anlass 3 wartet auf ein „offen-vs-erledigt"-Signal im Datenmodell, das heute fehlt. Werte-Widerspruch (Anlass-2-Kern) ist die zuletzt zu bauende, heikelste Klasse — erst wenn echte Werte-+Verhaltens-Historie über Zeit trägt. **Wiederaufnahme:** echte Lebens-Memories (Absichten, Werte, Verhalten) statt statischer Identität — entsteht durch reale Nutzung über Zeit, kein interner Hebel.
+**Status Tag 39: Anlass 2 (Muster/Widerspruch) ⏸️ VERTAGT — daten- UND konzept-blockiert (read-only an echten Daten gemessen).** 🔴 Daten: @markus hat 11 Facts, ALLE statische Identitäts-/Beziehungsdaten (Wohnort, Firma, Frau, Partner, Toskana-Plan); 0 vergessene Absichten, 0 Werte-Aussagen, 0 Verhaltens-Zeitreihe; twin_diary 1 Eintrag (über Twin-Verhalten, kein Owner-Lebensmuster), 0 Summaries. Beide Muster-Sorten null reale Beispiele → daten-blockiert wie Schritt 4 / Procedural Memory. 🔴 Konzept (die saubere Zerlegung): die SICHERE Sorte „vergessene Absicht" (faktenbasiert, kein Werturteil) IST in Wahrheit Anlass 3 (offene Frage) — beide brauchen dasselbe fehlende „offen-vs-erledigt"-Signal im Datenmodell (Facts haben kein solches Flag, facts_history trackt nur Wert-Drift). Der DISTINKTE Anlass-2-Kern ist NUR die riskante Sorte: Werte-Widerspruch, bei dem der Twin Owner-Verhalten BEWERTET (übergriffig, darf nicht auf dünner Inferenz gebaut werden). 🟢 Mechanik (proactive-nudge-Pipeline aus Tag 38) wäre 1:1 wiederverwendbar — nur Detektion + Generator-Prompt neu; die Bremse ist Daten + Konzept, nicht Code. **Konsequenz für die Roadmap (Tag 39 nachgeführt):** Anlass 3 (offene Frage/vergessene Absicht) ist seit Tag 39 GEBAUT (`a59b4af`, via Audit-Turn-Reihenfolge — das „offen-vs-erledigt"-Signal kam aus der Turn-Ordnung, NICHT aus einem nachzurüstenden Datenmodell-Flag; siehe Archiv). Werte-Widerspruch (Anlass-2-Kern) bleibt die zuletzt zu bauende, heikelste Klasse — erst wenn echte Werte-+Verhaltens-Historie über Zeit trägt. **Wiederaufnahme:** echte Lebens-Memories (Absichten, Werte, Verhalten) statt statischer Identität — entsteht durch reale Nutzung über Zeit, kein interner Hebel.
 
 ### #143 Web-OAuth-Production-Flow ohne CLI-Subprocess (XL, should — Phase B)
 
