@@ -75,6 +75,11 @@ export interface FocusLoopDeps {
    */
   triggerNudge?: (handle: string) => Promise<ProactiveNudgeResult | null>;
   /**
+   * Test-Hook: pro-Twin-Anlass-3-Trigger (unbeantwortete Twin-Frage). Default
+   * ruft `proactiveNudgeService.nudgeOpenQuestion()`. Tests injizieren einen Spy.
+   */
+  triggerOpenQuestion?: (handle: string) => Promise<ProactiveNudgeResult | null>;
+  /**
    * 2b: aktiver Owner-Push für autonome Nudges (BotRegistry). Optional — ohne
    * ihn (oder mit Flag AUS) bleibt der Nudge ein Pending. Wird hier durchgereicht
    * statt in den TwinService, weil die BotRegistry erst NACH der Twin-Registry
@@ -112,6 +117,10 @@ export class FocusLoopService {
   private readonly nudgeTrigger: (
     handle: string,
   ) => Promise<ProactiveNudgeResult | null>;
+  /** Anlass 3: pro-Twin-Trigger für unbeantwortete Twin-Fragen. */
+  private readonly openQuestionTrigger: (
+    handle: string,
+  ) => Promise<ProactiveNudgeResult | null>;
   /** G2: idle-Detektions-Repo (rein lesend) auf der geteilten db-Connection. */
   private readonly conversationsRepo: ConversationsRepo;
   /** G2: Idle-Schwelle in Millisekunden. */
@@ -147,6 +156,19 @@ export class FocusLoopService {
               this.deps.botRegistry!.sendToOwner(twinId, text)
           : undefined;
         return twin.proactiveNudgeService.nudge(sender);
+      });
+    this.openQuestionTrigger =
+      deps.triggerOpenQuestion ??
+      (async (handle) => {
+        const twin = this.deps.registry.getByHandle(handle);
+        if (!twin) return null;
+        // Eigenes Autosend-Gate in nudgeOpenQuestion (Default AUS) — Sender wird
+        // wie bei Anlass 1 nur durchgereicht, wenn die BotRegistry da ist.
+        const sender = this.deps.botRegistry
+          ? (twinId: string, text: string) =>
+              this.deps.botRegistry!.sendToOwner(twinId, text)
+          : undefined;
+        return twin.proactiveNudgeService.nudgeOpenQuestion(sender);
       });
 
     // G2: Idle-Lifecycle. Repo rein lesend auf der geteilten Connection; der
@@ -247,6 +269,21 @@ export class FocusLoopService {
           "[focus-loop] proactive-nudge failed for twin",
         );
       }
+      // Additiv: Anlass 3 (unbeantwortete Twin-Frage). Eigener try/catch — ein
+      // Fehler darf weder Anlass 1 noch die anderen Twins killen. Anlass-bewusstes
+      // Dedup hält Anlass 1 und 3 unabhängig.
+      try {
+        await this.openQuestionForTwin(twin);
+      } catch (err) {
+        this.logger?.error(
+          {
+            twinId: twin.twinId,
+            handle: twin.handle,
+            err: err instanceof Error ? err.message : String(err),
+          },
+          "[focus-loop] open-question-nudge failed for twin",
+        );
+      }
     }
   }
 
@@ -298,6 +335,30 @@ export class FocusLoopService {
     this.logger?.info(
       { handle: twin.handle, auditId: result.auditId, thema: result.thema },
       "[focus-loop] proaktiver Fokus-Anstoß als Pending erzeugt",
+    );
+    return result;
+  }
+
+  /**
+   * Anlass 3 (additiv, nach nudgeForTwin). Detektion + Guards + LLM + Pending/
+   * Push stecken im ProactiveNudgeService; hier nur Trigger + Logging. Rückgabe
+   * für Tests.
+   */
+  async openQuestionForTwin(
+    twin: TwinSummary,
+  ): Promise<ProactiveNudgeResult | null> {
+    const result = await this.openQuestionTrigger(twin.handle);
+    if (!result) return null; // Race: Twin zwischen list() und Trigger entfernt
+    if (!result.created) {
+      this.logger?.info(
+        { handle: twin.handle, reason: result.reason },
+        "[focus-loop] kein Anstoß zu offener Frage erzeugt",
+      );
+      return result;
+    }
+    this.logger?.info(
+      { handle: twin.handle, auditId: result.auditId, pushed: result.pushed },
+      "[focus-loop] Anstoß zu unbeantworteter Twin-Frage erzeugt (Anlass 3)",
     );
     return result;
   }

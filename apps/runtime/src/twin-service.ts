@@ -476,6 +476,10 @@ export class TwinService {
       twinId: deps.twinId,
       twinName: deps.persona.name,
       ownerName: deps.persona.name,
+      // Anlass 3: aktueller Kontext (Facts + Summaries) für die Relevanz-/
+      // Erledigt-Prüfung des shouldNudge-Generators.
+      factsRepo: deps.facts,
+      summariesRepo: deps.conversationSummaries,
       generate: async ({ system, prompt }) => {
         const result = await generateObject({
           model: deps.model,

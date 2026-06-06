@@ -205,6 +205,18 @@ export const CONVERSATION_IDLE_HOURS = parseIntEnv(
   "CONVERSATION_IDLE_HOURS",
 );
 
+/**
+ * Anlass 3 (Proaktiv-Nudge bei unbeantworteter Twin-Frage): max. Alter (Stunden)
+ * der offenen Frage, ab dem sie NICHT mehr Kandidat für einen Anstoß ist. Ältere
+ * Fragen gelten als erledigt/gegenstandslos/bewusst ignoriert. Default 72.
+ * Rein lesender Recency-Cutoff auf audit.timestamp — keine Migration.
+ */
+export const OPEN_QUESTION_MAX_AGE_HOURS = parseIntEnv(
+  process.env.OPEN_QUESTION_MAX_AGE_HOURS,
+  72,
+  "OPEN_QUESTION_MAX_AGE_HOURS",
+);
+
 // ─── EPISODIC-MEMORY TUNABLES (Phase 3.4 + 3.4.I) ───────────────────────────
 //
 // 3.4.I-Refactor: das bisherige einstufige `EPISODIC_SIMILARITY_THRESHOLD`
