@@ -213,7 +213,7 @@ In Phase 1 und 2 explizit ausgeschlossen — Files in `docs/` sind die Source of
 **Stufe:** 0 → 2 · **Spur:** UX-Reifung
 
 ### 11. Persona-Klarstellung: 1. Person vs. Stellvertreter-Sprech
-Twin spricht aktuell teilweise in dritter Person über Markus ("checke es bei Markus"). Klären, ob das gewünscht ist (zeigt klar: Twin ist nicht Markus selbst) oder ob er als "ich" konsistent für Markus sprechen soll. Verknüpft mit #14 (Owner-Recognition) — Stellvertreter-Sprech ist im A2A-Modus richtig, im Web-UI-Owner-Modus eher nicht.
+Twin spricht aktuell teilweise in dritter Person über Markus ("checke es bei Markus"). Klären, ob das gewünscht ist (zeigt klar: Twin ist nicht Markus selbst) oder ob er als "ich" konsistent für Markus sprechen soll. Verknüpft mit #14 (Owner-Recognition) — Stellvertreter-Sprech ist im A2A-Modus richtig, im Web-UI-Owner-Modus eher nicht. **Entblockt (Owner-Recognition gebaut)** — technische Basis da (owner-Web vs A2A-Kontext); offen ist die Persona-Verhaltens-Entscheidung + Umsetzung. Jetzt entscheidbar.
 **Größe:** S · **Priorität:** should · **Aus:** Phase-2-Live-Test
 
 ---
@@ -238,7 +238,7 @@ Chat-Header zeigt `%40florian` statt `@florian` (URL-encodierter `@`). Backend-R
 **Größe:** S · **Priorität:** nice · **Aus:** Sub-Schritt 2d Live-Test, in 2.5.3 erneut sichtbar (Chat-Header zeigt "%40heiko")
 
 ### 33. Mandate-basierte Approval-Logik auch im Web-UI
-Heute: Web-UI-Chat überspringt Approval-Flow für Markus, aber blockt für Heiko (cautious). A2A-Eingang nutzt Approval. Konzeptionell unklar: was, wenn Markus im Web-UI eine sensitive Antwort generieren lässt, die er sich nochmal anschauen will? Vorschlag: Mandates differenzieren `requires_approval` per Channel. RESPOND_TO_CHAT könnte für Owner-Chats `false`, für externe `true` sein. Verknüpft mit #14 (Owner-Recognition).
+Heute: Web-UI-Chat überspringt Approval-Flow für Markus, aber blockt für Heiko (cautious). A2A-Eingang nutzt Approval. Konzeptionell unklar: was, wenn Markus im Web-UI eine sensitive Antwort generieren lässt, die er sich nochmal anschauen will? Vorschlag: Mandates differenzieren `requires_approval` per Channel. RESPOND_TO_CHAT könnte für Owner-Chats `false`, für externe `true` sein. Verknüpft mit #14 (Owner-Recognition). **Entblockt + teil-adressiert:** Owner-vs-Extern via `ownerBypass` faktisch da (hardcoded über `isOwner`); offen ist der konfigurierbare Per-Channel-Teil (`requires_approval` pro Channel, Conditions-Auswertung fehlt).
 **Größe:** M · **Priorität:** should · **Aus:** Live-Test 2.5.2e, in 2.5.3 verstärkt sichtbar
 **Stufe:** 0 → 1 · **Spur:** UX-Reifung
 
@@ -258,6 +258,7 @@ Fix: Approval-Wartemeldung wird NICHT vom LLM generiert, sondern ist ein System-
 UI-mässig sollte die System-Antwort visuell anders dargestellt werden als eine echte Twin-Antwort — z.B. als graue Info-Box statt Twin-Sprechblase. Polish, nicht Architektur.
 
 Vorteile: eliminiert Improvisations-Risiko, schneller (kein LLM-Call), spart Kosten, klares Mental-Model für den Chat-Partner.
+**Status Tag 39:** Entblockt + Runtime-Teil de facto erledigt: Pending-Pfad gibt `message:null` zurück, kein Modell-Call → die LLM-Improvisation des Original-Bugs (Heiko-Twin „an Markus weitergeleitet") ist strukturell weg (`twin-service.ts` isPending-Pfad). OFFENER REST-SCOPE (klein, MUST): nur noch der UI-Festtext — graue Info-Box mit festem Wartetext statt Twin-Sprechblase im Web (heute nur Pending-Badges in `TopNav.tsx`, kein Festtext). = scharf umrissenes kleines Frontend-Item.
 **Größe:** S · **Priorität:** must · **Aus:** 2.5.3 Heiko-Live-Test
 **Stufe:** 0 → 1 · **Spur:** UX-Reifung
 
@@ -517,7 +518,7 @@ Items #1 (Twin-Konversationen als Threads) und #2 (Lokale Spiegelung des Bridge-
 
 ### Cluster Owner-Recognition (#14, #38, #33)
 Drei Items hängen zusammen und sollten in 2.5.4 koordiniert angegangen werden:
-- #14 Owner-Recognition: Twin weiß, wer sein Owner ist
+- #14 Owner-Recognition: Twin weiß, wer sein Owner ist — **gebaut** (twin-service.ts isOwner/ownerBypass, ownerUserId)
 - #33 Mandate per Channel: Owner-Chat überspringt Approval, externe nicht
 - #38 Approval-Wartemeldung: kein improvisiertes Owner-Naming mehr
 
@@ -750,12 +751,6 @@ Apex-`nolmi.ai` lieferte 404 (kein Traefik-Router). **Gewählt: Option (b)** (Di
 **Deployt + live verifiziert (Tag 35):** **#3 maxLength** (`6c836d5`), **Weg-B-Onboarding-Refactor** (`759fcbf`/`2e61007`), **Apex-Removal** (`37fabdb`, war auf Prod nie), Lizenz/Going-Public-Doku, 3b-TLS-Tooling. **KEINE Migration** (Runner: 26 bereits angewendet/skipped → kein Schema-Risiko). **runtime + web neu gebaut, bridge unberührt.** Web-Bundle korrekt auf `runtime.nolmi.ai` (Literal-Build-Arg). **Verifiziert:** Owner-Direct-Chat (@markus) · A2A (@markus→@florian) · **Weg-B-Onboarding-Smoke** (Test-Twin angelegt→geantwortet→gelöscht). Container stabil. **Rollback-Artefakte auf VPS:** Images `rollback-86ed1e4` + DB-Backups `*.preflight-bak` (später aufräumen).
 
 **Deploy-Mechanik korrigiert (DEPLOYMENT.md §3):** Der Prod-Stack nutzt `image:latest` **ohne `build:`** → `docker compose up -d` baut nichts. Korrekte Sequenz: `git pull` → **explizit `docker build` aus dem Repo-Root** (runtime + web; web mit **Literal** `--build-arg NEXT_PUBLIC_RUNTIME_URL=https://runtime.nolmi.ai` + `…DEPLOYMENT_LABEL=production`) → Bundle verifizieren → `docker compose up -d --force-recreate nolmi-runtime nolmi-web`. **🔴 Stolperstein:** `docker build` lädt die `.env` nicht → `${DOMAIN}` leer → `https://runtime.` (kaputt); der #126-Guard fängt das NICHT (nur localhost/leer) → **immer das Literal setzen + Bundle prüfen**. (Deckt sich mit der Tag-17-Lesson „Compose ist image-tag-only, Build via `docker build`".)
-
-### Twin-Löschfunktion fehlt in der Web-UI
-
-**Status:** ✅ **DONE (Tag 36)** — 3 Schritte: Bridge-Deregister `ef2b832` · Runtime-Löschkern `f5cb42c` · UI `77b9812`. Owner-gegateter `DELETE /twins/:handle`, geordnete Tx (`foreign_keys=ON`, audit+trust manuell, conversation_summaries→audit-Reihenfolge), Registry-Hot-Unload inkl. Telegram-Teardown, Type-to-confirm-UI. **Rest (eigenes, bereits getracktes Item):** Bridge-Orphan-Cleanup bei nicht erreichbarer Bridge → „Bridge-DB-Cleanup als Bootstrap-Schritt". **Offen:** manueller Browser-Durchklick (app.inject deckt HTTP-Contract, nicht DOM).
-
-Beim Weg-B-Onboarding-Smoke (Tag 35) aufgefallen: ein im Wizard angelegter Twin lässt sich über die **UI nicht löschen** — der Test-Twin musste **per DB-Skript** im Container entfernt werden. Wer Twins anlegen kann, muss sie auch löschen können (Erwartung jedes Self-Hosters, besonders relevant sobald externe Nutzer onboarden). **Zu bauen:** Lösch-Flow in der UI (Settings/Twin-Switcher) + Owner-gegateter Endpoint (`DELETE /twins/:handle` o.ä.) mit sauberem Cascade (twin_profiles + zugehörige audit/conversations/facts/oauth_tokens/trust-Zeilen — FK-Verhalten beachten, vgl. Migration 026) + Bridge-Deregistrierung, falls gebunden. Bestätigungs-Dialog (irreversibel). **Größe M** (UI + Endpoint + Cascade + A2A/Bridge-Sauberkeit).
 
 ### Bridge-Orphan-Cleanup bei nicht erreichbarer Bridge (aus #744)
 
@@ -1926,6 +1921,8 @@ Plus Hook-Trigger-Test via `pnpm --filter @twin-lab/web build` mit production-La
 
 ### 128. Bridge-optional-Mode für Single-Twin-Self-Hosting
 
+**Status (Welle 2 präzisiert):** Etappe-1-Kern ✅ DONE (Solo-Modus: nullable Mig. 026, Boot-Guard, BridgeDisabledError→409). OFFEN: Onboarding-Wizard-Solo-Branch (Wizard verlangt noch Bridge) + UI-Re-Bind-Knopf.
+
 **Befund Tag 24 (#109 §9 Code-Check):** Twin-Creation (Wizard + Bootstrap-CLI) verlangt heute zwingend eine erreichbare Bridge. Self-Hoster ohne Bridge-Zugang können keinen Twin anlegen.
 
 Runtime selbst ist Bridge-resilient (Reconnect-Loop ohne Crash für existing Twins), aber Anlege-Pfade sind hart:
@@ -2752,6 +2749,14 @@ Aus Tag-14-Recherche.
 ### Proaktiv-Nudge Anlass 3 (unbeantwortete Twin-Frage) ✅
 
 ✅ **Erledigt** (Tag 39; Beleg: `a59b4af` — `proactive-nudge`-Audit mit `input.anlass='offene_frage'`, Detektor `detectOpenQuestion` + Generator-Prompt + anlass-bewusstes Dedup in `apps/runtime/src/focus/proactive-nudge-service.ts`, am Fokus-Loop-Tick verdrahtet; STAND Tag 39 Forts.). Sichere Sorte (a) Twin-Frage-unbeantwortet: das „offen-vs-erledigt"-Signal kam aus der Audit-Turn-Reihenfolge (jüngste Audit-Row pro Konv = letztes Wort; reply endet auf „?" + keine neuere Row = offen), KEINE Migration. Eigenes Autosend-Gate `PROACTIVE_NUDGE_ANLASS3_AUTOSEND_ENABLED` (Default aus). Aus dem früheren Bundle „Anlass 2+3" abgespalten — Anlass 2 (Werte-Widerspruch) bleibt vertagt (siehe Phase-B-Block).
+
+### Twin-Löschfunktion in der Web-UI ✅
+
+✅ **Erledigt** (Tag 36, Hygiene Welle 2 hierher umsortiert; Beleg: `apps/runtime/src/server.ts:306` `DELETE /twins/:handle` → deleteTwinLocal + registry.removeTwin inkl. Telegram-Teardown; UI `apps/web/components/ConfirmDeleteTwinModal.tsx`). **Rest bleibt offen (eigene Items, unberührt):** manueller Browser-Durchklick (app.inject deckt nur HTTP-Contract) + Bridge-Orphan-Cleanup (separates Item im Offen-Block). Original-Text unverändert:
+
+**Status:** ✅ **DONE (Tag 36)** — 3 Schritte: Bridge-Deregister `ef2b832` · Runtime-Löschkern `f5cb42c` · UI `77b9812`. Owner-gegateter `DELETE /twins/:handle`, geordnete Tx (`foreign_keys=ON`, audit+trust manuell, conversation_summaries→audit-Reihenfolge), Registry-Hot-Unload inkl. Telegram-Teardown, Type-to-confirm-UI. **Rest (eigenes, bereits getracktes Item):** Bridge-Orphan-Cleanup bei nicht erreichbarer Bridge → „Bridge-DB-Cleanup als Bootstrap-Schritt". **Offen:** manueller Browser-Durchklick (app.inject deckt HTTP-Contract, nicht DOM).
+
+Beim Weg-B-Onboarding-Smoke (Tag 35) aufgefallen: ein im Wizard angelegter Twin lässt sich über die **UI nicht löschen** — der Test-Twin musste **per DB-Skript** im Container entfernt werden. Wer Twins anlegen kann, muss sie auch löschen können (Erwartung jedes Self-Hosters, besonders relevant sobald externe Nutzer onboarden). **Zu bauen:** Lösch-Flow in der UI (Settings/Twin-Switcher) + Owner-gegateter Endpoint (`DELETE /twins/:handle` o.ä.) mit sauberem Cascade (twin_profiles + zugehörige audit/conversations/facts/oauth_tokens/trust-Zeilen — FK-Verhalten beachten, vgl. Migration 026) + Bridge-Deregistrierung, falls gebunden. Bestätigungs-Dialog (irreversibel). **Größe M** (UI + Endpoint + Cascade + A2A/Bridge-Sauberkeit).
 
 ---
 
