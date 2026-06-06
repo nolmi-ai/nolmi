@@ -87,6 +87,13 @@ export interface RetrieveArgs {
    * Vector-Hits unter dieser Cosine-Sim kommen nicht in den RRF-Pool.
    */
   minVectorSimilarity?: number;
+  /**
+   * Reverse-Memory-Query Typ a (Zeitraum): optionales Zeitfenster auf
+   * `created_at`. Wird an Vektor- UND FTS5-Pfad durchgereicht. Default beide
+   * aus → kein Zeitfilter (normaler Chat-Pfad unverändert).
+   */
+  since?: string;
+  until?: string;
 }
 
 export interface MemoryRetrievalServiceDeps {
@@ -150,6 +157,8 @@ export class MemoryRetrievalService {
             // Pre-RRF-Filter erledigt das Threshold-Geschäft präziser.
             similarityThreshold: 0,
             embeddingModel: provider.modelName,
+            since: args.since,
+            until: args.until,
           }),
         ),
         Promise.resolve(
@@ -157,6 +166,8 @@ export class MemoryRetrievalService {
             ? this.deps.embeddingsRepo.searchFts5(args.twinId, sanitized, {
                 topK: poolSize,
                 embeddingModel: provider.modelName,
+                since: args.since,
+                until: args.until,
               })
             : ([] as Fts5SearchResult[]),
         ),

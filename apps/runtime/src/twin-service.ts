@@ -56,8 +56,12 @@ import {
   aggregateConversationForEmbedding,
   type MemoryEmbeddingService,
 } from "./episodic/memory-embedding-service.js";
-import type { MemoryRetrievalService } from "./episodic/memory-retrieval-service.js";
+import type {
+  MemoryRetrievalService,
+  RetrievalResult,
+} from "./episodic/memory-retrieval-service.js";
 import { buildEpisodicBlock } from "./episodic/prompt-builder.js";
+import { REVERSE_QUERY_TOP_K } from "./config.js";
 import type { TwinDiaryService } from "./episodic/twin-diary-service.js";
 import { TwinDiaryRepo } from "./episodic/twin-diary-repo.js";
 import { buildFactsBlock } from "./facts/prompt-builder.js";
@@ -584,6 +588,11 @@ export class TwinService {
       return this.runOwnerDirect(detection.capability, messages, lastUser, {
         forcedToolChoice: ctx.forcedToolChoice,
         channel: ctx.channel,
+        // Reverse-Memory-Query Typ a: Zeitfenster mitgeben (sonst undefined).
+        reverseTimeframe:
+          detection.capability === "reverse_memory_query"
+            ? detection.reverseTimeframe
+            : undefined,
       });
     }
 
@@ -678,6 +687,8 @@ export class TwinService {
       forcedToolChoice?: ForcedToolChoice;
       /** #130 Phase 3: weitergereicht in audit.input.channel für Web-UI-Badge. */
       channel?: "telegram" | "discord" | "whatsapp";
+      /** Reverse-Memory-Query Typ a: erkanntes Zeitfenster (undefined = Typ b). */
+      reverseTimeframe?: ReverseTimeframe;
     } = {},
   ): Promise<{
     message: ChatMessage;
@@ -688,6 +699,16 @@ export class TwinService {
     /** #107: Beta-Hint-Signal nach erster Recherche pro Twin. */
     firstUseHint?: "research";
   }> {
+    // Reverse-Memory-Query (Lebens-Narrativ Stufe 1): reaktive Rückschau —
+    // eigener Retrieval+Synthese-Pfad statt der normalen Chat-Kette. Inline im
+    // Chat (Gesprächscharakter), kein eigener Endpoint.
+    if (originalCapability === "reverse_memory_query") {
+      return this.runReverseMemoryQuery(
+        messages,
+        lastUser,
+        options.reverseTimeframe,
+      );
+    }
     // #71b/#80: Direct-Chat-Audits werden mit der aktiven Konversation
     // verknüpft. ownerUserId muss gesetzt sein, weil Owner-Bypass nur greift
     // wenn requesterUserId === ownerUserId — der `chat()`-Caller stellt das
@@ -927,6 +948,119 @@ export class TwinService {
       await this.failWithReason(failedAudit.id, err);
       throw err;
     }
+  }
+
+  // ─── Reverse-Memory-Query (Lebens-Narrativ Stufe 1) ───────────────────────
+  //
+  // Reaktive Rückschau: Owner fragt „was hab ich über X gesagt?" (Typ b,
+  // Stichwort) / „was hat mich diesen Monat beschäftigt?" (Typ a, Zeitfenster).
+  // Erbt das vorhandene Hybrid-Retrieval (breiteres topK), synthetisiert via
+  // synthesizeRetrospective. Inline im Chat (Audit-Capability 'owner-direct',
+  // originalCapability='reverse_memory_query' im Input für Trace). Bewusst OHNE
+  // Live-History/Summary-Maschinerie — die Rückschau steht für sich.
+
+  private async runReverseMemoryQuery(
+    messages: ChatMessage[],
+    lastUser: string,
+    timeframe?: ReverseTimeframe,
+  ): Promise<{
+    message: ChatMessage;
+    auditId: string;
+    pending: boolean;
+    memoryHits?: MemoryHit[];
+  }> {
+    // Konversations-Linkage wie im normalen Owner-Pfad (Turn gehört zur Konv).
+    let conversationId: string | null = null;
+    if (this.deps.ownerUserId) {
+      const conv = this.deps.conversations.getOrStart(
+        this.deps.ownerUserId,
+        this.deps.persona.handle.startsWith("@")
+          ? this.deps.persona.handle
+          : `@${this.deps.persona.handle}`,
+        this.deps.twinId,
+      );
+      conversationId = conv.id;
+    }
+
+    this.deps.bus.emit({
+      type: "twin.thinking",
+      payload: { capability: "owner-direct" },
+    });
+
+    // Typ a: Zeitfenster → since-ISO. Typ b: kein Zeitfilter.
+    const since = timeframe
+      ? reverseTimeframeToSinceIso(timeframe, new Date())
+      : undefined;
+
+    // Breiteres Retrieval als der Chat-Default (REVERSE_QUERY_TOP_K) — eine
+    // Rückschau braucht mehr Treffer zum Verdichten. Failure-Pfad gibt [].
+    const memories = await this.memoryRetrievalService.retrieve({
+      twinId: this.deps.twinId,
+      userMessage: lastUser,
+      currentConversationId: conversationId,
+      topK: REVERSE_QUERY_TOP_K,
+      since,
+    });
+
+    const { content, metadata } = await this.synthesizeRetrospective(
+      lastUser,
+      memories,
+    );
+
+    const memoryHits: MemoryHit[] = memories.map((m) => ({
+      targetType: m.targetType,
+      content: m.content,
+      createdAt: m.createdAt,
+    }));
+
+    const audit = await this.deps.audit.start({
+      capability: "owner-direct",
+      mandateId: null,
+      input: {
+        messages,
+        lastMessage: lastUser,
+        originalCapability: "reverse_memory_query",
+        ...(timeframe ? { reverseTimeframe: timeframe } : {}),
+      },
+      initialStatus: "executed",
+      conversationId,
+    });
+    await this.deps.audit.complete(audit.id, {
+      reply: content,
+      providerMetadata: metadata,
+      ...(memoryHits.length > 0 ? { memoryHits } : {}),
+    });
+    this.deps.bus.emit({ type: "twin.idle", payload: {} });
+    return {
+      message: { role: "assistant", content },
+      auditId: audit.id,
+      pending: false,
+      ...(memoryHits.length > 0 ? { memoryHits } : {}),
+    };
+  }
+
+  /**
+   * Synthese-Schicht (Herzstück, wiederverwendbar für Stufe 3 / proaktive
+   * Muster-Einsicht): verdichtet die retrievten Memory-Treffer zu einer
+   * Rückschau in der Stimme des Twins. Rückblick-orientierter System-Block +
+   * die Treffer; Anti-Halluzination ist eingebaut (ehrlich bei dünnem Korpus).
+   * KEINE MCP-Tools (rein Memory-gestützt, keine Außen-Calls).
+   */
+  async synthesizeRetrospective(
+    query: string,
+    memories: RetrievalResult[],
+  ): Promise<{ content: string; metadata: Record<string, unknown> }> {
+    const directive = buildRetrospectiveDirective(
+      this.deps.persona.name,
+      memories,
+    );
+    const reply = await this.runModel(
+      this.deps.persona,
+      [{ role: "user", content: query }],
+      directive,
+      { enableMcpTools: false },
+    );
+    return { content: reply.content, metadata: reply.metadata };
   }
 
   // ─── Owner-Direct-Send (User-initiierte A2A) ──────────────────────────────
@@ -2926,7 +3060,15 @@ export type CapabilityDetectionResult =
   | { capability: "respond_to_chat" }
   | { capability: "draft_linkedin_post" }
   | { capability: "summarize_topic" }
-  | { capability: "send_to_twin"; targetHandle: string };
+  | { capability: "send_to_twin"; targetHandle: string }
+  | {
+      capability: "reverse_memory_query";
+      /** Zeitbezug in der Frage (Typ a). Undefined = Stichwort-Rückschau (Typ b). */
+      reverseTimeframe?: ReverseTimeframe;
+    };
+
+/** Reverse-Memory-Query Typ a: erkanntes Zeitfenster der Rückschau-Frage. */
+export type ReverseTimeframe = "week" | "month" | "recent";
 
 const KNOWN_HANDLES: Record<string, string> = {
   florian: "@florian",
@@ -2969,8 +3111,135 @@ export function detectCapability(userMessage: string): CapabilityDetectionResult
 
   if (isSummary) return { capability: "summarize_topic" };
 
+  // 4. Reverse-Memory-Query (Lebens-Narrativ Stufe 1): reaktive Rückschau auf
+  //    eigene frühere Äußerungen/Themen. Signal-basiert statt fixe Phrasen,
+  //    damit eingeschobene Zeitangaben („was hab ich LETZTE WOCHE über X
+  //    gesagt") nicht die Erkennung brechen. Bewusst BREIT (first-person-Owner-
+  //    phrasiert, geringe A2A-Fehlauslöse-Gefahr) — der Synthese-Prompt ist eh
+  //    ehrlich bei Fehltreffern.
+  if (isReverseMemoryQuery(lower)) {
+    return {
+      capability: "reverse_memory_query",
+      reverseTimeframe: detectReverseTimeframe(lower),
+    };
+  }
+
   // Default: normale Chat-Antwort
   return { capability: "respond_to_chat" };
+}
+
+/**
+ * Reverse-Query-Erkennung (signal-basiert, robust gegen eingeschobene
+ * Zeitangaben). Drei Wege: (1) direkte Memory-Adresse an den Twin
+ * („erinnerst du", „weißt du noch"); (2) First-Person-Vergangenheit („hab ich")
+ * + Recall-Wort („über"/„gesagt"/…); (3) „beschäftigt … mich".
+ */
+function isReverseMemoryQuery(lower: string): boolean {
+  const memoryAddress =
+    lower.includes("erinnerst du") ||
+    lower.includes("weißt du noch") ||
+    lower.includes("was weißt du über") ||
+    lower.includes("weißt du noch über");
+  if (memoryAddress) return true;
+
+  const firstPersonPast =
+    lower.includes("hab ich") ||
+    lower.includes("habe ich") ||
+    lower.includes("worüber hab") ||
+    lower.includes("worüber habe");
+  const recallWord =
+    lower.includes("über") ||
+    lower.includes("gesagt") ||
+    lower.includes("erzählt") ||
+    lower.includes("erwähnt") ||
+    lower.includes("gedacht");
+  if (firstPersonPast && recallWord) return true;
+
+  // „was hat mich … beschäftigt" / „womit beschäftige ich mich"
+  if (lower.includes("beschäftig") && lower.includes("mich")) return true;
+
+  return false;
+}
+
+/**
+ * Zeitbezug einer Reverse-Query erkennen → Typ a (Zeitfenster). Kein Treffer →
+ * undefined (Typ b, Stichwort-Rückschau). Reine Keyword-Heuristik; das konkrete
+ * `since`-Datum berechnet der Send-Path (braucht „jetzt").
+ */
+function detectReverseTimeframe(lower: string): ReverseTimeframe | undefined {
+  if (
+    lower.includes("diese woche") ||
+    lower.includes("letzte woche") ||
+    lower.includes("letzten woche") ||
+    lower.includes("vergangene woche")
+  ) {
+    return "week";
+  }
+  if (
+    lower.includes("diesen monat") ||
+    lower.includes("dieser monat") ||
+    lower.includes("letzten monat") ||
+    lower.includes("letzter monat") ||
+    lower.includes("vergangenen monat")
+  ) {
+    return "month";
+  }
+  if (
+    lower.includes("in letzter zeit") ||
+    lower.includes("in der letzten zeit") ||
+    lower.includes("letzte tage") ||
+    lower.includes("letzten tagen") ||
+    lower.includes("kürzlich") ||
+    lower.includes("neulich") ||
+    lower.includes("zuletzt")
+  ) {
+    return "recent";
+  }
+  return undefined;
+}
+
+/** Reverse-Query Typ a: Zeitfenster → since-ISO relativ zu `now`. */
+export function reverseTimeframeToSinceIso(
+  timeframe: ReverseTimeframe,
+  now: Date,
+): string {
+  const days = timeframe === "week" ? 7 : timeframe === "month" ? 30 : 14;
+  return new Date(now.getTime() - days * 24 * 60 * 60 * 1000).toISOString();
+}
+
+/**
+ * Rückblick-System-Block für die Synthese-Schicht. Enthält die harte
+ * Anti-Halluzinations-Leitplanke (ehrlich bei dünnem/leerem Korpus) + die
+ * gefundenen Treffer als zu verdichtende Substanz. Self-contained, damit
+ * synthesizeRetrospective (und später Stufe 3) ihn 1:1 nutzen kann.
+ */
+export function buildRetrospectiveDirective(
+  ownerName: string,
+  memories: RetrievalResult[],
+): string {
+  const parts: string[] = [
+    `Der Owner (${ownerName}) fragt nach einer Rückschau über seine eigenen früheren Äußerungen/Themen. Fasse zusammen, was sich über die gefundenen Erinnerungs-Treffer hinweg ergibt — Themen, Entwicklungen, Wiederkehrendes. Erfinde NICHTS, was nicht in den Treffern steht; wenn die Treffer dünn sind, sage das ehrlich („dazu finde ich wenig"). Antworte in ${ownerName}' Stimme, als sein Twin.`,
+    "",
+  ];
+
+  if (memories.length === 0) {
+    parts.push(
+      "## Gefundene Erinnerungen",
+      "",
+      "(keine Treffer — sage ehrlich, dass du dazu wenig/nichts in deinen Erinnerungen findest; erfinde nichts)",
+    );
+    return parts.join("\n");
+  }
+
+  parts.push("## Gefundene Erinnerungen (rückblickend zu verdichten)", "");
+  memories.forEach((m, i) => {
+    // created_at als Datum (YYYY-MM-DD) für den zeitlichen Verlauf; Content
+    // byte-verbatim, damit der Anti-Halluzinations-Tenor nicht zum Ausschmücken
+    // einlädt.
+    const date = m.createdAt ? m.createdAt.slice(0, 10) : "?";
+    parts.push(`### Treffer ${i + 1} — ${m.targetType} (${date})`, m.content.trim(), "");
+  });
+  return parts.join("\n").trimEnd();
 }
 
 function detectTargetHandle(text: string): string | null {

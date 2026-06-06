@@ -119,6 +119,14 @@ export interface SearchOptions {
    * Modells (gleiche Vektor-Topologie), aber das ist Caller-Verantwortung.
    */
   embeddingModel?: string;
+  /**
+   * Reverse-Memory-Query (Zeitraum-Rückschau): optionaler Zeitfenster-Filter
+   * auf `created_at` (ISO-Strings). `since` inklusive untere Grenze, `until`
+   * inklusive obere. Default beide aus → kein Zeitfilter (bestehende Aufrufer
+   * wie runOwnerDirect unverändert). KEINE Migration — `created_at` existiert.
+   */
+  since?: string;
+  until?: string;
 }
 
 export interface SearchHit {
@@ -299,6 +307,9 @@ export class EmbeddingsRepo {
     const modelFilter = options.embeddingModel
       ? "AND e.embedding_model = @embedding_model"
       : "";
+    // Zeitfenster-Filter (Reverse-Query Typ a). Default leer → kein Filter.
+    const sinceFilter = options.since ? "AND e.created_at >= @since" : "";
+    const untilFilter = options.until ? "AND e.created_at <= @until" : "";
 
     const sql = `
       WITH knn AS (
@@ -313,6 +324,8 @@ export class EmbeddingsRepo {
       JOIN embeddings e ON e.rowid = knn.rowid
       WHERE e.twin_id = @twin_id
         ${modelFilter}
+        ${sinceFilter}
+        ${untilFilter}
       ORDER BY knn.distance ASC
     `;
 
@@ -324,6 +337,8 @@ export class EmbeddingsRepo {
     if (options.embeddingModel) {
       params.embedding_model = options.embeddingModel;
     }
+    if (options.since) params.since = options.since;
+    if (options.until) params.until = options.until;
 
     const rows = this.db.prepare(sql).all(params) as Array<
       EmbeddingRow & { knn_distance: number }
@@ -383,10 +398,29 @@ export class EmbeddingsRepo {
   searchFts5(
     twinId: string,
     sanitizedQuery: string,
-    options: { topK: number; embeddingModel: string },
+    options: { topK: number; embeddingModel: string; since?: string; until?: string },
   ): Fts5SearchResult[] {
     if (sanitizedQuery.length === 0) return [];
     try {
+      // Positions-Parameter in fester Reihenfolge aufbauen — die optionalen
+      // Zeitfenster-Conditions (Reverse-Query Typ a) werden auf dem JOIN-
+      // Partner `e.created_at` gefiltert, vor LIMIT. Default: kein Filter.
+      const conditions: string[] = [
+        "memory_fts MATCH ?",
+        "memory_fts.twin_id = ?",
+        "e.embedding_model = ?",
+      ];
+      const params: unknown[] = [sanitizedQuery, twinId, options.embeddingModel];
+      if (options.since) {
+        conditions.push("e.created_at >= ?");
+        params.push(options.since);
+      }
+      if (options.until) {
+        conditions.push("e.created_at <= ?");
+        params.push(options.until);
+      }
+      params.push(options.topK);
+
       const rows = this.db
         .prepare(
           `SELECT
@@ -399,18 +433,11 @@ export class EmbeddingsRepo {
              ON e.twin_id = memory_fts.twin_id
             AND e.target_type = memory_fts.target_type
             AND e.target_id = memory_fts.target_id
-           WHERE memory_fts MATCH ?
-             AND memory_fts.twin_id = ?
-             AND e.embedding_model = ?
+           WHERE ${conditions.join("\n             AND ")}
            ORDER BY bm25_score ASC
            LIMIT ?`,
         )
-        .all(
-          sanitizedQuery,
-          twinId,
-          options.embeddingModel,
-          options.topK,
-        ) as Array<{
+        .all(...params) as Array<{
           embedding_id: string;
           target_type: EmbeddingTargetType;
           target_id: string;

@@ -217,6 +217,18 @@ export const OPEN_QUESTION_MAX_AGE_HOURS = parseIntEnv(
   "OPEN_QUESTION_MAX_AGE_HOURS",
 );
 
+/**
+ * Reverse-Memory-Query (Lebens-Narrativ Stufe 1): Top-K für die reaktive
+ * Rückschau. Bewusst höher als der Chat-Default (EPISODIC_TOP_K=3) — eine
+ * Rückschau braucht mehr Treffer zum Verdichten. Ändert den normalen Chat NICHT.
+ * Default 12.
+ */
+export const REVERSE_QUERY_TOP_K = parseIntEnv(
+  process.env.REVERSE_QUERY_TOP_K,
+  12,
+  "REVERSE_QUERY_TOP_K",
+);
+
 // ─── EPISODIC-MEMORY TUNABLES (Phase 3.4 + 3.4.I) ───────────────────────────
 //
 // 3.4.I-Refactor: das bisherige einstufige `EPISODIC_SIMILARITY_THRESHOLD`
