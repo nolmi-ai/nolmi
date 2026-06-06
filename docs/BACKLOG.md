@@ -220,10 +220,6 @@ Twin spricht aktuell teilweise in dritter Person über Markus ("checke es bei Ma
 
 ## Aus Phase 2.5 entstanden
 
-### 12. Anthropic-Persona Umlaut-Bug
-Claude (anthropic/claude-opus-4-7) generiert in Markus' Persona Antworten ohne Umlaute ("weiss" statt "weiß", "Gespraechen" statt "Gesprächen", "beschaeftigt" statt "beschäftigt"). Florian-Persona zeigt das Problem nicht durchgängig — Hypothese: Persona-Markdown-Sprache beeinflusst LLM-Output. Fix: Umlaut-Direktive explizit in `docs/persona.md` ergänzen ("Schreibe immer mit korrekten deutschen Umlauten ä/ö/ü/ß").
-**Größe:** S · **Priorität:** must · **Aus:** Sub-Schritt 2c/2d/2e/2.5.3 Live-Tests
-
 ### 13. metadata_json in twin_profiles ergänzen
 Aktuell hardcoded `{}` im Boot — Persona-Metadata (Verbindungen, Tags, etc.) hat keine DB-Spalte. Migration 005 für `metadata_json TEXT`-Spalte. Genutzt u.a. für Beziehungs-Mapping ("Florian ist Co-Founder von Markus").
 **Größe:** S · **Priorität:** should · **Aus:** Sub-Schritt 2c Caveat
@@ -259,7 +255,8 @@ UI-mässig sollte die System-Antwort visuell anders dargestellt werden als eine 
 
 Vorteile: eliminiert Improvisations-Risiko, schneller (kein LLM-Call), spart Kosten, klares Mental-Model für den Chat-Partner.
 **Status Tag 39:** Entblockt + Runtime-Teil de facto erledigt: Pending-Pfad gibt `message:null` zurück, kein Modell-Call → die LLM-Improvisation des Original-Bugs (Heiko-Twin „an Markus weitergeleitet") ist strukturell weg (`twin-service.ts` isPending-Pfad). OFFENER REST-SCOPE (klein, MUST): nur noch der UI-Festtext — graue Info-Box mit festem Wartetext statt Twin-Sprechblase im Web (heute nur Pending-Badges in `TopNav.tsx`, kein Festtext). = scharf umrissenes kleines Frontend-Item.
-**Größe:** S · **Priorität:** must · **Aus:** 2.5.3 Heiko-Live-Test
+**Aktualisierung nach Diagnose Tag 39:** UI-Rest (graue Info-Box) im jetzigen Web gegenstandslos — kein menschlich-sichtbarer Pending-Wait-Auslöser (Owner bypasst; MCP-Tool-Pending bereits sauber gerendert; kein External-/Public-Web-Chat). Wartebox wird erst mit External-Web-Chat-Surface relevant → mit Public-Mode #29/#30 zusammen bauen. Priorität MUST→should (Original-Bug behoben, UI-Rest gating-abhängig).
+**Größe:** S · **Priorität:** should · **Aus:** 2.5.3 Heiko-Live-Test
 **Stufe:** 0 → 1 · **Spur:** UX-Reifung
 
 ### 39. Cautious-Mode mit Klassifikator-Vorlauf — Phase 3 — NEU aus 2.5.3
@@ -2757,6 +2754,13 @@ Aus Tag-14-Recherche.
 **Status:** ✅ **DONE (Tag 36)** — 3 Schritte: Bridge-Deregister `ef2b832` · Runtime-Löschkern `f5cb42c` · UI `77b9812`. Owner-gegateter `DELETE /twins/:handle`, geordnete Tx (`foreign_keys=ON`, audit+trust manuell, conversation_summaries→audit-Reihenfolge), Registry-Hot-Unload inkl. Telegram-Teardown, Type-to-confirm-UI. **Rest (eigenes, bereits getracktes Item):** Bridge-Orphan-Cleanup bei nicht erreichbarer Bridge → „Bridge-DB-Cleanup als Bootstrap-Schritt". **Offen:** manueller Browser-Durchklick (app.inject deckt HTTP-Contract, nicht DOM).
 
 Beim Weg-B-Onboarding-Smoke (Tag 35) aufgefallen: ein im Wizard angelegter Twin lässt sich über die **UI nicht löschen** — der Test-Twin musste **per DB-Skript** im Container entfernt werden. Wer Twins anlegen kann, muss sie auch löschen können (Erwartung jedes Self-Hosters, besonders relevant sobald externe Nutzer onboarden). **Zu bauen:** Lösch-Flow in der UI (Settings/Twin-Switcher) + Owner-gegateter Endpoint (`DELETE /twins/:handle` o.ä.) mit sauberem Cascade (twin_profiles + zugehörige audit/conversations/facts/oauth_tokens/trust-Zeilen — FK-Verhalten beachten, vgl. Migration 026) + Bridge-Deregistrierung, falls gebunden. Bestätigungs-Dialog (irreversibel). **Größe M** (UI + Endpoint + Cascade + A2A/Bridge-Sauberkeit).
+
+### 12. Anthropic-Persona Umlaut-Bug ✅
+
+✅ **Erledigt** — zentrale LANGUAGE_DIRECTIVE (twin-service.ts:2690, in composeOwnerSystemPrompt für alle Twins/Modelle, test-abgesichert) statt Persona-File-Edit. Anmerkung: Auslöser ist Modell-Verhalten — die Direktive ist die richtige Code-Antwort, garantiert aber nicht 100%; falls je wieder ae/ss im Live-Output auftaucht, ist das ein Modell-Regress (kein Code-Bug) → am Prompt-Ende/Modell nachjustieren. (Item referenzierte claude-opus-4-7; Default heute claude-opus-4-8, meist robuster.) Original-Text unverändert:
+
+Claude (anthropic/claude-opus-4-7) generiert in Markus' Persona Antworten ohne Umlaute ("weiss" statt "weiß", "Gespraechen" statt "Gesprächen", "beschaeftigt" statt "beschäftigt"). Florian-Persona zeigt das Problem nicht durchgängig — Hypothese: Persona-Markdown-Sprache beeinflusst LLM-Output. Fix: Umlaut-Direktive explizit in `docs/persona.md` ergänzen ("Schreibe immer mit korrekten deutschen Umlauten ä/ö/ü/ß").
+**Größe:** S · **Priorität:** must · **Aus:** Sub-Schritt 2c/2d/2e/2.5.3 Live-Tests
 
 ---
 
