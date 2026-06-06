@@ -203,6 +203,33 @@ export class ConversationsRepo {
   }
 
   /**
+   * G2 (Telegram-Lifecycle): aktive Konversationen eines Twins, deren letzte
+   * Aktivität älter als `cutoffIso` ist (= idle). „Letzte Aktivität" = jüngster
+   * Audit-Turn der Konversation (Owner-Direct/Telegram-Audits tragen
+   * conversation_id); fehlt der (gerade gestartete Konv ohne Turn), zählt
+   * `started_at` als Fallback — so wird eine eben begonnene Konv NIE fälschlich
+   * als idle markiert. Rein lesend; das Beenden+Verdichten macht der Caller über
+   * `resetConversation`. KEINE Migration nötig — leitet idle aus vorhandenen
+   * Timestamps ab. ISO-Text ist lexikographisch vergleichbar.
+   */
+  listIdleActive(twinId: string, cutoffIso: string): Conversation[] {
+    const rows = this.db
+      .prepare(
+        `SELECT c.* FROM conversations c
+           WHERE c.twin_id = ?
+             AND c.status = 'active'
+             AND COALESCE(
+                   (SELECT MAX(a.timestamp) FROM audit a
+                      WHERE a.conversation_id = c.id),
+                   c.started_at
+                 ) < ?
+           ORDER BY c.started_at ASC`,
+      )
+      .all(twinId, cutoffIso) as ConversationRow[];
+    return rows.map(rowToConversation);
+  }
+
+  /**
    * #105: Listet alle aktiven Konversationen eines Owners pro Twin. Wird
    * vom List-Endpoint (GET /twins/:handle/conversations) genutzt, um lokale
    * start-only-Konversationen (#105) sichtbar zu machen, die noch keine

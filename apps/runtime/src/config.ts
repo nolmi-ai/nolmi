@@ -187,6 +187,24 @@ export const CONVERSATION_LIVE_WINDOW = parseIntEnv(
   "CONVERSATION_LIVE_WINDOW",
 );
 
+/**
+ * G2 (Telegram-Konversations-Lifecycle): Ab wie vielen Stunden Inaktivität eine
+ * aktive Konversation als „idle" gilt und vom Fokus-Loop automatisch beendet +
+ * episodisch verdichtet (embedded) wird. Schließt die Lücke, dass Telegram nie
+ * eine Konversation beendet (nur die Web-Reset-Route tat das) — ohne Auto-End
+ * erzeugt gelebter Telegram-Verkehr 0 episodische Embeddings.
+ *
+ * Anders als die Loop-ENABLED-Flags ist das KEIN on/off-Gate, sondern ein
+ * Schwellwert mit sinnvollem Default: der Mechanismus läuft auch ohne
+ * VPS-`.env`-Eintrag (24h greift), weil Verdichtung reversibel/peripher ist
+ * (kein Approval, kein Owner-Eingriff) und nach dem Deploy sofort wirken soll.
+ */
+export const CONVERSATION_IDLE_HOURS = parseIntEnv(
+  process.env.CONVERSATION_IDLE_HOURS,
+  24,
+  "CONVERSATION_IDLE_HOURS",
+);
+
 // ─── EPISODIC-MEMORY TUNABLES (Phase 3.4 + 3.4.I) ───────────────────────────
 //
 // 3.4.I-Refactor: das bisherige einstufige `EPISODIC_SIMILARITY_THRESHOLD`

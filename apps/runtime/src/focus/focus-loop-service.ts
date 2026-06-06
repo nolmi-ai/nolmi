@@ -3,6 +3,8 @@ import type Database from "better-sqlite3";
 import type { TwinServiceRegistry, TwinSummary } from "../twin-service-registry.js";
 import type { FocusResult } from "./focus-engine.js";
 import type { ProactiveNudgeResult } from "./proactive-nudge-service.js";
+import { ConversationsRepo } from "../conversations/repo.js";
+import { CONVERSATION_IDLE_HOURS } from "../config.js";
 
 // ─── FOCUS LOOP SERVICE (Aufmerksamkeit/Fokus Stufe 1 — Schritt 4/4) ─────────
 //
@@ -34,6 +36,19 @@ import type { ProactiveNudgeResult } from "./proactive-nudge-service.js";
 // an diesem (FOCUS_LOOP_ENABLED-gateten) Loop. Eigener try/catch pro Twin, damit
 // ein Nudge-Fehler weder die Fokus-Ableitung noch die anderen Twins killt.
 // „Still, bis Historie da ist": <3 Snapshots → detectStuck=false, 0 Token.
+//
+// ── ANGEHÄNGT (additiv): G2 — Telegram-Konversations-Lifecycle ──
+// VOR der Fokus-Ableitung beendet + verdichtet jeder Tick idle Konversationen
+// (endIdleConversationsForTwin). Hintergrund: Telegram beendet nie eine
+// Konversation (nur die Web-Reset-Route tat das) → gelebter Telegram-Verkehr
+// erzeugte 0 episodische Embeddings. G2 schließt die Lücke: Konv ohne Aktivität
+// seit > CONVERSATION_IDLE_HOURS (Default 24) werden über den bestehenden
+// resetConversation()-Pfad beendet + embedded. KEIN eigenes Gate (hängt am
+// FOCUS_LOOP_ENABLED-Loop), KEINE Migration (idle aus vorhandenen Timestamps),
+// eigener try/catch pro Twin. Reihenfolge: am ANFANG des Ticks — erst alte Konv
+// verdichten, dann Fokus/Nudge auf frischer Basis ableiten. resetConversation
+// ist idempotent (status='ended' + embedding_status='done') → zweiter Tick
+// re-embedded dieselbe Konv nicht.
 
 const DEFAULT_INTERVAL_HOURS = 24;
 
@@ -68,6 +83,17 @@ export interface FocusLoopDeps {
   botRegistry?: {
     sendToOwner(twinId: string, text: string): Promise<{ sent: boolean; reason?: string }>;
   };
+  /**
+   * G2: Idle-Schwelle in Stunden. Default `CONVERSATION_IDLE_HOURS` (env, 24).
+   * Test-Override, um synthetische Idle-Daten ohne 24h-Wartezeit zu prüfen.
+   */
+  idleHours?: number;
+  /**
+   * G2 Test-Hook: pro-Twin-Reset einer idle Konversation. Default ruft
+   * `TwinService.resetConversation(convId)` über die Registry (end + embed).
+   * Tests injizieren einen Spy, um „N Konv beendet" ohne echten Embed zu prüfen.
+   */
+  triggerResetConversation?: (handle: string, conversationId: string) => Promise<void>;
 }
 
 export interface FocusForTwinOutcome {
@@ -86,6 +112,15 @@ export class FocusLoopService {
   private readonly nudgeTrigger: (
     handle: string,
   ) => Promise<ProactiveNudgeResult | null>;
+  /** G2: idle-Detektions-Repo (rein lesend) auf der geteilten db-Connection. */
+  private readonly conversationsRepo: ConversationsRepo;
+  /** G2: Idle-Schwelle in Millisekunden. */
+  private readonly idleMs: number;
+  /** G2: pro-Twin-Reset (end + embed) einer idle Konversation. */
+  private readonly resetTrigger: (
+    handle: string,
+    conversationId: string,
+  ) => Promise<void>;
 
   constructor(private deps: FocusLoopDeps) {
     const envHours = Number(process.env.FOCUS_LOOP_INTERVAL_HOURS);
@@ -112,6 +147,19 @@ export class FocusLoopService {
               this.deps.botRegistry!.sendToOwner(twinId, text)
           : undefined;
         return twin.proactiveNudgeService.nudge(sender);
+      });
+
+    // G2: Idle-Lifecycle. Repo rein lesend auf der geteilten Connection; der
+    // Reset-Trigger ruft den bestehenden end+embed-Pfad über die Registry.
+    this.conversationsRepo = new ConversationsRepo(this.deps.db);
+    const idleHours = deps.idleHours ?? CONVERSATION_IDLE_HOURS;
+    this.idleMs = idleHours * 60 * 60 * 1000;
+    this.resetTrigger =
+      deps.triggerResetConversation ??
+      (async (handle, conversationId) => {
+        const twin = this.deps.registry.getByHandle(handle);
+        if (!twin) return; // Race: Twin zwischen list() und Trigger entfernt
+        await twin.resetConversation(conversationId);
       });
   }
 
@@ -158,6 +206,21 @@ export class FocusLoopService {
   async runTick(): Promise<void> {
     const twins = this.deps.registry.list();
     for (const twin of twins) {
+      // G2: VOR der Fokus-Ableitung — idle Konv beenden + verdichten, damit
+      // Fokus/Nudge auf frischer Basis ableiten. Eigener try/catch: ein Embed-
+      // Fehler darf weder die Fokus-Ableitung noch die anderen Twins killen.
+      try {
+        await this.endIdleConversationsForTwin(twin);
+      } catch (err) {
+        this.logger?.error(
+          {
+            twinId: twin.twinId,
+            handle: twin.handle,
+            err: err instanceof Error ? err.message : String(err),
+          },
+          "[focus-loop] idle-conversation-lifecycle failed for twin",
+        );
+      }
       try {
         await this.focusForTwin(twin);
       } catch (err) {
@@ -237,6 +300,53 @@ export class FocusLoopService {
       "[focus-loop] proaktiver Fokus-Anstoß als Pending erzeugt",
     );
     return result;
+  }
+
+  /**
+   * G2 (Telegram-Konversations-Lifecycle): findet aktive Konversationen des
+   * Twins, deren letzte Aktivität älter als die Idle-Schwelle ist, und beendet
+   * + verdichtet jede über `resetConversation` (end + episodisches Embedding).
+   *
+   * Idle = jüngster Audit-Turn < cutoff (Fallback started_at bei turn-loser
+   * Konv — eine eben gestartete Konv wird so NIE fälschlich idle markiert).
+   * Idempotent: nach end() ist die Konv 'ended' + embedding_status='done', der
+   * nächste Tick findet sie via listIdleActive (status='active') nicht mehr;
+   * der nächste Owner-Turn startet via getOrStart eine frische Konv.
+   *
+   * Per-Konv try/catch: ein Embed-/Reset-Fehler bei einer Konv darf die
+   * übrigen idle Konv desselben Twins nicht überspringen. Rückgabe für Tests.
+   */
+  async endIdleConversationsForTwin(
+    twin: TwinSummary,
+  ): Promise<{ ended: number; idle: number }> {
+    const cutoffIso = new Date(Date.now() - this.idleMs).toISOString();
+    const idle = this.conversationsRepo.listIdleActive(twin.twinId, cutoffIso);
+    if (idle.length === 0) {
+      // Leerer Normalfall: still durchlaufen, kein Log-Spam pro Tick.
+      return { ended: 0, idle: 0 };
+    }
+
+    let ended = 0;
+    for (const conv of idle) {
+      try {
+        await this.resetTrigger(twin.handle, conv.id);
+        ended++;
+      } catch (err) {
+        this.logger?.error(
+          {
+            handle: twin.handle,
+            conversationId: conv.id,
+            err: err instanceof Error ? err.message : String(err),
+          },
+          "[focus-loop] idle-Konv beenden+embedden fehlgeschlagen",
+        );
+      }
+    }
+    this.logger?.info(
+      { handle: twin.handle, idle: idle.length, ended },
+      "[focus-loop] idle Konversationen beendet + verdichtet (G2)",
+    );
+    return { ended, idle: idle.length };
   }
 
   // ─── Guard-Queries ──────────────────────────────────────────────────────
