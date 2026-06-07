@@ -100,25 +100,53 @@ async function main(): Promise<void> {
     db.close();
   }
 
-  // ── 8) Dry-Run: schreibt NICHTS ──
-  console.log("\n── 8) Dry-Run schreibt nichts");
+  // ── 8) Dry-Run: tail-aware Vorschau, KEIN LLM, schreibt NICHTS ──
+  console.log("\n── 8) Dry-Run: Tail-Vorschau ohne LLM/Schreiben");
   {
     const db = new Database(":memory:"); migrate(db);
     const { twinId, userId } = seedTwin(db);
     const summariesRepo = new ConversationSummariesRepo(db);
     const convId = seedEndedConvWithTail(db, summariesRepo, twinId, userId);
+    // 🔴 summarize WIRFT, falls aufgerufen → beweist: dry-run ruft KEIN LLM.
+    const throwingSummarize = async () => { throw new Error("LLM darf im dry-run NICHT laufen"); };
     const maintenance = buildTailFlushMaintenance({
-      db, twinId, twinName: "Markus", summarize: mockSummarize, getProvider: () => mockProvider() as never,
+      db, twinId, twinName: "Markus", summarize: throwingSummarize, getProvider: () => mockProvider() as never,
     });
-    await maintenance.embedAll({ twinId, type: "conversation", trigger: "manual", dryRun: true, tailFlushLimit: 5 });
-    assert(cSeg(db, convId) === 1, "dry-run → kein neues Segment (nur das alte)");
+    const events: { status: string; tailTurns?: number }[] = [];
+    const r = await maintenance.embedAll({
+      twinId, type: "conversation", trigger: "manual", dryRun: true, tailFlushLimit: 5,
+      onProgress: (e) => events.push({ status: e.status, tailTurns: e.tailTurns }),
+    });
+    assert(r.tailFlushable === 1, `dry-run: tailFlushable=1 (Vorschau) (got ${r.tailFlushable})`);
+    assert(events.some((e) => e.status === "tail-pending" && e.tailTurns === 13), "dry-run: 'tail-pending'-Event mit 13 turns gemeldet");
+    assert(cSeg(db, convId) === 1, "dry-run → kein neues Segment");
     assert(cSegEmb(db, convId) === 0, "dry-run → kein Embedding");
     assert(convEmbStatus(db, convId) === "pending", `dry-run → status unverändert pending (got ${convEmbStatus(db, convId)})`);
+    // (kein Throw bis hier = summarize wurde NICHT aufgerufen → kein LLM im dry-run)
+    assert(true, "dry-run → kein LLM-Call (throwing summarize wurde nicht ausgelöst)");
+    db.close();
+  }
+
+  // ── 8b) Dry-Run, Konv mit Segment OHNE Tail → skip, tailFlushable=0 ──
+  console.log("\n── 8b) Dry-Run: Segment ohne Tail → skip");
+  {
+    const db = new Database(":memory:"); migrate(db);
+    const { twinId, userId } = seedTwin(db);
+    const summariesRepo = new ConversationSummariesRepo(db);
+    const convId = seedEndedConvWithTail(db, summariesRepo, twinId, userId);
+    // Zweites Segment, das den Tail (41..53) abdeckt → Tail = 0.
+    const allAudits = db.prepare("SELECT id FROM audit WHERE conversation_id=? ORDER BY timestamp ASC").all(convId) as { id: string }[];
+    summariesRepo.insert({ conversationId: convId, segmentStartAuditId: allAudits[40]!.id, segmentEndAuditId: allAudits[52]!.id, segmentMessageCount: 13, summaryMd: "Segment 41..53" });
+    const maintenance = buildTailFlushMaintenance({
+      db, twinId, twinName: "Markus", summarize: async () => { throw new Error("kein LLM"); }, getProvider: () => mockProvider() as never,
+    });
+    const r = await maintenance.embedAll({ twinId, type: "conversation", trigger: "manual", dryRun: true, tailFlushLimit: 5 });
+    assert(r.tailFlushable === 0, `kein Tail → tailFlushable=0 (got ${r.tailFlushable})`);
     db.close();
   }
 
   console.log(failures === 0
-    ? "\n✅ ALLE CHECKS GRÜN — CLI-Wiring (manual-Backfill flusht, dry-run schreibt nichts).\n"
+    ? "\n✅ ALLE CHECKS GRÜN — CLI-Wiring (manual-Backfill flusht, dry-run tail-aware: Vorschau ohne LLM/Schreiben).\n"
     : `\n❌ ${failures} FEHLER\n`);
   process.exit(failures === 0 ? 0 : 1);
 }

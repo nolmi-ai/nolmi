@@ -45,8 +45,11 @@ export interface ProgressEvent {
   total: number;
   targetType: EmbeddingTargetType;
   targetId: string;
-  status: "embedding" | "succeeded" | "failed" | "skipped";
+  /** 'tail-pending' = dry-run-Vorschau: diese Konv würde im echten Lauf geflusht. */
+  status: "embedding" | "succeeded" | "failed" | "skipped" | "tail-pending";
   error?: Error;
+  /** Bei 'tail-pending': Anzahl unsummarisierter Tail-Turns (dry-run). */
+  tailTurns?: number;
 }
 
 export interface EmbedAllArgs {
@@ -75,6 +78,8 @@ export interface EmbedAllResult {
   skipped: number;
   /** Sub-Step 4: Anzahl tatsächlich geflushter Tails (Konv mit Segment + Tail). */
   tailFlushed: number;
+  /** Sub-Step 6a-fix: im dry-run die Anzahl Konv, die der echte Lauf flushen würde. */
+  tailFlushable: number;
   durationMs: number;
 }
 
@@ -99,6 +104,12 @@ export interface MaintenanceDeps {
    * Der Caller (CLI/Loop) verkabelt ihn mit flushConversationTail + SummaryEngine.
    */
   tailFlush?: TailFlushCallback;
+  /**
+   * Sub-Step 6a-fix: reiner Tail-Leser (summaryEngine.countPendingTurns) — KEIN
+   * LLM, kein Schreiben. Nur für die dry-run-Vorschau: zeigt, welche Konv der
+   * echte Lauf flushen würde, ohne irgendetwas auszuführen.
+   */
+  tailPending?: (conversationId: string) => number;
 }
 
 export class MemoryMaintenanceService {
@@ -113,6 +124,7 @@ export class MemoryMaintenanceService {
     const trigger: TailFlushTrigger = args.trigger ?? "manual";
     const tailFlushLimit = args.tailFlushLimit ?? TAIL_FLUSH_BATCH_LIMIT;
     let tailFlushed = 0;
+    let tailFlushable = 0;
 
     // ─── Sammeln ──────────────────────────────────────────────────────────
     const items: WorkItem[] = [];
@@ -141,10 +153,33 @@ export class MemoryMaintenanceService {
       for (const conv of convs) {
         const segCount = this.deps.conversationSummariesRepo.count(conv.id);
         if (segCount > 0) {
-          // Sub-Step 4: Konv MIT Segment(en) hat oft einen unsummarisierten Tail
-          // (L3). Wenn ein tailFlush-Callback verkabelt ist → Tail verdichten
-          // statt überspringen; sonst (Back-Compat / dry-run) altes Skip+done.
-          if (this.deps.tailFlush && !args.dryRun) {
+          // Sub-Step 4/6a-fix: Konv MIT Segment(en) hat oft einen unsummarisierten
+          // Tail (L3). Wenn ein tailFlush-Callback verkabelt ist → Tail verdichten
+          // (echter Lauf) bzw. nur VORHERSAGEN (dry-run, kein LLM/Schreiben).
+          if (this.deps.tailFlush) {
+            if (args.dryRun) {
+              // dry-run: reiner Tail-Leser (countPendingTurns) — KEIN LLM, KEIN
+              // Schreiben. Zeigt, was der echte Lauf flushen würde.
+              const tail = this.deps.tailPending
+                ? this.deps.tailPending(conv.id)
+                : 0;
+              if (tail > 0) {
+                tailFlushable += 1;
+                args.onProgress?.({
+                  current: 0, total: 0, targetType: "conversation",
+                  targetId: conv.id, status: "tail-pending", tailTurns: tail,
+                });
+              } else {
+                // Kein Tail → im echten Lauf No-op→done; hier nur skip-Anzeige.
+                skipped += 1;
+                args.onProgress?.({
+                  current: 0, total: 0, targetType: "conversation",
+                  targetId: conv.id, status: "skipped",
+                });
+              }
+              continue;
+            }
+            // Echter Lauf:
             if (tailFlushed >= tailFlushLimit) {
               // Batch-Limit erreicht — Konv bleibt pending für den nächsten Lauf
               // (NICHT done), damit der Bestand über mehrere Läufe abgebaut wird.
@@ -166,7 +201,7 @@ export class MemoryMaintenanceService {
             });
             continue;
           }
-          // Back-Compat: kein tailFlush-Callback ODER dry-run → altes Verhalten.
+          // Back-Compat: kein tailFlush-Callback → altes Verhalten.
           // Segmente decken den Hauptteil ab; Status auf 'done' (Pending-Konvergenz).
           if (!args.dryRun) {
             this.deps.conversationsRepo.updateEmbeddingStatus(conv.id, "done");
@@ -240,6 +275,7 @@ export class MemoryMaintenanceService {
         failed: 0,
         skipped: skipped + items.length,
         tailFlushed,
+        tailFlushable,
         durationMs: Date.now() - start,
       };
     }
@@ -302,6 +338,7 @@ export class MemoryMaintenanceService {
       failed,
       skipped,
       tailFlushed,
+      tailFlushable,
       durationMs: Date.now() - start,
     };
   }

@@ -133,8 +133,16 @@ async function main() {
       // immer; das TAIL_FLUSH_AUTONOMOUS_ENABLED-Gate betrifft nur Loop/G2).
       trigger: "manual",
       onProgress: (e) => {
+        if (e.status === "tail-pending") {
+          // Sub-Step 6a-fix: dry-run-Vorschau — diese Konv würde im echten Lauf
+          // ihren Tail verdichten (kein LLM/Schreiben im dry-run).
+          console.log(
+            `  ⟳ würde Tail flushen: ${e.targetType}/${shortId(e.targetId)} (${e.tailTurns} turns)`,
+          );
+          return;
+        }
         if (e.status === "skipped" && e.total === 0) {
-          // Konversation mit Segments oder leere Konversation — vor dem
+          // Konversation mit Segments ohne Tail / leere Konversation — vor dem
           // Embed-Loop reportet.
           console.log(`  ⊘ skip ${e.targetType}/${shortId(e.targetId)}`);
           return;
@@ -160,7 +168,11 @@ async function main() {
     console.log(`  succeeded:  ${result.succeeded}`);
     console.log(`  failed:     ${result.failed}`);
     console.log(`  skipped:    ${result.skipped}`);
-    console.log(`  tailFlushed:${result.tailFlushed}`);
+    if (dryRun) {
+      console.log(`  tailFlushable: ${result.tailFlushable} (würden im echten Lauf geflusht)`);
+    } else {
+      console.log(`  tailFlushed:${result.tailFlushed}`);
+    }
 
     if (result.failed > 0) {
       console.log("");

@@ -74,5 +74,8 @@ export function buildTailFlushMaintenance(opts: {
     twinDiaryRepo,
     memoryEmbeddingService,
     tailFlush,
+    // Sub-Step 6a-fix: reiner Tail-Leser für die dry-run-Vorschau (kein LLM).
+    tailPending: (conversationId) =>
+      summaryEngine.countPendingTurns(conversationId),
   });
 }
