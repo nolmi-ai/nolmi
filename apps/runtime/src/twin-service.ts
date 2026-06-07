@@ -583,6 +583,55 @@ export class TwinService {
   }
 
   /**
+   * Sub-Step 5 (Tail-Flush-Verarbeiter): greift die bereits BEENDETEN pending-
+   * Konversationen MIT Segment(en) auf und verdichtet ihren unsummarisierten
+   * Tail. Schließt die L3-Lücke für Konv, die NICHT über resetConversation
+   * endeten (z.B. start()-Invariante, Pre-G2-Bestand) — die G2 (active-only)
+   * nicht erreicht.
+   *
+   * Nutzt die EIGENEN Engines des TwinService (summaryEngine mit echtem Modell,
+   * memoryEmbeddingService) — KEINE Neu-Konstruktion von Provider/LLM. trigger
+   * wird durchgereicht: der autonome Loop ruft mit 'autonomous' (in
+   * flushConversationTail gegen TAIL_FLUSH_AUTONOMOUS_ENABLED gegated). Nur Konv
+   * MIT Segment (segCount>0); segment-lose pending gehören in den Whole-Embed-
+   * Pfad (Maintenance-CLI), nicht in den autonomen Loop. Batch-Limit + per-Konv
+   * try/catch (ein Fehler kippt den Lauf nicht).
+   */
+  async flushPendingConversationTails(
+    trigger: TailFlushTrigger,
+    limit: number,
+  ): Promise<{ flushed: number; candidates: number }> {
+    const pending = this.deps.conversations.listPendingByTwin(this.deps.twinId);
+    let flushed = 0;
+    let candidates = 0;
+    for (const conv of pending) {
+      if (flushed >= limit) break;
+      if (this.deps.conversationSummaries.count(conv.id) === 0) continue;
+      candidates += 1;
+      try {
+        const res = await flushConversationTail(
+          {
+            summaryEngine: this.summaryEngine,
+            memoryEmbeddingService: this.memoryEmbeddingService,
+            conversationsRepo: this.deps.conversations,
+            conversationSummariesRepo: this.deps.conversationSummaries,
+            twinId: this.deps.twinId,
+          },
+          conv.id,
+          { twinName: this.deps.persona.name, partnerHandle: conv.partnerHandle },
+          trigger,
+        );
+        if (res.status === "done") flushed += 1;
+      } catch (err) {
+        console.error(
+          `[tail-flush-loop] conv=${conv.id} fehlgeschlagen: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
+    }
+    return { flushed, candidates };
+  }
+
+  /**
    * Container-Shutdown-Hook: wird von TwinServiceRegistry.disposeAll() bei
    * SIGTERM/SIGINT gerufen. Beendet alle gehaltenen MCP-Subprocesses graceful
    * (mit SIGKILL-Fallback nach MCP_DISCONNECT_TIMEOUT_MS pro Server).

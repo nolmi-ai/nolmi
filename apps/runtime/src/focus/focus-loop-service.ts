@@ -4,7 +4,11 @@ import type { TwinServiceRegistry, TwinSummary } from "../twin-service-registry.
 import type { FocusResult } from "./focus-engine.js";
 import type { ProactiveNudgeResult } from "./proactive-nudge-service.js";
 import { ConversationsRepo } from "../conversations/repo.js";
-import { CONVERSATION_IDLE_HOURS } from "../config.js";
+import {
+  CONVERSATION_IDLE_HOURS,
+  TAIL_FLUSH_BATCH_LIMIT,
+  isTailFlushAutonomousEnabled,
+} from "../config.js";
 
 // ─── FOCUS LOOP SERVICE (Aufmerksamkeit/Fokus Stufe 1 — Schritt 4/4) ─────────
 //
@@ -99,6 +103,19 @@ export interface FocusLoopDeps {
    * Tests injizieren einen Spy, um „N Konv beendet" ohne echten Embed zu prüfen.
    */
   triggerResetConversation?: (handle: string, conversationId: string) => Promise<void>;
+  /**
+   * Sub-Step 5: max. Tail-Flushes pro Tick. Default `TAIL_FLUSH_BATCH_LIMIT`
+   * (env, 5). Test-Override.
+   */
+  tailFlushLimit?: number;
+  /**
+   * Sub-Step 5 Test-Hook: pro-Twin-Tail-Flush-Verarbeiter. Default ruft
+   * `TwinService.flushPendingConversationTails('autonomous', limit)`. Tests
+   * injizieren einen Spy.
+   */
+  triggerTailFlush?: (
+    handle: string,
+  ) => Promise<{ flushed: number; candidates: number } | null>;
 }
 
 export interface FocusForTwinOutcome {
@@ -130,6 +147,12 @@ export class FocusLoopService {
     handle: string,
     conversationId: string,
   ) => Promise<void>;
+  /** Sub-Step 5: max. Tail-Flushes pro Tick. */
+  private readonly tailFlushLimit: number;
+  /** Sub-Step 5: pro-Twin-Tail-Flush-Verarbeiter (beendete pending-Konv). */
+  private readonly tailFlushTrigger: (
+    handle: string,
+  ) => Promise<{ flushed: number; candidates: number } | null>;
 
   constructor(private deps: FocusLoopDeps) {
     const envHours = Number(process.env.FOCUS_LOOP_INTERVAL_HOURS);
@@ -185,6 +208,19 @@ export class FocusLoopService {
         // TAIL_FLUSH_AUTONOMOUS_ENABLED (das end+embed des Resets läuft immer,
         // nur der Tail-Flush-Pfad ist gegated).
         await twin.resetConversation(conversationId, "autonomous");
+      });
+
+    // Sub-Step 5: Tail-Flush-Verarbeiter (beendete pending-Konv mit Tail).
+    this.tailFlushLimit = deps.tailFlushLimit ?? TAIL_FLUSH_BATCH_LIMIT;
+    this.tailFlushTrigger =
+      deps.triggerTailFlush ??
+      (async (handle) => {
+        const twin = this.deps.registry.getByHandle(handle);
+        if (!twin) return null; // Race: Twin zwischen list() und Trigger entfernt
+        return twin.flushPendingConversationTails(
+          "autonomous",
+          this.tailFlushLimit,
+        );
       });
   }
 
@@ -244,6 +280,23 @@ export class FocusLoopService {
             err: err instanceof Error ? err.message : String(err),
           },
           "[focus-loop] idle-conversation-lifecycle failed for twin",
+        );
+      }
+      // Sub-Step 5: Tail-Flush-Verarbeiter — nach G2 (das erzeugt frische
+      // pending-Tails), VOR der Fokus-Ableitung (Verdichtungs-Phase zusammen,
+      // dann Fokus/Nudge auf frischer Basis). ENV-gated (Default AUS) → bei
+      // Flag-AUS kompletter No-op, die bestehenden Schritte laufen unverändert.
+      // Eigener try/catch: ein Flush-Fehler kippt weder Fokus/Nudge noch Twins.
+      try {
+        await this.processTailFlushForTwin(twin);
+      } catch (err) {
+        this.logger?.error(
+          {
+            twinId: twin.twinId,
+            handle: twin.handle,
+            err: err instanceof Error ? err.message : String(err),
+          },
+          "[focus-loop] tail-flush failed for twin",
         );
       }
       try {
@@ -411,6 +464,36 @@ export class FocusLoopService {
       "[focus-loop] idle Konversationen beendet + verdichtet (G2)",
     );
     return { ended, idle: idle.length };
+  }
+
+  /**
+   * Sub-Step 5: Tail-Flush-Verarbeiter pro Twin. Greift beendete pending-Konv
+   * mit Tail auf (TwinService.flushPendingConversationTails, trigger='autonomous',
+   * Batch-Limit). ENV-gated: bei TAIL_FLUSH_AUTONOMOUS_ENABLED=AUS sofortiger
+   * No-op — KEIN listPendingByTwin, kein LLM, gar nichts (früher Loop-Guard
+   * zusätzlich zum flushConversationTail-Gate, damit bei Flag-AUS kein
+   * Verarbeiter-Overhead entsteht). Rückgabe für Tests.
+   */
+  async processTailFlushForTwin(
+    twin: TwinSummary,
+  ): Promise<{ flushed: number; candidates: number } | null> {
+    if (!isTailFlushAutonomousEnabled()) {
+      // Flag AUS (Default) → kompletter No-op.
+      return { flushed: 0, candidates: 0 };
+    }
+    const result = await this.tailFlushTrigger(twin.handle);
+    if (!result) return null; // Race: Twin zwischen list() und Trigger entfernt
+    if (result.flushed > 0 || result.candidates > 0) {
+      this.logger?.info(
+        {
+          handle: twin.handle,
+          flushed: result.flushed,
+          candidates: result.candidates,
+        },
+        "[tail-flush-loop] beendete pending-Konv-Tails verdichtet",
+      );
+    }
+    return result;
   }
 
   // ─── Guard-Queries ──────────────────────────────────────────────────────

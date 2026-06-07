@@ -235,9 +235,42 @@ async function main(): Promise<void> {
     delete process.env.TAIL_FLUSH_AUTONOMOUS_ENABLED;
   }
 
+  // ── 9) flushPendingConversationTails — Verarbeiter (Batch-Limit + Gate) ──
+  console.log("\n── 9) flushPendingConversationTails (Sub-Step 5)");
+  {
+    const db9 = new Database(":memory:"); migrate(db9);
+    const { twinId: t9, userId: u9 } = seedTwin(db9);
+    const sum9 = new ConversationSummariesRepo(db9);
+    const svc9 = buildService(db9, t9, u9);
+    // 3 BEENDETE pending-Konv mit Segment + Tail.
+    for (let i = 0; i < 3; i++) {
+      const { convId, auditIds } = seedConv(db9, t9, u9, 53);
+      seedSegment(sum9, convId, auditIds, 40);
+      db9.prepare("UPDATE conversations SET status='ended', ended_at=? WHERE id=?")
+        .run(new Date(BASE_MS + 9_000_000 + i * 1000).toISOString(), convId);
+    }
+    process.env.TAIL_FLUSH_AUTONOMOUS_ENABLED = "true";
+    const r1 = await svc9.flushPendingConversationTails("autonomous", 2);
+    assert(r1.flushed === 2 && r1.candidates === 2, `Batch-Limit: flushed=2/candidates=2 (got ${r1.flushed}/${r1.candidates})`);
+    const r2 = await svc9.flushPendingConversationTails("autonomous", 2);
+    assert(r2.flushed === 1, `2. Lauf flusht den Rest (got ${r2.flushed})`);
+    const r3 = await svc9.flushPendingConversationTails("autonomous", 5);
+    assert(r3.flushed === 0, "alle done → 3. Lauf flusht nichts (Idempotenz)");
+
+    // Gate: Flag AUS → flushConversationTail gated → 0 geflusht (Konv bleibt pending)
+    delete process.env.TAIL_FLUSH_AUTONOMOUS_ENABLED;
+    const { convId, auditIds } = seedConv(db9, t9, u9, 53);
+    seedSegment(sum9, convId, auditIds, 40);
+    db9.prepare("UPDATE conversations SET status='ended', ended_at=? WHERE id=?")
+      .run(new Date(BASE_MS + 9_500_000).toISOString(), convId);
+    const r4 = await svc9.flushPendingConversationTails("autonomous", 5);
+    assert(r4.flushed === 0 && r4.candidates === 1, `Flag AUS → gated, 0 geflusht (got ${r4.flushed}/${r4.candidates})`);
+    db9.close();
+  }
+
   db.close();
   console.log(failures === 0
-    ? "\n✅ ALLE CHECKS GRÜN — resetConversation-Tail-Flush (lange Konv flusht, kurze unverändert, No-Tail No-op, autonomous-Gate, alle ended).\n"
+    ? "\n✅ ALLE CHECKS GRÜN — resetConversation-Tail-Flush (lange Konv flusht, kurze unverändert, No-Tail No-op, autonomous-Gate, alle ended) + flushPendingConversationTails (Batch-Limit/Gate).\n"
     : `\n❌ ${failures} FEHLER\n`);
   process.exit(failures === 0 ? 0 : 1);
 }

@@ -166,10 +166,66 @@ async function main(): Promise<void> {
     assert(seen.includes("@err") && seen.includes("@ok"), "beide Twins berührt — @err-Fehler killt @ok nicht");
   }
 
+  // ── e) Sub-Step 5: Tail-Flush-Schritt (Gate + Wiring + Isolation) ──
+  console.log("\n── e) Tail-Flush-Schritt im Loop");
+  {
+    const twin = { twinId: "twin_tf", handle: "@tf", displayName: "@tf" };
+
+    // e1) Flag AUS → triggerTailFlush NICHT aufgerufen (früher Loop-Guard)
+    delete process.env.TAIL_FLUSH_AUTONOMOUS_ENABLED;
+    let callsOff = 0;
+    const loopOff = new FocusLoopService({
+      db, registry: stubRegistry([twin]),
+      triggerTailFlush: async () => { callsOff++; return { flushed: 0, candidates: 0 }; },
+    });
+    const rOff = await loopOff.processTailFlushForTwin(twin);
+    assert(callsOff === 0, "Flag AUS → triggerTailFlush NICHT aufgerufen (kein Overhead)");
+    assert(rOff?.flushed === 0 && rOff?.candidates === 0, "Flag AUS → {flushed:0,candidates:0}");
+
+    // e2) Flag AN → triggerTailFlush aufgerufen + Ergebnis durchgereicht
+    process.env.TAIL_FLUSH_AUTONOMOUS_ENABLED = "true";
+    let callsOn = 0;
+    const loopOn = new FocusLoopService({
+      db, registry: stubRegistry([twin]),
+      triggerTailFlush: async () => { callsOn++; return { flushed: 2, candidates: 3 }; },
+    });
+    const rOn = await loopOn.processTailFlushForTwin(twin);
+    assert(callsOn === 1, "Flag AN → triggerTailFlush 1× aufgerufen");
+    assert(rOn?.flushed === 2 && rOn?.candidates === 3, "Flag AN → Verarbeiter-Ergebnis durchgereicht");
+
+    // e3) runTick (Flag AN): Tail-Flush läuft VOR Fokus; bestehende Schritte unverändert
+    const order: string[] = [];
+    const loopTick = new FocusLoopService({
+      db, registry: stubRegistry([twin]),
+      triggerTailFlush: async () => { order.push("tailflush"); return { flushed: 1, candidates: 1 }; },
+      triggerFocus: async () => { order.push("focus"); return null; },
+      triggerNudge: async () => { order.push("nudge"); return null; },
+      triggerOpenQuestion: async () => { order.push("openq"); return null; },
+    });
+    await loopTick.runTick();
+    assert(order.includes("tailflush"), "runTick (Flag AN) → Tail-Flush-Schritt lief");
+    assert(order.includes("focus") && order.includes("nudge") && order.includes("openq"),
+      "bestehende Schritte (Fokus/Nudge/Anlass3) liefen unverändert");
+    assert(order.indexOf("tailflush") < order.indexOf("focus"),
+      "Reihenfolge: Tail-Flush VOR Fokus (Verdichtungs-Phase)");
+
+    // e4) Isolation: Tail-Flush wirft → runTick läuft weiter, Fokus trotzdem
+    const order2: string[] = [];
+    const loopErr = new FocusLoopService({
+      db, registry: stubRegistry([twin]),
+      triggerTailFlush: async () => { throw new Error("tail-flush-Fehler (gemockt)"); },
+      triggerFocus: async () => { order2.push("focus"); return null; },
+    });
+    await loopErr.runTick(); // darf NICHT werfen
+    assert(order2.includes("focus"), "Tail-Flush-Fehler killt Fokus nicht (Isolation)");
+
+    delete process.env.TAIL_FLUSH_AUTONOMOUS_ENABLED;
+  }
+
   db.close();
   console.log(
     failures === 0
-      ? "\n✅ ALLE CHECKS GRÜN — opt-in default-aus, Substanz-Guard bremst, direkt-schreiben + genau-1-aktiv, kein Pending, robust.\n"
+      ? "\n✅ ALLE CHECKS GRÜN — opt-in default-aus, Substanz-Guard bremst, direkt-schreiben + genau-1-aktiv, kein Pending, robust, Tail-Flush-Schritt (Gate/Wiring/Isolation).\n"
       : `\n❌ ${failures} CHECK(S) FEHLGESCHLAGEN.\n`,
   );
   if (failures > 0) process.exit(1);
