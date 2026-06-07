@@ -261,6 +261,19 @@ export type TwinToolListResponse = z.infer<typeof TwinToolListResponseSchema>;
 export const ConversationStatusSchema = z.enum(["active", "ended"]);
 export type ConversationStatus = z.infer<typeof ConversationStatusSchema>;
 
+// 3.4.A / #118: Verdichtungs-Status (episodisches Embedding) der Konversation.
+// Spiegelt conversations.embedding_status (Migration 018):
+//   'pending' → noch nicht verdichtet · 'done' → verdichtet (Tail-Flush/Reset
+//   hat eingebettet) · 'failed' → Embedding-Versuch gescheitert.
+export const ConversationEmbeddingStatusSchema = z.enum([
+  "pending",
+  "done",
+  "failed",
+]);
+export type ConversationEmbeddingStatus = z.infer<
+  typeof ConversationEmbeddingStatusSchema
+>;
+
 export const ConversationSchema = z.object({
   id: z.string(),
   ownerUserId: z.string(),
@@ -275,6 +288,12 @@ export const ConversationSchema = z.object({
    * um Audits mit `timestamp < lastResetAt` standardmäßig auszublenden.
    */
   lastResetAt: z.string().nullable(),
+  /**
+   * #118: Verdichtungs-Status der Konversation. Optional, weil primär für die
+   * Sidebar-Anzeige beendeter Konv relevant (→ „verdichtet"-Hinweis bei
+   * 'done'). Wird aus conversations.embedding_status gelesen.
+   */
+  embeddingStatus: ConversationEmbeddingStatusSchema.optional(),
 });
 export type Conversation = z.infer<typeof ConversationSchema>;
 

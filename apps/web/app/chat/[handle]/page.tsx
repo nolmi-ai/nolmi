@@ -126,6 +126,12 @@ interface ConversationItem {
   partnerDisplayName: string | null;
   lastMessageAt: string;
   unreadCount: number;
+  /** #118: 'active' | 'ended' — beendete kommen mit „beendet"-Badge. */
+  status?: "active" | "ended";
+  /** #118: ended_at der beendeten Konv (für „beendet vor X"). */
+  endedAt?: string | null;
+  /** #118: 'done' → „verdichtet"-Hinweis. */
+  embeddingStatus?: "pending" | "done" | "failed";
 }
 
 interface TrustEntry {
@@ -870,36 +876,57 @@ function Sidebar({
           </div>
         ) : (
           conversations.map((c) => {
-            const isActive =
+            const isSelected =
               selection.kind === "a2a" &&
               selection.partner.toLowerCase() === c.partnerHandle.toLowerCase();
+            // #118: beendete Konv dezent absetzen (gedämpfter Name + „beendet"-
+            // Badge), aktive bleiben unverändert. Verdichtet-Hinweis nur bei
+            // embedding_status='done'.
+            const isEnded = c.status === "ended";
+            const isCompacted = isEnded && c.embeddingStatus === "done";
             return (
               <button
                 key={c.partnerHandle}
                 onClick={() => onSelect({ kind: "a2a", partner: c.partnerHandle })}
                 className={`w-full text-left px-3 py-2 rounded border transition-colors ${
-                  isActive
+                  isSelected
                     ? "border-accent bg-bg"
                     : "border-transparent hover:border-accent/40 hover:bg-bg/40"
                 }`}
               >
                 <div className="flex items-center justify-between gap-2">
-                  <div className="text-sm text-text truncate">
+                  <div
+                    className={`text-sm truncate ${isEnded ? "text-muted" : "text-text"}`}
+                  >
                     {c.partnerDisplayName ?? c.partnerHandle}
                   </div>
-                  {c.unreadCount > 0 && (
-                    <span
-                      className="inline-block w-2 h-2 rounded-full bg-warn flex-shrink-0"
-                      title={`${c.unreadCount} ungelesen`}
-                      aria-label={`${c.unreadCount} ungelesene Antworten`}
-                    />
+                  {isEnded ? (
+                    <span className="text-[10px] uppercase tracking-wider text-muted border border-border rounded px-1.5 py-0.5 flex-shrink-0">
+                      beendet
+                    </span>
+                  ) : (
+                    c.unreadCount > 0 && (
+                      <span
+                        className="inline-block w-2 h-2 rounded-full bg-warn flex-shrink-0"
+                        title={`${c.unreadCount} ungelesen`}
+                        aria-label={`${c.unreadCount} ungelesene Antworten`}
+                      />
+                    )
                   )}
                 </div>
                 <div className="text-xs text-muted font-mono truncate">
                   {c.partnerHandle}
                 </div>
-                <div className="text-[11px] text-muted mt-0.5">
-                  {formatRelative(c.lastMessageAt)}
+                <div className="text-[11px] text-muted mt-0.5 flex items-center gap-1.5">
+                  <span>{formatRelative(c.endedAt ?? c.lastMessageAt)}</span>
+                  {isCompacted && (
+                    <span
+                      title="Ins Gedächtnis verdichtet"
+                      aria-label="Ins Gedächtnis verdichtet"
+                    >
+                      · ✓ verdichtet
+                    </span>
+                  )}
                 </div>
               </button>
             );

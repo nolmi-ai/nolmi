@@ -68,6 +68,8 @@ import { activatePresets } from "./skills/activate-presets.js";
 import { PresetSelectionSchema } from "@nolmi/shared";
 import { getEnv } from "@nolmi/shared/env";
 import type {
+  Conversation,
+  ConversationEmbeddingStatus,
   PresetActivationResult,
   Skill,
   SkillUiPayload,
@@ -2416,6 +2418,10 @@ interface ConversationItem {
   /** sind immer 'active' (nur aktive haben Bridge-Messages), lokale Merge-Treffer */
   /** kommen mit ihrem echten DB-Status. */
   status: "active" | "ended";
+  /** #118: ended_at der beendeten Konv (für „beendet vor X"). null/undefined bei aktiven. */
+  endedAt?: string | null;
+  /** #118: Verdichtungs-Status — 'done' → „verdichtet"-Hinweis in der Sidebar. */
+  embeddingStatus?: ConversationEmbeddingStatus;
 }
 
 function registerConversationRoutes(
@@ -2474,32 +2480,73 @@ function registerConversationRoutes(
         });
       }
 
-      // #105: lokale start-only-Konversationen ergänzen, die noch keine
-      // Bridge-Messages haben. Sonst sind frisch angelegte A2A-Konvs in der
-      // Sidebar unsichtbar. Filter:
-      //   - status='active' (ended liegt unter UI-Lifecycle-Item #118)
-      //   - partner != self (Direct-Chat-Rows raus, sonst Doppel-Render)
+      // #105 + #118-Kern: lokale Konversationen ergänzen, die noch keine
+      // Bridge-Messages haben — jetzt inkl. BEENDETER. Bisher nur aktive
+      // (listActiveByOwnerAndTwin); beendete Konv (status='ended', vom
+      // System-Lifecycle G2/Tail-Flush erzeugt) wurden weggefiltert und waren
+      // in der Sidebar unsichtbar. Status/ended_at/embedding_status werden jetzt
+      // ECHT durchgereicht (kein "active"-Hardcode mehr), damit die UI
+      // „beendet"+„verdichtet" zeigen kann.
+      // Filter unverändert:
+      //   - partner != self (Direct-Chat-Rows raus — eigener Reset-Marker-Pfad)
       //   - Partner nicht schon im Bridge-Aggregat (Bridge-Pfad hat Vorrang)
+      // Scope-Grenze: NUR dieser lokale Merge. Das Bridge-Aggregat oben bleibt
+      // unberührt — Bridge-Konv sind per Natur aktiv (nur aktive haben Bridge-
+      // Messages); ihr Lebenszyklus ist ein späteres A2A-Stück.
       const seenPartners = new Set(conversations.map((c) => c.partnerHandle));
-      const localConvs = deps.conversationsRepo.listActiveByOwnerAndTwin(
+      const selfHandle = entry.handle.toLowerCase();
+
+      const localActive = deps.conversationsRepo.listActiveByOwnerAndTwin(
         ctx.user.userId,
         entry.twinId,
       );
-      const selfHandle = entry.handle.toLowerCase();
-      for (const conv of localConvs) {
+      // listEndedByTwin ist twin-, nicht owner-scoped → auf den eingeloggten
+      // Owner einschränken (Direct-Chat-Self wird unten ohnehin gefiltert).
+      const localEnded = deps.conversationsRepo
+        .listEndedByTwin(entry.twinId)
+        .filter((c) => c.ownerUserId === ctx.user.userId);
+
+      // Pro Partner einen Repräsentanten: aktive Konv schlägt beendete; unter
+      // beendeten gewinnt die mit jüngstem ended_at. Verhindert Doppel-Rows
+      // (1 aktive + N beendete) und damit React-Key-Kollisionen im Frontend.
+      const localByPartner = new Map<string, Conversation>();
+      for (const conv of localActive) {
         const partner = conv.partnerHandle.toLowerCase();
-        if (partner === selfHandle) continue;
-        if (seenPartners.has(partner)) continue;
+        if (partner === selfHandle || seenPartners.has(partner)) continue;
+        localByPartner.set(partner, conv);
+      }
+      for (const conv of localEnded) {
+        const partner = conv.partnerHandle.toLowerCase();
+        if (partner === selfHandle || seenPartners.has(partner)) continue;
+        const cur = localByPartner.get(partner);
+        if (cur?.status === "active") continue; // aktive hat Vorrang
+        if (cur && (cur.endedAt ?? "") >= (conv.endedAt ?? "")) continue; // jüngere behalten
+        localByPartner.set(partner, conv);
+      }
+
+      for (const [partner, conv] of localByPartner) {
         conversations.push({
           partnerHandle: partner,
           partnerDisplayName: displayNames?.get(partner) ?? null,
-          lastMessageAt: conv.startedAt,
+          // Beendete nach ended_at einordnen (für „beendet vor X" + Sortierung),
+          // aktive nach started_at wie bisher.
+          lastMessageAt:
+            conv.status === "ended"
+              ? conv.endedAt ?? conv.startedAt
+              : conv.startedAt,
           unreadCount: 0,
-          status: "active",
+          status: conv.status,
+          endedAt: conv.endedAt,
+          embeddingStatus: conv.embeddingStatus,
         });
       }
 
-      conversations.sort((a, b) => b.lastMessageAt.localeCompare(a.lastMessageAt));
+      // #118: aktive zuerst (nach letzter Aktivität absteigend), dann beendete
+      // (jüngste beendete oben). Hält die aktive Arbeit oben in der Liste.
+      conversations.sort((a, b) => {
+        if (a.status !== b.status) return a.status === "active" ? -1 : 1;
+        return b.lastMessageAt.localeCompare(a.lastMessageAt);
+      });
       return { conversations };
     },
   );

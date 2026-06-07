@@ -2,6 +2,7 @@ import type Database from "better-sqlite3";
 import { nanoid } from "nanoid";
 import type {
   Conversation,
+  ConversationEmbeddingStatus,
   ConversationStartInput,
   ConversationStatus,
 } from "@nolmi/shared";
@@ -30,9 +31,12 @@ interface ConversationRow {
   started_at: string;
   ended_at: string | null;
   last_reset_at: string | null;
+  embedding_status: ConversationEmbeddingStatus;
 }
 
-export type ConversationEmbeddingStatus = "pending" | "done" | "failed";
+// Re-Export für Konsumenten im Runtime, die den Status-Typ erwarten — der
+// kanonische Typ lebt seit #118 in @nolmi/shared.
+export type { ConversationEmbeddingStatus };
 
 export class ConversationNotFoundError extends Error {
   constructor(id: string) {
@@ -61,6 +65,7 @@ export class ConversationsRepo {
       startedAt: now,
       endedAt: null,
       lastResetAt: input.lastResetAt ?? null,
+      embeddingStatus: "pending",
     };
 
     // Log beim Start, nicht bei jedem getOrStart() — sonst spammt jede
@@ -310,5 +315,6 @@ function rowToConversation(row: ConversationRow): Conversation {
     startedAt: row.started_at,
     endedAt: row.ended_at,
     lastResetAt: row.last_reset_at,
+    embeddingStatus: row.embedding_status,
   };
 }
