@@ -10,6 +10,7 @@ Beim Aufgreifen einer beendeten pending-Konv: statt segCount-Skip → falls unsu
 
 ## Design-Entscheidungen (Tag 40)
 - **Gate: ENV-gated, Default AUS.** Grund nicht Gefahr, sondern kontrollierte Beobachtung der ersten Läufe (wie viele Tails, LLM-Kosten, Tail-Summary-Qualität). Nach 1–2 beobachteten Läufen scharfschaltbar. (Anders als G2 Default-AN, weil hier LLM-Calls + Kosten; gleicher Rhythmus wie Reflexions-Loop/Nudges.)
+- **Gate-Entscheidung (Tag 40, Sub-Step 4 präzisiert):** EIN context-basiertes Gate (TAIL_FLUSH_AUTONOMOUS_ENABLED, Default AUS) deckt ALLE autonomen Auslöser ab (G2-Reset-Hook + Loop-Verarbeiter); manuelle/owner-getriggerte Pfade (Web-Reset, CLI-Backfill) sind IMMER erlaubt (kein autonomer Kostenfresser). Grund: die kontrollierte Beobachtung der ersten Läufe gilt für jeden autonomen Tail-Flush, nicht nur den Loop.
 - **Batch-Limit pro Tick.** Der Verarbeiter greift den Bestand (viele ended pending-Tails) automatisch mit → ohne Limit ein Kosten-/Last-Spike beim ersten Lauf. Max N Konv pro Tick (ENV-justierbar) → Bestand über mehrere Ticks.
 - **Backfill = derselbe Verarbeiter, erster Lauf kontrolliert manuell.** Kein separater Backfill-Code. Der erste Beweis-Lauf erfolgt manuell via CLI, eingegrenzt auf @markus (genau conv_m4J0tWfr4z-Gy5Ur), BEVOR der Loop-Schritt scharf geht.
 - **Kosten-Gate:** Tail-Flush nur wenn Tail>0 (kein LLM-Call bei leerem Tail).

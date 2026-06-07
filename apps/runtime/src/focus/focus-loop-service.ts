@@ -181,7 +181,10 @@ export class FocusLoopService {
       (async (handle, conversationId) => {
         const twin = this.deps.registry.getByHandle(handle);
         if (!twin) return; // Race: Twin zwischen list() und Trigger entfernt
-        await twin.resetConversation(conversationId);
+        // G2 ist ein AUTONOMER Auslöser → Tail-Flush nur bei
+        // TAIL_FLUSH_AUTONOMOUS_ENABLED (das end+embed des Resets läuft immer,
+        // nur der Tail-Flush-Pfad ist gegated).
+        await twin.resetConversation(conversationId, "autonomous");
       });
   }
 

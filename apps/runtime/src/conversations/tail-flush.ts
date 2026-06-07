@@ -2,6 +2,7 @@ import type { ConversationsRepo } from "./repo.js";
 import type { ConversationSummariesRepo } from "./summaries-repo.js";
 import type { SummaryEngine, GenerateSummaryContext } from "./summary-engine.js";
 import type { MemoryEmbeddingService } from "../episodic/memory-embedding-service.js";
+import { isTailFlushAutonomousEnabled } from "../config.js";
 
 // ─── TAIL-FLUSH-PRIMITIVE (Verdichtung, Sub-Step 2/6) ────────────────────────
 //
@@ -29,6 +30,18 @@ import type { MemoryEmbeddingService } from "../episodic/memory-embedding-servic
 /** Defensiver Backstop gegen Endlosschleife — greift bei monotonem Cursor nie. */
 const MAX_FLUSH_ITERATIONS = 50;
 
+/**
+ * Auslöser-Kontext. 'manual' = owner-/CLI-getriggert (immer erlaubt). 'autonomous'
+ * = G2-Reset-Hook / Loop-Verarbeiter (nur bei TAIL_FLUSH_AUTONOMOUS_ENABLED).
+ */
+export type TailFlushTrigger = "manual" | "autonomous";
+
+/** Callback-Form für den pending-Verarbeiter (MemoryMaintenanceService). */
+export type TailFlushCallback = (
+  conversationId: string,
+  trigger: TailFlushTrigger,
+) => Promise<TailFlushResult>;
+
 export interface TailFlushDeps {
   summaryEngine: SummaryEngine;
   memoryEmbeddingService: MemoryEmbeddingService;
@@ -43,11 +56,14 @@ export interface TailFlushResult {
   /** Tail-Größe (zählende Turns) vor dem Flush. */
   pendingBefore: number;
   /**
-   * 'noop'   = kein Segment vorhanden (gehört in Whole-Embed-Pfad) ODER kein Tail.
+   * 'gated'  = autonomous + Flag AUS → nichts getan, Konv bleibt pending (wartet
+   *            auf Scharfschalten). KEIN DB-Write, kein LLM-Call.
+   * 'noop'   = kein Segment (Whole-Embed-Pfad) ODER kein Tail (Konv ist voll
+   *            abgedeckt → embedding_status='done' gesetzt zwecks Konvergenz).
    * 'done'   = Tail vollständig verdichtet, Konv embedding_status='done'.
    * 'failed' = generateSummary/Embed scheiterte; Tail bleibt für nächsten Lauf.
    */
-  status: "noop" | "done" | "failed";
+  status: "gated" | "noop" | "done" | "failed";
 }
 
 /**
@@ -64,17 +80,30 @@ export async function flushConversationTail(
   deps: TailFlushDeps,
   conversationId: string,
   context: GenerateSummaryContext,
+  trigger: TailFlushTrigger = "manual",
 ): Promise<TailFlushResult> {
-  // Scope-Gate: keine Segmente → nicht unser Job (Whole-Embed-Pfad). No-op.
+  // Autonomous-Gate: G2-Reset / Loop nur bei TAIL_FLUSH_AUTONOMOUS_ENABLED.
+  // Default AUS → sofort raus, KEIN DB-Write, kein LLM-Call, Konv bleibt pending
+  // (wird geflusht, sobald scharfgeschaltet). 'manual' ignoriert das Gate.
+  if (trigger === "autonomous" && !isTailFlushAutonomousEnabled()) {
+    return { flushed: 0, pendingBefore: 0, status: "gated" };
+  }
+
+  // Scope-Gate: keine Segmente → nicht unser Job (Whole-Embed-Pfad). No-op,
+  // kein Status-Touch (eine segment-lose Konv gehört in resetConversation
+  // `summaries===0`).
   const existingSegments =
     deps.conversationSummariesRepo.count(conversationId);
   if (existingSegments === 0) {
     return { flushed: 0, pendingBefore: 0, status: "noop" };
   }
 
-  // Kosten-Gate: kein Tail → No-op, kein LLM-Call.
+  // Kosten-Gate: kein Tail → kein LLM-Call. Aber: die Konv ist voll durch
+  // Segmente abgedeckt → embedding_status='done' zwecks Pending-Konvergenz
+  // (sonst greift der Verarbeiter sie endlos wieder auf).
   const pendingBefore = deps.summaryEngine.countPendingTurns(conversationId);
   if (pendingBefore === 0) {
+    deps.conversationsRepo.updateEmbeddingStatus(conversationId, "done");
     return { flushed: 0, pendingBefore: 0, status: "noop" };
   }
 

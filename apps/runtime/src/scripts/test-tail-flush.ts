@@ -215,9 +215,38 @@ async function main(): Promise<void> {
     assert(countSummaries(db, convId) === 0, "kein Segment erzeugt (Whole-Embed-Pfad bleibt zuständig)");
   }
 
+  // ── 9) context-Gate: autonomous (env-gated) vs manual (immer) ──
+  console.log("\n── 9) Gate: autonomous vs manual");
+  {
+    // 9a) autonomous + Flag AUS → gated (kein Flush, kein summarize-Call)
+    delete process.env.TAIL_FLUSH_AUTONOMOUS_ENABLED;
+    const { convId, auditIds } = seedConvWithTurns(db, twinId, userId, 53);
+    const sum = mockSummarize();
+    const deps = makeDeps(db, twinId, sum.fn);
+    seedSegment(deps._summaries, convId, auditIds, 40);
+    const rGated = await flushConversationTail(deps, convId, CONTEXT, "autonomous");
+    assert(rGated.status === "gated" && rGated.flushed === 0, `autonomous+AUS → gated/0 (got ${rGated.status}/${rGated.flushed})`);
+    assert(sum.state.calls === 0, "gated → kein summarize-Call (kein LLM)");
+    assert(countSummaries(db, convId) === 1, "gated → kein neues Segment");
+
+    // 9b) dieselbe Konv, autonomous + Flag AN → flusht
+    process.env.TAIL_FLUSH_AUTONOMOUS_ENABLED = "true";
+    const rOn = await flushConversationTail(deps, convId, CONTEXT, "autonomous");
+    assert(rOn.status === "done" && rOn.flushed === 1, `autonomous+AN → done/1 (got ${rOn.status}/${rOn.flushed})`);
+    assert(countSummaries(db, convId) === 2, "Flag AN → Tail-Segment erzeugt");
+    delete process.env.TAIL_FLUSH_AUTONOMOUS_ENABLED;
+
+    // 9c) frische Konv, manual + Flag AUS → flusht trotzdem (manual ignoriert Gate)
+    const c2 = seedConvWithTurns(db, twinId, userId, 53);
+    const deps2 = makeDeps(db, twinId, mockSummarize().fn);
+    seedSegment(deps2._summaries, c2.convId, c2.auditIds, 40);
+    const rMan = await flushConversationTail(deps2, c2.convId, CONTEXT, "manual");
+    assert(rMan.status === "done" && rMan.flushed === 1, `manual+AUS → flusht (done/1) (got ${rMan.status}/${rMan.flushed})`);
+  }
+
   db.close();
   console.log(failures === 0
-    ? "\n✅ ALLE CHECKS GRÜN — Tail-Flush (1 Segment, Schleife>BATCH, Idempotenz, Kosten-Gate, No-Segment-No-op).\n"
+    ? "\n✅ ALLE CHECKS GRÜN — Tail-Flush (1 Segment, Schleife>BATCH, Idempotenz, Kosten-Gate, No-Segment-No-op, context-Gate).\n"
     : `\n❌ ${failures} FEHLER\n`);
   process.exit(failures === 0 ? 0 : 1);
 }

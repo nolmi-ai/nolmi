@@ -229,6 +229,34 @@ export const REVERSE_QUERY_TOP_K = parseIntEnv(
   "REVERSE_QUERY_TOP_K",
 );
 
+/**
+ * Tail-Flush-Verdichtung: Gate für AUTONOME Auslöser (G2-Reset-Hook +
+ * Loop-Verarbeiter). Default AUS — manuelle/owner-Pfade (Web-Reset, CLI-
+ * Backfill) sind davon unberührt und laufen immer. Bewusst eine FUNKTION
+ * (Call-Time-Read von `process.env`, wie FOCUS_LOOP_ENABLED / PROACTIVE_NUDGE_
+ * AUTOSEND_ENABLED) statt einer Import-Zeit-Konstante — so ist das Gate testbar
+ * (Tests togglen `process.env` pro Fall) und konsistent mit den anderen
+ * autonomen Gates.
+ */
+export function isTailFlushAutonomousEnabled(): boolean {
+  return parseBoolEnv(
+    process.env.TAIL_FLUSH_AUTONOMOUS_ENABLED,
+    false,
+    "TAIL_FLUSH_AUTONOMOUS_ENABLED",
+  );
+}
+
+/**
+ * Tail-Flush-Verarbeiter: max. Anzahl Tail-Flushes pro Lauf (Kosten-Spike-
+ * Bremse beim ersten Bestands-Lauf). Bestand wird über mehrere Läufe abgebaut.
+ * Default 5, ENV-justierbar.
+ */
+export const TAIL_FLUSH_BATCH_LIMIT = parseIntEnv(
+  process.env.TAIL_FLUSH_BATCH_LIMIT,
+  5,
+  "TAIL_FLUSH_BATCH_LIMIT",
+);
+
 // ─── EPISODIC-MEMORY TUNABLES (Phase 3.4 + 3.4.I) ───────────────────────────
 //
 // 3.4.I-Refactor: das bisherige einstufige `EPISODIC_SIMILARITY_THRESHOLD`

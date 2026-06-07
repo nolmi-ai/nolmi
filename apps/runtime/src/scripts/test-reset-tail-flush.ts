@@ -212,9 +212,32 @@ async function main(): Promise<void> {
     assert(status(db, convId) === "ended", `conv ended (got ${status(db, convId)})`);
   }
 
+  // ── 8) G2-autonomous-Trigger: gegated (Flag AUS → kein Flush, Flag AN → Flush) ──
+  console.log("\n── 8) resetConversation('autonomous') ist gegated");
+  {
+    // 8a) Flag AUS → Tail bleibt liegen, Konv trotzdem ended
+    delete process.env.TAIL_FLUSH_AUTONOMOUS_ENABLED;
+    const { convId, auditIds } = seedConv(db, twinId, userId, 53);
+    seedSegment(summariesRepo, convId, auditIds, 40);
+    await service.resetConversation(convId, "autonomous");
+    assert(cSeg(db, convId) === 1, "autonomous+AUS → kein Tail-Segment (gated)");
+    assert(cSegEmb(db, convId) === 0, "autonomous+AUS → kein Tail-Embedding");
+    assert(status(db, convId) === "ended", "autonomous+AUS → conv trotzdem ended");
+
+    // 8b) Flag AN → Tail wird geflusht
+    process.env.TAIL_FLUSH_AUTONOMOUS_ENABLED = "true";
+    const c2 = seedConv(db, twinId, userId, 53);
+    seedSegment(summariesRepo, c2.convId, c2.auditIds, 40);
+    await service.resetConversation(c2.convId, "autonomous");
+    assert(cSeg(db, c2.convId) === 2, "autonomous+AN → Tail-Segment erzeugt");
+    assert(cSegEmb(db, c2.convId) === 1, "autonomous+AN → Tail-Embedding");
+    assert(status(db, c2.convId) === "ended", "autonomous+AN → ended");
+    delete process.env.TAIL_FLUSH_AUTONOMOUS_ENABLED;
+  }
+
   db.close();
   console.log(failures === 0
-    ? "\n✅ ALLE CHECKS GRÜN — resetConversation-Tail-Flush (lange Konv flusht, kurze unverändert, No-Tail No-op, alle ended).\n"
+    ? "\n✅ ALLE CHECKS GRÜN — resetConversation-Tail-Flush (lange Konv flusht, kurze unverändert, No-Tail No-op, autonomous-Gate, alle ended).\n"
     : `\n❌ ${failures} FEHLER\n`);
   process.exit(failures === 0 ? 0 : 1);
 }

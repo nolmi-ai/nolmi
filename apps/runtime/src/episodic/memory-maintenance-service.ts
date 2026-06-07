@@ -8,6 +8,11 @@ import {
   aggregateConversationForEmbedding,
   type MemoryEmbeddingService,
 } from "./memory-embedding-service.js";
+import type {
+  TailFlushCallback,
+  TailFlushTrigger,
+} from "../conversations/tail-flush.js";
+import { TAIL_FLUSH_BATCH_LIMIT } from "../config.js";
 
 // ─── MEMORY MAINTENANCE SERVICE (3.4.G) ─────────────────────────────────────
 //
@@ -52,6 +57,14 @@ export interface EmbedAllArgs {
   type?: MaintenanceTargetFilter;
   /** Zeigt was getan würde, ohne tatsächlich zu embedden. */
   dryRun?: boolean;
+  /**
+   * Sub-Step 4: Auslöser-Kontext für den Tail-Flush von Konv MIT Segmenten.
+   * 'manual' (Default, CLI) = immer. 'autonomous' (Loop, Sub-Step 5) = nur bei
+   * TAIL_FLUSH_AUTONOMOUS_ENABLED (das Gate liegt in flushConversationTail).
+   */
+  trigger?: TailFlushTrigger;
+  /** Max. echte Tail-Flushes pro Lauf. Default TAIL_FLUSH_BATCH_LIMIT. */
+  tailFlushLimit?: number;
   onProgress?: (event: ProgressEvent) => void;
 }
 
@@ -60,6 +73,8 @@ export interface EmbedAllResult {
   succeeded: number;
   failed: number;
   skipped: number;
+  /** Sub-Step 4: Anzahl tatsächlich geflushter Tails (Konv mit Segment + Tail). */
+  tailFlushed: number;
   durationMs: number;
 }
 
@@ -77,6 +92,13 @@ export interface MaintenanceDeps {
   conversationSummariesRepo: ConversationSummariesRepo;
   twinDiaryRepo: TwinDiaryRepo;
   memoryEmbeddingService: MemoryEmbeddingService;
+  /**
+   * Sub-Step 4: optionaler Tail-Flush-Callback (Konv mit Segment + Tail). Wenn
+   * gesetzt, ersetzt er den alten segCount-Skip durch echte Tail-Verdichtung;
+   * fehlt er (Back-Compat-Aufrufer ohne LLM), bleibt das alte Skip+done-Verhalten.
+   * Der Caller (CLI/Loop) verkabelt ihn mit flushConversationTail + SummaryEngine.
+   */
+  tailFlush?: TailFlushCallback;
 }
 
 export class MemoryMaintenanceService {
@@ -87,6 +109,10 @@ export class MemoryMaintenanceService {
     const type: MaintenanceTargetFilter = args.type ?? "all";
     const includes = (t: EmbeddingTargetType) => type === "all" || type === t;
     let skipped = 0;
+    // Sub-Step 4: Tail-Flush-Kontext + Batch-Limit.
+    const trigger: TailFlushTrigger = args.trigger ?? "manual";
+    const tailFlushLimit = args.tailFlushLimit ?? TAIL_FLUSH_BATCH_LIMIT;
+    let tailFlushed = 0;
 
     // ─── Sammeln ──────────────────────────────────────────────────────────
     const items: WorkItem[] = [];
@@ -115,9 +141,33 @@ export class MemoryMaintenanceService {
       for (const conv of convs) {
         const segCount = this.deps.conversationSummariesRepo.count(conv.id);
         if (segCount > 0) {
-          // Hat Segments — die werden separat embedded, die Konv selbst
-          // bleibt aus dem Episodic-Index draußen. Status auf 'done' ziehen,
-          // damit die Pending-Liste konvergiert (kein endloses Retry).
+          // Sub-Step 4: Konv MIT Segment(en) hat oft einen unsummarisierten Tail
+          // (L3). Wenn ein tailFlush-Callback verkabelt ist → Tail verdichten
+          // statt überspringen; sonst (Back-Compat / dry-run) altes Skip+done.
+          if (this.deps.tailFlush && !args.dryRun) {
+            if (tailFlushed >= tailFlushLimit) {
+              // Batch-Limit erreicht — Konv bleibt pending für den nächsten Lauf
+              // (NICHT done), damit der Bestand über mehrere Läufe abgebaut wird.
+              skipped += 1;
+              args.onProgress?.({
+                current: 0, total: 0, targetType: "conversation",
+                targetId: conv.id, status: "skipped",
+              });
+              continue;
+            }
+            // flushConversationTail setzt den Konv-Status selbst (done / noop→done /
+            // gated→bleibt-pending / failed). Nur echte Flushes zählen gegens Limit.
+            const res = await this.deps.tailFlush(conv.id, trigger);
+            if (res.status === "done") tailFlushed += 1;
+            skipped += 1;
+            args.onProgress?.({
+              current: 0, total: 0, targetType: "conversation",
+              targetId: conv.id, status: "skipped",
+            });
+            continue;
+          }
+          // Back-Compat: kein tailFlush-Callback ODER dry-run → altes Verhalten.
+          // Segmente decken den Hauptteil ab; Status auf 'done' (Pending-Konvergenz).
           if (!args.dryRun) {
             this.deps.conversationsRepo.updateEmbeddingStatus(conv.id, "done");
           }
@@ -189,6 +239,7 @@ export class MemoryMaintenanceService {
         succeeded: 0,
         failed: 0,
         skipped: skipped + items.length,
+        tailFlushed,
         durationMs: Date.now() - start,
       };
     }
@@ -250,6 +301,7 @@ export class MemoryMaintenanceService {
       succeeded,
       failed,
       skipped,
+      tailFlushed,
       durationMs: Date.now() - start,
     };
   }

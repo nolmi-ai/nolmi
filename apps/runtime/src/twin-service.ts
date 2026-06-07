@@ -44,7 +44,10 @@ import type {
   ConversationSummary,
 } from "./conversations/summaries-repo.js";
 import { SummaryEngine } from "./conversations/summary-engine.js";
-import { flushConversationTail } from "./conversations/tail-flush.js";
+import {
+  flushConversationTail,
+  type TailFlushTrigger,
+} from "./conversations/tail-flush.js";
 import {
   auditsToOwnerDirectMessagesChronological,
   buildSummaryBlock,
@@ -515,8 +518,16 @@ export class TwinService {
    *
    * Failure-Verhalten: Embedding-/Flush-Fehler unterbrechen das Reset nicht;
    * Service/Primitive schlucken sie und setzen status='failed'.
+   *
+   * `trigger`: 'manual' (Default) = owner-getriggert (Web-Reset) → Tail-Flush
+   * läuft immer. 'autonomous' = G2-Idle-Reset → Tail-Flush nur bei
+   * TAIL_FLUSH_AUTONOMOUS_ENABLED. NUR der Tail-Flush-Pfad (summaries>0) ist
+   * gegated; der Whole-Conv-Embed (summaries===0) und end() laufen immer.
    */
-  async resetConversation(conversationId: string): Promise<void> {
+  async resetConversation(
+    conversationId: string,
+    trigger: TailFlushTrigger = "manual",
+  ): Promise<void> {
     const summaries =
       this.deps.conversationSummaries.listByConversation(conversationId);
     if (summaries.length === 0) {
@@ -560,6 +571,7 @@ export class TwinService {
             twinName: this.deps.persona.name,
             partnerHandle: conv.partnerHandle,
           },
+          trigger,
         );
       } catch (err) {
         console.error(
