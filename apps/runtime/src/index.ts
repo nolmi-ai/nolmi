@@ -9,6 +9,7 @@ import { TwinProfilesRepo } from "./twin-profiles-repo.js";
 import { TrustRepo } from "./trust/trust-repo.js";
 import { SkillRepo } from "./skills/repo.js";
 import { ConversationsRepo } from "./conversations/repo.js";
+import { ConversationSummariesRepo } from "./conversations/summaries-repo.js";
 import { McpServersRepo } from "./mcp/repo.js";
 import { FactsRepo } from "./facts/repo.js";
 import { FactsHistoryRepo } from "./facts/facts-history-repo.js";
@@ -78,6 +79,8 @@ async function main() {
   const trustRepo = new TrustRepo(repo.db);
   const skillRepo = new SkillRepo(repo.db);
   const conversationsRepo = new ConversationsRepo(repo.db);
+  // Direct-Chat-Historie (Sub-Step 1): Snippet-Quelle für die Verlauf-Liste.
+  const conversationSummariesRepo = new ConversationSummariesRepo(repo.db);
   const mcpServersRepo = new McpServersRepo(repo.db, masterKey);
   // #97 Schritt 2/4: facts_history-Store + in FactsRepo injiziert — Capture von
   // Wert-Drift/Delete läuft jetzt atomar in FactsRepo.upsert/delete.
@@ -135,6 +138,7 @@ async function main() {
     trustRepo,
     skillRepo,
     conversationsRepo,
+    conversationSummariesRepo,
     mcpServersRepo,
     factsRepo,
     twinMaturityService,

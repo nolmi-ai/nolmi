@@ -306,6 +306,34 @@ export const ConversationStartInputSchema = z.object({
 });
 export type ConversationStartInput = z.infer<typeof ConversationStartInputSchema>;
 
+// ─── DIRECT-CHAT-HISTORIE (Sub-Step 1) ──────────────────────────────────────
+//
+// Leichte Metadaten einer Direct-Chat-Konversation für die Verlauf-Liste —
+// ohne die vollen Audits (die kommen on-demand über die by-id-Route). Siehe
+// docs/DIRECT-CHAT-HISTORIE-STRATEGY.md.
+
+export const ConversationHistoryMetaSchema = z.object({
+  id: z.string(),
+  status: ConversationStatusSchema,
+  startedAt: z.string(),
+  endedAt: z.string().nullable(),
+  embeddingStatus: ConversationEmbeddingStatusSchema.optional(),
+});
+export type ConversationHistoryMeta = z.infer<
+  typeof ConversationHistoryMetaSchema
+>;
+
+export const ConversationHistoryItemSchema = ConversationHistoryMetaSchema.extend({
+  /**
+   * Themen-Snippet: erstes summary_segment der Konv (gekürzt). Fallback bei
+   * segment-loser Konv: erste User-Nachricht. null wenn beides fehlt.
+   */
+  snippet: z.string().nullable(),
+});
+export type ConversationHistoryItem = z.infer<
+  typeof ConversationHistoryItemSchema
+>;
+
 // ─── SKILLS (Phase 3.1) ──────────────────────────────────────────────────────
 //
 // Skills bündeln Wissen + optional Script, das ein Twin im Rahmen einer

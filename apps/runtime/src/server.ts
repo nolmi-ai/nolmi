@@ -70,11 +70,14 @@ import { getEnv } from "@nolmi/shared/env";
 import type {
   Conversation,
   ConversationEmbeddingStatus,
+  ConversationHistoryItem,
+  ConversationHistoryMeta,
   PresetActivationResult,
   Skill,
   SkillUiPayload,
 } from "@nolmi/shared";
 import type { ConversationsRepo } from "./conversations/repo.js";
+import type { ConversationSummariesRepo } from "./conversations/summaries-repo.js";
 import {
   mergeAuditIntoBridgeMessages,
   type MergedMessage,
@@ -127,6 +130,8 @@ export interface ServerDeps {
   skillRepo: SkillRepo;
   /** Für /twins/:handle/conversations/reset — geteilte Instanz mit der Registry. */
   conversationsRepo: ConversationsRepo;
+  /** Direct-Chat-Historie (Sub-Step 1): Snippet-Quelle für die Verlauf-Liste. */
+  conversationSummariesRepo: ConversationSummariesRepo;
   /** 3.2.H — für GET /twins/:handle/tools (Server-Name pro Skill). */
   mcpServersRepo: McpServersRepo;
   /** 3.3.D — für /twins/:handle/facts-Endpoints (CRUD-API für Semantic-Memory). */
@@ -2551,6 +2556,95 @@ function registerConversationRoutes(
     },
   );
 
+  // GET /twins/:handle/conversations/history — Direct-Chat-Konv-Liste (leicht)
+  //
+  // Direct-Chat-Historie Sub-Step 1: leichte Metadaten + Themen-Snippet pro
+  // Direct-Chat-Konv (partner == self), neueste zuerst. Bewusst OHNE die vollen
+  // Audits — die kommen on-demand über die by-id-Route. Owner-gegatet, read-only.
+  // NUR Direct-Chat; A2A-Konv sind ein eigenes Thema und hier ausgeschlossen.
+  //
+  // Pfad: `history` ist ein STATISCHES Segment und kollidiert nicht mit der
+  // parametrischen Route `/conversations/:partnerHandle` — find-my-way
+  // priorisiert statische vor parametrischen Segmenten. Für Direct-Chat (Partner
+  // == eigener Handle) könnte `history` ohnehin nie ein Partner-Handle sein.
+  app.get<{ Params: { handle: string } }>(
+    "/twins/:handle/conversations/history",
+    async (request, reply) => {
+      const ctx = await requireOwner(request, reply, request.params.handle);
+      if (!ctx) return;
+      const { entry, user } = ctx;
+
+      // Direct-Chat-Konv = (owner, partner == self, twin). list() liefert sie
+      // started_at DESC inkl. status/ended_at/embedding_status.
+      const convs = deps.conversationsRepo.list(
+        user.userId,
+        entry.handle,
+        entry.twinId,
+      );
+
+      const items: ConversationHistoryItem[] = await Promise.all(
+        convs.map(async (conv) => ({
+          id: conv.id,
+          status: conv.status,
+          startedAt: conv.startedAt,
+          endedAt: conv.endedAt,
+          embeddingStatus: conv.embeddingStatus,
+          snippet: await buildConversationSnippet(deps, conv.id),
+        })),
+      );
+
+      return { conversations: items };
+    },
+  );
+
+  // GET /twins/:handle/conversations/:conversationId/audits — eine Konv read-only
+  //
+  // Direct-Chat-Historie Sub-Step 1: Audits GENAU dieser Konv
+  // (audit.listByConversation), chronologisch (ASC), plus Konv-Metadaten für den
+  // Read-View-Kopf. On-demand — löst das 50-Audit-Fenster-Problem, weil nie mehr
+  // als eine Konv geladen wird.
+  //
+  // IDOR-Schutz: der conversationId-Param wird gegen (owner, twin) geprüft — eine
+  // fremde Konv-ID liefert 404, NIE die Audits einer nicht-Owner-Konv.
+  app.get<{ Params: { handle: string; conversationId: string } }>(
+    "/twins/:handle/conversations/:conversationId/audits",
+    async (request, reply) => {
+      const ctx = await requireOwner(request, reply, request.params.handle);
+      if (!ctx) return;
+      const { entry, user } = ctx;
+      const conversationId = request.params.conversationId;
+
+      // Konv laden + Besitz prüfen. findById wirft, wenn die ID nicht existiert
+      // → 404. Fremder Twin/Owner → ebenfalls 404 (kein Leak, dass die ID
+      // existiert).
+      let conv: Conversation;
+      try {
+        conv = deps.conversationsRepo.findById(conversationId);
+      } catch {
+        return reply.status(404).send({ error: "Konversation nicht gefunden" });
+      }
+      if (conv.twinId !== entry.twinId || conv.ownerUserId !== user.userId) {
+        return reply.status(404).send({ error: "Konversation nicht gefunden" });
+      }
+
+      // listByConversation liefert DESC (neueste zuerst) — für den Read-View
+      // chronologisch (ASC) umdrehen. Großzügiges Limit, damit auch lange Konv
+      // (z.B. 53 Turns) vollständig geladen werden.
+      const auditsDesc = await deps.audit.listByConversation(conversationId, 1000);
+      const audits = [...auditsDesc].reverse();
+
+      const conversation: ConversationHistoryMeta = {
+        id: conv.id,
+        status: conv.status,
+        startedAt: conv.startedAt,
+        endedAt: conv.endedAt,
+        embeddingStatus: conv.embeddingStatus,
+      };
+
+      return { conversation, audits };
+    },
+  );
+
   // GET /twins/:handle/conversations/:partnerHandle — chronologischer Thread
   //
   // Bridge-Verlauf zwischen uns und partner, angereichert mit lokalem Audit-
@@ -2861,6 +2955,46 @@ function countUnreadRepliesByPartner(audits: AuditEntry[]): Map<string, number> 
     map.set(from, (map.get(from) ?? 0) + 1);
   }
   return map;
+}
+
+const SNIPPET_MAX_LEN = 80;
+
+/**
+ * Direct-Chat-Historie Sub-Step 1: kurzes Themen-Snippet einer Konversation.
+ * Primär das erste summary_segment (verdichtete Konv haben eins); Fallback bei
+ * segment-loser (= kurzer, unter der Summary-Schwelle liegender) Konv die erste
+ * (älteste) User-Nachricht aus dem Audit-Log. null, wenn beides fehlt.
+ */
+async function buildConversationSnippet(
+  deps: ServerDeps,
+  conversationId: string,
+): Promise<string | null> {
+  const segments =
+    deps.conversationSummariesRepo.listByConversation(conversationId);
+  if (segments.length > 0 && segments[0]) {
+    return truncateSnippet(segments[0].summaryMd);
+  }
+
+  // Fallback: älteste User-Nachricht. listByConversation ist DESC (neueste
+  // zuerst) → von hinten (ältester Eintrag) nach vorn die erste mit lastMessage.
+  // Limit klein gehalten: segment-lose Konv liegen per Definition unter der
+  // Summary-Schwelle, sind also kurz.
+  const auditsDesc = await deps.audit.listByConversation(conversationId, 100);
+  for (let i = auditsDesc.length - 1; i >= 0; i--) {
+    const raw = (auditsDesc[i]?.input as { lastMessage?: unknown }).lastMessage;
+    if (typeof raw === "string" && raw.trim().length > 0) {
+      return truncateSnippet(raw);
+    }
+  }
+  return null;
+}
+
+/** Kollabiert Whitespace/Newlines und kürzt auf SNIPPET_MAX_LEN Zeichen. */
+function truncateSnippet(text: string): string {
+  const collapsed = text.replace(/\s+/g, " ").trim();
+  return collapsed.length > SNIPPET_MAX_LEN
+    ? `${collapsed.slice(0, SNIPPET_MAX_LEN)}…`
+    : collapsed;
 }
 
 /**
