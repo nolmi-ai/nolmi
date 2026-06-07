@@ -13,6 +13,7 @@ import Link from "next/link";
 import type {
   AuditEntry,
   ChatMessage,
+  ConversationHistoryItem,
   MemoryHit,
   TwinEvent,
 } from "@nolmi/shared";
@@ -487,6 +488,8 @@ function DirectChatActions({
   const [busy, setBusy] = useState(false);
   const [extracting, setExtracting] = useState(false);
   const [modalOpen, setModalOpen] = useState(false);
+  // Direct-Chat-Historie Sub-Step 2: Verlauf-Panel (Konv-Liste).
+  const [historyOpen, setHistoryOpen] = useState(false);
   // Echter Selbst-Reflexions-Trigger (≠ Fakten-Extraktion). Twin-weit, daher
   // NICHT an eine aktive Konversation gebunden.
   const [reflecting, setReflecting] = useState(false);
@@ -679,6 +682,22 @@ function DirectChatActions({
 
   return (
     <>
+      {/* Direct-Chat-Historie Sub-Step 2: öffnet die Verlauf-Liste (read-only). */}
+      <button
+        type="button"
+        onClick={() => setHistoryOpen(true)}
+        title="Vergangene Konversationen mit deinem Twin ansehen"
+        className="text-xs text-muted border border-border rounded px-2 py-1 hover:border-accent hover:text-accent transition-colors"
+      >
+        Verlauf
+      </button>
+      {historyOpen && (
+        <ConversationHistoryPanel
+          handle={handle}
+          onClose={() => setHistoryOpen(false)}
+        />
+      )}
+
       <button
         onClick={handleReflectOnly}
         disabled={busy || extracting || !hasConversation}
@@ -816,6 +835,110 @@ function DirectChatActions({
         </ModalWrapper>
       )}
     </>
+  );
+}
+
+// ─── Direct-Chat-Verlauf-Panel (Sub-Step 2) ─────────────────────────────────
+//
+// Read-only Liste der vergangenen Direct-Chat-Konversationen, gespeist aus
+// GET /conversations/history (Sub-Step 1). Modal, damit der laufende Chat
+// darunter unberührt bleibt. Klick auf einen Eintrag ist hier bewusst noch
+// no-op — das read-only Read-View (Route 2) kommt in Sub-Step 3.
+function ConversationHistoryPanel({
+  handle,
+  onClose,
+}: {
+  handle: string;
+  onClose: () => void;
+}) {
+  const [items, setItems] = useState<ConversationHistoryItem[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch(
+          `${RUNTIME_URL}/twins/${handle}/conversations/history`,
+          { credentials: "include" },
+        );
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const body = (await res.json()) as {
+          conversations: ConversationHistoryItem[];
+        };
+        if (!cancelled) setItems(body.conversations);
+      } catch (err) {
+        if (!cancelled) {
+          setError(
+            err instanceof Error
+              ? err.message
+              : "Verlauf konnte nicht geladen werden",
+          );
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [handle]);
+
+  return (
+    <ModalWrapper onClose={onClose} maxWidthClass="max-w-lg">
+      <div className="p-4 space-y-3">
+        <div className="flex items-center justify-between">
+          <h2 className="text-sm text-text font-medium">Verlauf</h2>
+          <button
+            type="button"
+            onClick={onClose}
+            className="text-muted hover:text-text text-sm"
+            aria-label="Schließen"
+          >
+            ✕
+          </button>
+        </div>
+
+        {error ? (
+          <div className="text-xs text-warn border border-warn/40 rounded px-3 py-2">
+            {error}
+          </div>
+        ) : items === null ? (
+          <div className="text-xs text-muted px-1 py-2">lädt…</div>
+        ) : items.length === 0 ? (
+          <EmptyState
+            title="Noch kein Verlauf"
+            description="Vergangene Konversationen mit deinem Twin erscheinen hier, sobald du eine beendest oder neu startest."
+          />
+        ) : (
+          <ul className="space-y-1 max-h-[60vh] overflow-y-auto">
+            {items.map((c) => (
+              <li
+                key={c.id}
+                className="px-3 py-2 rounded border border-border bg-bg/40"
+              >
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-[11px] text-muted">
+                    {formatRelative(c.endedAt ?? c.startedAt)}
+                  </span>
+                  <span className="flex items-center gap-1.5 text-[10px] uppercase tracking-wider text-muted flex-shrink-0">
+                    <span className="border border-border rounded px-1.5 py-0.5">
+                      {c.status === "ended" ? "beendet" : "aktiv"}
+                    </span>
+                    {c.embeddingStatus === "done" && (
+                      <span title="Ins Gedächtnis verdichtet">· ✓ verdichtet</span>
+                    )}
+                  </span>
+                </div>
+                <div className="text-sm text-text mt-1 truncate">
+                  {c.snippet ?? (
+                    <span className="text-muted italic">(kein Inhalt)</span>
+                  )}
+                </div>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+    </ModalWrapper>
   );
 }
 
