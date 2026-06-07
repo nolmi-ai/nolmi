@@ -14,6 +14,7 @@ import type {
   AuditEntry,
   ChatMessage,
   ConversationHistoryItem,
+  ConversationHistoryMeta,
   MemoryHit,
   TwinEvent,
 } from "@nolmi/shared";
@@ -853,6 +854,8 @@ function ConversationHistoryPanel({
 }) {
   const [items, setItems] = useState<ConversationHistoryItem[] | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // Sub-Step 3: gewählte Konv → read-only Read-View. null = Listen-Ansicht.
+  const [selectedId, setSelectedId] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -882,63 +885,228 @@ function ConversationHistoryPanel({
     };
   }, [handle]);
 
+  // Read-View breiter (Chat-Bubbles), Liste schmaler. ✕/ESC/Backdrop schließt
+  // das ganze Panel → man ist wieder im laufenden Direct-Chat.
   return (
-    <ModalWrapper onClose={onClose} maxWidthClass="max-w-lg">
-      <div className="p-4 space-y-3">
-        <div className="flex items-center justify-between">
-          <h2 className="text-sm text-text font-medium">Verlauf</h2>
-          <button
-            type="button"
-            onClick={onClose}
-            className="text-muted hover:text-text text-sm"
-            aria-label="Schließen"
-          >
-            ✕
-          </button>
-        </div>
-
-        {error ? (
-          <div className="text-xs text-warn border border-warn/40 rounded px-3 py-2">
-            {error}
+    <ModalWrapper
+      onClose={onClose}
+      maxWidthClass={selectedId ? "max-w-2xl" : "max-w-lg"}
+    >
+      {selectedId ? (
+        <ConversationReadView
+          handle={handle}
+          conversationId={selectedId}
+          onBack={() => setSelectedId(null)}
+        />
+      ) : (
+        <div className="p-4 space-y-3">
+          <div className="flex items-center justify-between">
+            <h2 className="text-sm text-text font-medium">Verlauf</h2>
+            <button
+              type="button"
+              onClick={onClose}
+              className="text-muted hover:text-text text-sm"
+              aria-label="Schließen"
+            >
+              ✕
+            </button>
           </div>
-        ) : items === null ? (
-          <div className="text-xs text-muted px-1 py-2">lädt…</div>
-        ) : items.length === 0 ? (
-          <EmptyState
-            title="Noch kein Verlauf"
-            description="Vergangene Konversationen mit deinem Twin erscheinen hier, sobald du eine beendest oder neu startest."
-          />
-        ) : (
-          <ul className="space-y-1 max-h-[60vh] overflow-y-auto">
-            {items.map((c) => (
-              <li
-                key={c.id}
-                className="px-3 py-2 rounded border border-border bg-bg/40"
-              >
-                <div className="flex items-center justify-between gap-2">
-                  <span className="text-[11px] text-muted">
-                    {formatRelative(c.endedAt ?? c.startedAt)}
-                  </span>
-                  <span className="flex items-center gap-1.5 text-[10px] uppercase tracking-wider text-muted flex-shrink-0">
-                    <span className="border border-border rounded px-1.5 py-0.5">
-                      {c.status === "ended" ? "beendet" : "aktiv"}
-                    </span>
-                    {c.embeddingStatus === "done" && (
-                      <span title="Ins Gedächtnis verdichtet">· ✓ verdichtet</span>
-                    )}
-                  </span>
-                </div>
-                <div className="text-sm text-text mt-1 truncate">
-                  {c.snippet ?? (
-                    <span className="text-muted italic">(kein Inhalt)</span>
-                  )}
-                </div>
-              </li>
-            ))}
-          </ul>
+
+          {error ? (
+            <div className="text-xs text-warn border border-warn/40 rounded px-3 py-2">
+              {error}
+            </div>
+          ) : items === null ? (
+            <div className="text-xs text-muted px-1 py-2">lädt…</div>
+          ) : items.length === 0 ? (
+            <EmptyState
+              title="Noch kein Verlauf"
+              description="Vergangene Konversationen mit deinem Twin erscheinen hier, sobald du eine beendest oder neu startest."
+            />
+          ) : (
+            <ul className="space-y-1 max-h-[60vh] overflow-y-auto">
+              {items.map((c) => (
+                <li key={c.id}>
+                  <button
+                    type="button"
+                    onClick={() => setSelectedId(c.id)}
+                    className="w-full text-left px-3 py-2 rounded border border-border bg-bg/40 hover:border-accent/40 hover:bg-bg/60 transition-colors"
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-[11px] text-muted">
+                        {formatRelative(c.endedAt ?? c.startedAt)}
+                      </span>
+                      <span className="flex items-center gap-1.5 text-[10px] uppercase tracking-wider text-muted flex-shrink-0">
+                        <span className="border border-border rounded px-1.5 py-0.5">
+                          {c.status === "ended" ? "beendet" : "aktiv"}
+                        </span>
+                        {c.embeddingStatus === "done" && (
+                          <span title="Ins Gedächtnis verdichtet">
+                            · ✓ verdichtet
+                          </span>
+                        )}
+                      </span>
+                    </div>
+                    <div className="text-sm text-text mt-1 truncate">
+                      {c.snippet ?? (
+                        <span className="text-muted italic">(kein Inhalt)</span>
+                      )}
+                    </div>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
+    </ModalWrapper>
+  );
+}
+
+// ─── Read-only Konv-View (Sub-Step 3) ───────────────────────────────────────
+//
+// Lädt GET /conversations/:conversationId/audits (Route 2) und rendert die
+// vergangene Konv als Chat-Bubbles — über die VORHANDENE Logik
+// (buildChatBlocksFromAudits + Bubble/McpToolCallBox), read-only: kein
+// Eingabefeld, keine Approve/Reject-Aktionen. Route 2 liefert ASC; der Builder
+// erwartet DESC (intern reversed) → vor dem Aufruf umdrehen. Klar als
+// VERGANGENE Konv markiert; „← Zurück" führt zur Liste, ✕/ESC zum Live-Chat.
+function ConversationReadView({
+  handle,
+  conversationId,
+  onBack,
+}: {
+  handle: string;
+  conversationId: string;
+  onBack: () => void;
+}) {
+  const [data, setData] = useState<{
+    conversation: ConversationHistoryMeta;
+    audits: AuditEntry[];
+  } | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch(
+          `${RUNTIME_URL}/twins/${handle}/conversations/${encodeURIComponent(conversationId)}/audits`,
+          { credentials: "include" },
+        );
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const body = (await res.json()) as {
+          conversation: ConversationHistoryMeta;
+          audits: AuditEntry[];
+        };
+        if (!cancelled) setData(body);
+      } catch (err) {
+        if (!cancelled) {
+          setError(
+            err instanceof Error
+              ? err.message
+              : "Konversation konnte nicht geladen werden",
+          );
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [handle, conversationId]);
+
+  const blocks = useMemo<ChatBlock[]>(
+    () =>
+      data ? buildChatBlocksFromAudits([...data.audits].reverse()).blocks : [],
+    [data],
+  );
+
+  const meta = data?.conversation;
+
+  return (
+    <div className="p-4 space-y-3">
+      <div className="flex items-center justify-between gap-2">
+        <button
+          type="button"
+          onClick={onBack}
+          className="text-xs text-muted hover:text-text transition-colors"
+        >
+          ← Zurück
+        </button>
+        {meta && (
+          <span className="flex items-center gap-1.5 text-[10px] uppercase tracking-wider text-muted">
+            <span className="border border-border rounded px-1.5 py-0.5">
+              {meta.status === "ended" ? "beendet" : "aktiv"}
+            </span>
+            {meta.embeddingStatus === "done" && (
+              <span title="Ins Gedächtnis verdichtet">· ✓ verdichtet</span>
+            )}
+          </span>
         )}
       </div>
-    </ModalWrapper>
+
+      <div>
+        <h2 className="text-sm text-text font-medium">
+          {meta
+            ? `Konversation vom ${new Date(meta.endedAt ?? meta.startedAt).toLocaleDateString("de-DE")}`
+            : "Konversation"}
+        </h2>
+        <div className="text-[11px] text-muted">
+          read-only — vergangene Konversation
+        </div>
+      </div>
+
+      {error ? (
+        <div className="text-xs text-warn border border-warn/40 rounded px-3 py-2">
+          {error}
+        </div>
+      ) : data === null ? (
+        <div className="text-xs text-muted px-1 py-2">lädt…</div>
+      ) : blocks.length === 0 ? (
+        <div className="text-xs text-muted px-1 py-2">
+          Keine Nachrichten in dieser Konversation.
+        </div>
+      ) : (
+        <div className="max-h-[65vh] overflow-y-auto space-y-4 pr-1">
+          {blocks.map((block, i) => (
+            <Fragment key={i}>
+              {block.kind === "mcp-tool-call" ? (
+                <McpToolCallBox
+                  toolName={block.toolName}
+                  args={block.args}
+                  status={block.status}
+                  toolResult={block.toolResult}
+                  rejectReason={block.rejectReason}
+                  busy={false}
+                  readOnly
+                  onApprove={() => {}}
+                  onReject={() => {}}
+                />
+              ) : block.kind === "assistant" ? (
+                <div className="space-y-1.5">
+                  <Bubble
+                    role={block.kind}
+                    content={block.content}
+                    channel={block.channel}
+                  />
+                  {block.memoryHits && block.memoryHits.length > 0 && (
+                    <div className="px-3">
+                      <MemoryHitBadge hits={block.memoryHits} />
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <Bubble
+                  role={block.kind}
+                  content={block.content}
+                  channel={block.channel}
+                />
+              )}
+            </Fragment>
+          ))}
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -2255,6 +2423,7 @@ function McpToolCallBox({
   busy,
   onApprove,
   onReject,
+  readOnly = false,
 }: {
   toolName: string;
   args: Record<string, unknown>;
@@ -2264,6 +2433,12 @@ function McpToolCallBox({
   busy: boolean;
   onApprove: () => void;
   onReject: () => void;
+  /**
+   * Direct-Chat-Historie Sub-Step 3: im read-only Konv-View blendet readOnly
+   * den Approve/Reject-Slot aus — eine vergangene Konv hat nichts mehr zu
+   * genehmigen. Default false → Live-Chat-Verhalten unverändert.
+   */
+  readOnly?: boolean;
 }) {
   let statusLabel: string;
   let statusClass: string;
@@ -2351,7 +2526,7 @@ function McpToolCallBox({
           </div>
         )}
       </div>
-      {status === "pending" && (
+      {status === "pending" && !readOnly && (
         <>
           {/* UX.1.A / #98: Cost-/Time-Preview vor den Buttons. Nur im
               Pending-State — bei executed/rejected steht das Result schon
