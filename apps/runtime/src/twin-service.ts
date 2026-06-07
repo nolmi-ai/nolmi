@@ -44,6 +44,7 @@ import type {
   ConversationSummary,
 } from "./conversations/summaries-repo.js";
 import { SummaryEngine } from "./conversations/summary-engine.js";
+import { flushConversationTail } from "./conversations/tail-flush.js";
 import {
   auditsToOwnerDirectMessagesChronological,
   buildSummaryBlock,
@@ -498,15 +499,22 @@ export class TwinService {
   }
 
   /**
-   * 3.4.D: Reset-Pfad mit Episodic-Memory-Pflege. Wenn die Konversation
-   * bereits Summary-Segments hat, sind die schon embedded (Send-Path
-   * triggert nach jeder Summary-Generation) — wir beenden nur die Konv.
-   * Ohne Segments (kurze Konversationen unter dem Threshold) wird die
-   * ganze Konversation in einen einzelnen Embedding-Eintrag verdichtet,
-   * sonst gäbe es keine Spur im Episodic-Memory.
+   * 3.4.D + Sub-Step 3 (Tail-Flush): Reset-Pfad mit Episodic-Memory-Pflege.
+   *   - OHNE Segments (kurze Konv unter dem Threshold): die ganze Konversation
+   *     wird in einen einzelnen Embedding-Eintrag verdichtet (Whole-Conv-Embed),
+   *     sonst gäbe es keine Spur im Episodic-Memory. UNVERÄNDERT.
+   *   - MIT Segments (lange Konv): die Segmente sind schon embedded, ABER der
+   *     unsummarisierte Tail (Turns nach dem letzten Segment-Cursor, unter der
+   *     Schwelle) fiel bisher durch (L3-Lücke, docs/TAIL-FLUSH-VERDICHTUNG-
+   *     STRATEGY.md). Statt Skip → flushConversationTail verdichtet ihn final.
    *
-   * Failure-Verhalten: Embedding-Fehler unterbrechen das Reset nicht; der
-   * Service schluckt sie und setzt status='failed'.
+   * Reihenfolge: Embed/Flush VOR end() — auf der noch-aktiven Konv, damit die
+   * Audit-/Cursor-Zählung sauber ist. end() läuft danach in JEDEM Fall (auch
+   * wenn der Flush scheitert — der Tail bleibt dann 'failed' für den späteren
+   * Loop-Verarbeiter, Sub-Step 4).
+   *
+   * Failure-Verhalten: Embedding-/Flush-Fehler unterbrechen das Reset nicht;
+   * Service/Primitive schlucken sie und setzen status='failed'.
    */
   async resetConversation(conversationId: string): Promise<void> {
     const summaries =
@@ -530,6 +538,32 @@ export class TwinService {
       } else {
         console.log(
           `[reset] conv=${conversationId} hatte keine zählenden Audits — kein Embedding nötig`,
+        );
+      }
+    } else {
+      // Sub-Step 3: lange Konv mit Segment(en) → unsummarisierten Tail final
+      // verdichten statt überspringen. Selbst kosten-/scope-gegated (Tail=0 →
+      // No-op). Eigener try/catch: ein Flush-Fehler darf das Reset NICHT
+      // crashen — end() unten muss laufen.
+      try {
+        const conv = this.deps.conversations.findById(conversationId);
+        await flushConversationTail(
+          {
+            summaryEngine: this.summaryEngine,
+            memoryEmbeddingService: this.memoryEmbeddingService,
+            conversationsRepo: this.deps.conversations,
+            conversationSummariesRepo: this.deps.conversationSummaries,
+            twinId: this.deps.twinId,
+          },
+          conversationId,
+          {
+            twinName: this.deps.persona.name,
+            partnerHandle: conv.partnerHandle,
+          },
+        );
+      } catch (err) {
+        console.error(
+          `[reset] Tail-Flush warf conv=${conversationId} — übersprungen, Reset läuft weiter: ${err instanceof Error ? err.message : String(err)}`,
         );
       }
     }
