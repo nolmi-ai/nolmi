@@ -73,6 +73,9 @@ export interface GenerateSummaryResult {
   segmentEndAuditId: string;
   segmentMessageCount: number;
   summaryWordCount: number;
+  /** Der verdichtete Markdown-Text — additiv, damit Caller (Tail-Flush) das
+   *  frische Segment direkt embedden können, ohne es neu zu laden. */
+  summaryMd: string;
 }
 
 export class SummaryEngine {
@@ -87,6 +90,17 @@ export class SummaryEngine {
     if (!conversationId) return false;
     const pending = this.countPendingMessages(conversationId);
     return pending > CONVERSATION_SUMMARY_THRESHOLD;
+  }
+
+  /**
+   * Öffentlicher Lese-Zugriff auf die Anzahl noch-nicht-summarisierter
+   * zählender Turns (Tail nach dem Cursor). Für den Tail-Flush-Verarbeiter
+   * (schwellen-UNABHÄNGIG: zählt den Rest, egal ob < oder > Schwelle). 0 wenn
+   * keine Konv / kein Tail.
+   */
+  countPendingTurns(conversationId: string | null): number {
+    if (!conversationId) return 0;
+    return this.countPendingMessages(conversationId);
   }
 
   /**
@@ -172,6 +186,7 @@ export class SummaryEngine {
       segmentEndAuditId: lastAudit.id,
       segmentMessageCount: counting.length,
       summaryWordCount: wordCount,
+      summaryMd: text,
     };
   }
 
