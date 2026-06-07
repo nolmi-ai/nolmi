@@ -1,19 +1,15 @@
 import "dotenv/config";
-import Database from "better-sqlite3";
 import * as sqliteVec from "sqlite-vec";
 import { loadRuntimeConfig } from "../config.js";
 import { TwinProfilesRepo } from "../twin-profiles-repo.js";
-import { ConversationsRepo } from "../conversations/repo.js";
-import { ConversationSummariesRepo } from "../conversations/summaries-repo.js";
-import { EmbeddingsRepo } from "../episodic/embeddings-repo.js";
-import { TwinDiaryRepo } from "../episodic/twin-diary-repo.js";
-import { MemoryEmbeddingService } from "../episodic/memory-embedding-service.js";
-import {
-  MemoryMaintenanceService,
-  type MaintenanceTargetFilter,
-} from "../episodic/memory-maintenance-service.js";
+import { type MaintenanceTargetFilter } from "../episodic/memory-maintenance-service.js";
 import { getEmbeddingProvider } from "../episodic/providers/index.js";
 import { createSqliteRepository } from "../repository/index.js";
+import { buildTailFlushMaintenance } from "../episodic/tail-flush-maintenance.js";
+import { type SummaryGenerator } from "../conversations/summary-engine.js";
+import { createLlmClient } from "../llm-client.js";
+import { loadMasterKey, decrypt } from "../crypto-utils.js";
+import { generateText } from "ai";
 
 // ─── twin:memory-embed-all (CLI, 3.4.G) ─────────────────────────────────────
 //
@@ -86,25 +82,39 @@ async function main() {
     process.exit(1);
   }
 
-  const conversationsRepo = new ConversationsRepo(db);
-  const conversationSummariesRepo = new ConversationSummariesRepo(db);
-  const embeddingsRepo = new EmbeddingsRepo(db);
-  const twinDiaryRepo = new TwinDiaryRepo(db);
-  const memoryEmbeddingService = new MemoryEmbeddingService({
-    embeddingsRepo,
-    conversationSummariesRepo,
-    conversationsRepo,
-    twinDiaryRepo,
-    getProvider: () => getEmbeddingProvider(),
+  // Tail-Flush braucht das Summary-LLM — denselben Provider/Model wie der
+  // Live-Pfad (createLlmClient + entschlüsselter Key, exakt wie buildEntry +
+  // summaryEngine.summarize im TwinService). bundle.audit/sqlite-vec sind in `db`.
+  if (!twin.llmConfig.apiKeyEncrypted) {
+    console.error(
+      `Twin '${handle}' hat keinen apiKeyEncrypted — Tail-Flush-Summary nicht möglich.`,
+    );
+    db.close();
+    process.exit(1);
+  }
+  const masterKey = loadMasterKey();
+  const apiKey = decrypt(twin.llmConfig.apiKeyEncrypted, masterKey);
+  const model = createLlmClient({
+    provider: twin.llmConfig.provider,
+    model: twin.llmConfig.model,
+    apiKey,
+    baseUrl: twin.llmConfig.baseUrl,
   });
-  const maintenance = new MemoryMaintenanceService({
+  const summarize: SummaryGenerator = async (system, user) => {
+    const result = await generateText({
+      model,
+      system,
+      messages: [{ role: "user", content: user }],
+    });
+    return { text: result.text };
+  };
+  void bundle; // audit kommt jetzt aus buildTailFlushMaintenance (eigene Repo-Instanz)
+  const maintenance = buildTailFlushMaintenance({
     db,
-    audit: bundle.audit,
-    embeddingsRepo,
-    conversationsRepo,
-    conversationSummariesRepo,
-    twinDiaryRepo,
-    memoryEmbeddingService,
+    twinId: twin.twinId,
+    twinName: twin.displayName,
+    summarize,
+    getProvider: () => getEmbeddingProvider(),
   });
 
   console.log(`twin:memory-embed-all  twin=${handle}`);
@@ -119,6 +129,9 @@ async function main() {
       force,
       type,
       dryRun,
+      // Sub-Step 6a: manueller Backfill → trigger='manual' (Gate-frei, läuft
+      // immer; das TAIL_FLUSH_AUTONOMOUS_ENABLED-Gate betrifft nur Loop/G2).
+      trigger: "manual",
       onProgress: (e) => {
         if (e.status === "skipped" && e.total === 0) {
           // Konversation mit Segments oder leere Konversation — vor dem
@@ -147,6 +160,7 @@ async function main() {
     console.log(`  succeeded:  ${result.succeeded}`);
     console.log(`  failed:     ${result.failed}`);
     console.log(`  skipped:    ${result.skipped}`);
+    console.log(`  tailFlushed:${result.tailFlushed}`);
 
     if (result.failed > 0) {
       console.log("");
