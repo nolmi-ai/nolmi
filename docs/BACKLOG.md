@@ -3267,6 +3267,8 @@ Aktuell 35 `test-*.ts`-Smoke-Scripts in `apps/runtime/src/scripts/` (22 in `pack
 
 **Wert:** vermeidet stille DB-Drift bei künftigen Smokes, dokumentiert die FK-Semantik für jeden, der manuell in die DB greift. Niedriges Risiko, hoher Cleanliness-Impact für die Phase-B-Self-Hosting-Phase wenn externe Owner ihre Test-Twins iterativ wegputzen.
 
+- **#160 — Leere Fortsetzungs-/Reset-Konv aufräumen.** „Fortsetzen" (v2) und vermutlich auch „Neu starten" hinterlassen eine leere „(kein Inhalt)"-Konv, wenn keine Nachricht folgt. Sammeln sich im Verlauf an. Optionen: (a) leere Konv beim nächsten Reset/Fortsetzen automatisch hart löschen; (b) Fortsetzung erst materialisieren, wenn die erste Nachricht kommt (berührt start()/Invariante — sorgfältig). Kein Quick-Fix, eigenes kleines Stück mit Diagnose. Workaround heute: per #53-Löschfunktion manuell wegräumen.
+
 ### CLA/DCO vor den ersten externen Beiträgen (Vorbedingung für Dual-Licensing)
 
 **Status:** OFFEN (jetzt unkritisch, Alleinautor) | **Größe S–M** | **Gate:** vor „erste externe Beiträge annehmen"
