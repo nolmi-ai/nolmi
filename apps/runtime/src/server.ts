@@ -2868,6 +2868,9 @@ function registerConversationRoutes(
             startedAt: activeConv.startedAt,
             endedAt: activeConv.endedAt,
             lastResetAt: activeConv.lastResetAt,
+            // Fortsetzen v2 SS2: für den „fortgesetzt aus …"-Marker im
+            // DirectChat-Stream-Kopf. NULL bei normaler Konv → kein Marker.
+            continuedFromConversationId: activeConv.continuedFromConversationId,
           }
         : null;
 

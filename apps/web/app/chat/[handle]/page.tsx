@@ -696,6 +696,13 @@ function DirectChatActions({
         <ConversationHistoryPanel
           handle={handle}
           onClose={() => setHistoryOpen(false)}
+          onContinued={() => {
+            // v2 SS2: Panel zu + Direct-Chat refreshen — die neue aktive Konv
+            // (Fortsetzung) wird beim nächsten loadAudits-Poll sichtbar; der
+            // Reset-Bump signalisiert „Konversation gewechselt" wie beim Reset.
+            setHistoryOpen(false);
+            onResetSuccess?.();
+          }}
         />
       )}
 
@@ -848,9 +855,12 @@ function DirectChatActions({
 function ConversationHistoryPanel({
   handle,
   onClose,
+  onContinued,
 }: {
   handle: string;
   onClose: () => void;
+  /** v2 SS2: nach Fortsetzen — Panel schließen + Direct-Chat refreshen. */
+  onContinued?: () => void;
 }) {
   const [items, setItems] = useState<ConversationHistoryItem[] | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -1009,6 +1019,7 @@ function ConversationHistoryPanel({
           onArchiveToggle={() =>
             void handleArchiveToggle(selectedId, toggleAction)
           }
+          onContinued={onContinued}
         />
       ) : (
         <div className="p-4 space-y-3">
@@ -1148,6 +1159,7 @@ function ConversationReadView({
   onDelete,
   archiveLabel,
   onArchiveToggle,
+  onContinued,
 }: {
   handle: string;
   conversationId: string;
@@ -1158,12 +1170,41 @@ function ConversationReadView({
   archiveLabel?: string;
   /** SS4: archiviert/stellt diese Konv wieder her (reversibel, kein Confirm). */
   onArchiveToggle?: () => void;
+  /** v2 SS2: nach erfolgreichem Fortsetzen — Panel schließen + in den neuen
+   *  (aktiven) Direct-Chat wechseln. */
+  onContinued?: () => void;
 }) {
   const [data, setData] = useState<{
     conversation: ConversationHistoryMeta;
     audits: AuditEntry[];
   } | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // v2 SS2: „Fortsetzen"-Aktion (startet eine neue Konv mit dieser als Seed).
+  const [continueBusy, setContinueBusy] = useState(false);
+  const [continueError, setContinueError] = useState<string | null>(null);
+
+  async function handleContinue() {
+    if (continueBusy) return;
+    setContinueBusy(true);
+    setContinueError(null);
+    try {
+      const res = await fetch(
+        `${RUNTIME_URL}/twins/${handle}/conversations/${encodeURIComponent(conversationId)}/continue`,
+        { method: "POST", credentials: "include" },
+      );
+      if (!res.ok) {
+        const body = (await res.json().catch(() => ({}))) as { error?: string };
+        throw new Error(body.error ?? `HTTP ${res.status}`);
+      }
+      onContinued?.();
+    } catch (err) {
+      setContinueError(
+        err instanceof Error ? err.message : "Fortsetzen fehlgeschlagen",
+      );
+    } finally {
+      setContinueBusy(false);
+    }
+  }
 
   useEffect(() => {
     let cancelled = false;
@@ -1223,6 +1264,20 @@ function ConversationReadView({
               )}
             </span>
           )}
+          {/* v2 SS2: Fortsetzen (neue Konv mit dieser als Seed) — nur bei
+              beendeter Konv (eine aktive fortzusetzen ergibt keinen Sinn).
+              Positive Aktion → accent. */}
+          {onContinued && meta?.status === "ended" && (
+            <button
+              type="button"
+              onClick={() => void handleContinue()}
+              disabled={continueBusy}
+              title="Hier weitermachen — startet eine neue Konversation, der Twin erinnert diesen Strang"
+              className="text-[10px] uppercase tracking-wider text-accent hover:underline disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+            >
+              {continueBusy ? "…" : "fortsetzen"}
+            </button>
+          )}
           {/* SS4: archivieren/wiederherstellen (neutral, reversibel) — nur für
               beendete Konv. */}
           {onArchiveToggle && archiveLabel && meta?.status === "ended" && (
@@ -1259,6 +1314,12 @@ function ConversationReadView({
           read-only — vergangene Konversation
         </div>
       </div>
+
+      {continueError && (
+        <div className="text-xs text-warn border border-warn/40 rounded px-3 py-2">
+          {continueError}
+        </div>
+      )}
 
       {error ? (
         <div className="text-xs text-warn border border-warn/40 rounded px-3 py-2">
@@ -1667,6 +1728,9 @@ function DirectChat({
   // ausgeblendet, Toggle macht sie wieder sichtbar (UI-State only).
   const [lastResetAt, setLastResetAt] = useState<string | null>(null);
   const [showFullHistory, setShowFullHistory] = useState(false);
+  // Fortsetzen v2 SS2: conv-id der Ur-Konv, wenn die aktive Konv eine
+  // Fortsetzung ist (für den „fortgesetzt aus …"-Marker). NULL = normale Konv.
+  const [continuedFrom, setContinuedFrom] = useState<string | null>(null);
   // 3.2.G Optimistic-Pfad: User-Text wird sofort als pseudo-Bubble angehängt,
   // beim nächsten erfolgreichen loadAudits() ersetzt der Server-Audit ihn.
   // null = nichts in flight.
@@ -1767,9 +1831,13 @@ function DirectChat({
       }
       if (detailRes && detailRes.ok) {
         const data = (await detailRes.json()) as {
-          conversation: { lastResetAt: string | null } | null;
+          conversation: {
+            lastResetAt: string | null;
+            continuedFromConversationId?: string | null;
+          } | null;
         };
         setLastResetAt(data.conversation?.lastResetAt ?? null);
+        setContinuedFrom(data.conversation?.continuedFromConversationId ?? null);
       }
     } catch {
       // Silent fail — UI bleibt mit dem letzten Stand.
@@ -1953,6 +2021,15 @@ function DirectChat({
         className="flex-1 min-h-0 overflow-y-auto px-6 py-4"
       >
         <div className="max-w-3xl mx-auto space-y-4">
+          {/* Fortsetzen v2 SS2: Marker, wenn die aktive Konv aus einer früheren
+              fortgesetzt wurde. Dezent (Stil wie ResetMarker), oben im Stream. */}
+          {continuedFrom && (
+            <div className="flex items-center gap-3 my-2 text-[10px] uppercase tracking-wider text-muted">
+              <div className="flex-1 h-px bg-border" />
+              <span>↩ fortgesetzt aus einer früheren Konversation</span>
+              <div className="flex-1 h-px bg-border" />
+            </div>
+          )}
           {(() => {
             // #106: EmptyState entweder bei brand-new Twin (keine Audits
             // überhaupt) oder bei post-Reset ohne neue Audits (hidden gibt's,
