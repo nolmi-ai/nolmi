@@ -860,13 +860,20 @@ function ConversationHistoryPanel({
   const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
   const [deleteBusy, setDeleteBusy] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
+  // SS4: Umschalter Standard-Verlauf ⇄ Archiv. archive lädt ?archived=true.
+  const [view, setView] = useState<"history" | "archive">("history");
+  // SS4: nicht-blockierender Fehler für archivieren/wiederherstellen.
+  const [actionError, setActionError] = useState<string | null>(null);
 
-  const loadHistory = useCallback(async () => {
+  const loadList = useCallback(async () => {
+    setItems(null);
+    setError(null);
+    setActionError(null);
     try {
-      const res = await fetch(
-        `${RUNTIME_URL}/twins/${handle}/conversations/history`,
-        { credentials: "include" },
-      );
+      const url = `${RUNTIME_URL}/twins/${handle}/conversations/history${
+        view === "archive" ? "?archived=true" : ""
+      }`;
+      const res = await fetch(url, { credentials: "include" });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const body = (await res.json()) as {
         conversations: ConversationHistoryItem[];
@@ -879,14 +886,14 @@ function ConversationHistoryPanel({
           : "Verlauf konnte nicht geladen werden",
       );
     }
-  }, [handle]);
+  }, [handle, view]);
 
   useEffect(() => {
-    void loadHistory();
-  }, [loadHistory]);
+    void loadList();
+  }, [loadList]);
 
-  // SS2: DELETE /conversations/:id (SS1). Erfolg → Liste neu laden, Confirm +
-  // ggf. offenen Read-View schließen. Fehler → sichtbar, Eintrag bleibt.
+  // SS2: DELETE /conversations/:id (SS1). Erfolg → aktuelle Liste neu laden,
+  // Confirm + ggf. offenen Read-View schließen. Fehler → sichtbar, Eintrag bleibt.
   async function handleDelete(id: string) {
     setDeleteBusy(true);
     setDeleteError(null);
@@ -901,7 +908,7 @@ function ConversationHistoryPanel({
       }
       setPendingDeleteId(null);
       setSelectedId(null);
-      await loadHistory();
+      await loadList();
     } catch (err) {
       setDeleteError(
         err instanceof Error ? err.message : "Löschen fehlgeschlagen",
@@ -910,6 +917,40 @@ function ConversationHistoryPanel({
       setDeleteBusy(false);
     }
   }
+
+  // SS4: POST /conversations/:id/archive|unarchive (reversibel → KEIN Confirm).
+  // Erfolg → aktuelle Liste neu laden (Eintrag wandert in die andere Sicht) +
+  // ggf. offenen Read-View schließen. Fehler → dezente, nicht-blockierende
+  // Meldung über der Liste.
+  async function handleArchiveToggle(
+    id: string,
+    action: "archive" | "unarchive",
+  ) {
+    setActionError(null);
+    try {
+      const res = await fetch(
+        `${RUNTIME_URL}/twins/${handle}/conversations/${encodeURIComponent(id)}/${action}`,
+        { method: "POST", credentials: "include" },
+      );
+      if (!res.ok) {
+        const body = (await res.json().catch(() => ({}))) as { error?: string };
+        throw new Error(body.error ?? `HTTP ${res.status}`);
+      }
+      setSelectedId(null);
+      await loadList();
+    } catch (err) {
+      setActionError(
+        err instanceof Error ? err.message : "Aktion fehlgeschlagen",
+      );
+    }
+  }
+
+  // SS4: in der Archiv-Sicht „wiederherstellen", sonst „archivieren".
+  const isArchiveView = view === "archive";
+  const toggleAction: "archive" | "unarchive" = isArchiveView
+    ? "unarchive"
+    : "archive";
+  const toggleLabel = isArchiveView ? "wiederherstellen" : "archivieren";
 
   // Read-View breiter (Chat-Bubbles), Confirm/Liste schmaler. ✕/ESC/Backdrop
   // schließt das Panel → zurück im laufenden Direct-Chat (während eines
@@ -964,11 +1005,31 @@ function ConversationHistoryPanel({
           conversationId={selectedId}
           onBack={() => setSelectedId(null)}
           onDelete={() => setPendingDeleteId(selectedId)}
+          archiveLabel={toggleLabel}
+          onArchiveToggle={() =>
+            void handleArchiveToggle(selectedId, toggleAction)
+          }
         />
       ) : (
         <div className="p-4 space-y-3">
-          <div className="flex items-center justify-between">
-            <h2 className="text-sm text-text font-medium">Verlauf</h2>
+          <div className="flex items-center justify-between gap-2">
+            {/* SS4: Umschalter Verlauf ⇄ Archiv (dezente Tabs). */}
+            <div className="flex items-center gap-3 text-sm">
+              {(["history", "archive"] as const).map((v) => (
+                <button
+                  key={v}
+                  type="button"
+                  onClick={() => setView(v)}
+                  className={`pb-0.5 border-b-2 transition-colors ${
+                    view === v
+                      ? "text-text border-accent font-medium"
+                      : "text-muted border-transparent hover:text-text"
+                  }`}
+                >
+                  {v === "history" ? "Verlauf" : "Archiv"}
+                </button>
+              ))}
+            </div>
             <button
               type="button"
               onClick={onClose}
@@ -979,6 +1040,12 @@ function ConversationHistoryPanel({
             </button>
           </div>
 
+          {actionError && (
+            <div className="text-xs text-warn border border-warn/40 rounded px-3 py-2">
+              {actionError}
+            </div>
+          )}
+
           {error ? (
             <div className="text-xs text-warn border border-warn/40 rounded px-3 py-2">
               {error}
@@ -987,15 +1054,21 @@ function ConversationHistoryPanel({
             <div className="text-xs text-muted px-1 py-2">lädt…</div>
           ) : items.length === 0 ? (
             <EmptyState
-              title="Noch kein Verlauf"
-              description="Vergangene Konversationen mit deinem Twin erscheinen hier, sobald du eine beendest oder neu startest."
+              title={isArchiveView ? "Archiv ist leer" : "Noch kein Verlauf"}
+              description={
+                isArchiveView
+                  ? "Archivierte Konversationen erscheinen hier. Archivieren blendet eine Konversation aus dem Verlauf aus, ohne sie zu löschen."
+                  : "Vergangene Konversationen mit deinem Twin erscheinen hier, sobald du eine beendest oder neu startest."
+              }
             />
           ) : (
             <ul className="space-y-1 max-h-[60vh] overflow-y-auto">
               {items.map((c) => (
-                // Eigenständige Lösch-Aktion NEBEN dem Öffnen-Button (kein
+                // Eigenständige Aktionen NEBEN dem Öffnen-Button (kein
                 // verschachteltes <button>, kein Propagation-Konflikt). Nur für
                 // BEENDETE Konv — die aktive würde den laufenden Chat zerreißen.
+                // Farb-Trennung: archivieren/wiederherstellen neutral (accent),
+                // löschen destruktiv (warn).
                 <li key={c.id} className="flex items-stretch gap-1 group">
                   <button
                     type="button"
@@ -1024,15 +1097,31 @@ function ConversationHistoryPanel({
                     </div>
                   </button>
                   {c.status === "ended" && (
-                    <button
-                      type="button"
-                      onClick={() => setPendingDeleteId(c.id)}
-                      title="Konversation endgültig löschen"
-                      aria-label="Konversation endgültig löschen"
-                      className="flex-shrink-0 px-2 text-[10px] uppercase tracking-wider text-muted hover:text-warn opacity-0 group-hover:opacity-100 focus:opacity-100 transition-opacity"
-                    >
-                      löschen
-                    </button>
+                    <div className="flex-shrink-0 flex items-center opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity">
+                      <button
+                        type="button"
+                        onClick={() =>
+                          void handleArchiveToggle(c.id, toggleAction)
+                        }
+                        title={
+                          isArchiveView
+                            ? "Aus dem Archiv in den Verlauf zurückholen"
+                            : "Aus dem Verlauf ins Archiv verschieben (reversibel)"
+                        }
+                        className="px-2 text-[10px] uppercase tracking-wider text-muted hover:text-accent transition-colors"
+                      >
+                        {toggleLabel}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setPendingDeleteId(c.id)}
+                        title="Konversation endgültig löschen"
+                        aria-label="Konversation endgültig löschen"
+                        className="px-2 text-[10px] uppercase tracking-wider text-muted hover:text-warn transition-colors"
+                      >
+                        löschen
+                      </button>
+                    </div>
                   )}
                 </li>
               ))}
@@ -1057,12 +1146,18 @@ function ConversationReadView({
   conversationId,
   onBack,
   onDelete,
+  archiveLabel,
+  onArchiveToggle,
 }: {
   handle: string;
   conversationId: string;
   onBack: () => void;
   /** SS2: löst den Lösch-Confirm für diese Konv aus (nur bei beendeter Konv). */
   onDelete?: () => void;
+  /** SS4: „archivieren" oder „wiederherstellen" (je nach Panel-Sicht). */
+  archiveLabel?: string;
+  /** SS4: archiviert/stellt diese Konv wieder her (reversibel, kein Confirm). */
+  onArchiveToggle?: () => void;
 }) {
   const [data, setData] = useState<{
     conversation: ConversationHistoryMeta;
@@ -1127,6 +1222,17 @@ function ConversationReadView({
                 <span title="Ins Gedächtnis verdichtet">· ✓ verdichtet</span>
               )}
             </span>
+          )}
+          {/* SS4: archivieren/wiederherstellen (neutral, reversibel) — nur für
+              beendete Konv. */}
+          {onArchiveToggle && archiveLabel && meta?.status === "ended" && (
+            <button
+              type="button"
+              onClick={onArchiveToggle}
+              className="text-[10px] uppercase tracking-wider text-muted hover:text-accent transition-colors"
+            >
+              {archiveLabel}
+            </button>
           )}
           {/* SS2: Löschen nur für beendete Konv (die aktive würde den laufenden
               Chat zerreißen). */}
