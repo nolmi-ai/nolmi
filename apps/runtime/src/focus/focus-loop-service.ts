@@ -264,7 +264,17 @@ export class FocusLoopService {
    * Ein Durchlauf über alle aktiven Twins. Per-Twin try/catch: ein Fehler (z.B.
    * kaputter Key) killt nicht die anderen Twins oder den Loop.
    */
-  async runTick(): Promise<void> {
+  async runTick(loggerOverride?: FastifyBaseLogger): Promise<void> {
+    // Manueller/CLI-Trigger: optionaler Logger, damit ein on-demand-Tick die
+    // internen [focus-loop]-Logs (twin-declined, no-new-substance, …) sichtbar
+    // macht — `this.logger` wird sonst NUR in start() gesetzt. STRIKT additiv:
+    // ohne Arg bleibt `this.logger` unangetastet → der setInterval-Pfad (ruft
+    // runTick() ohne Arg) ist byte-identisch. Restore nach dem Lauf; der Tick
+    // selbst wirft nicht (jeder Twin-Schritt ist per-Twin try/catch), die
+    // CLI-Instanz ist zudem einmalig.
+    const prevLogger = this.logger;
+    if (loggerOverride) this.logger = loggerOverride;
+
     const twins = this.deps.registry.list();
     for (const twin of twins) {
       // G2: VOR der Fokus-Ableitung — idle Konv beenden + verdichten, damit
@@ -341,6 +351,9 @@ export class FocusLoopService {
         );
       }
     }
+
+    // Logger-Override zurücksetzen (no-op, wenn keiner übergeben war).
+    if (loggerOverride) this.logger = prevLogger;
   }
 
   /**
