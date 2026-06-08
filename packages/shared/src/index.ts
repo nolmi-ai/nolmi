@@ -294,6 +294,11 @@ export const ConversationSchema = z.object({
    * 'done'). Wird aus conversations.embedding_status gelesen.
    */
   embeddingStatus: ConversationEmbeddingStatusSchema.optional(),
+  /**
+   * #53 SS3: ISO-Timestamp der Archivierung. NULL = nicht archiviert. Archiv
+   * ist reine UI-Sichtbarkeit (orthogonal zu status), kein Memory-Entzug.
+   */
+  archivedAt: z.string().nullable().optional(),
 });
 export type Conversation = z.infer<typeof ConversationSchema>;
 
@@ -318,6 +323,8 @@ export const ConversationHistoryMetaSchema = z.object({
   startedAt: z.string(),
   endedAt: z.string().nullable(),
   embeddingStatus: ConversationEmbeddingStatusSchema.optional(),
+  /** #53 SS3: ISO-Timestamp der Archivierung, NULL = nicht archiviert. */
+  archivedAt: z.string().nullable().optional(),
 });
 export type ConversationHistoryMeta = z.infer<
   typeof ConversationHistoryMetaSchema

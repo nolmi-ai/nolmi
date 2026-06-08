@@ -52,6 +52,7 @@ interface ConversationRow {
   ended_at: string | null;
   last_reset_at: string | null;
   embedding_status: ConversationEmbeddingStatus;
+  archived_at: string | null;
 }
 
 // Re-Export für Konsumenten im Runtime, die den Status-Typ erwarten — der
@@ -86,6 +87,7 @@ export class ConversationsRepo {
       endedAt: null,
       lastResetAt: input.lastResetAt ?? null,
       embeddingStatus: "pending",
+      archivedAt: null,
     };
 
     // Log beim Start, nicht bei jedem getOrStart() — sonst spammt jede
@@ -187,18 +189,28 @@ export class ConversationsRepo {
   /**
    * Listet alle Konversationen für das Tripel, neueste zuerst (started_at
    * absteigend). Für die UI-Konversations-Historie.
+   *
+   * #53 SS3: Archiv-Filter. Default (`archived` unset/false) → nur NICHT-
+   * archivierte (Standard-Verlauf). `{ archived: true }` → NUR archivierte
+   * (Archiv-Sicht). Archiv ist orthogonal zum status — die Liste mischt
+   * weiterhin active + ended, blendet nur nach archived_at.
    */
   list(
     ownerUserId: string,
     partnerHandle: string,
     twinId: string,
+    opts: { archived?: boolean } = {},
   ): Conversation[] {
+    const archivedClause = opts.archived
+      ? "AND archived_at IS NOT NULL"
+      : "AND archived_at IS NULL";
     const rows = this.db
       .prepare(
         `SELECT * FROM conversations
            WHERE owner_user_id = ?
              AND partner_handle = ?
              AND twin_id = ?
+             ${archivedClause}
            ORDER BY started_at DESC`,
       )
       .all(ownerUserId, partnerHandle, twinId) as ConversationRow[];
@@ -271,6 +283,7 @@ export class ConversationsRepo {
            WHERE owner_user_id = ?
              AND twin_id = ?
              AND status = 'active'
+             AND archived_at IS NULL
            ORDER BY started_at DESC`,
       )
       .all(ownerUserId, twinId) as ConversationRow[];
@@ -407,6 +420,34 @@ export class ConversationsRepo {
 
     return { deleted: true, audits, summaries, embeddings };
   }
+
+  /**
+   * #53 SS3: Archiviert eine Konversation (archived_at = now). Reine UI-
+   * Sichtbarkeit — embeddings/Memory bleiben UNANGETASTET. Twin-gegatet: setzt
+   * nur, wenn convId zu twinId gehört (sonst false, kein Cross-Twin). Idempotent
+   * (überschreibt einen bestehenden Stempel mit dem neuen — harmlos).
+   */
+  archive(twinId: string, convId: string): boolean {
+    const result = this.db
+      .prepare(
+        `UPDATE conversations SET archived_at = ? WHERE id = ? AND twin_id = ?`,
+      )
+      .run(new Date().toISOString(), convId, twinId);
+    return result.changes > 0;
+  }
+
+  /**
+   * #53 SS3: Hebt die Archivierung auf (archived_at = NULL). Twin-gegatet.
+   * Gibt false zurück, wenn convId nicht zu twinId gehört.
+   */
+  unarchive(twinId: string, convId: string): boolean {
+    const result = this.db
+      .prepare(
+        `UPDATE conversations SET archived_at = NULL WHERE id = ? AND twin_id = ?`,
+      )
+      .run(convId, twinId);
+    return result.changes > 0;
+  }
 }
 
 function rowToConversation(row: ConversationRow): Conversation {
@@ -420,5 +461,6 @@ function rowToConversation(row: ConversationRow): Conversation {
     endedAt: row.ended_at,
     lastResetAt: row.last_reset_at,
     embeddingStatus: row.embedding_status,
+    archivedAt: row.archived_at,
   };
 }

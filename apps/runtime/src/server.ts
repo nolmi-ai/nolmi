@@ -2507,9 +2507,13 @@ function registerConversationRoutes(
       );
       // listEndedByTwin ist twin-, nicht owner-scoped → auf den eingeloggten
       // Owner einschränken (Direct-Chat-Self wird unten ohnehin gefiltert).
+      // #53 SS3: archivierte hier filtern (NICHT in der Repo-Query) — dieselbe
+      // Methode speist die Memory-Maintenance (listEndedByTwin in
+      // memory-maintenance-service), die archivierte Konv weiter re-embedden
+      // muss (Archiv ≠ Memory-Entzug).
       const localEnded = deps.conversationsRepo
         .listEndedByTwin(entry.twinId)
-        .filter((c) => c.ownerUserId === ctx.user.userId);
+        .filter((c) => c.ownerUserId === ctx.user.userId && !c.archivedAt);
 
       // Pro Partner einen Repräsentanten: aktive Konv schlägt beendete; unter
       // beendeten gewinnt die mit jüngstem ended_at. Verhindert Doppel-Rows
@@ -2567,19 +2571,24 @@ function registerConversationRoutes(
   // parametrischen Route `/conversations/:partnerHandle` — find-my-way
   // priorisiert statische vor parametrischen Segmenten. Für Direct-Chat (Partner
   // == eigener Handle) könnte `history` ohnehin nie ein Partner-Handle sein.
-  app.get<{ Params: { handle: string } }>(
+  app.get<{ Params: { handle: string }; Querystring: { archived?: string } }>(
     "/twins/:handle/conversations/history",
     async (request, reply) => {
       const ctx = await requireOwner(request, reply, request.params.handle);
       if (!ctx) return;
       const { entry, user } = ctx;
 
+      // #53 SS3: ?archived=true → Archiv-Sicht (nur archivierte); sonst der
+      // Standard-Verlauf (nur nicht-archivierte). Filter sitzt in list().
+      const archived = request.query.archived === "true";
+
       // Direct-Chat-Konv = (owner, partner == self, twin). list() liefert sie
-      // started_at DESC inkl. status/ended_at/embedding_status.
+      // started_at DESC inkl. status/ended_at/embedding_status/archived_at.
       const convs = deps.conversationsRepo.list(
         user.userId,
         entry.handle,
         entry.twinId,
+        { archived },
       );
 
       const items: ConversationHistoryItem[] = await Promise.all(
@@ -2589,6 +2598,7 @@ function registerConversationRoutes(
           startedAt: conv.startedAt,
           endedAt: conv.endedAt,
           embeddingStatus: conv.embeddingStatus,
+          archivedAt: conv.archivedAt,
           snippet: await buildConversationSnippet(deps, conv.id),
         })),
       );
@@ -2697,6 +2707,45 @@ function registerConversationRoutes(
       }
     },
   );
+
+  // POST /twins/:handle/conversations/:conversationId/archive   — archivieren
+  // POST /twins/:handle/conversations/:conversationId/unarchive — wiederherstellen
+  //
+  // #53 SS3: reine UI-Sichtbarkeit — setzt/löscht archived_at, lässt embeddings/
+  // Memory UNANGETASTET (Archiv ≠ Memory-Entzug). Owner-gegatet, IDOR wie die
+  // DELETE-/audits-Routen: die Konv muss (owner, twin) gehören → sonst 404.
+  for (const action of ["archive", "unarchive"] as const) {
+    app.post<{ Params: { handle: string; conversationId: string } }>(
+      `/twins/:handle/conversations/:conversationId/${action}`,
+      async (request, reply) => {
+        const ctx = await requireOwner(request, reply, request.params.handle);
+        if (!ctx) return;
+        const { entry, user } = ctx;
+        const conversationId = request.params.conversationId;
+
+        // IDOR: Besitz prüfen, bevor etwas geändert wird.
+        let conv: Conversation;
+        try {
+          conv = deps.conversationsRepo.findById(conversationId);
+        } catch {
+          return reply.status(404).send({ error: "Konversation nicht gefunden" });
+        }
+        if (conv.twinId !== entry.twinId || conv.ownerUserId !== user.userId) {
+          return reply.status(404).send({ error: "Konversation nicht gefunden" });
+        }
+
+        const ok =
+          action === "archive"
+            ? deps.conversationsRepo.archive(entry.twinId, conversationId)
+            : deps.conversationsRepo.unarchive(entry.twinId, conversationId);
+        request.log.info(
+          { handle: entry.handle, conversationId, action, ok },
+          "[conversations] Archiv-Status geändert",
+        );
+        return { ok, action };
+      },
+    );
+  }
 
   // GET /twins/:handle/conversations/:partnerHandle — chronologischer Thread
   //
