@@ -856,47 +856,114 @@ function ConversationHistoryPanel({
   const [error, setError] = useState<string | null>(null);
   // Sub-Step 3: gewählte Konv → read-only Read-View. null = Listen-Ansicht.
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  // SS2: Lösch-Confirm. Gesetzte ID = Confirm-Ansicht für diese Konv.
+  const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
+  const [deleteBusy, setDeleteBusy] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
 
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      try {
-        const res = await fetch(
-          `${RUNTIME_URL}/twins/${handle}/conversations/history`,
-          { credentials: "include" },
-        );
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        const body = (await res.json()) as {
-          conversations: ConversationHistoryItem[];
-        };
-        if (!cancelled) setItems(body.conversations);
-      } catch (err) {
-        if (!cancelled) {
-          setError(
-            err instanceof Error
-              ? err.message
-              : "Verlauf konnte nicht geladen werden",
-          );
-        }
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
+  const loadHistory = useCallback(async () => {
+    try {
+      const res = await fetch(
+        `${RUNTIME_URL}/twins/${handle}/conversations/history`,
+        { credentials: "include" },
+      );
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const body = (await res.json()) as {
+        conversations: ConversationHistoryItem[];
+      };
+      setItems(body.conversations);
+    } catch (err) {
+      setError(
+        err instanceof Error
+          ? err.message
+          : "Verlauf konnte nicht geladen werden",
+      );
+    }
   }, [handle]);
 
-  // Read-View breiter (Chat-Bubbles), Liste schmaler. ✕/ESC/Backdrop schließt
-  // das ganze Panel → man ist wieder im laufenden Direct-Chat.
+  useEffect(() => {
+    void loadHistory();
+  }, [loadHistory]);
+
+  // SS2: DELETE /conversations/:id (SS1). Erfolg → Liste neu laden, Confirm +
+  // ggf. offenen Read-View schließen. Fehler → sichtbar, Eintrag bleibt.
+  async function handleDelete(id: string) {
+    setDeleteBusy(true);
+    setDeleteError(null);
+    try {
+      const res = await fetch(
+        `${RUNTIME_URL}/twins/${handle}/conversations/${encodeURIComponent(id)}`,
+        { method: "DELETE", credentials: "include" },
+      );
+      if (!res.ok) {
+        const body = (await res.json().catch(() => ({}))) as { error?: string };
+        throw new Error(body.error ?? `HTTP ${res.status}`);
+      }
+      setPendingDeleteId(null);
+      setSelectedId(null);
+      await loadHistory();
+    } catch (err) {
+      setDeleteError(
+        err instanceof Error ? err.message : "Löschen fehlgeschlagen",
+      );
+    } finally {
+      setDeleteBusy(false);
+    }
+  }
+
+  // Read-View breiter (Chat-Bubbles), Confirm/Liste schmaler. ✕/ESC/Backdrop
+  // schließt das Panel → zurück im laufenden Direct-Chat (während eines
+  // laufenden Delete geguardet).
   return (
     <ModalWrapper
-      onClose={onClose}
-      maxWidthClass={selectedId ? "max-w-2xl" : "max-w-lg"}
+      onClose={deleteBusy ? () => {} : onClose}
+      maxWidthClass={
+        pendingDeleteId ? "max-w-md" : selectedId ? "max-w-2xl" : "max-w-lg"
+      }
     >
-      {selectedId ? (
+      {pendingDeleteId ? (
+        <div className="p-5 space-y-4">
+          <h2 className="text-sm font-semibold text-warn">
+            Konversation löschen
+          </h2>
+          <p className="text-sm text-text leading-relaxed">
+            Diese Konversation wird endgültig gelöscht — inklusive aller
+            Nachrichten und ihres Beitrags zum Gedächtnis des Twins. Das kann
+            nicht rückgängig gemacht werden.
+          </p>
+          {deleteError && (
+            <div className="text-xs text-warn border border-warn rounded px-3 py-2">
+              {deleteError}
+            </div>
+          )}
+          <div className="flex items-center justify-end gap-3 pt-1">
+            <button
+              type="button"
+              onClick={() => {
+                setPendingDeleteId(null);
+                setDeleteError(null);
+              }}
+              disabled={deleteBusy}
+              className="px-3 py-2 text-sm text-muted hover:text-text transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+            >
+              Abbrechen
+            </button>
+            <button
+              type="button"
+              onClick={() => void handleDelete(pendingDeleteId)}
+              disabled={deleteBusy}
+              className="px-4 py-2 text-sm border border-warn bg-warn text-bg rounded hover:opacity-80 disabled:opacity-30 disabled:cursor-not-allowed transition-opacity"
+            >
+              {deleteBusy ? "Lösche…" : "Endgültig löschen"}
+            </button>
+          </div>
+        </div>
+      ) : selectedId ? (
         <ConversationReadView
           handle={handle}
           conversationId={selectedId}
           onBack={() => setSelectedId(null)}
+          onDelete={() => setPendingDeleteId(selectedId)}
         />
       ) : (
         <div className="p-4 space-y-3">
@@ -926,11 +993,14 @@ function ConversationHistoryPanel({
           ) : (
             <ul className="space-y-1 max-h-[60vh] overflow-y-auto">
               {items.map((c) => (
-                <li key={c.id}>
+                // Eigenständige Lösch-Aktion NEBEN dem Öffnen-Button (kein
+                // verschachteltes <button>, kein Propagation-Konflikt). Nur für
+                // BEENDETE Konv — die aktive würde den laufenden Chat zerreißen.
+                <li key={c.id} className="flex items-stretch gap-1 group">
                   <button
                     type="button"
                     onClick={() => setSelectedId(c.id)}
-                    className="w-full text-left px-3 py-2 rounded border border-border bg-bg/40 hover:border-accent/40 hover:bg-bg/60 transition-colors"
+                    className="flex-1 min-w-0 text-left px-3 py-2 rounded border border-border bg-bg/40 hover:border-accent/40 hover:bg-bg/60 transition-colors"
                   >
                     <div className="flex items-center justify-between gap-2">
                       <span className="text-[11px] text-muted">
@@ -953,6 +1023,17 @@ function ConversationHistoryPanel({
                       )}
                     </div>
                   </button>
+                  {c.status === "ended" && (
+                    <button
+                      type="button"
+                      onClick={() => setPendingDeleteId(c.id)}
+                      title="Konversation endgültig löschen"
+                      aria-label="Konversation endgültig löschen"
+                      className="flex-shrink-0 px-2 text-[10px] uppercase tracking-wider text-muted hover:text-warn opacity-0 group-hover:opacity-100 focus:opacity-100 transition-opacity"
+                    >
+                      löschen
+                    </button>
+                  )}
                 </li>
               ))}
             </ul>
@@ -975,10 +1056,13 @@ function ConversationReadView({
   handle,
   conversationId,
   onBack,
+  onDelete,
 }: {
   handle: string;
   conversationId: string;
   onBack: () => void;
+  /** SS2: löst den Lösch-Confirm für diese Konv aus (nur bei beendeter Konv). */
+  onDelete?: () => void;
 }) {
   const [data, setData] = useState<{
     conversation: ConversationHistoryMeta;
@@ -1033,16 +1117,30 @@ function ConversationReadView({
         >
           ← Zurück
         </button>
-        {meta && (
-          <span className="flex items-center gap-1.5 text-[10px] uppercase tracking-wider text-muted">
-            <span className="border border-border rounded px-1.5 py-0.5">
-              {meta.status === "ended" ? "beendet" : "aktiv"}
+        <div className="flex items-center gap-2.5">
+          {meta && (
+            <span className="flex items-center gap-1.5 text-[10px] uppercase tracking-wider text-muted">
+              <span className="border border-border rounded px-1.5 py-0.5">
+                {meta.status === "ended" ? "beendet" : "aktiv"}
+              </span>
+              {meta.embeddingStatus === "done" && (
+                <span title="Ins Gedächtnis verdichtet">· ✓ verdichtet</span>
+              )}
             </span>
-            {meta.embeddingStatus === "done" && (
-              <span title="Ins Gedächtnis verdichtet">· ✓ verdichtet</span>
-            )}
-          </span>
-        )}
+          )}
+          {/* SS2: Löschen nur für beendete Konv (die aktive würde den laufenden
+              Chat zerreißen). */}
+          {onDelete && meta?.status === "ended" && (
+            <button
+              type="button"
+              onClick={onDelete}
+              title="Konversation endgültig löschen"
+              className="text-[10px] uppercase tracking-wider text-muted hover:text-warn transition-colors"
+            >
+              löschen
+            </button>
+          )}
+        </div>
       </div>
 
       <div>
