@@ -474,6 +474,13 @@ export class ConversationsRepo {
    * Invariante bleibt EXAKT gewahrt (keine zweite aktive Konv). Setzt dabei
    * `continued_from_conversation_id` (Marker) + `seed_context` (LLM-Anker,
    * Summary-Snapshot der Ur-Konv). Die Ur-Konv wird NICHT angefasst.
+   *
+   * `lastResetAt = now` wie der Reset-Pfad: der DirectChat-Soft-Hide-Filter
+   * blendet damit die Alt-Audits aus → frischer Stream, an dessen Anfang der
+   * „fortgesetzt aus …"-Marker sichtbar steht (sonst durch den Auto-Scroll
+   * eines langen Voll-Verlaufs nach oben weggeschoben). Gefahrlos: der Seed
+   * lebt im LLM-Kontext (seed_context), NICHT im sichtbaren Stream — das
+   * Ausblenden mindert das Twin-Wissen über den Strang NICHT.
    */
   startContinuation(
     ownerUserId: string,
@@ -485,6 +492,7 @@ export class ConversationsRepo {
       ownerUserId,
       partnerHandle,
       twinId,
+      lastResetAt: new Date().toISOString(),
       continuedFromConversationId: seed.continuedFromId,
       seedContext: seed.seedContext,
     });
