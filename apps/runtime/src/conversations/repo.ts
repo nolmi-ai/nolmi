@@ -53,6 +53,8 @@ interface ConversationRow {
   last_reset_at: string | null;
   embedding_status: ConversationEmbeddingStatus;
   archived_at: string | null;
+  continued_from_conversation_id: string | null;
+  seed_context: string | null;
 }
 
 // Re-Export für Konsumenten im Runtime, die den Status-Typ erwarten — der
@@ -88,6 +90,7 @@ export class ConversationsRepo {
       lastResetAt: input.lastResetAt ?? null,
       embeddingStatus: "pending",
       archivedAt: null,
+      continuedFromConversationId: input.continuedFromConversationId ?? null,
     };
 
     // Log beim Start, nicht bei jedem getOrStart() — sonst spammt jede
@@ -120,9 +123,11 @@ export class ConversationsRepo {
       this.db
         .prepare(
           `INSERT INTO conversations
-             (id, owner_user_id, partner_handle, twin_id, status, started_at, ended_at, last_reset_at)
+             (id, owner_user_id, partner_handle, twin_id, status, started_at, ended_at, last_reset_at,
+              continued_from_conversation_id, seed_context)
            VALUES
-             (@id, @owner_user_id, @partner_handle, @twin_id, @status, @started_at, @ended_at, @last_reset_at)`,
+             (@id, @owner_user_id, @partner_handle, @twin_id, @status, @started_at, @ended_at, @last_reset_at,
+              @continued_from_conversation_id, @seed_context)`,
         )
         .run({
           id: conv.id,
@@ -133,6 +138,9 @@ export class ConversationsRepo {
           started_at: conv.startedAt,
           ended_at: conv.endedAt,
           last_reset_at: conv.lastResetAt,
+          // Fortsetzen v2: bei normalem start() beide null.
+          continued_from_conversation_id: input.continuedFromConversationId ?? null,
+          seed_context: input.seedContext ?? null,
         });
     });
     tx();
@@ -448,6 +456,39 @@ export class ConversationsRepo {
       .run(convId, twinId);
     return result.changes > 0;
   }
+
+  /**
+   * Fortsetzen v2: liest den server-internen seed_context einer Konv (nicht in
+   * `Conversation` gemappt — kein API-Leak). null, wenn keiner gesetzt ist.
+   */
+  getSeedContext(convId: string): string | null {
+    const row = this.db
+      .prepare("SELECT seed_context FROM conversations WHERE id = ?")
+      .get(convId) as { seed_context: string | null } | undefined;
+    return row?.seed_context ?? null;
+  }
+
+  /**
+   * Fortsetzen v2: startet eine NEUE aktive Konv als Fortsetzung — nutzt
+   * denselben start()-Pfad (end-all-then-insert in 1 Tx) → die Ein-aktive-
+   * Invariante bleibt EXAKT gewahrt (keine zweite aktive Konv). Setzt dabei
+   * `continued_from_conversation_id` (Marker) + `seed_context` (LLM-Anker,
+   * Summary-Snapshot der Ur-Konv). Die Ur-Konv wird NICHT angefasst.
+   */
+  startContinuation(
+    ownerUserId: string,
+    partnerHandle: string,
+    twinId: string,
+    seed: { continuedFromId: string; seedContext: string | null },
+  ): Conversation {
+    return this.start({
+      ownerUserId,
+      partnerHandle,
+      twinId,
+      continuedFromConversationId: seed.continuedFromId,
+      seedContext: seed.seedContext,
+    });
+  }
 }
 
 function rowToConversation(row: ConversationRow): Conversation {
@@ -462,5 +503,8 @@ function rowToConversation(row: ConversationRow): Conversation {
     lastResetAt: row.last_reset_at,
     embeddingStatus: row.embedding_status,
     archivedAt: row.archived_at,
+    continuedFromConversationId: row.continued_from_conversation_id,
+    // seed_context wird BEWUSST nicht gemappt — server-intern (kein API-Leak),
+    // separat via getSeedContext() gelesen.
   };
 }

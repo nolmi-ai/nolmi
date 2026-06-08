@@ -299,6 +299,13 @@ export const ConversationSchema = z.object({
    * ist reine UI-Sichtbarkeit (orthogonal zu status), kein Memory-Entzug.
    */
   archivedAt: z.string().nullable().optional(),
+  /**
+   * Fortsetzen v2: conv-id der Ur-Konv, aus der diese fortgesetzt wurde (für
+   * den „fortgesetzt aus …"-Marker). NULL = normale Konv. Dient zugleich als
+   * „hat Seed"-Flag — `seed_context` selbst bleibt server-intern (nicht im
+   * Schema, kein API-Leak).
+   */
+  continuedFromConversationId: z.string().nullable().optional(),
 });
 export type Conversation = z.infer<typeof ConversationSchema>;
 
@@ -308,6 +315,10 @@ export const ConversationStartInputSchema = z.object({
   twinId: z.string(),
   /** #106: Reset-Pfad gibt einen ISO-Timestamp mit; sonst null. */
   lastResetAt: z.string().nullable().optional(),
+  /** Fortsetzen v2: conv-id der Ur-Konv (für den Marker). */
+  continuedFromConversationId: z.string().nullable().optional(),
+  /** Fortsetzen v2: Summary-Snapshot der Ur-Konv (server-intern, LLM-Seed). */
+  seedContext: z.string().nullable().optional(),
 });
 export type ConversationStartInput = z.infer<typeof ConversationStartInputSchema>;
 

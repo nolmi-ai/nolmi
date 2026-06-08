@@ -124,3 +124,19 @@ export function buildSummaryBlock(
   });
   return parts.join("\n\n---\n\n");
 }
+
+/**
+ * Fortsetzen v2: rendert den Seed-Kontext (Summary-Snapshot der Ur-Konv) als
+ * Prompt-Block für eine Fortsetzungs-Konv. Eine frische Fortsetzung hat noch
+ * keine eigenen Summaries → DIESER Block ist ihr Anfangs-Kontext, damit der
+ * Twin den fortgesetzten Strang kennt. Bei leerem/fehlendem Seed `null` (Caller
+ * filtert via `.filter(Boolean)`). Wird im Owner-Pfad VOR den eigenen Summaries
+ * der laufenden Konv eingehängt (gleiche Prompt-Schicht, ältester Kontext zuerst).
+ */
+export function buildSeedBlock(
+  seedContext: string | null | undefined,
+): string | null {
+  const text = seedContext?.trim();
+  if (!text) return null;
+  return `**Fortsetzung eines früheren Gesprächs — bisheriger Kontext:**\n\n${text}`;
+}

@@ -2747,6 +2747,63 @@ function registerConversationRoutes(
     );
   }
 
+  // POST /twins/:handle/conversations/:conversationId/continue — fortsetzen (v2)
+  //
+  // Direct-Chat-Fortsetzen v2 SS1: startet eine NEUE aktive Direct-Chat-Konv,
+  // die den Kontext der (beendeten) Ur-Konv als Seed-Snapshot mitbekommt. Über
+  // startContinuation → derselbe end-all-then-insert-Pfad wie start() → die
+  // Ein-aktive-Invariante bleibt gewahrt. Die Ur-Konv wird NICHT verändert
+  // (read-only). Owner-gegatet, IDOR wie #53-SS1: die Ur-Konv muss (owner, twin)
+  // gehören → sonst 404.
+  app.post<{ Params: { handle: string; conversationId: string } }>(
+    "/twins/:handle/conversations/:conversationId/continue",
+    async (request, reply) => {
+      const ctx = await requireOwner(request, reply, request.params.handle);
+      if (!ctx) return;
+      const { entry, user } = ctx;
+      const fromId = request.params.conversationId;
+
+      // IDOR: Ur-Konv laden + Besitz prüfen, bevor etwas angelegt wird.
+      let from: Conversation;
+      try {
+        from = deps.conversationsRepo.findById(fromId);
+      } catch {
+        return reply.status(404).send({ error: "Konversation nicht gefunden" });
+      }
+      if (from.twinId !== entry.twinId || from.ownerUserId !== user.userId) {
+        return reply.status(404).send({ error: "Konversation nicht gefunden" });
+      }
+
+      // Seed-Snapshot: Summary-Segmente der Ur-Konv als Text-KOPIE
+      // zusammenfügen (robust gegen späteres Löschen/Archivieren der Ur-Konv).
+      // Keine Segmente (kurze, nie verdichtete Konv) → null (Fortsetzung läuft
+      // trotzdem, nur ohne Anker).
+      const segs = deps.conversationSummariesRepo.listByConversation(fromId);
+      const seedContext =
+        segs
+          .map((s) => s.summaryMd.trim())
+          .filter((t) => t.length > 0)
+          .join("\n\n---\n\n") || null;
+
+      const fresh = deps.conversationsRepo.startContinuation(
+        user.userId,
+        entry.handle,
+        entry.twinId,
+        { continuedFromId: fromId, seedContext },
+      );
+      request.log.info(
+        {
+          handle: entry.handle,
+          fromConversationId: fromId,
+          newConversationId: fresh.id,
+          hasSeed: seedContext !== null,
+        },
+        "[conversations] Konversation fortgesetzt (neue aktive mit Seed)",
+      );
+      return { conversation: fresh };
+    },
+  );
+
   // GET /twins/:handle/conversations/:partnerHandle — chronologischer Thread
   //
   // Bridge-Verlauf zwischen uns und partner, angereichert mit lokalem Audit-

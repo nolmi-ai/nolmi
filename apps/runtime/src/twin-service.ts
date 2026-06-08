@@ -50,6 +50,7 @@ import {
 } from "./conversations/tail-flush.js";
 import {
   auditsToOwnerDirectMessagesChronological,
+  buildSeedBlock,
   buildSummaryBlock,
   loadConversationHistory,
 } from "./conversations/history-loader.js";
@@ -812,6 +813,10 @@ export class TwinService {
     let conversationId: string | null = null;
     let history: ChatMessage[] = [];
     let summaries: ConversationSummary[] = [];
+    // Fortsetzen v2: Seed-Kontext der aktiven Konv (Summary-Snapshot der Ur-
+    // Konv). Nur Fortsetzungs-Konv tragen einen → über das continuedFrom-Flag
+    // gegated, damit normale Sends KEINEN Extra-Lookup zahlen.
+    let seedContext: string | null = null;
     if (this.deps.ownerUserId) {
       const conv = this.deps.conversations.getOrStart(
         this.deps.ownerUserId,
@@ -821,6 +826,9 @@ export class TwinService {
         this.deps.twinId,
       );
       conversationId = conv.id;
+      if (conv.continuedFromConversationId) {
+        seedContext = this.deps.conversations.getSeedContext(conv.id);
+      }
       // 3.3.B: Summary-Check VOR dem History-Load — wenn der Threshold
       // überschritten ist, persistiert die SummaryEngine die ältesten
       // Messages noch in dieser Send-Latenz. Sync, weil Edge-Case
@@ -945,7 +953,15 @@ export class TwinService {
         {
           enableMcpTools: true,
           forcedToolChoice: options.forcedToolChoice,
-          summaryBlock: buildSummaryBlock(summaries),
+          // Fortsetzen v2: Seed-Block (Ur-Konv-Snapshot) VOR den eigenen
+          // Summaries der laufenden Konv — ältester Kontext zuerst, gleiche
+          // Prompt-Schicht. Beide null → kein Block. Seed wird IMMER mitgegeben
+          // (auch wenn die Fortsetzung schon eigene Summaries hat): er ist der
+          // Anker des fortgesetzten Strangs, bounded Text, einfache Regel.
+          summaryBlock:
+            [buildSeedBlock(seedContext), buildSummaryBlock(summaries)]
+              .filter(Boolean)
+              .join("\n\n---\n\n") || null,
           factsBlock,
           episodicBlock,
           focusBlock,
