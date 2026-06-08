@@ -6,6 +6,26 @@ import type {
   ConversationStartInput,
   ConversationStatus,
 } from "@nolmi/shared";
+import type { EmbeddingsRepo } from "../episodic/embeddings-repo.js";
+import type { ConversationSummariesRepo } from "./summaries-repo.js";
+
+/** #53 SS1: Abhängigkeiten für den Konv-Lösch-Cascade (wie delete-twin.ts). */
+export interface DeleteConversationDeps {
+  embeddingsRepo: Pick<EmbeddingsRepo, "deleteByTarget">;
+  summariesRepo: Pick<ConversationSummariesRepo, "listByConversation">;
+}
+
+/** #53 SS1: Ergebnis eines Konv-Löschvorgangs (Logging + Test-Verifikation). */
+export interface DeleteConversationResult {
+  /** false = Konv existierte nicht oder gehört nicht zu twinId (No-op). */
+  deleted: boolean;
+  /** Entfernte Audit-Turns dieser Konv. */
+  audits: number;
+  /** Entfernte conversation_summaries-Rows. */
+  summaries: number;
+  /** Entfernte embeddings (conversation + summary_segment, inkl. vec0/fts). */
+  embeddings: number;
+}
 
 // ─── CONVERSATIONS REPOSITORY ───────────────────────────────────────────────
 //
@@ -302,6 +322,90 @@ export class ConversationsRepo {
       .prepare(`UPDATE conversations SET embedding_status = ? WHERE id = ?`)
       .run(status, id);
     return result.changes > 0;
+  }
+
+  /**
+   * #53 SS1: Löscht eine Konversation ENDGÜLTIG — Row + Audit-Turns + Summaries
+   * + Embeddings (conversation + summary_segment, inkl. vec0/fts). Eine
+   * Transaktion (foreign_keys bleibt ON, wie delete-twin.ts). Die REIHENFOLGE
+   * ist load-bearing:
+   *   1. Summary-IDs ZUERST holen — die CASCADE (conversation_summaries→conv)
+   *      würde sie sonst mit den Summary-Rows entfernen, bevor wir ihre
+   *      Embeddings selektiv löschen können.
+   *   2. Embeddings je Summary-Segment + die Konv-Embedding via deleteByTarget
+   *      (atomar embeddings+vec+fts — NICHT FK-gekoppelt, müssen explizit weg,
+   *      sonst verwaiste Vektoren).
+   *   3. conversation_summaries manuell VOR audit — segment_*_audit_id→audit ist
+   *      NO ACTION, blockt sonst den audit-DELETE.
+   *   4. Audit-Turns hart — die FK audit.conversation_id ist SET NULL (nicht
+   *      CASCADE) → würde sonst nur verwaisen statt zu löschen. VOR der conv-Row,
+   *      weil ein conv-DELETE die conversation_id per SET NULL kappen würde.
+   *   5. Die conversations-Row, an id UND twin_id gebunden.
+   *
+   * 🔴 Twin-Scope: bricht ohne Löschung ab (deleted:false), wenn convId nicht zu
+   * twinId gehört — KEIN Cross-Twin-Delete. ALLE DELETEs sind an conversation_id
+   * (+ twin_id) gebunden, nie breiter. Schlägt ein Schritt fehl → Rollback (tx),
+   * keine halb-gelöschte Konv.
+   */
+  deleteConversation(
+    twinId: string,
+    convId: string,
+    deps: DeleteConversationDeps,
+  ): DeleteConversationResult {
+    // Scope-Guard VOR der Transaktion: existiert die Konv + gehört sie diesem
+    // Twin? Sonst No-op — niemals eine fremde Konv anfassen.
+    const row = this.db
+      .prepare("SELECT twin_id FROM conversations WHERE id = ?")
+      .get(convId) as { twin_id: string } | undefined;
+    if (!row || row.twin_id !== twinId) {
+      return { deleted: false, audits: 0, summaries: 0, embeddings: 0 };
+    }
+
+    let embeddings = 0;
+    let summaries = 0;
+    let audits = 0;
+
+    const tx = this.db.transaction(() => {
+      // 1. Summary-IDs ZUERST (vor jedem Löschen — sonst CASCADE-Verlust).
+      const summaryRows = deps.summariesRepo.listByConversation(convId);
+
+      // 2. Embeddings: pro Summary-Segment + die Konv-Embedding (atomar vec+fts).
+      for (const s of summaryRows) {
+        embeddings += deps.embeddingsRepo.deleteByTarget(
+          twinId,
+          "summary_segment",
+          s.id,
+        );
+      }
+      embeddings += deps.embeddingsRepo.deleteByTarget(
+        twinId,
+        "conversation",
+        convId,
+      );
+
+      // 3. conversation_summaries manuell VOR audit (NO-ACTION-FK entsperren).
+      summaries = this.db
+        .prepare(`DELETE FROM conversation_summaries WHERE conversation_id = ?`)
+        .run(convId).changes;
+
+      // 4. Audit-Turns hart (FK ist SET NULL) — VOR der conv-Row.
+      audits = this.db
+        .prepare(`DELETE FROM audit WHERE conversation_id = ?`)
+        .run(convId).changes;
+
+      // 5. Die conversations-Row, an id UND twin_id gebunden (defensiv).
+      this.db
+        .prepare(`DELETE FROM conversations WHERE id = ? AND twin_id = ?`)
+        .run(convId, twinId);
+    });
+    tx();
+
+    console.log(
+      `[conversations] gelöscht: ${convId} (twin=${twinId}) — ` +
+        `${audits} Audit-Turns, ${summaries} Summaries, ${embeddings} Embeddings`,
+    );
+
+    return { deleted: true, audits, summaries, embeddings };
   }
 }
 

@@ -2645,6 +2645,59 @@ function registerConversationRoutes(
     },
   );
 
+  // DELETE /twins/:handle/conversations/:conversationId — Konv endgültig löschen
+  //
+  // #53 SS1: Hard-Delete einer Konversation inkl. Audit-Turns, Summaries und
+  // Embeddings (conversation + summary_segment, vec0/fts) — siehe
+  // ConversationsRepo.deleteConversation. Owner-gegatet, IDOR-Schutz wie die
+  // history-by-id-Route (GET …/audits): die Konv muss (owner, twin) gehören →
+  // fremde/unbekannte ID liefert 404, NIE ein Cross-Twin/Cross-Owner-Delete.
+  app.delete<{ Params: { handle: string; conversationId: string } }>(
+    "/twins/:handle/conversations/:conversationId",
+    async (request, reply) => {
+      const ctx = await requireOwner(request, reply, request.params.handle);
+      if (!ctx) return;
+      const { entry, user } = ctx;
+      const conversationId = request.params.conversationId;
+
+      // IDOR: Besitz prüfen, bevor irgendetwas gelöscht wird. findById wirft bei
+      // unbekannter ID → 404. Fremder Twin/Owner → ebenfalls 404 (kein Leak).
+      let conv: Conversation;
+      try {
+        conv = deps.conversationsRepo.findById(conversationId);
+      } catch {
+        return reply.status(404).send({ error: "Konversation nicht gefunden" });
+      }
+      if (conv.twinId !== entry.twinId || conv.ownerUserId !== user.userId) {
+        return reply.status(404).send({ error: "Konversation nicht gefunden" });
+      }
+
+      try {
+        const result = deps.conversationsRepo.deleteConversation(
+          entry.twinId,
+          conversationId,
+          {
+            embeddingsRepo: new EmbeddingsRepo(deps.db),
+            summariesRepo: deps.conversationSummariesRepo,
+          },
+        );
+        request.log.info(
+          { handle: entry.handle, conversationId, ...result },
+          "[conversations] endgültig gelöscht",
+        );
+        return result;
+      } catch (err) {
+        request.log.error(
+          { err, handle: entry.handle, conversationId },
+          "[conversations] Löschen fehlgeschlagen — Rollback, Konv unverändert",
+        );
+        return reply.status(500).send({
+          error: "Konversation konnte nicht gelöscht werden — keine Änderung",
+        });
+      }
+    },
+  );
+
   // GET /twins/:handle/conversations/:partnerHandle — chronologischer Thread
   //
   // Bridge-Verlauf zwischen uns und partner, angereichert mit lokalem Audit-
