@@ -3271,6 +3271,8 @@ Aktuell 35 `test-*.ts`-Smoke-Scripts in `apps/runtime/src/scripts/` (22 in `pack
 
 ### #161 Verdichtungs-Loch: unter-Schwelle beendete Konversationen fallen durch alle Netze (M, wichtig)
 
+**✅ ERLEDIGT (Tag 42, bbfb156 + Backfill):** Fix am Verarbeiter (flushPendingConversationTails: count===0-Skip → Whole-Embed-Zweig, Rezept aus resetConversation, Batch-Limit + MIT-Inhalt-Guard). Backfill via twin:memory-embed-all @markus: conv_5W09 + conv_wRUgwuz5 embedded, ended+pending 2→0, Embeddings 10→12. start()-Invariante bewusst end-only belassen; Verarbeiter ist die richtige Schicht. Wiederkehr im Fokus-Loop autonom geschlossen.
+
 **Befund (Tag 42):** Beendete Konversationen mit Inhalt aber unter der Summary-Schwelle (10-40 Turns) werden weder summarisiert (kein Segment) noch embedded (Whole-Conv-Embed läuft nicht) noch vom Tail-Flush erfasst (skippt bei summaries===0). Sie bleiben embedding_status=pending und sind im Memory-Retrieval unsichtbar. Beleg: conv_5W09i-eXW2d (@markus, 26 owner-direct-Turns, ended 8.6., 0 Summaries, 0 Embeddings, pending).
 
 **Wirkung:** Bei Nutzungsmustern mit vielen mittellangen Gesprächen (Markus: 95% Telegram, selten 50+ Turns) bleibt ein Großteil des gelebten Korpus unverdichtet/unsichtbar → reflection-owner / Dream / Muster-Anläufe wirken daten-blockiert, obwohl Substanz existiert (sie ist nur nicht erschlossen).
