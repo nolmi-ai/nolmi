@@ -2,6 +2,7 @@ import type { FastifyBaseLogger } from "fastify";
 import type Database from "better-sqlite3";
 import type { TwinServiceRegistry, TwinSummary } from "../twin-service-registry.js";
 import { REFLECTION_CAPABILITY, type ReflectionResult } from "./reflection-engine.js";
+import { REFLECTION_NUDGE_CAPABILITY } from "../focus/proactive-nudge-service.js";
 
 // ─── REFLECTION LOOP SERVICE (Selbst-Reflexion Stufe 2) ──────────────────────
 //
@@ -16,17 +17,33 @@ import { REFLECTION_CAPABILITY, type ReflectionResult } from "./reflection-engin
 // Pending anlegt; Approve (Mensch) bleibt der einzige Wirksam-Werden-Schritt.
 //
 // ── Bewusste Setzungen ──
-//   - NUR 'self'-Modus. Autonome Inferenzen ÜBER MARKUS ('owner') bleiben
-//     manuell (sensibelste Klasse) — eigene spätere Entscheidung.
+//   - 'self'-Modus: Pending (Leitplanke, unverändert).
+//   - Wow-Strang 2 SS3: ZUSÄTZLICH der owner-Reflexions-EINWURF — der Twin
+//     äußert eine Beobachtung über Markus an dessen Telegram. ÄUSSERN≠SPEICHERN:
+//     der Pfad ruft NIE approveSelfReflectionWrite (generate-only, kein Pending/
+//     Diary über die Reflexion selbst), nur emitReflectionNudge (Push status=sent
+//     bzw. Pending, je REFLECTION_NUDGE_AUTOSEND_ENABLED). Eigene Capability
+//     (reflection-nudge) + eigener Substanz-Cursor (lastOwnerNudgeTs) → self und
+//     owner stören sich NICHT.
 //   - OPT-IN: Default AUS. Ohne REFLECTION_LOOP_ENABLED=true tut start() nichts.
 //   - Dedup VOR jedem LLM-Call (0 Token-Kosten bei Skip):
-//       Guard A: max 1 offenes Pending pro Twin.
-//       Guard B: nur bei neuer Substanz seit der letzten Reflexion.
+//       self:  Guard A (max 1 offenes self-reflection-write-Pending) + Guard B
+//              (neue Substanz seit lastReflectionTs).
+//       owner: Guard A (max 1 offenes reflection-nudge-Pending) + Episode-
+//              Cooldown (nicht öfter als 1× pro N Stunden) + Guard B (neue
+//              Substanz seit lastOwnerNudgeTs) — alles vor dem teuren Opus-Call.
 //   - Multi-Tenant: iteriert über registry.list() (in-process entschlüsselte
 //     LLM-Clients; gelöschte Twins sind via removeTwin/#744 raus); per-Twin
 //     try/catch isoliert Fehler (kaputter Key killt nicht die anderen).
 
 const DEFAULT_INTERVAL_HOURS = 24;
+/**
+ * Wow-Strang 2 SS3: Episode-Cooldown für den owner-Reflexions-Einwurf — nicht
+ * öfter als 1× pro so vielen Stunden, gegen Wiederholung derselben Beobachtung
+ * (der Twin erzeugt konsistent ähnliche Inferenzen). 168 = 7 Tage. Env-Override
+ * REFLECTION_NUDGE_COOLDOWN_HOURS, Test-Override über deps.ownerNudgeCooldownHours.
+ */
+const DEFAULT_OWNER_NUDGE_COOLDOWN_HOURS = 168;
 
 /** Minimaler Bool-ENV-Parse (config.parseBoolEnv ist nicht exportiert). */
 function envEnabled(raw: string | undefined): boolean {
@@ -45,6 +62,35 @@ export interface ReflectionLoopDeps {
    * „Generator NICHT aufgerufen" (Skip) bzw. „aufgerufen" zu prüfen.
    */
   triggerReflection?: (handle: string) => Promise<ReflectionResult | null>;
+  /**
+   * Wow-Strang 2 SS3: Owner-Push-Sender (BotRegistry.sendToOwner), wie beim
+   * Fokus-Loop per-Call durchgereicht. Optional: ohne ihn läuft emitReflection-
+   * Nudge ohne Push → bleibt Pending (auch bei Gate-an). Boot-Reihenfolge wie
+   * der Fokus-Loop (botRegistry existiert bei der Loop-Konstruktion).
+   */
+  botRegistry?: {
+    sendToOwner(twinId: string, text: string): Promise<{ sent: boolean; reason?: string }>;
+  };
+  /** Test-Override für den owner-Episode-Cooldown (Stunden). */
+  ownerNudgeCooldownHours?: number;
+  /**
+   * Test-Hook: pro-Twin-owner-Einwurf-Trigger. Default ruft
+   * `reflectGenerateOnly('owner')` → bei worthNudging `emitReflectionNudge`.
+   * Tests injizieren einen Spy/Mock (Guards bleiben im Loop, vor dem Trigger).
+   */
+  triggerOwnerNudge?: (handle: string) => Promise<OwnerNudgeOutcome | null>;
+}
+
+/** Wow-Strang 2 SS3: Ergebnis des owner-Reflexions-Einwurf-Pfads (pro Twin). */
+export interface OwnerNudgeOutcome {
+  skipped: boolean;
+  /** 'open-pending' | 'cooldown' | 'no-new-substance' | 'twin-not-loaded' | 'no-substance' | 'not-worth' */
+  reason?: string;
+  /** true → emitReflectionNudge wurde gerufen (Push oder Pending). */
+  emitted?: boolean;
+  /** true → autonom an Telegram gepusht (status=sent); false → Pending. */
+  pushed?: boolean;
+  auditId?: string;
 }
 
 export interface ReflectForTwinOutcome {
@@ -60,6 +106,12 @@ export class ReflectionLoopService {
   private logger: FastifyBaseLogger | null = null;
   private readonly intervalMs: number;
   private readonly trigger: (handle: string) => Promise<ReflectionResult | null>;
+  /** SS3: owner-Einwurf-Trigger (reflectGenerateOnly → ggf. emitReflectionNudge). */
+  private readonly ownerNudgeTrigger: (
+    handle: string,
+  ) => Promise<OwnerNudgeOutcome | null>;
+  /** SS3: owner-Episode-Cooldown in Millisekunden. */
+  private readonly ownerNudgeCooldownMs: number;
 
   constructor(private deps: ReflectionLoopDeps) {
     const envHours = Number(process.env.REFLECTION_LOOP_INTERVAL_HOURS);
@@ -73,6 +125,44 @@ export class ReflectionLoopService {
         const twin = deps.registry.getByHandle(handle);
         if (!twin) return null; // Race: Twin zwischen list() und Trigger entfernt
         return twin.reflectionEngine.reflect("self");
+      });
+
+    // SS3: owner-Cooldown (Test-Override > env > Default 168h).
+    const envCooldown = Number(process.env.REFLECTION_NUDGE_COOLDOWN_HOURS);
+    const cooldownHours =
+      deps.ownerNudgeCooldownHours ??
+      (Number.isFinite(envCooldown) && envCooldown > 0
+        ? envCooldown
+        : DEFAULT_OWNER_NUDGE_COOLDOWN_HOURS);
+    this.ownerNudgeCooldownMs = cooldownHours * 60 * 60 * 1000;
+
+    // SS3: owner-Einwurf — generate-only über Markus, dann (bei worthNudging)
+    // emitReflectionNudge (das Gate REFLECTION_NUDGE_AUTOSEND_ENABLED entscheidet
+    // Push vs Pending selbst — KEINE Gate-Logik hier). Die Guards (open-pending /
+    // Cooldown / neue Substanz) sitzen VOR diesem Trigger in ownerNudgeForTwin.
+    this.ownerNudgeTrigger =
+      deps.triggerOwnerNudge ??
+      (async (handle): Promise<OwnerNudgeOutcome | null> => {
+        const twin = deps.registry.getByHandle(handle);
+        if (!twin) return null;
+        const draft = await twin.reflectionEngine.reflectGenerateOnly("owner");
+        if (!draft.created) return { skipped: true, reason: "no-substance" };
+        if (!draft.worthNudging) return { skipped: true, reason: "not-worth" };
+        const sender = this.deps.botRegistry
+          ? (twinId: string, text: string) =>
+              this.deps.botRegistry!.sendToOwner(twinId, text)
+          : undefined;
+        const res = await twin.proactiveNudgeService.emitReflectionNudge({
+          reflectionText: draft.reflectionText!,
+          worthNudgingReasoning: draft.worthNudgingReasoning,
+          sendToOwner: sender,
+        });
+        return {
+          skipped: false,
+          emitted: true,
+          pushed: res.pushed,
+          auditId: res.auditId,
+        };
       });
   }
 
@@ -133,7 +223,73 @@ export class ReflectionLoopService {
           "[reflection-loop] reflect failed for twin",
         );
       }
+      // SS3 (additiv): owner-Reflexions-Einwurf. Eigener try/catch — ein Fehler
+      // (z.B. Push-Problem) darf weder den self-Pfad noch die anderen Twins
+      // killen. Der self-Pfad oben bleibt unverändert.
+      try {
+        await this.ownerNudgeForTwin(twin);
+      } catch (err) {
+        this.logger?.error(
+          {
+            twinId: twin.twinId,
+            handle: twin.handle,
+            err: err instanceof Error ? err.message : String(err),
+          },
+          "[reflection-loop] owner-reflection-nudge failed for twin",
+        );
+      }
     }
+  }
+
+  /**
+   * Wow-Strang 2 SS3: owner-Reflexions-Einwurf pro Twin. Guards (alle VOR dem
+   * teuren Opus-Call) → Trigger (reflectGenerateOnly owner → ggf.
+   * emitReflectionNudge). Eigener Substanz-Cursor (lastOwnerNudgeTs, Capability
+   * reflection-nudge) → unabhängig vom self-Pfad. Rückgabe für Tests.
+   */
+  async ownerNudgeForTwin(twin: TwinSummary): Promise<OwnerNudgeOutcome> {
+    // Guard A — kein offenes reflection-nudge-Pending (kein Inbox-Stapeln in der
+    // Gate-AUS-Erprobungsphase: ein offener Einwurf reicht).
+    if (this.hasOpenReflectionNudge(twin.twinId)) {
+      this.logger?.info(
+        { handle: twin.handle },
+        "[reflection-loop] owner skip — offenes reflection-nudge-Pending",
+      );
+      return { skipped: true, reason: "open-pending" };
+    }
+
+    const lastTs = this.lastOwnerNudgeTs(twin.twinId);
+    if (lastTs) {
+      // Episode-Cooldown: nicht öfter als 1× pro N Stunden — schützt gegen das
+      // wiederholte Pushen derselben (konsistent erzeugten) Beobachtung.
+      if (Date.now() - Date.parse(lastTs) < this.ownerNudgeCooldownMs) {
+        this.logger?.info(
+          { handle: twin.handle, lastTs },
+          "[reflection-loop] owner skip — Episode-Cooldown",
+        );
+        return { skipped: true, reason: "cooldown" };
+      }
+      // Substanz-Guard: kein teurer Opus-Call ohne neues Korpus seit dem letzten
+      // owner-Einwurf. (hasNewSubstanceSince ist korpus-basiert, subject-neutral.)
+      if (!this.hasNewSubstanceSince(twin.twinId, lastTs)) {
+        this.logger?.info(
+          { handle: twin.handle, lastTs },
+          "[reflection-loop] owner skip — keine neue Substanz seit letztem Einwurf",
+        );
+        return { skipped: true, reason: "no-new-substance" };
+      }
+    }
+
+    // Guards passiert → teurer Pfad (reflectGenerateOnly owner + ggf. emit).
+    const outcome = await this.ownerNudgeTrigger(twin.handle);
+    if (!outcome) return { skipped: true, reason: "twin-not-loaded" };
+    if (outcome.emitted) {
+      this.logger?.info(
+        { handle: twin.handle, pushed: outcome.pushed, auditId: outcome.auditId },
+        "[reflection-loop] owner-Reflexions-Einwurf erzeugt",
+      );
+    }
+    return outcome;
   }
 
   /**
@@ -196,6 +352,36 @@ export class ReflectionLoopService {
            WHERE twin_id = ? AND capability = ?`,
       )
       .get(twinId, REFLECTION_CAPABILITY) as { m: string | null };
+    return row.m ?? null;
+  }
+
+  /**
+   * SS3: offenes reflection-nudge-Pending? EIGENE Capability (reflection-nudge),
+   * getrennt vom self-Pfad (self-reflection-write) → self + owner stören sich nicht.
+   */
+  private hasOpenReflectionNudge(twinId: string): boolean {
+    const row = this.deps.db
+      .prepare(
+        `SELECT COUNT(*) AS c FROM audit
+           WHERE twin_id = ? AND capability = ? AND status = 'pending'`,
+      )
+      .get(twinId, REFLECTION_NUDGE_CAPABILITY) as { c: number };
+    return row.c > 0;
+  }
+
+  /**
+   * SS3: Zeitstempel des letzten owner-Einwurfs (reflection-nudge, sent ODER
+   * pending) — der EIGENE Substanz-/Cooldown-Cursor des owner-Pfads. Der
+   * generate-only-Pfad erzeugt KEIN self-reflection-write-Audit, daher kann der
+   * self-Cursor (lastReflectionTs) hier nicht greifen — dieser ist getrennt.
+   */
+  private lastOwnerNudgeTs(twinId: string): string | null {
+    const row = this.deps.db
+      .prepare(
+        `SELECT MAX(timestamp) AS m FROM audit
+           WHERE twin_id = ? AND capability = ?`,
+      )
+      .get(twinId, REFLECTION_NUDGE_CAPABILITY) as { m: string | null };
     return row.m ?? null;
   }
 

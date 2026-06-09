@@ -211,6 +211,9 @@ async function main() {
   const reflectionLoopService = new ReflectionLoopService({
     db: repo.db,
     registry,
+    // Wow-Strang 2 SS3: owner-Reflexions-Einwurf-Push (Gate REFLECTION_NUDGE_
+    // AUTOSEND_ENABLED in emitReflectionNudge selbst, Default aus → Pending).
+    botRegistry: telegramBotRegistry,
   });
   reflectionLoopService.start(app.log);
 
