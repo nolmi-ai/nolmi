@@ -175,22 +175,10 @@ export class FocusEngine {
    * verlieren). inputType 'passage' wie im memory-embedding-service.
    */
   private async embedThemes(themes: string[]): Promise<Buffer | null> {
-    if (themes.length === 0) return null;
     const resolve = this.deps.getEmbeddingProvider;
-    if (!resolve) return null;
+    if (!resolve || themes.length === 0) return null;
     try {
-      const provider = resolve();
-      const vectors = await provider.embed(themes, { inputType: "passage" });
-      // Korrespondenz Theme↔Vektor ist load-bearing fürs Unpack in SS2
-      // (BLOB-Offset i = themes[i]). Stimmt die Anzahl nicht, lieber NULL als
-      // ein BLOB mit verschobener Zuordnung.
-      if (vectors.length !== themes.length) {
-        console.warn(
-          `[focus] theme-embed Anzahl-Mismatch twin=${this.deps.twinId}: ${vectors.length} Vektoren für ${themes.length} Themen — BLOB verworfen`,
-        );
-        return null;
-      }
-      return packThemeEmbeddings(vectors);
+      return await embedThemesToBlob(resolve(), themes);
     } catch (err) {
       const reason = err instanceof Error ? err.message : String(err);
       console.warn(
@@ -199,6 +187,36 @@ export class FocusEngine {
       return null;
     }
   }
+}
+
+/**
+ * Embeddet die Fokus-Themen in EINEM batched Provider-Call (≤5 Vektoren) und
+ * packt sie zu EINEM konkatenierten Float32-BLOB (Reihenfolge = `themes`).
+ *
+ * EINZIGE Pack-Stelle (load-bearing): embed-on-create (deriveFocus, SS1) UND
+ * das Backfill-CLI (SS3) gehen hier durch — so ist das BLOB-Format garantiert
+ * identisch, sonst läse SS2 inkonsistente BLOBs. Gibt null zurück bei leeren
+ * Themen oder Theme↔Vektor-Anzahl-Mismatch. Ein Provider-/Embed-Fehler
+ * PROPAGIERT (wirft) — der Caller entscheidet defensiv (deriveFocus: Snapshot
+ * ohne BLOB; Backfill: Snapshot überspringen). inputType 'passage' wie im
+ * memory-embedding-service.
+ */
+export async function embedThemesToBlob(
+  provider: EmbeddingProvider,
+  themes: string[],
+): Promise<Buffer | null> {
+  if (themes.length === 0) return null;
+  const vectors = await provider.embed(themes, { inputType: "passage" });
+  // Korrespondenz Theme↔Vektor ist load-bearing fürs Unpack in SS2
+  // (BLOB-Offset i = themes[i]). Stimmt die Anzahl nicht, lieber NULL als
+  // ein BLOB mit verschobener Zuordnung.
+  if (vectors.length !== themes.length) {
+    console.warn(
+      `[focus] theme-embed Anzahl-Mismatch: ${vectors.length} Vektoren für ${themes.length} Themen — BLOB verworfen`,
+    );
+    return null;
+  }
+  return packThemeEmbeddings(vectors);
 }
 
 /**

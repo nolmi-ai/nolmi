@@ -137,6 +137,40 @@ export class FocusSnapshotsRepo {
    * History erhalten. Idempotent: kein aktiver Snapshot → no-op (kein Fehler).
    * Gibt true zurück, wenn eine Row supersedet wurde.
    */
+  /**
+   * Theme-Similarity SS3 (Backfill): alle Snapshots — über ALLE Twins —, die
+   * noch KEIN Theme-Embedding haben (theme_embeddings_blob IS NULL), aber
+   * Themen tragen (themes_json gesetzt). Genau die Kandidaten, die das
+   * Backfill-CLI nachembeddet. Snapshots ohne Themen (themes_json NULL) haben
+   * nichts zu embedden → ausgeschlossen. Aktive UND superseded (die ganze
+   * Historie zählt für detectStuck/SS2).
+   */
+  listMissingThemeEmbeddings(): FocusSnapshot[] {
+    const rows = this.db
+      .prepare(
+        `SELECT * FROM focus_snapshots
+           WHERE theme_embeddings_blob IS NULL
+             AND themes_json IS NOT NULL
+           ORDER BY derived_at ASC`,
+      )
+      .all() as FocusSnapshotRow[];
+    return rows.map(rowToSnapshot);
+  }
+
+  /**
+   * Theme-Similarity SS3 (Backfill): setzt das vorberechnete Theme-Embedding-
+   * BLOB für genau einen Snapshot. Gibt true zurück, wenn eine Row getroffen
+   * wurde. Nur das BLOB-Feld wird angefasst — themes_json/focus_text bleiben.
+   */
+  setThemeEmbeddingsBlob(id: string, blob: Buffer): boolean {
+    const result = this.db
+      .prepare(
+        `UPDATE focus_snapshots SET theme_embeddings_blob = ? WHERE id = ?`,
+      )
+      .run(blob, id);
+    return result.changes > 0;
+  }
+
   supersede(twinId: string): boolean {
     const result = this.db
       .prepare(

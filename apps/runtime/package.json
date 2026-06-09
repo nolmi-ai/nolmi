@@ -29,6 +29,7 @@
     "twin:facts-extract": "tsx src/scripts/facts-extract.ts",
     "twin:reflect": "tsx src/scripts/reflect.ts",
     "twin:focus-tick": "tsx src/scripts/focus-loop-tick.ts",
+    "twin:backfill-theme-embeddings": "tsx src/scripts/backfill-theme-embeddings.ts",
     "twin:social-nudge": "tsx src/scripts/social-nudge.ts",
     "twin:diary-add": "tsx src/scripts/diary-add.ts",
     "twin:diary-list": "tsx src/scripts/diary-list.ts",
