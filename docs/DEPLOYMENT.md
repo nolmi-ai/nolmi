@@ -1884,6 +1884,18 @@ If you have custom path-filtering, ensure `/webhooks/telegram/*` is forwarded �
 
 ---
 
+## 🔴 LESSON (Tag 42): Compose-environment-Whitelist — neue ENV-Variablen müssen explizit durchgereicht werden
+
+**Symptom:** Eine ENV-Variable steht korrekt in der VPS-`.env` (`/docker/nolmi/.env`, cat -A sauber: `=true$`), aber der Container liest sie als NICHT GESETZT — auch nach `docker compose up -d --force-recreate`. Andere Flags aus derselben `.env` greifen.
+
+**Ursache:** Die VPS-lokale `docker-compose.yml` (`/docker/nolmi/docker-compose.yml`, NICHT im Repo) hat im runtime-Service einen `environment:`-Block, der nur EXPLIZIT gelistete Variablen durchreicht (Whitelist, Format `- VAR=${VAR:-}`). Variablen, die NICHT im Block stehen, erreichen den Container nie — egal was in der `.env` steht.
+
+**Fix:** Jede neue ENV-Variable in den `environment:`-Block der VPS-`docker-compose.yml` eintragen (`- NEUE_VAR=${NEUE_VAR:-}`), `docker compose config >/dev/null` (YAML-Check), dann `--force-recreate`. Verifizieren via `docker exec nolmi-runtime node -e "..."`.
+
+**Konsequenz/Checkliste:** Bei JEDEM neuen Loop/Gate/Flag: (1) Code liest process.env.X, (2) X in VPS-`.env` setzen, (3) 🔴 X in `docker-compose.yml` environment-Whitelist eintragen, (4) recreate + verifizieren. Schritt 3 wird leicht vergessen → Flag läuft still ins Leere. Tag 42 hat das mehrfach gekostet (REFLECTION_NUDGE_AUTOSEND, PROACTIVE_NUDGE_ANLASS3_AUTOSEND, OPEN_QUESTION_MAX_AGE_HOURS standen seit früh in der .env, griffen aber erst nach dem Whitelist-Eintrag).
+
+---
+
 ## Mitwirkende
 
 Diese Anleitung ist iterativ. Wenn dir beim Self-Hosting was fehlt
