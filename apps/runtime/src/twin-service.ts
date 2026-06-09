@@ -65,6 +65,7 @@ import type {
   MemoryRetrievalService,
   RetrievalResult,
 } from "./episodic/memory-retrieval-service.js";
+import type { EmbeddingProvider } from "./episodic/providers/index.js";
 import { buildEpisodicBlock } from "./episodic/prompt-builder.js";
 import { REVERSE_QUERY_TOP_K } from "./config.js";
 import type { TwinDiaryService } from "./episodic/twin-diary-service.js";
@@ -201,6 +202,13 @@ export interface TwinServiceDeps {
    * Failures sind eskaliert auf "leere Memories-Liste" — Send läuft normal.
    */
   memoryRetrievalService: MemoryRetrievalService;
+  /**
+   * Theme-Similarity SS1: Lazy-Resolve auf den Embedding-Provider (derselbe
+   * Singleton wie memoryEmbeddingService). Wird in den FocusEngine
+   * durchgereicht, damit deriveFocus die Themen bei der Snapshot-Erzeugung
+   * embedden kann. Production: `() => getEmbeddingProvider()`.
+   */
+  getEmbeddingProvider: () => EmbeddingProvider;
   /**
    * 3.4.D: Diary-Service-Wrapper (Insert + Auto-Embedding). Wird in 3.4.F
    * vom CLI twin:diary-add genutzt; der Pattern-Phase Self-Reflection für
@@ -475,6 +483,9 @@ export class TwinService {
         });
         return result.object as FocusOutput;
       },
+      // Theme-Similarity SS1: Provider lazy durchreichen (derselbe Singleton wie
+      // memoryEmbeddingService) — deriveFocus embeddet damit die Themen.
+      getEmbeddingProvider: deps.getEmbeddingProvider,
     });
     // Proaktiver Fokus-Nudge: teilt den focusRepo (liest die Snapshot-Historie)
     // und braucht — wie focusEngine — den LLM-Client für den Anstoß-Text.

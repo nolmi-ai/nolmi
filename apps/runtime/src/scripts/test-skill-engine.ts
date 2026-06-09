@@ -193,6 +193,14 @@ async function main() {
     facts: factsRepo,
     memoryEmbeddingService,
     memoryRetrievalService,
+    // Theme-Similarity SS1: FocusEngine-Dep. Der Skill-Test triggert kein
+    // deriveFocus; Stub-Provider reicht (wie memoryRetrievalService).
+    getEmbeddingProvider: () => ({
+      modelName: "skill-test-stub",
+      dimensions: 1024,
+      embed: async () => [new Float32Array(1024)],
+      isReady: async () => true,
+    }),
     twinDiaryService,
   });
 

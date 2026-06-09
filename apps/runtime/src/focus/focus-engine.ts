@@ -6,6 +6,8 @@ import type {
   ConversationSummary,
 } from "../conversations/summaries-repo.js";
 import type { FocusSnapshot, FocusSnapshotsRepo } from "./focus-snapshots-repo.js";
+import type { EmbeddingProvider } from "../episodic/providers/index.js";
+import { f32ToBuffer } from "../episodic/embeddings-repo.js";
 
 // ─── FOCUS ENGINE (Aufmerksamkeit/Fokus Stufe 1 — Schritt 1) ────────────────
 //
@@ -59,6 +61,15 @@ export interface FocusEngineDeps {
   twinName: string;
   ownerName: string;
   derive: FocusGenerator;
+  /**
+   * Theme-Similarity SS1: Lazy-Resolve auf den Embedding-Provider — wie
+   * memory-embedding-service (`() => getEmbeddingProvider()`), NICHT hart
+   * verdrahtet. Production: der lokale Provider (gratis, batched, normalisiert
+   * → Cosine = Dot-Product). deriveFocus embeddet damit die ≤5 Themen EINMAL
+   * bei der Snapshot-Erzeugung. Optional: fehlt er, wird kein Theme-BLOB
+   * gespeichert (Snapshot bleibt unberührt) — Tests ohne Provider laufen weiter.
+   */
+  getEmbeddingProvider?: () => EmbeddingProvider;
 }
 
 export interface FocusResult {
@@ -129,12 +140,24 @@ export class FocusEngine {
     // Gilt für beide Pfade (manuelles focus/refresh + Loop Schritt 4),
     // konsistent zum Reset-Verhalten (Schritt 3).
     const basisSummary = `aus ${summaries.length} Summaries + ${turnCount} Turns`;
+    const themes = out.themes ?? [];
+
+    // Theme-Similarity SS1: die ≤5 Themen EINMAL hier (wo eh ein LLM-Call lief)
+    // embedden + als BLOB mit dem Snapshot speichern. detectStuck (SS2) rechnet
+    // dann nur noch Cosine über die gespeicherten Vektoren — 0 Token zur
+    // Detektionszeit. DEFENSIV: schlägt das Embedden fehl (oder fehlt der
+    // Provider), wird der Snapshot TROTZDEM geschrieben (themes_json wie bisher,
+    // BLOB NULL). Der Snapshot darf nicht verloren gehen, nur weil das Embedding
+    // scheitert (NULL-BLOBs fängt der SS2-Fallback ab).
+    const themeEmbeddingsBlob = await this.embedThemes(themes);
+
     this.deps.focusRepo.supersede(this.deps.twinId);
     const snapshot = this.deps.focusRepo.insert({
       twinId: this.deps.twinId,
       focusText: text,
-      themes: out.themes ?? [],
+      themes,
       basisSummary,
+      themeEmbeddingsBlob,
     });
 
     console.log(
@@ -142,6 +165,58 @@ export class FocusEngine {
     );
     return { created: true, snapshot };
   }
+
+  /**
+   * Embeddet die Fokus-Themen in EINEM batched Provider-Call (≤5 Vektoren) und
+   * packt sie zu EINEM konkatenierten Float32-BLOB (Reihenfolge = `themes`).
+   * Gibt null zurück, wenn nichts zu embedden ist, kein Provider injiziert
+   * wurde oder der Embed-Call fehlschlägt — der Caller schreibt den Snapshot
+   * dann ohne BLOB (defensiv, load-bearing: Snapshot nie wegen Embedding-Fehler
+   * verlieren). inputType 'passage' wie im memory-embedding-service.
+   */
+  private async embedThemes(themes: string[]): Promise<Buffer | null> {
+    if (themes.length === 0) return null;
+    const resolve = this.deps.getEmbeddingProvider;
+    if (!resolve) return null;
+    try {
+      const provider = resolve();
+      const vectors = await provider.embed(themes, { inputType: "passage" });
+      // Korrespondenz Theme↔Vektor ist load-bearing fürs Unpack in SS2
+      // (BLOB-Offset i = themes[i]). Stimmt die Anzahl nicht, lieber NULL als
+      // ein BLOB mit verschobener Zuordnung.
+      if (vectors.length !== themes.length) {
+        console.warn(
+          `[focus] theme-embed Anzahl-Mismatch twin=${this.deps.twinId}: ${vectors.length} Vektoren für ${themes.length} Themen — BLOB verworfen`,
+        );
+        return null;
+      }
+      return packThemeEmbeddings(vectors);
+    } catch (err) {
+      const reason = err instanceof Error ? err.message : String(err);
+      console.warn(
+        `[focus] theme-embed failed twin=${this.deps.twinId}: ${reason} — Snapshot wird ohne BLOB geschrieben`,
+      );
+      return null;
+    }
+  }
+}
+
+/**
+ * Konkateniert die Theme-Vektoren zu EINEM Float32-BLOB. Voraussetzung für
+ * das Unpack in SS2: alle Vektoren gleiche Dimension → BLOB-Länge /
+ * (dim × 4 Bytes) = Anzahl Themen, Offset i = i-tes Thema. Verschiedene
+ * Dimensionen (dürfte beim selben Provider nie passieren) → null statt eines
+ * nicht entpackbaren BLOBs.
+ */
+function packThemeEmbeddings(vectors: Float32Array[]): Buffer | null {
+  const first = vectors[0];
+  if (!first) return null;
+  const dim = first.length;
+  if (dim === 0) return null;
+  if (vectors.some((v) => v.length !== dim)) return null;
+  const combined = new Float32Array(vectors.length * dim);
+  vectors.forEach((v, i) => combined.set(v, i * dim));
+  return f32ToBuffer(combined);
 }
 
 // ─── Prompt-Builder (modul-lokal, pure) ──────────────────────────────────────

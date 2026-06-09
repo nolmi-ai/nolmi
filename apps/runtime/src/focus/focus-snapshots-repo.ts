@@ -18,6 +18,14 @@ export interface FocusSnapshot {
   derivedAt: string;
   /** null = aktueller Snapshot; gesetzt = abgelöst/zurückgesetzt. */
   supersededAt: string | null;
+  /**
+   * Theme-Similarity SS1: die ≤5 Theme-Embeddings als EIN konkateniertes
+   * Float32-BLOB (themes.length × dim × 4 Bytes, Reihenfolge = `themes`).
+   * null = bei der Erzeugung kein Embedding (leere Themen / Provider-Fehler)
+   * oder Alt-Snapshot vor Backfill (SS3). detectStuck (SS2) entpackt das via
+   * bufferToF32 und rechnet paarweise Cosine; NULL → norm-Fallback.
+   */
+  themeEmbeddingsBlob: Buffer | null;
 }
 
 interface FocusSnapshotRow {
@@ -28,6 +36,7 @@ interface FocusSnapshotRow {
   basis_summary: string | null;
   derived_at: string;
   superseded_at: string | null;
+  theme_embeddings_blob: Buffer | null;
 }
 
 export interface CreateFocusSnapshotInput {
@@ -35,6 +44,12 @@ export interface CreateFocusSnapshotInput {
   focusText: string;
   themes?: string[];
   basisSummary?: string | null;
+  /**
+   * Theme-Similarity SS1: vorberechnetes Theme-Embedding-BLOB (siehe
+   * FocusSnapshot.themeEmbeddingsBlob). Optional — fehlt es / ist es null,
+   * wird die Spalte NULL gesetzt (Alt-Verhalten unverändert).
+   */
+  themeEmbeddingsBlob?: Buffer | null;
 }
 
 export class FocusSnapshotsRepo {
@@ -54,16 +69,17 @@ export class FocusSnapshotsRepo {
       basisSummary: input.basisSummary ?? null,
       derivedAt: new Date().toISOString(),
       supersededAt: null,
+      themeEmbeddingsBlob: input.themeEmbeddingsBlob ?? null,
     };
 
     this.db
       .prepare(
         `INSERT INTO focus_snapshots
            (id, twin_id, focus_text, themes_json, basis_summary,
-            derived_at, superseded_at)
+            derived_at, superseded_at, theme_embeddings_blob)
          VALUES
            (@id, @twin_id, @focus_text, @themes_json, @basis_summary,
-            @derived_at, NULL)`,
+            @derived_at, NULL, @theme_embeddings_blob)`,
       )
       .run({
         id: snapshot.id,
@@ -73,6 +89,7 @@ export class FocusSnapshotsRepo {
           snapshot.themes.length > 0 ? JSON.stringify(snapshot.themes) : null,
         basis_summary: snapshot.basisSummary,
         derived_at: snapshot.derivedAt,
+        theme_embeddings_blob: snapshot.themeEmbeddingsBlob,
       });
 
     return snapshot;
@@ -156,5 +173,8 @@ function rowToSnapshot(row: FocusSnapshotRow): FocusSnapshot {
     basisSummary: row.basis_summary,
     derivedAt: row.derived_at,
     supersededAt: row.superseded_at,
+    // SS1: BLOB roh durchreichen (Buffer | null). listRecent — von detectStuck
+    // (SS2) genutzt — liefert ihn so mit; das Entpacken/Cosine kommt in SS2.
+    themeEmbeddingsBlob: row.theme_embeddings_blob ?? null,
   };
 }

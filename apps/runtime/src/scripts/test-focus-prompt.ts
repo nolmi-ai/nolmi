@@ -30,6 +30,7 @@ function snapshot(focusText: string, themes: string[] = []): FocusSnapshot {
     basisSummary: "aus 1 Summaries + 2 Turns",
     derivedAt: "2026-06-04T10:00:00.000Z",
     supersededAt: null,
+    themeEmbeddingsBlob: null,
   };
 }
 

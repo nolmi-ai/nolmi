@@ -93,7 +93,7 @@ async function main(): Promise<void> {
       registry: stubRegistry([{ twinId: twinA, handle: "@a" }]),
       triggerFocus: async () => {
         triggerCalls += 1;
-        return { created: true, snapshot: { id: "new", focusText: "x", themes: [], twinId: twinA, basisSummary: null, derivedAt: "2026-06-10T00:00:00.000Z", supersededAt: null } };
+        return { created: true, snapshot: { id: "new", focusText: "x", themes: [], twinId: twinA, basisSummary: null, derivedAt: "2026-06-10T00:00:00.000Z", supersededAt: null, themeEmbeddingsBlob: null } };
       },
     });
 
@@ -158,7 +158,7 @@ async function main(): Promise<void> {
       triggerFocus: async (handle) => {
         seen.push(handle);
         if (handle === "@err") throw new Error("Twin-Fehler (gemockt)");
-        return { created: true, snapshot: { id: "s", focusText: "x", themes: [], twinId: "twin_ok", basisSummary: null, derivedAt: "2026-06-10T00:00:00.000Z", supersededAt: null } };
+        return { created: true, snapshot: { id: "s", focusText: "x", themes: [], twinId: "twin_ok", basisSummary: null, derivedAt: "2026-06-10T00:00:00.000Z", supersededAt: null, themeEmbeddingsBlob: null } };
       },
     });
     // beide Twins ohne Snapshot → lastFocusDerivedAt null → Guard passiert → Trigger

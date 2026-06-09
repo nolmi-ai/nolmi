@@ -555,6 +555,9 @@ export class TwinServiceRegistry {
       facts,
       memoryEmbeddingService,
       memoryRetrievalService,
+      // Theme-Similarity SS1: derselbe Provider-Singleton wie für Memory —
+      // FocusEngine embeddet damit die Fokus-Themen bei der Snapshot-Erzeugung.
+      getEmbeddingProvider: () => getEmbeddingProvider(),
       twinDiaryService,
       // #131 Phase 3.0: optional, Send-Path liest deps.oauthRefreshService NUR
       // bei authMode === 'oauth'. Existing api_key-Twins sind nicht betroffen.

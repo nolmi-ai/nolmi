@@ -168,6 +168,8 @@ function buildService(db: Database.Database, twinId: string, userId: string): Tw
     facts: new FactsRepo(db, new FactsHistoryRepo(db)),
     memoryEmbeddingService,
     memoryRetrievalService,
+    // Theme-Similarity SS1: FocusEngine-Dep (Reset-Test triggert kein deriveFocus).
+    getEmbeddingProvider: () => mockProvider() as never,
     twinDiaryService: new TwinDiaryService(twinDiaryRepo, memoryEmbeddingService),
   });
 }
