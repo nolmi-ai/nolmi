@@ -102,23 +102,31 @@ export class ConversationsRepo {
      );
 
     const tx = this.db.transaction(() => {
-      // Bestehende aktive für das Tripel auf 'ended' setzen. Mehrere wären
-      // ein Bug — der UPDATE setzt sie alle gleichzeitig.
-      this.db
+      // Bestehende aktive für das Tripel räumen, BEVOR die neue eingefügt wird
+      // (Invariante „genau eine aktive"). #160: leere ABGEHENDE Konv hart löschen
+      // statt eine „(kein Inhalt)"-Leiche zu hinterlassen; nicht-leere wie bisher
+      // auf 'ended' setzen. Mehrere aktive wären ein Bug — die Schleife räumt
+      // sie alle (delete-or-end). Reihenfolge: erst räumen, dann die neue Row.
+      const priorActives = this.db
         .prepare(
-          `UPDATE conversations
-             SET status = 'ended', ended_at = @now
-           WHERE owner_user_id = @owner_user_id
-             AND partner_handle = @partner_handle
-             AND twin_id = @twin_id
-             AND status = 'active'`,
+          `SELECT id FROM conversations
+             WHERE owner_user_id = ?
+               AND partner_handle = ?
+               AND twin_id = ?
+               AND status = 'active'`,
         )
-        .run({
-          now,
-          owner_user_id: input.ownerUserId,
-          partner_handle: input.partnerHandle,
-          twin_id: input.twinId,
-        });
+        .all(input.ownerUserId, input.partnerHandle, input.twinId) as {
+        id: string;
+      }[];
+      for (const { id } of priorActives) {
+        if (!this.deleteIfEmpty(id)) {
+          this.db
+            .prepare(
+              `UPDATE conversations SET status = 'ended', ended_at = ? WHERE id = ?`,
+            )
+            .run(now, id);
+        }
+      }
 
       this.db
         .prepare(
@@ -427,6 +435,42 @@ export class ConversationsRepo {
     );
 
     return { deleted: true, audits, summaries, embeddings };
+  }
+
+  /**
+   * #160: Löscht eine Konversations-Row NUR, wenn sie LEER ist (0 echte Audit-
+   * Turns + defensiv 0 summary_segments). Eine 0-Turn-Konv hat per Konstruktion
+   * keine Summaries/Embeddings → cascade-frei (nur die Row). Gedacht für den
+   * Übergang: die ABGEHENDE (gerade zu beendende/ersetzte) Konv aufräumen, statt
+   * eine leere „(kein Inhalt)"-Leiche zu hinterlassen.
+   *
+   * Rückgabe: true = gelöscht (war leer), false = nicht-leer (UNANGETASTET).
+   * Reine this.db-Queries, KEINE eigene Transaktion → komponiert sauber INNERHALB
+   * der start()-Transaktion (better-sqlite3 ist synchron → kein TOCTOU-Race
+   * zwischen Count und DELETE; zwischen den Statements läuft kein anderer JS-Tick).
+   *
+   * 🔴 Nur die conversations-Row (WHERE id=?), nie breiter. Caller stellt sicher,
+   * dass convId die ABGEHENDE ist — NIE die lebende aktive.
+   */
+  deleteIfEmpty(convId: string): boolean {
+    const turns = (
+      this.db
+        .prepare("SELECT count(*) AS c FROM audit WHERE conversation_id = ?")
+        .get(convId) as { c: number }
+    ).c;
+    if (turns > 0) return false;
+    const segs = (
+      this.db
+        .prepare(
+          "SELECT count(*) AS c FROM conversation_summaries WHERE conversation_id = ?",
+        )
+        .get(convId) as { c: number }
+    ).c;
+    if (segs > 0) return false;
+    const result = this.db
+      .prepare("DELETE FROM conversations WHERE id = ?")
+      .run(convId);
+    return result.changes > 0;
   }
 
   /**

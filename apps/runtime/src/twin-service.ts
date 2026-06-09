@@ -529,6 +529,16 @@ export class TwinService {
     conversationId: string,
     trigger: TailFlushTrigger = "manual",
   ): Promise<void> {
+    // #160: leere ABGEHENDE Konv → direkt hart löschen statt zu beenden (kein
+    // Embed/End nötig — 0 Turns ⇒ nichts zu verdichten). deleteIfEmpty liefert
+    // false bei ≥1 Turn → dann läuft der normale Verdichten+Enden-Pfad unverändert.
+    // Fängt Reset (Owner) UND G2/Fokus-Loop (beide rufen resetConversation).
+    if (this.deps.conversations.deleteIfEmpty(conversationId)) {
+      console.log(
+        `[reset] conv=${conversationId} war leer — gelöscht statt beendet (#160)`,
+      );
+      return;
+    }
     const summaries =
       this.deps.conversationSummaries.listByConversation(conversationId);
     if (summaries.length === 0) {
