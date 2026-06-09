@@ -47,6 +47,16 @@ export const ReflectionOutputSchema = z.object({
   reflection: z.string().max(2000),
   /** Worauf sich die Reflexion stützt (Evidenz aus den vorliegenden Daten). */
   evidence: z.string().max(1000),
+  /**
+   * Wow-Strang 2 (Reflexions-Einwurf): HÖHERE Schwelle als hasEnoughSubstance —
+   * ist die Beobachtung es wert, Markus PROAKTIV zu unterbrechen? Nur der
+   * owner-Prompt instruiert das Feld; im self-Modus bleibt es weg (optional) →
+   * Code behandelt fehlend als false. Unabhängig von hasEnoughSubstance: eine
+   * wahre, aber banale Beobachtung ist worthNudging=false.
+   */
+  worthNudging: z.boolean().optional(),
+  /** Kurze Begründung des worthNudging-Urteils (für Audit/Transparenz). */
+  worthNudgingReasoning: z.string().max(800).optional(),
 });
 export type ReflectionOutput = z.infer<typeof ReflectionOutputSchema>;
 
@@ -86,6 +96,25 @@ export interface ReflectionResult {
   skippedReason?: string;
 }
 
+/**
+ * Wow-Strang 2 SS1: Ergebnis des generate-only-Pfads (`reflectGenerateOnly`).
+ * Wie ReflectionResult, aber OHNE auditId (es wird KEIN Pending angelegt) und
+ * MIT dem worthNudging-Urteil. created=false → kein belastbarer Text (zu wenig
+ * Substanz / LLM-Fehler). KEIN Inbox-Artefakt, KEIN Diary-Write — reiner
+ * Generator für den Einwurf-Pfad (SS2).
+ */
+export interface ReflectionDraftResult {
+  created: boolean;
+  subject?: ReflectionSubject;
+  reflectionText?: string;
+  reasoning?: string;
+  /** Höhere Schwelle als hasEnoughSubstance: ist es einen proaktiven Einwurf wert? */
+  worthNudging?: boolean;
+  worthNudgingReasoning?: string;
+  /** Grund, wenn nichts erzeugt wurde. */
+  skippedReason?: string;
+}
+
 export class ReflectionEngine {
   constructor(private deps: ReflectionEngineDeps) {}
 
@@ -97,6 +126,78 @@ export class ReflectionEngine {
    * `{ created: false }` + Grund.
    */
   async reflect(subject: ReflectionSubject = "owner"): Promise<ReflectionResult> {
+    // Kern-Generierung (Kontext + LLM + Substanz-Check) im geteilten Helper;
+    // hier NUR der Pending-Write als einziger Effekt (unverändertes Verhalten).
+    const draft = await this.generateReflectionDraft(subject);
+    if (!draft.ok) {
+      return { created: false, subject, skippedReason: draft.skippedReason };
+    }
+
+    // EINZIGER Effekt: Pending-Audit. Kein Diary-Write. Output null bis Approve
+    // (3.2.F-Konvention, wie semantic-fact-write). Kein facts-Row. `subject`
+    // im Input = Unterscheidungs-Träger für Inbox + Approve.
+    const audit = await this.deps.auditService.start({
+      capability: REFLECTION_CAPABILITY,
+      mandateId: null,
+      initialStatus: "pending",
+      input: { subject, reflectionText: draft.reflectionText, reasoning: draft.reasoning },
+    });
+
+    console.log(`[reflection] pending reflection (${subject}) erzeugt für twin=${this.deps.twinId}, audit=${audit.id}`);
+    return {
+      created: true,
+      auditId: audit.id,
+      reflectionText: draft.reflectionText,
+      reasoning: draft.reasoning,
+      subject,
+    };
+  }
+
+  /**
+   * Wow-Strang 2 SS1 (Reflexions-Einwurf): generate-only. Erzeugt den
+   * Reflexions-Text + die Urteile (hasEnoughSubstance implizit via created,
+   * worthNudging) und gibt sie ZURÜCK — legt aber KEIN self-reflection-write-
+   * Pending an und schreibt NICHTS ins Diary. Reiner Generator für den Einwurf-
+   * Pfad (SS2): äußern ohne speichern, Vision-Grenze gewahrt (approveSelf-
+   * ReflectionWrite wird nie berührt). Teilt die Kern-Logik mit reflect() über
+   * generateReflectionDraft — kein Duplikat.
+   */
+  async reflectGenerateOnly(
+    subject: ReflectionSubject = "owner",
+  ): Promise<ReflectionDraftResult> {
+    const draft = await this.generateReflectionDraft(subject);
+    if (!draft.ok) {
+      return { created: false, subject, skippedReason: draft.skippedReason };
+    }
+    return {
+      created: true,
+      subject,
+      reflectionText: draft.reflectionText,
+      reasoning: draft.reasoning,
+      worthNudging: draft.worthNudging,
+      worthNudgingReasoning: draft.worthNudgingReasoning,
+    };
+  }
+
+  /**
+   * Geteilte Kern-Generierung für reflect() (mit Pending) und
+   * reflectGenerateOnly() (ohne Pending): Kontext laden → Prompt + LLM-Call →
+   * Substanz-Check → Parsing. KEIN Seiteneffekt (kein Audit, kein Diary). Gibt
+   * den geparsten Entwurf zurück oder einen Skip-Grund. So bleibt die Logik an
+   * EINER Stelle (kein Verhaltensdrift zwischen den beiden Pfaden).
+   */
+  private async generateReflectionDraft(
+    subject: ReflectionSubject,
+  ): Promise<
+    | { ok: false; skippedReason: string }
+    | {
+        ok: true;
+        reflectionText: string;
+        reasoning: string;
+        worthNudging: boolean;
+        worthNudgingReasoning: string;
+      }
+  > {
     // 1. Kontext laden — gleiche Quellen für beide Subjekte (Extraction-Pattern,
     //    twin-weit): approved Facts + jüngste Summaries + jüngste Turns. Bei
     //    'self' sind v.a. die eigenen `[twin]`-Antworten in den Turns die
@@ -144,33 +245,27 @@ export class ReflectionEngine {
     } catch (err) {
       const reason = err instanceof Error ? err.message : String(err);
       console.warn(`[reflection] generation failed for twin=${this.deps.twinId}: ${reason}`);
-      return { created: false, skippedReason: `LLM-Fehler: ${reason}` };
+      return { ok: false, skippedReason: `LLM-Fehler: ${reason}` };
     }
 
     const text = out.reflection?.trim() ?? "";
     if (!out.hasEnoughSubstance || text === "") {
       console.log(`[reflection] no reflection (${subject}) for twin=${this.deps.twinId} — zu wenig Substanz`);
       return {
-        created: false,
-        subject,
+        ok: false,
         skippedReason: "zu wenig Substanz — keine Reflexion erzeugt (leeres Ergebnis ist erlaubt)",
       };
     }
 
-    const reasoning = out.evidence?.trim() ?? "";
-
-    // 3. EINZIGER Effekt: Pending-Audit. Kein Diary-Write. Output null bis Approve
-    //    (3.2.F-Konvention, wie semantic-fact-write). Kein facts-Row. `subject`
-    //    im Input = Unterscheidungs-Träger für Inbox + Approve.
-    const audit = await this.deps.auditService.start({
-      capability: REFLECTION_CAPABILITY,
-      mandateId: null,
-      initialStatus: "pending",
-      input: { subject, reflectionText: text, reasoning },
-    });
-
-    console.log(`[reflection] pending reflection (${subject}) erzeugt für twin=${this.deps.twinId}, audit=${audit.id}`);
-    return { created: true, auditId: audit.id, reflectionText: text, reasoning, subject };
+    return {
+      ok: true,
+      reflectionText: text,
+      reasoning: out.evidence?.trim() ?? "",
+      // worthNudging nur im owner-Prompt instruiert; fehlt (self / Modell lässt
+      // es weg) → konservativ false ("im Zweifel kein Einwurf").
+      worthNudging: out.worthNudging ?? false,
+      worthNudgingReasoning: out.worthNudgingReasoning?.trim() ?? "",
+    };
   }
 }
 
@@ -206,10 +301,14 @@ VERMEIDE:
 - Pauschale Charakter-Urteile ohne Evidenz.
 - Mehrere Beobachtungen auf einmal.
 
+worthNudging: Wäre diese Beobachtung es wert, ${input.ownerName} PROAKTIV zu unterbrechen — also ihm ungefragt auf sein Telefon zu schreiben? Das ist eine HÖHERE Schwelle als 'wahr' oder 'genug Evidenz'. Setze worthNudging=true NUR, wenn die Beobachtung (a) nicht-offensichtlich ist (${input.ownerName} weiß es nicht ohnehin schon über sich), (b) ihm einen echten Mehrwert gibt (ein Aha, ein Perspektivwechsel, etwas zum Nachdenken) und (c) gerade jetzt relevant wirkt. Eine wahre, aber banale oder selbstverständliche Beobachtung: worthNudging=false. Im Zweifel false — lieber kein Einwurf als ein belangloser.
+
 Ausgabe-Felder:
 - hasEnoughSubstance: ist genug belastbare Evidenz da?
 - reflection: der Vorschlags-Text (leer, wenn hasEnoughSubstance=false).
-- evidence: worauf du dich konkret stützt (welche Facts/Verläufe).`;
+- evidence: worauf du dich konkret stützt (welche Facts/Verläufe).
+- worthNudging: ist die Beobachtung einen proaktiven Einwurf wert (siehe oben)?
+- worthNudgingReasoning: kurze Begründung deines worthNudging-Urteils.`;
 }
 
 function buildSelfSystemPrompt(input: { twinName: string; ownerName: string }): string {
