@@ -37,8 +37,15 @@ export const PROACTIVE_NUDGE_CAPABILITY = "proactive-nudge";
 export const ANLASS_FOKUS = "fokus";
 export const ANLASS_OFFENE_FRAGE = "offene_frage";
 
-/** „Festhängen" = dasselbe Thema in ≥ so vielen aufeinanderfolgenden Snapshots. */
-const STUCK_MIN_SNAPSHOTS = 3;
+/**
+ * „Festhängen" = dasselbe Thema in ≥ so vielen aufeinanderfolgenden Snapshots.
+ * Tag 42 (Wow-Strang 1): von 3 auf 2 gelockert, damit detectStuck im echten
+ * Betrieb überhaupt feuert (3 themen-gleiche Snapshots akkumuliert der
+ * 24h/Deploy-Reset-Loop fast nie → 0 proaktive Einwürfe). Die konsekutive
+ * Themen-Überlappungs-Logik bleibt unverändert; der LLM-shouldNudge-Filter
+ * (siehe nudge()) sichert inhaltlich gegen Spam ab.
+ */
+const STUCK_MIN_SNAPSHOTS = 2;
 /** Fenster: so viele jüngste Snapshots zieht die Detektion heran. */
 const STUCK_WINDOW = 8;
 

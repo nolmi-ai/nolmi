@@ -10,6 +10,12 @@ import { ConversationsRepo } from "../conversations/repo.js";
 import { McpServersRepo } from "../mcp/repo.js";
 import { OAuthTokensRepo } from "../oauth/oauth-tokens-repo.js";
 import { OAuthRefreshService } from "../oauth/refresh-service.js";
+import { TwinProfilesRepo } from "../twin-profiles-repo.js";
+import { TelegramConfigsRepo } from "../telegram/configs-repo.js";
+import { TelegramMessagesRepo } from "../telegram/messages-repo.js";
+import { PairingService } from "../telegram/pairing-service.js";
+import { TelegramMessageRouter } from "../telegram/message-router.js";
+import { TelegramBotRegistry } from "../telegram/bot-registry.js";
 import { TwinServiceRegistry } from "../twin-service-registry.js";
 import { FocusLoopService } from "../focus/focus-loop-service.js";
 
@@ -28,9 +34,12 @@ import { FocusLoopService } from "../focus/focus-loop-service.js";
 //
 // 🔴 Gates GELTEN (nicht umgangen): läuft mit der echten .env, trigger=
 //    'autonomous'. runTick() selbst ist NICHT durch FOCUS_LOOP_ENABLED gegated
-//    (das gated nur den Timer in start()) → der direkte Aufruf läuft. KEINE
-//    botRegistry übergeben → Autosend hat keinen Sender → Nudges bleiben
-//    Pendings (kein Telegram-Push), unabhängig von den Autosend-Flags.
+//    (das gated nur den Timer in start()) → der direkte Aufruf läuft.
+//
+// SS1 (Wow-Strang 1): botRegistry IST verdrahtet (wie der Live-Loop) → bei
+//    Autosend-an (PROACTIVE_NUDGE_AUTOSEND_ENABLED) + gepairtem Owner pusht ein
+//    Fokus-Nudge direkt an Telegram (Audit status='sent'). Ohne Flag/ohne
+//    Pairing → Fallback auf Pending. Sofort-Test ohne 24h-Warten.
 //
 // Aufruf:
 //   pnpm --filter @nolmi/runtime twin:focus-tick
@@ -188,6 +197,32 @@ async function main() {
     oauthRefreshService,
   });
 
+  // SS1 (Wow-Strang 1): dieselbe telegramBotRegistry wie der Live-Loop
+  // (index.ts) konstruieren, damit der manuelle Tick bei Autosend-an auch an
+  // Telegram PUSHEN kann (statt nur Pending). eagerLoadAllBots() populiert die
+  // Bot-Map (createTelegrafBot — KEIN launch(), KEIN Webhook-Server) → der
+  // ausgehende sendToOwner-Pfad (bot.telegram.sendMessage) funktioniert ohne
+  // laufenden Server. masterKey kommt zur Laufzeit aus der .env (Token-Decrypt).
+  const profilesRepo = new TwinProfilesRepo(db);
+  const telegramConfigsRepo = new TelegramConfigsRepo(db, masterKey);
+  const telegramMessagesRepo = new TelegramMessagesRepo(db);
+  const pairingService = new PairingService(telegramConfigsRepo);
+  const telegramMessageRouter = new TelegramMessageRouter(
+    telegramConfigsRepo,
+    telegramMessagesRepo,
+    conversationsRepo,
+    registry,
+  );
+  const telegramBotRegistry = new TelegramBotRegistry(
+    telegramConfigsRepo,
+    pairingService,
+    telegramMessageRouter,
+    profilesRepo,
+    config.telegramUsePolling,
+    config.runtimePublicUrl,
+  );
+  telegramBotRegistry.eagerLoadAllBots();
+
   const twins = registry.list();
   console.log(
     `[focus-tick] ${twins.length} Twin(s) geladen: ${
@@ -195,13 +230,15 @@ async function main() {
     }`,
   );
   console.log(
-    "[focus-tick] Tick mit echter .env (Gates gelten, trigger='autonomous', keine botRegistry → Nudges=Pending).\n",
+    "[focus-tick] Tick mit echter .env (Gates gelten, trigger='autonomous', " +
+      "botRegistry verdrahtet → bei Autosend-an Telegram-Push statt Pending).\n",
   );
 
   const before = measure(db);
 
-  // KEINE botRegistry → Nudges bleiben Pendings (kein Push).
-  const loop = new FocusLoopService({ db, registry });
+  // botRegistry verdrahtet (wie der Live-Loop) → emitNudge kann bei Autosend-an
+  // via sendToOwner pushen; ohne Flag/ohne Pairing bleibt es Pending (Fallback).
+  const loop = new FocusLoopService({ db, registry, botRegistry: telegramBotRegistry });
   let tickError: unknown = null;
   try {
     console.log("── Tick-Logs ─────────────────────────────────────────────");
@@ -218,9 +255,11 @@ async function main() {
   const after = measure(db);
   printDelta(before, after);
 
-  // Cleanup analog index.ts-Shutdown: Streams trennen (keine offen), MCP-
-  // Subprocesses disposen, dann Connection schließen.
+  // Cleanup analog index.ts-Shutdown: Streams trennen (keine offen), Telegram-
+  // Bots stoppen (kein launch() → no-op-nah, aber sauber), MCP-Subprocesses
+  // disposen, dann Connection schließen.
   await registry.shutdown();
+  telegramBotRegistry.shutdown();
   await registry.disposeAll();
   db.close();
 
