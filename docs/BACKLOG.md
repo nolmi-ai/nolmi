@@ -3269,6 +3269,16 @@ Aktuell 35 `test-*.ts`-Smoke-Scripts in `apps/runtime/src/scripts/` (22 in `pack
 
 - **#160 — Leere Fortsetzungs-/Reset-Konv aufräumen.** „Fortsetzen" (v2) und vermutlich auch „Neu starten" hinterlassen eine leere „(kein Inhalt)"-Konv, wenn keine Nachricht folgt. Sammeln sich im Verlauf an. Optionen: (a) leere Konv beim nächsten Reset/Fortsetzen automatisch hart löschen; (b) Fortsetzung erst materialisieren, wenn die erste Nachricht kommt (berührt start()/Invariante — sorgfältig). Kein Quick-Fix, eigenes kleines Stück mit Diagnose. Workaround heute: per #53-Löschfunktion manuell wegräumen.
 
+### #161 Verdichtungs-Loch: unter-Schwelle beendete Konversationen fallen durch alle Netze (M, wichtig)
+
+**Befund (Tag 42):** Beendete Konversationen mit Inhalt aber unter der Summary-Schwelle (10-40 Turns) werden weder summarisiert (kein Segment) noch embedded (Whole-Conv-Embed läuft nicht) noch vom Tail-Flush erfasst (skippt bei summaries===0). Sie bleiben embedding_status=pending und sind im Memory-Retrieval unsichtbar. Beleg: conv_5W09i-eXW2d (@markus, 26 owner-direct-Turns, ended 8.6., 0 Summaries, 0 Embeddings, pending).
+
+**Wirkung:** Bei Nutzungsmustern mit vielen mittellangen Gesprächen (Markus: 95% Telegram, selten 50+ Turns) bleibt ein Großteil des gelebten Korpus unverdichtet/unsichtbar → reflection-owner / Dream / Muster-Anläufe wirken daten-blockiert, obwohl Substanz existiert (sie ist nur nicht erschlossen).
+
+**Fix-Richtung (erst Diagnose):** (1) 🔴 Klären, warum der Whole-Conv-Embed bei 0-Segment-ended-Konv nicht läuft (Trigger-Bedingung? status-Übergang?) — die Tag-40-Strategie nahm an, dieser Pfad deckt 0-Segment-Konv ab; conv_5W09 widerlegt das. (2) Dann: entweder den Whole-Embed-Pfad reparieren ODER die Tail-Flush-Selektion erweitern (0-Segment-ended-Konv mit Inhalt auch verdichten, statt count===0 zu skippen) — Abwägung, welcher Pfad sauberer ist, im Fix-Schritt. (3) Backfill für bestehende pending-unter-Schwelle-Konv (conv_5W09 + alle gleicher Klasse). Backup vor jedem Schreibvorgang.
+
+**Nicht verwechseln mit:** L3 (Tag 40, Tail nach existierendem Segment — gelöst). Dies ist die 0-Segment-Klasse, die Tag 40 als „über Whole-Embed abgedeckt" annahm, was nicht stimmt.
+
 ### CLA/DCO vor den ersten externen Beiträgen (Vorbedingung für Dual-Licensing)
 
 **Status:** OFFEN (jetzt unkritisch, Alleinautor) | **Größe S–M** | **Gate:** vor „erste externe Beiträge annehmen"
