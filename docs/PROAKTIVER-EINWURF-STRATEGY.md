@@ -38,3 +38,14 @@ Dream-Einsichten (Strang 2, eigenes Stück); eigene Stimme (Strang 3); autonome 
 
 ## Verify-Gesamt (Prod)
 twin:focus-tick (mit botRegistry, ggf. zweimal für 2 Snapshots) → wenn der Twin ein stabiles Thema erkennt + der LLM zustimmt → autonomer Einwurf landet in @markus' Telegram (SS1) + im Direct-Chat-Stream (SS2), als Audit status=sent, ohne Approval. Notbremse (Flag aus) stoppt alles.
+
+## Stand Tag 42 — Infra komplett, Anlass-Frage offen
+
+SS1 (Telegram-Einwurf-Infra) + die Theme-Similarity-Kette (SS1-3, docs/THEME-SIMILARITY-STRATEGY.md) sind gebaut, deployt, Prod-verifiziert. detectStuck feuert jetzt semantisch. Der autonome Push-Pfad (Autosend, botRegistry, status=sent, Notbremse-Flag) ist fertig.
+
+🔴 Offene Kern-Erkenntnis: Der Anlass "stuck/Festhängen" passt nicht zu Markus (produktives Arbeiten ≠ Blockade → LLM declined zu Recht). SS2 (Chat-Einwurf) ist daher zurückgestellt — es gibt noch keinen feuernden Anlass, der den Chat-Einwurf sichtbar machen würde. Bevor SS2 oder ein neuer Anlass gebaut wird, muss die Anlass-Frage geklärt sein:
+- "Muster/Verbindung" via Theme-Embeddings → zu oberflächlich (nur offensichtliche Nachbarschaften).
+- Stufe 3 (verdichtete Episoden, STUFE-3-MUSTER-NUDGE-STRATEGY.md) → der richtige Muster-Anlass, aber datenblockiert (G2-Episoden-Tiefe).
+- Offen als nächste Linsen: Anlass 3 (offene Frage, detectOpenQuestion — erreichbarer, zustandsabhängig) schärfen? Oder Strang 2 (Dream-Einsichten) als eigener Wow, der die Theme-Infra nutzt?
+
+Die Infra wartet auf das richtige Signal — nicht auf mehr Code.
