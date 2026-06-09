@@ -31,12 +31,23 @@ import { bufferToF32 } from "../episodic/embeddings-repo.js";
 export const PROACTIVE_NUDGE_CAPABILITY = "proactive-nudge";
 
 /**
+ * Wow-Strang 2 (Reflexions-Einwurf): EIGENE Capability für den proaktiven
+ * Reflexions-Einwurf — getrennt von proactive-nudge (eigener Inbox-Filter,
+ * eigenes Autosend-Gate). Der Push-Kern (emitNudge) ist geteilt; nur die
+ * Capability + das Gate unterscheiden sich. Der Text kommt aus
+ * reflectGenerateOnly (SS1, generate-only — kein Pending/Diary).
+ */
+export const REFLECTION_NUDGE_CAPABILITY = "reflection-nudge";
+
+/**
  * anlass-Werte im Audit-Payload. Dedup („max 1 offenes Pending") + Episode-
  * Cooldown sind anlass-BEWUSST: ein offenes Anlass-1-Pending blockiert KEIN
  * Anlass-3-Pending und umgekehrt (sie teilen nur die Capability).
  */
 export const ANLASS_FOKUS = "fokus";
 export const ANLASS_OFFENE_FRAGE = "offene_frage";
+/** Wow-Strang 2: anlass-Wert im reflection-nudge-Audit-Payload. */
+export const ANLASS_REFLEXION = "reflexion";
 
 /**
  * „Festhängen" = dasselbe Thema in ≥ so vielen aufeinanderfolgenden Snapshots.
@@ -134,6 +145,21 @@ export type NudgeSender = (
 function envEnabled(raw: string | undefined): boolean {
   const v = raw?.trim().toLowerCase();
   return v === "true" || v === "1" || v === "yes";
+}
+
+/**
+ * Wow-Strang 2 SS2: dezente Telegram-Rahmung für den Reflexions-Einwurf — macht
+ * sichtbar, dass das ein PROAKTIVER Twin-Gedanke ist (nicht eine Antwort). Der
+ * reflectionText öffnet meist schon mit einer Beobachtungs-Floskel ("Mir fällt
+ * auf, dass …"); dann genügt ein `💭`-Marker, sonst doppelte sich die Einleitung
+ * ("aufgefallen" + "fällt auf"). Nur wenn KEINE solche Floskel da ist, kommt die
+ * volle Einleitung davor.
+ */
+function frameReflectionForTelegram(text: string): string {
+  const t = text.trim();
+  const opensWithObservation =
+    /^(mir fällt auf|mir ist (gerade )?aufgefallen|es fällt mir auf|es scheint)/i.test(t);
+  return opensWithObservation ? `💭 ${t}` : `💭 Mir ist gerade was aufgefallen:\n\n${t}`;
 }
 
 export interface ProactiveNudgeDeps {
@@ -482,8 +508,15 @@ export class ProactiveNudgeService {
     thema?: string;
     autosend: boolean;
     sendToOwner?: NudgeSender;
+    /**
+     * Wow-Strang 2: Capability des erzeugten Audits. Default
+     * PROACTIVE_NUDGE_CAPABILITY → der bestehende Fokus-/Offene-Frage-Pfad ist
+     * byte-identisch (kein Caller setzt es). reflection-nudge setzt es explizit.
+     */
+    capability?: string;
   }): Promise<ProactiveNudgeResult> {
     const { input, message, thema, autosend, sendToOwner } = args;
+    const capability = args.capability ?? PROACTIVE_NUDGE_CAPABILITY;
     const anlass = String((input as { anlass?: string }).anlass ?? "");
 
     // AUTOSEND (Flag AN + Sender da): Push versuchen.
@@ -501,7 +534,7 @@ export class ProactiveNudgeService {
         // Stille Audit-Spur: Status 'sent' (NICHT pending) → kein offenes To-do
         //   in der Inbox, aber nachvollziehbar was/wann gepusht wurde.
         const audit = await this.deps.auditService.start({
-          capability: PROACTIVE_NUDGE_CAPABILITY,
+          capability,
           mandateId: null,
           initialStatus: "sent",
           input,
@@ -520,7 +553,7 @@ export class ProactiveNudgeService {
     // PENDING — Flag AUS, oder Push-Fallback. Output null bis Approve
     //   (wie social-suggestion / self-reflection-write).
     const audit = await this.deps.auditService.start({
-      capability: PROACTIVE_NUDGE_CAPABILITY,
+      capability,
       mandateId: null,
       initialStatus: "pending",
       input,
@@ -529,6 +562,42 @@ export class ProactiveNudgeService {
       `[nudge] pending proaktiver Anstoß erzeugt für twin=${this.deps.twinId}, audit=${audit.id} (anlass="${anlass}")`,
     );
     return { created: true, pushed: false, auditId: audit.id, thema, message };
+  }
+
+  /**
+   * Wow-Strang 2 SS2 (Reflexions-Einwurf): pusht eine worthNudging-Reflexion
+   * (Text aus reflectGenerateOnly, SS1) als proaktiven Einwurf an Markus'
+   * Telegram. Nutzt den GETEILTEN emitNudge-Push-Kern (Autosend → sendToOwner →
+   * status=sent; Push-Fehler → Pending-Fallback), aber mit EIGENER Capability
+   * (reflection-nudge) + EIGENEM Gate (REFLECTION_NUDGE_AUTOSEND_ENABLED,
+   * Default AUS — sensibelste Klasse, erst Pending erproben).
+   *
+   * 🔴 VISION-GRENZE (äußern≠speichern): der Push ÄUSSERT die Beobachtung
+   * flüchtig (status=sent / Pending), ruft NIE approveSelfReflectionWrite →
+   * schreibt NICHTS ins Diary, legt KEINE Inferenz als Fact/Diary ab. Das
+   * Speichern bleibt ein separater, manueller Opt-in (STUFE-3 Z.13). Der
+   * generate-only-Pfad (SS1) hat schon kein self-reflection-write-Pending
+   * erzeugt; hier kommt nur der reflection-nudge-Audit dazu.
+   *
+   * SS3 (Loop) ruft das nach reflectGenerateOnly, wenn worthNudging=true.
+   */
+  async emitReflectionNudge(args: {
+    reflectionText: string;
+    worthNudgingReasoning?: string;
+    sendToOwner?: NudgeSender;
+  }): Promise<ProactiveNudgeResult> {
+    const autosend = envEnabled(process.env.REFLECTION_NUDGE_AUTOSEND_ENABLED);
+    return this.emitNudge({
+      input: {
+        anlass: ANLASS_REFLEXION,
+        reflectionText: args.reflectionText,
+        worthNudgingReasoning: args.worthNudgingReasoning ?? "",
+      },
+      message: frameReflectionForTelegram(args.reflectionText),
+      autosend,
+      sendToOwner: args.sendToOwner,
+      capability: REFLECTION_NUDGE_CAPABILITY,
+    });
   }
 
   /**
