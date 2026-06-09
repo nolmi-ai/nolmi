@@ -622,13 +622,52 @@ export class TwinService {
   async flushPendingConversationTails(
     trigger: TailFlushTrigger,
     limit: number,
-  ): Promise<{ flushed: number; candidates: number }> {
+  ): Promise<{ flushed: number; candidates: number; wholeEmbedded: number }> {
     const pending = this.deps.conversations.listPendingByTwin(this.deps.twinId);
     let flushed = 0;
     let candidates = 0;
+    let wholeEmbedded = 0;
     for (const conv of pending) {
-      if (flushed >= limit) break;
-      if (this.deps.conversationSummaries.count(conv.id) === 0) continue;
+      // #161: Batch-Limit gilt über BEIDE Verarbeitungs-Arten (Tail-Flush +
+      // Whole-Embed) — sonst Kosten-Spike beim ersten Lauf über den Bestand.
+      if (flushed + wholeEmbedded >= limit) break;
+
+      // #161: 0-Segment-ended-pending-Konv (durch die start()-Invariante beendet,
+      // nie embedded) fielen bisher hier raus (count===0 → continue) und blieben
+      // für immer pending — der einzige Whole-Embed-Verarbeiter (embedAll) ist
+      // manuell. Stattdessen: hier whole-embedden, mit DEMSELBEN Rezept wie
+      // resetConversation (aggregateConversationForEmbedding → embedConversation).
+      // embedConversation setzt embedding_status selbst (done/failed). Eigener
+      // Zweig + eigener Zähler; der Tail-Flush für Konv MIT Segment bleibt unten
+      // unverändert.
+      if (this.deps.conversationSummaries.count(conv.id) === 0) {
+        try {
+          // Audits DESC → ASC für die chronologische Aggregation (wie reset).
+          const auditsDesc = await this.deps.audit.repo.listByConversation(
+            conv.id,
+            10_000,
+          );
+          const content = aggregateConversationForEmbedding([...auditsDesc].reverse());
+          // „MIT Inhalt"-Guard: wirklich leere 0-Turn-Konv NICHT embedden (kein
+          // leerer Call) — exakt das resetConversation-Kriterium (content.length).
+          if (content.length === 0) continue;
+          await this.memoryEmbeddingService.embedConversation({
+            twinId: this.deps.twinId,
+            conversationId: conv.id,
+            content,
+          });
+          wholeEmbedded += 1;
+          console.log(
+            `[tail-flush-loop] conv=${conv.id} 0-Segment whole-embedded (#161)`,
+          );
+        } catch (err) {
+          console.error(
+            `[tail-flush-loop] conv=${conv.id} whole-embed fehlgeschlagen: ${err instanceof Error ? err.message : String(err)}`,
+          );
+        }
+        continue;
+      }
+
       candidates += 1;
       try {
         const res = await flushConversationTail(
@@ -650,7 +689,7 @@ export class TwinService {
         );
       }
     }
-    return { flushed, candidates };
+    return { flushed, candidates, wholeEmbedded };
   }
 
   /**
