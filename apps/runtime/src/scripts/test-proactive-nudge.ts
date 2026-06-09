@@ -147,14 +147,14 @@ async function main(): Promise<void> {
       "isStuck=false bei 3 verschiedenen Themen");
   }
 
-  // ── 4) Guard: <3 Snapshots → isStuck=false (heutiger Normalfall) ──
-  console.log("\n── 4) <3 Snapshots → still");
+  // ── 4) Guard: <STUCK_MIN_SNAPSHOTS (=2) Snapshots → isStuck=false ──
+  // (Tag 42: Schwelle 3→2 gelockert; ein einzelner Snapshot reicht nie.)
+  console.log("\n── 4) <2 Snapshots → still");
   {
     const db = new Database(":memory:"); db.exec(SCHEMA);
-    seed(db, "f1", ["Beziehungs-Modell"], "2026-06-02T10:00:00Z", "2026-06-03T10:00:00Z");
-    seed(db, "f2", ["Beziehungs-Modell"], "2026-06-03T10:00:00Z", null);
+    seed(db, "f1", ["Beziehungs-Modell"], "2026-06-03T10:00:00Z", null);
     assert(makeService(db, makeAudit(), okGen).detectStuck(T).isStuck === false,
-      "2 Snapshots → isStuck=false");
+      "1 Snapshot → isStuck=false");
     const empty = new Database(":memory:"); empty.exec(SCHEMA);
     assert(makeService(empty, makeAudit(), okGen).detectStuck(T).isStuck === false,
       "0 Snapshots (leerer Normalfall) → isStuck=false, kein Fehler");

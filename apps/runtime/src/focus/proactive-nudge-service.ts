@@ -6,6 +6,7 @@ import type { FactsRepo } from "../facts/repo.js";
 import type { ConversationSummariesRepo } from "../conversations/summaries-repo.js";
 import { OPEN_QUESTION_MAX_AGE_HOURS } from "../config.js";
 import type { FocusSnapshot, FocusSnapshotsRepo } from "./focus-snapshots-repo.js";
+import { bufferToF32 } from "../episodic/embeddings-repo.js";
 
 // ─── PROACTIVE NUDGE SERVICE (Proaktiver Fokus-Anstoß Stufe 1) ──────────────
 //
@@ -48,6 +49,16 @@ export const ANLASS_OFFENE_FRAGE = "offene_frage";
 const STUCK_MIN_SNAPSHOTS = 2;
 /** Fenster: so viele jüngste Snapshots zieht die Detektion heran. */
 const STUCK_WINDOW = 8;
+
+/**
+ * Theme-Similarity SS2: zwei Themen gelten als „dasselbe", wenn die Cosine-
+ * Ähnlichkeit ihrer Theme-Embeddings ≥ dieser Schwelle ist. 0.85 als Start —
+ * empirisch an echten Theme-Paaren kalibrierbar (8.6.↔9.6.-Snapshots sollten
+ * matchen). Die Theme-Vektoren sind normalisiert (Cosine = Dot-Product).
+ * Ersetzt den exakten String-Vergleich (norm()), der wegen leicht variierender
+ * deriveFocus-Formulierungen fast nie matchte → detectStuck feuerte nie.
+ */
+const THEME_SIM_THRESHOLD = 0.85;
 
 /** Chat-Capabilities, die einen Owner↔Twin-Turn tragen (conversation_id gesetzt). */
 const CHAT_CAPABILITIES = new Set(["owner-direct", "respond_to_chat"]);
@@ -145,10 +156,83 @@ export interface ProactiveNudgeDeps {
   openQuestionMaxAgeHours?: number;
 }
 
-/** Themen-Normalisierung: trimmt + lowercased, damit leicht variierende
- *  Formulierungen aus deriveFocus trotzdem als „dasselbe Thema" matchen. */
+/** Themen-Normalisierung: trimmt + lowercased. SS2 nur noch als FALLBACK, wenn
+ *  einem Snapshot das Theme-Embedding-BLOB fehlt (Alt-Daten / Backfill fehlt). */
 function norm(theme: string): string {
   return theme.trim().toLowerCase();
+}
+
+/** Ein Theme mit (optionalem) Embedding-Vektor. vec=null → kein BLOB vorhanden
+ *  (Alt-Snapshot ohne Backfill) → String-Fallback in der Match-Logik. */
+interface ThemeEntry {
+  theme: string;
+  vec: Float32Array | null;
+}
+
+/**
+ * SS2: zerlegt das konkatenierte theme_embeddings_blob eines Snapshots in seine
+ * Theme-Vektoren. Format (SS1/SS3, load-bearing): themes.length × dim Float32
+ * hintereinander, Reihenfolge = `themes`. dim = flat.length / themes.length.
+ *
+ * Gibt [] zurück, wenn kein BLOB da ist ODER die Länge nicht sauber aufgeht
+ * (Theme↔Vektor-Korrespondenz nicht herstellbar) — beides löst in `themeEntries`
+ * den String-Fallback aus, statt zu crashen.
+ */
+function themeVectors(snap: FocusSnapshot): Array<{ theme: string; vec: Float32Array }> {
+  const blob = snap.themeEmbeddingsBlob;
+  const n = snap.themes.length;
+  if (!blob || n === 0) return [];
+  const flat = bufferToF32(blob);
+  if (flat.length === 0 || flat.length % n !== 0) return []; // Format passt nicht → Fallback
+  const dim = flat.length / n;
+  const out: Array<{ theme: string; vec: Float32Array }> = [];
+  for (let i = 0; i < n; i++) {
+    out.push({ theme: snap.themes[i]!, vec: flat.subarray(i * dim, (i + 1) * dim) });
+  }
+  return out;
+}
+
+/**
+ * SS2: die Themen eines Snapshots als ThemeEntry[] — mit Vektor, wenn das BLOB
+ * sauber entpackt (alle Themen abgedeckt), sonst alle mit vec=null (String-
+ * Fallback). So trägt jeder Eintrag IMMER das Original-Theme (für Casing +
+ * Fallback), und vec ist genau dann gesetzt, wenn semantisch gematcht werden kann.
+ */
+function themeEntries(snap: FocusSnapshot): ThemeEntry[] {
+  const vecs = themeVectors(snap);
+  if (vecs.length === snap.themes.length && vecs.length > 0) {
+    return vecs.map((v) => ({ theme: v.theme, vec: v.vec }));
+  }
+  return snap.themes.map((theme) => ({ theme, vec: null }));
+}
+
+/** Cosine-Ähnlichkeit zweier normalisierter Float32Arrays = Dot-Product
+ *  (Σ a[i]·b[i]). Defensiv: ungleiche Länge → 0 (kein Match). */
+function cosineSim(a: Float32Array, b: Float32Array): number {
+  if (a.length !== b.length) return 0;
+  let dot = 0;
+  for (let i = 0; i < a.length; i++) dot += a[i]! * b[i]!;
+  return dot;
+}
+
+/**
+ * SS2: bleibt ein common-Eintrag (Theme des jüngsten Snapshots) im älteren
+ * Snapshot bestehen? SEMANTISCH (Cosine ≥ Schwelle gegen IRGENDEINEN älteren
+ * Theme-Vektor), wenn BEIDE Seiten Vektoren haben; sonst FALLBACK auf den
+ * exakten norm()-String-Vergleich (ein Snapshot ohne BLOB). Defensiv, bricht
+ * nie die Kette wegen fehlender Vektoren ab.
+ */
+function entrySurvivesIn(
+  entry: ThemeEntry,
+  older: ThemeEntry[],
+  olderNormSet: Set<string>,
+): boolean {
+  const olderVecs = older.filter((e) => e.vec).map((e) => e.vec!);
+  if (entry.vec && olderVecs.length > 0) {
+    return olderVecs.some((ov) => cosineSim(entry.vec!, ov) >= THEME_SIM_THRESHOLD);
+  }
+  // Fallback: mindestens eine Seite hat kein BLOB → exakter String-Vergleich.
+  return olderNormSet.has(norm(entry.theme));
 }
 
 export class ProactiveNudgeService {
@@ -160,15 +244,19 @@ export class ProactiveNudgeService {
   }
 
   /**
-   * Festhäng-Detektion (rein lesend, 0 Token). „Festhängen" = die ≥3 JÜNGSTEN
-   * Snapshots (aktiv + superseded) teilen ein gemeinsames Thema — robust über
-   * Themen-ÜBERLAPPUNG (Schnittmenge), nicht exakte String-Gleichheit, weil
-   * deriveFocus leicht variierende Formulierungen liefert.
+   * Festhäng-Detektion (rein lesend, 0 Token — die Theme-Embeddings sind bei der
+   * Snapshot-Erzeugung/Backfill VORberechnet, hier wird nur Cosine gerechnet).
+   * „Festhängen" = die ≥2 JÜNGSTEN Snapshots (aktiv + superseded) teilen ein
+   * gemeinsames Thema — SS2: SEMANTISCH (Theme-Embeddings Cosine ≥ Schwelle),
+   * nicht mehr exakte String-Gleichheit. deriveFocus formuliert dasselbe Thema
+   * über die Zeit variabel („Agent Readiness Framework" vs „Agent Readiness als
+   * HARWAY-Produktfeld") → der alte exakte Match griff fast nie.
    *
-   * Algorithmus: von der jüngsten Row aus die Kette verlängern, solange die
-   * laufende Themen-Schnittmenge nicht-leer bleibt. Kette ≥ STUCK_MIN_SNAPSHOTS
-   * und Schnittmenge nicht-leer → festgehangen. <3 Snapshots / leere Themen
-   * (kein gemeinsames Thema) → nicht festgehangen (konservativ).
+   * Algorithmus (unverändert in der STRUKTUR, nur das Matching ist semantisch):
+   * von der jüngsten Row aus die Kette verlängern, solange die laufende
+   * „gemeinsame Themen"-Menge nicht-leer bleibt. Kette ≥ STUCK_MIN_SNAPSHOTS →
+   * festgehangen. Fehlt einem Snapshot das BLOB (Alt-Daten), fällt das Paar auf
+   * den norm()-String-Vergleich zurück (defensiv, kein Crash, kein Kettenabbruch).
    */
   detectStuck(twinId: string): StuckDetection {
     const recent = this.deps.focusRepo.listRecent(twinId, STUCK_WINDOW);
@@ -177,27 +265,28 @@ export class ProactiveNudgeService {
       return { isStuck: false };
     }
 
-    // Schnittmenge mit dem jüngsten Snapshot seeden, dann die Kette verlängern.
-    let common = new Set(newest.themes.map(norm));
+    // Gemeinsame Themen mit dem jüngsten Snapshot seeden (Original-Casing + vec),
+    // dann die Kette verlängern, solange mind. ein Thema semantisch überlebt.
+    let common = themeEntries(newest);
     let chain = 1;
     for (let i = 1; i < recent.length; i++) {
       const snap = recent[i];
       if (!snap) break;
-      const next = new Set(snap.themes.map(norm));
-      const inter = [...common].filter((t) => next.has(t));
-      if (inter.length === 0) break; // Thema gewechselt → Kette endet hier
-      common = new Set(inter);
+      const older = themeEntries(snap);
+      const olderNormSet = new Set(snap.themes.map(norm));
+      const kept = common.filter((e) => entrySurvivesIn(e, older, olderNormSet));
+      if (kept.length === 0) break; // Thema gewechselt → Kette endet hier
+      common = kept;
       chain++;
     }
 
-    if (chain < STUCK_MIN_SNAPSHOTS || common.size === 0) {
+    if (chain < STUCK_MIN_SNAPSHOTS || common.length === 0) {
       return { isStuck: false };
     }
 
-    // Thema in Original-Schreibweise: das erste Thema des jüngsten Snapshots,
-    // das in der stabilen Schnittmenge liegt.
-    const thema =
-      newest.themes.find((t) => common.has(norm(t))) ?? [...common][0];
+    // Thema in Original-Schreibweise: die common-Einträge tragen die Themen des
+    // jüngsten Snapshots (common wurde daraus geseedet + nur gefiltert).
+    const thema = common[0]!.theme;
 
     return {
       isStuck: true,
