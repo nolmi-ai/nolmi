@@ -63,10 +63,18 @@ export interface FactsCoherenceEngineDeps {
   generate: CoherenceGenerator;
 }
 
+/** SS3: ein durch einen Wiederholungs-Guard übersprungener Vorschlag. */
+export interface SkippedProposal {
+  factKey: string;
+  reason: "open-pending" | "rejected-before";
+}
+
 export interface CoherenceReviewResult {
   proposals: FactCoherenceProposal[];
   /** Die angelegten fact-coherence-fix-Pending-Audit-IDs (Pending-Pfad). */
   pendingAuditIds: string[];
+  /** SS3: Vorschläge, die ein Guard übersprungen hat (Dedup / Rejected-Gedächtnis). */
+  skipped: SkippedProposal[];
 }
 
 export class FactsCoherenceEngine {
@@ -111,14 +119,54 @@ export class FactsCoherenceEngine {
   }
 
   /**
-   * Pending-Pfad: review() + pro Vorschlag ein fact-coherence-fix-Pending (über
-   * die SS1-Mechanik). RUFT NIE approveFactCoherenceFix — der Approve ist Markus'
-   * Sache. Der bestehende Fact bleibt bis zum Approve unberührt.
+   * Pending-Pfad: pro Vorschlag ein fact-coherence-fix-Pending (über die SS1-
+   * Mechanik) — hinter den SS3-Wiederholungs-Guards. RUFT NIE approveFact-
+   * CoherenceFix; der Approve ist Markus' Sache, der Fact bleibt bis dahin
+   * unberührt.
+   *
+   * `precomputed`: optional die schon aus review() geholten Vorschläge —
+   * vermeidet einen zweiten (teuren) LLM-Call, wenn der Caller (CLI) sie erst
+   * ausgibt und DANN pending macht. Ohne Arg wird intern review() gerufen.
+   *
+   * Guards (vor dem Anlegen je factKey, JS-Filter wie loadNudges):
+   *  - Dedup: existiert schon ein OFFENES (pending) fact-coherence-fix für den
+   *    factKey → überspringen (kein Doppel-Pending).
+   *  - Rejected-Gedächtnis (v1: schon-mal, kein Zeitfenster): wurde ein Fix für
+   *    den factKey jemals REJECTED → nicht erneut vorschlagen (nicht nerven).
    */
-  async reviewAndCreatePending(): Promise<CoherenceReviewResult> {
-    const proposals = await this.review();
+  async reviewAndCreatePending(
+    precomputed?: FactCoherenceProposal[],
+  ): Promise<CoherenceReviewResult> {
+    const proposals = precomputed ?? (await this.review());
+
+    // Einmal die bisherigen fact-coherence-fix-Audits laden, dann je factKey
+    // filtern (AuditListOpts kann nicht nach capability/status filtern). Limit
+    // großzügig fürs Rejected-Gedächtnis (Rückblick); bei sehr großem Audit-
+    // Volumen wäre eine indizierte capability-Query der Upgrade-Pfad.
+    const prior = (
+      await this.deps.auditService.repo.list({
+        twinId: this.deps.twinId,
+        limit: 1000,
+      })
+    ).filter((a) => a.capability === FACT_COHERENCE_FIX_CAPABILITY);
+    const openPendingKeys = new Set(
+      prior.filter((a) => a.status === "pending").map(factKeyOf),
+    );
+    const rejectedKeys = new Set(
+      prior.filter((a) => a.status === "rejected").map(factKeyOf),
+    );
+
     const pendingAuditIds: string[] = [];
+    const skipped: SkippedProposal[] = [];
     for (const p of proposals) {
+      if (openPendingKeys.has(p.factKey)) {
+        skipped.push({ factKey: p.factKey, reason: "open-pending" });
+        continue;
+      }
+      if (rejectedKeys.has(p.factKey)) {
+        skipped.push({ factKey: p.factKey, reason: "rejected-before" });
+        continue;
+      }
       const audit = await this.deps.auditService.start({
         capability: FACT_COHERENCE_FIX_CAPABILITY,
         mandateId: null,
@@ -133,14 +181,21 @@ export class FactsCoherenceEngine {
         },
       });
       pendingAuditIds.push(audit.id);
+      // Innerhalb DESSELBEN Laufs nicht zweimal denselben Key anlegen.
+      openPendingKeys.add(p.factKey);
     }
-    if (pendingAuditIds.length > 0) {
+    if (pendingAuditIds.length > 0 || skipped.length > 0) {
       console.log(
-        `[coherence] ${pendingAuditIds.length} fact-coherence-fix-Pending(s) erzeugt für twin=${this.deps.twinId}`,
+        `[coherence] twin=${this.deps.twinId}: ${pendingAuditIds.length} Pending(s), ${skipped.length} übersprungen (Guards)`,
       );
     }
-    return { proposals, pendingAuditIds };
+    return { proposals, pendingAuditIds, skipped };
   }
+}
+
+/** factKey aus dem Proposal-Input eines fact-coherence-fix-Audits. */
+function factKeyOf(audit: { input: unknown }): string {
+  return String((audit.input as { factKey?: string }).factKey ?? "");
 }
 
 /** Vorschlag plausibel? Key existiert (approved) + update hat newValue. */

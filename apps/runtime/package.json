@@ -30,6 +30,7 @@
     "twin:reflect": "tsx src/scripts/reflect.ts",
     "twin:focus-tick": "tsx src/scripts/focus-loop-tick.ts",
     "twin:reflect-nudge": "tsx src/scripts/reflect-nudge.ts",
+    "twin:facts-review": "tsx src/scripts/facts-review.ts",
     "twin:backfill-theme-embeddings": "tsx src/scripts/backfill-theme-embeddings.ts",
     "twin:social-nudge": "tsx src/scripts/social-nudge.ts",
     "twin:diary-add": "tsx src/scripts/diary-add.ts",
