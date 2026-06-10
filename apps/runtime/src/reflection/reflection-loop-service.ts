@@ -242,7 +242,7 @@ export class ReflectionLoopService {
       });
     }, this.intervalMs);
     logger.info(
-      `[reflection-loop] started, interval ${this.intervalMs}ms (self-mode, opt-in)`,
+      `[reflection-loop] started, interval ${this.intervalMs}ms (self + owner + coherence, opt-in)`,
     );
   }
 
