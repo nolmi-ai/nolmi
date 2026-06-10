@@ -3,6 +3,8 @@ import type Database from "better-sqlite3";
 import type { TwinServiceRegistry, TwinSummary } from "../twin-service-registry.js";
 import { REFLECTION_CAPABILITY, type ReflectionResult } from "./reflection-engine.js";
 import { REFLECTION_NUDGE_CAPABILITY } from "../focus/proactive-nudge-service.js";
+import { FACT_COHERENCE_FIX_CAPABILITY } from "../facts/repo.js";
+import type { CoherenceReviewResult } from "../facts/coherence-engine.js";
 
 // ─── REFLECTION LOOP SERVICE (Selbst-Reflexion Stufe 2) ──────────────────────
 //
@@ -44,6 +46,12 @@ const DEFAULT_INTERVAL_HOURS = 24;
  * REFLECTION_NUDGE_COOLDOWN_HOURS, Test-Override über deps.ownerNudgeCooldownHours.
  */
 const DEFAULT_OWNER_NUDGE_COOLDOWN_HOURS = 168;
+/**
+ * #94 neu (Loop-Wiring): Cooldown des Kohärenz-Reviews — seltener als self (24h),
+ * gleich wie owner (168 = 7 Tage), env REFLECTION_COHERENCE_COOLDOWN_HOURS. Der
+ * Review hängt an Fact-Änderungen (selten), darum eine seltene Kadenz.
+ */
+const DEFAULT_COHERENCE_REVIEW_COOLDOWN_HOURS = 168;
 
 /** Minimaler Bool-ENV-Parse (config.parseBoolEnv ist nicht exportiert). */
 function envEnabled(raw: string | undefined): boolean {
@@ -79,6 +87,23 @@ export interface ReflectionLoopDeps {
    * Tests injizieren einen Spy/Mock (Guards bleiben im Loop, vor dem Trigger).
    */
   triggerOwnerNudge?: (handle: string) => Promise<OwnerNudgeOutcome | null>;
+  /** #94 neu: Test-Override für den Kohärenz-Review-Cooldown (Stunden). */
+  coherenceReviewCooldownHours?: number;
+  /**
+   * #94 neu: Test-Hook: pro-Twin-Kohärenz-Review-Trigger. Default ruft
+   * `factsCoherenceEngine.reviewAndCreatePending()`. Tests injizieren einen
+   * Spy/Mock (die Kadenz-Guards bleiben im Loop, vor dem Trigger).
+   */
+  triggerCoherenceReview?: (handle: string) => Promise<CoherenceReviewResult | null>;
+}
+
+/** #94 neu: Ergebnis des Kohärenz-Review-Pfads (pro Twin, im Loop). */
+export interface CoherenceReviewOutcome {
+  skipped: boolean;
+  /** 'open-pending' | 'no-fact-change' | 'cooldown' | 'twin-not-loaded' */
+  reason?: string;
+  /** Anzahl angelegter fact-coherence-fix-Pendings (wenn gelaufen). */
+  pendingCount?: number;
 }
 
 /** Wow-Strang 2 SS3: Ergebnis des owner-Reflexions-Einwurf-Pfads (pro Twin). */
@@ -112,6 +137,12 @@ export class ReflectionLoopService {
   ) => Promise<OwnerNudgeOutcome | null>;
   /** SS3: owner-Episode-Cooldown in Millisekunden. */
   private readonly ownerNudgeCooldownMs: number;
+  /** #94 neu: Kohärenz-Review-Trigger (reviewAndCreatePending). */
+  private readonly coherenceReviewTrigger: (
+    handle: string,
+  ) => Promise<CoherenceReviewResult | null>;
+  /** #94 neu: Kohärenz-Review-Cooldown in Millisekunden. */
+  private readonly coherenceReviewCooldownMs: number;
 
   constructor(private deps: ReflectionLoopDeps) {
     const envHours = Number(process.env.REFLECTION_LOOP_INTERVAL_HOURS);
@@ -163,6 +194,26 @@ export class ReflectionLoopService {
           pushed: res.pushed,
           auditId: res.auditId,
         };
+      });
+
+    // #94 neu: Kohärenz-Review-Cooldown (Test-Override > env > Default 168h).
+    const envCohCooldown = Number(process.env.REFLECTION_COHERENCE_COOLDOWN_HOURS);
+    const cohCooldownHours =
+      deps.coherenceReviewCooldownHours ??
+      (Number.isFinite(envCohCooldown) && envCohCooldown > 0
+        ? envCohCooldown
+        : DEFAULT_COHERENCE_REVIEW_COOLDOWN_HOURS);
+    this.coherenceReviewCooldownMs = cohCooldownHours * 60 * 60 * 1000;
+
+    // #94 neu: Kohärenz-Review — die SS3-Engine (mit Dedup/Rejected-Guards INNEN)
+    // frisch reviewen + Pendings anlegen. Die Kadenz-Guards (open-pending /
+    // Fact-Substanz / Cooldown) sitzen VOR diesem Trigger in coherenceReviewForTwin.
+    this.coherenceReviewTrigger =
+      deps.triggerCoherenceReview ??
+      (async (handle): Promise<CoherenceReviewResult | null> => {
+        const twin = deps.registry.getByHandle(handle);
+        if (!twin) return null;
+        return twin.factsCoherenceEngine.reviewAndCreatePending();
       });
   }
 
@@ -238,7 +289,83 @@ export class ReflectionLoopService {
           "[reflection-loop] owner-reflection-nudge failed for twin",
         );
       }
+      // #94 neu (additiv): Kohärenz-Review. Eigener try/catch — ein Fehler darf
+      // weder self/owner noch die anderen Twins killen. Self/owner oben unberührt.
+      try {
+        await this.coherenceReviewForTwin(twin);
+      } catch (err) {
+        this.logger?.error(
+          {
+            twinId: twin.twinId,
+            handle: twin.handle,
+            err: err instanceof Error ? err.message : String(err),
+          },
+          "[reflection-loop] coherence-review failed for twin",
+        );
+      }
     }
+  }
+
+  /**
+   * #94 neu (Loop-Wiring): Facts-Kohärenz-Review pro Twin. Kadenz-Guards (alle
+   * VOR dem teuren Opus-Call) → Trigger (reviewAndCreatePending; dessen
+   * Inhalts-Guards Dedup/Rejected liegen IN der Engine). Eigener Cursor
+   * (lastCoherenceReviewTs, Capability fact-coherence-fix) → unabhängig von
+   * self/owner. KEIN Push, nur Inbox-Pendings → kein Scharf-Gate nötig.
+   *
+   * Guard-Reihenfolge: (c) Effizienz-Guard (offenes Pending → Inbox erst leeren,
+   * spart den Call) — immer; dann, NUR wenn schon mal reviewt (lastTs gesetzt):
+   * (a) Fact-Substanz (kein Review ohne Fact-Änderung seit dem letzten — der
+   * genuin neue Check, NICHT hasNewSubstanceSince), (b) Cooldown. cursor=null
+   * (Erstlauf) → (a)/(b) übersprungen, der erste Review darf feuern.
+   */
+  async coherenceReviewForTwin(twin: TwinSummary): Promise<CoherenceReviewOutcome> {
+    // (c) Effizienz-Guard: schon ein offenes fact-coherence-fix-Pending → ganzen
+    // Review skippen (Inbox erst abarbeiten). Grob auf Loop-Ebene; die Engine
+    // hat zusätzlich einen feinen per-factKey-Dedup.
+    if (this.hasOpenCoherenceFix(twin.twinId)) {
+      this.logger?.info(
+        { handle: twin.handle },
+        "[reflection-loop] coherence skip — offenes fact-coherence-fix-Pending",
+      );
+      return { skipped: true, reason: "open-pending" };
+    }
+
+    const lastTs = this.lastCoherenceReviewTs(twin.twinId);
+    if (lastTs) {
+      // (a) Fact-Substanz: nur reviewen, wenn sich Facts seit dem letzten Review
+      // GEÄNDERT haben (Insert/upsert-Wert/Approve bumpen facts.updated_at). Kein
+      // Fact-Drift → nichts Neues zu prüfen, kein teurer Call.
+      const factChangeTs = this.lastFactChangeTs(twin.twinId);
+      if (!factChangeTs || Date.parse(factChangeTs) <= Date.parse(lastTs)) {
+        this.logger?.info(
+          { handle: twin.handle, lastTs },
+          "[reflection-loop] coherence skip — keine Fact-Änderung seit letztem Review",
+        );
+        return { skipped: true, reason: "no-fact-change" };
+      }
+      // (b) Cooldown: nicht öfter als 1× pro N Stunden.
+      if (Date.now() - Date.parse(lastTs) < this.coherenceReviewCooldownMs) {
+        this.logger?.info(
+          { handle: twin.handle, lastTs },
+          "[reflection-loop] coherence skip — Cooldown",
+        );
+        return { skipped: true, reason: "cooldown" };
+      }
+    }
+
+    // Guards passiert (oder Erstlauf) → der teure Pfad.
+    const result = await this.coherenceReviewTrigger(twin.handle);
+    if (!result) return { skipped: true, reason: "twin-not-loaded" };
+    this.logger?.info(
+      {
+        handle: twin.handle,
+        pendings: result.pendingAuditIds.length,
+        skipped: result.skipped.length,
+      },
+      "[reflection-loop] Kohärenz-Review gelaufen",
+    );
+    return { skipped: false, pendingCount: result.pendingAuditIds.length };
   }
 
   /**
@@ -382,6 +509,47 @@ export class ReflectionLoopService {
            WHERE twin_id = ? AND capability = ?`,
       )
       .get(twinId, REFLECTION_NUDGE_CAPABILITY) as { m: string | null };
+    return row.m ?? null;
+  }
+
+  /** #94 neu: offenes fact-coherence-fix-Pending? (grober Loop-Effizienz-Guard). */
+  private hasOpenCoherenceFix(twinId: string): boolean {
+    const row = this.deps.db
+      .prepare(
+        `SELECT COUNT(*) AS c FROM audit
+           WHERE twin_id = ? AND capability = ? AND status = 'pending'`,
+      )
+      .get(twinId, FACT_COHERENCE_FIX_CAPABILITY) as { c: number };
+    return row.c > 0;
+  }
+
+  /**
+   * #94 neu: Zeitstempel des letzten Kohärenz-Review-Vorschlags (fact-coherence-
+   * fix, jeder Status) — der EIGENE Cursor des Review-Pfads (getrennt von self/
+   * owner). null = noch nie ein Vorschlag → Erstlauf erlaubt.
+   */
+  private lastCoherenceReviewTs(twinId: string): string | null {
+    const row = this.deps.db
+      .prepare(
+        `SELECT MAX(timestamp) AS m FROM audit
+           WHERE twin_id = ? AND capability = ?`,
+      )
+      .get(twinId, FACT_COHERENCE_FIX_CAPABILITY) as { m: string | null };
+    return row.m ?? null;
+  }
+
+  /**
+   * #94 neu: der genuin neue Substanz-Check — wann wurde zuletzt ein Fact
+   * geändert (Insert/upsert-Wert/Approve bumpen updated_at; Delete entfernt die
+   * Row, aber ein Delete erzeugt keinen Widerspruch → korrekt verfehlt). Direkt
+   * auf der facts-Tabelle (twin_id indiziert), wie hasNewSubstanceSince. NICHT
+   * hasNewSubstanceSince wiederverwenden (das misst Gesprächs-Korpus + nur
+   * created_at, verfehlt Wert-Änderungen). null = (theoretisch) keine Facts.
+   */
+  private lastFactChangeTs(twinId: string): string | null {
+    const row = this.deps.db
+      .prepare(`SELECT MAX(updated_at) AS m FROM facts WHERE twin_id = ?`)
+      .get(twinId) as { m: string | null };
     return row.m ?? null;
   }
 
