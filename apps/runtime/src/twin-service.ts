@@ -59,6 +59,11 @@ import type { McpClientFactory } from "./mcp/client-factory.js";
 import type { FactsRepo } from "./facts/repo.js";
 import { FACT_COHERENCE_FIX_CAPABILITY } from "./facts/repo.js";
 import {
+  FactsCoherenceEngine,
+  FactCoherenceOutputSchema,
+  type FactCoherenceOutput,
+} from "./facts/coherence-engine.js";
+import {
   aggregateConversationForEmbedding,
   type MemoryEmbeddingService,
 } from "./episodic/memory-embedding-service.js";
@@ -311,6 +316,12 @@ export class TwinService {
    * erst ins Diary (`approveSelfReflectionWrite`). NIE autonom wirksam.
    */
   public readonly reflectionEngine: ReflectionEngine;
+  /**
+   * Facts-Kohärenz-Review (#94 neu, SS2). Liest approved Facts, findet
+   * Widersprüche/Veraltetes, schlägt fact-coherence-fix-Pendings vor. Der
+   * Auslöser kommt per CLI (SS3) über die Registry — wie reflectionEngine.
+   */
+  public readonly factsCoherenceEngine: FactsCoherenceEngine;
 
   /**
    * Soziale Proaktivität Stufe 1: datengetriebener Beziehungs-Vorschlag (KEIN
@@ -450,6 +461,26 @@ export class TwinService {
           prompt,
         });
         return result.object as ReflectionOutput;
+      },
+    });
+    // Facts-Kohärenz-Review (#94 neu, SS2): eigener Generator im facts-Domain
+    // (NICHT reflection-engine — anderer Concern). Strukturierter Output via
+    // Zod, Twin-eigener Provider/Model — analog reflection/extraction.
+    this.factsCoherenceEngine = new FactsCoherenceEngine({
+      facts: deps.facts,
+      conversationSummaries: deps.conversationSummaries,
+      auditService: deps.audit,
+      twinId: deps.twinId,
+      twinName: deps.persona.name,
+      ownerName: deps.persona.name,
+      generate: async ({ system, prompt }) => {
+        const result = await generateObject({
+          model: deps.model,
+          schema: FactCoherenceOutputSchema,
+          system,
+          prompt,
+        });
+        return result.object as FactCoherenceOutput;
       },
     });
     this.memoryEmbeddingService = deps.memoryEmbeddingService;
