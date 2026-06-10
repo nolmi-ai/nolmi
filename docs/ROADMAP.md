@@ -122,7 +122,7 @@ Twins werden überall erreichbar. Mit Vision-Updates: **Beziehungs-Modell** (Ver
 
 - **4.1 — Telegram-Adapter (Owner-Mode)** — Stufe 1 (Owner-Only-Bridge) **✅ vorgezogen + Production-live als #130** (Tag 23–26, `docs/130-TELEGRAM-STRATEGY.md`). **Vollausbau offen:** Stufe 2/3 (Multi-User, External-Sender-Approval) bleibt Phase 4.1.
 - **4.2 — WhatsApp-Adapter (Owner-Mode)** — offen (~2–3 Wochen inkl. KYC).
-- **4.3 — Public-Mode + Beziehungs-Modell** — Mandate-Layer für eingehende Channel-Messages + Vertrautheits-Level pro Gegenüber (Vision Block 1.3). Offen.
+- **4.3 — Public-Mode + Beziehungs-Modell** — Mandate-Layer für eingehende Channel-Messages + Vertrautheits-Level pro Gegenüber (Vision Block 1.3). Beziehungs-Modell: Schritte 1–3 deployt (Tag 43 verifiziert), Schritt 4 daten-vertagt, Schritt 5 Deploy-Stand offen. Public-Mode-Mandate-Layer offen.
 - **4.4 — Föderation (mehrere Bridges)** — Matrix-Modell, Twin auf Bridge-A ↔ Bridge-B; Cross-Twin-Embedding-Search. Offen (1–2 Monate).
 - **4.5 — Google A2A-Adapter** — Ökosystem-Anbindung als Adapter-Schicht über der eigenen Bridge. Offen.
 

@@ -1,6 +1,6 @@
 # Phase 4.3 — Beziehungs-Modell (graded Vertrautheits-Level)
 
-**Strategie gelockt:** Tag 38 (5. Juni 2026). **Quelle:** ROADMAP Phase 4.3 + TWIN-VISION Block 1.3 („Substanz konstant, Verpackung passt sich an") + Architektur-Thema #2 („Beziehungs-Modell pro A2A-Partner — Erweiterung des Trust-Layers"). **Status:** Funktional vollständig (Schritte 1–3 + 5 gebaut + lokal verifiziert, Schritt 4 daten-vertagt), NICHT deployt — Stand Tag 38.
+**Strategie gelockt:** Tag 38 (5. Juni 2026). **Quelle:** ROADMAP Phase 4.3 + TWIN-VISION Block 1.3 („Substanz konstant, Verpackung passt sich an") + Architektur-Thema #2 („Beziehungs-Modell pro A2A-Partner — Erweiterung des Trust-Layers"). **Status:** Schritte 1–3 + 5 lokal verifiziert; Schritt 1 (Migration 029) Prod-verifiziert deployt (Tag 43, familiarity_level auf Prod-twin.db); Code-Schritte 2/3/Route mit-deployt. Schritt 4 daten-vertagt (A2A-Daten zu dünn, @florian 1 Konversation). Schritt 5 (Autonomie-Abstufung) gebaut+lokal verifiziert, Deploy-Stand auf Prod NICHT separat verifiziert — bei Bedarf prüfen.
 
 ## Kontext / Ausgangslage
 
