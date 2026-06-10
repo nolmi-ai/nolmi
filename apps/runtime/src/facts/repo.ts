@@ -18,6 +18,15 @@ import type { FactsHistoryRepo, FactsHistoryRow } from "./facts-history-repo.js"
 
 export type { FactConfidence, FactSource };
 
+/**
+ * Facts-Kohärenz-Review (#94 neu, SS1): Capability des „apply-on-approve"-
+ * Pending-Audits. ANDERS als 'semantic-fact-write' (pre-write Fact-Row +
+ * Approve flippt nur confidence): hier bleibt der bestehende Fact bis zum
+ * Approve UNBERÜHRT, und ERST der Approve führt die Aktion aus (upsert mit
+ * newValue / delete). capability ist ein freier String → keine Migration.
+ */
+export const FACT_COHERENCE_FIX_CAPABILITY = "fact-coherence-fix";
+
 export interface Fact {
   id: string;
   twinId: string;

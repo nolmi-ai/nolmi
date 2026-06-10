@@ -57,6 +57,7 @@ import {
 import type { McpServersRepo } from "./mcp/repo.js";
 import type { McpClientFactory } from "./mcp/client-factory.js";
 import type { FactsRepo } from "./facts/repo.js";
+import { FACT_COHERENCE_FIX_CAPABILITY } from "./facts/repo.js";
 import {
   aggregateConversationForEmbedding,
   type MemoryEmbeddingService,
@@ -1538,6 +1539,8 @@ export class TwinService {
         return this.approveMcpToolUse(entry, persona);
       case "semantic-fact-write":
         return this.approveSemanticFactWrite(entry);
+      case FACT_COHERENCE_FIX_CAPABILITY:
+        return this.approveFactCoherenceFix(entry);
       case REFLECTION_CAPABILITY:
         return this.approveSelfReflectionWrite(entry);
       case SOCIAL_SUGGESTION_CAPABILITY:
@@ -1586,6 +1589,15 @@ export class TwinService {
           "rejected",
         );
       }
+      return;
+    }
+
+    // Facts-Kohärenz-Review SS1: Reject = verwerfen. Der Audit ist bereits
+    // 'rejected' (audit.reject oben). Der bestehende Fact bleibt UNBERÜHRT —
+    // KEIN Write, KEIN Delete (anders als semantic-fact-write gibt es keine
+    // pre-write-Row, die zurückzudrehen wäre). Das rejected-Audit dient SS3
+    // als Rejected-Gedächtnis-Marker (denselben Fix nicht erneut vorschlagen).
+    if (entry.capability === FACT_COHERENCE_FIX_CAPABILITY) {
       return;
     }
 
@@ -1904,6 +1916,90 @@ export class TwinService {
     return {
       auditId: entry.id,
     };
+  }
+
+  /**
+   * Facts-Kohärenz-Review SS1: Approve eines `fact-coherence-fix`-Pending —
+   * die „apply-on-approve"-Mechanik. ANDERS als semantic-fact-write (das nur
+   * eine vor-geschriebene Row auf 'approved' flippt): hier wurde der bestehende
+   * Fact bis JETZT NICHT angefasst, und ERST dieser Approve führt die im Proposal
+   * vorgeschlagene Aktion aus:
+   *   - 'update' → facts.upsert(newValue, source='twin', confidence='approved')
+   *     (überschreibt den Wert; facts.delete/upsert erfassen den Drift in der
+   *     facts_history als value_change).
+   *   - 'delete' → facts.delete (Fact weg; facts_history erfasst den delete).
+   * Bei Reject (rejectPending) bleibt der Fact unberührt.
+   *
+   * 🔴 Robustheit (B4): Ein Proposal kann zwischen Erzeugung und Approve veralten
+   * (Markus hat den Key inzwischen anders geändert/gelöscht). Verhalten:
+   *   - 'update' auf einen NICHT mehr existierenden Key → wird NICHT neu angelegt
+   *     (eine bewusste Löschung soll nicht aus einem stale Proposal wiederaufleben);
+   *     der Approve completed mit applied=false + Hinweis.
+   *   - 'delete' auf einen schon abwesenden Key → No-op (facts.delete liefert
+   *     false); das Ziel (Fact abwesend) ist ohnehin erreicht.
+   * In keinem Fall ein Crash — definierter Ausgang, Audit wird completed.
+   */
+  private async approveFactCoherenceFix(
+    entry: AuditEntry,
+  ): Promise<ApproveResult> {
+    const input = entry.input as {
+      factKey?: string;
+      proposedAction?: "update" | "delete";
+      newValue?: string;
+      reasoning?: string;
+    };
+    const factKey = input.factKey;
+    const action = input.proposedAction;
+    if (!factKey || (action !== "update" && action !== "delete")) {
+      throw new Error(
+        `Audit ${entry.id} hat kein gültiges fact-coherence-fix-Proposal (factKey/proposedAction) — nicht approvable`,
+      );
+    }
+
+    let applied = false;
+    let note: string | null = null;
+
+    if (action === "update") {
+      const newValue = input.newValue?.trim();
+      if (!newValue) {
+        throw new Error(
+          `Audit ${entry.id}: proposedAction='update' ohne newValue — nicht approvable`,
+        );
+      }
+      // Nur ändern, wenn der Key noch existiert — kein Re-Create aus stale Proposal.
+      const existing = this.deps.facts.get(this.deps.twinId, factKey);
+      if (!existing) {
+        note = "fact-not-found — Key zwischenzeitlich entfernt, kein Re-Create aus stale Proposal";
+        console.warn(`[fact-coherence] approve update '${factKey}' für twin=${this.deps.twinId}: ${note}`);
+      } else {
+        this.deps.facts.upsert({
+          twinId: this.deps.twinId,
+          factKey,
+          factValue: newValue,
+          source: "twin",
+          confidence: "approved",
+        });
+        applied = true;
+      }
+    } else {
+      // delete: No-op auf nicht-existentem Key (returnt false) — Ziel erreicht.
+      const removed = this.deps.facts.delete(this.deps.twinId, factKey);
+      applied = removed;
+      if (!removed) {
+        note = "already-gone — Fact existierte beim Approve nicht mehr (No-op)";
+        console.warn(`[fact-coherence] approve delete '${factKey}' für twin=${this.deps.twinId}: ${note}`);
+      }
+    }
+
+    await this.deps.audit.complete(entry.id, {
+      factKey,
+      proposedAction: action,
+      newValue: input.newValue ?? null,
+      reasoning: input.reasoning ?? null,
+      applied,
+      note,
+    });
+    return { auditId: entry.id };
   }
 
   /**
