@@ -182,6 +182,26 @@ export async function createServer(deps: ServerDeps) {
     },
   );
 
+  // ─── Admin-Liste (Orphan-Reconcile, #744-Folge) ──────────────────────────────
+  //
+  // Listet ALLE Bridge-Handles unter Admin-Token (X-Admin-Token via requireAdmin)
+  // — anders als GET /twins, das per-twin-gated ist und so für einen Reconcile-
+  // Sweep nutzlos wäre (Waisen haben kein api_token mehr). Der Runtime-Reconcile
+  // diff't diese Liste gegen seine lebenden Handles und deregistriert die Waisen.
+  //
+  // 🔴 KEINE api_token im Output — Secrets werden nie exponiert, auch wenn
+  // twins.list() sie mitliefert. Nur handle + Meta.
+  app.get("/admin/twins", { preHandler: admin }, async () => {
+    return {
+      twins: deps.twins.list().map((t) => ({
+        handle: t.handle,
+        displayName: t.displayName,
+        registeredAt: t.registeredAt,
+        lastSeenAt: t.lastSeenAt,
+      })),
+    };
+  });
+
   // ─── Nachricht senden ──────────────────────────────────────────────────────
   app.post<{
     Body: {
