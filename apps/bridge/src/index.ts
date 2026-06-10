@@ -42,7 +42,11 @@ async function main() {
     );
   }
 
-  const app = await createServer({ twins, messages, delivery, registerToken });
+  // Admin-Token für den Orphan-Cleanup-Endpoint (#744-Rest). Optional/opt-in:
+  // ohne ENV läuft die Bridge weiter, DELETE /admin/twins/:handle antwortet 503.
+  const adminToken = process.env.BRIDGE_ADMIN_TOKEN?.trim() || null;
+
+  const app = await createServer({ twins, messages, delivery, registerToken, adminToken });
   const port = Number(process.env.BRIDGE_PORT ?? 5100);
   const host = process.env.BRIDGE_HOST ?? "127.0.0.1";
 
@@ -51,6 +55,9 @@ async function main() {
   console.log(`[boot] DB: ${dbPath} (${twins.list().length} registrierte Twins)`);
   console.log(
     `[boot] Register-Endpoint: ${registerToken ? "geschützt (Token aktiv)" : "DEAKTIVIERT (kein Token)"}`,
+  );
+  console.log(
+    `[boot] Admin-Cleanup-Endpoint: ${adminToken ? "aktiv (Admin-Token gesetzt)" : "DEAKTIVIERT (kein BRIDGE_ADMIN_TOKEN)"}`,
   );
 }
 

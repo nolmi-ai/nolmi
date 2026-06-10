@@ -7,7 +7,7 @@ import { TwinAlreadyExistsError } from "./twins-repo.js";
 import type { MessagesRepo, MessageType } from "./messages-repo.js";
 import { MESSAGE_TYPES } from "./messages-repo.js";
 import type { DeliveryHub } from "./delivery.js";
-import { requireTwinAuth } from "./auth.js";
+import { requireTwinAuth, requireAdmin } from "./auth.js";
 
 // ─── HTTP SERVER ─────────────────────────────────────────────────────────────
 //
@@ -15,6 +15,7 @@ import { requireTwinAuth } from "./auth.js";
 //   POST /twins/register             → neuen Twin anlegen, Token vergeben
 //                                       (Allowlist via X-Register-Token)
 //   DELETE /twins/:handle            → Handle deregistrieren (auth, Owner-Scope)
+//   DELETE /admin/twins/:handle      → Orphan-Cleanup (Admin-Token, #744-Rest)
 //   GET  /twins                      → alle Twins listen (auth)
 //   POST /messages                   → Nachricht an anderen Twin senden (auth)
 //   GET  /messages/inbox?since=...   → ungelieferte Nachrichten holen (auth)
@@ -37,6 +38,12 @@ export interface ServerDeps {
    * im index.ts macht das laut.
    */
   registerToken: string | null;
+  /**
+   * Admin-Token für privilegierte Cleanup-Endpoints (DELETE /admin/twins/:handle,
+   * #744-Rest Orphan-Cleanup). null → Endpoint deaktiviert (503). OPT-IN, fail-
+   * closed: ohne ENV ist der Admin-Pfad nicht erreichbar.
+   */
+  adminToken: string | null;
 }
 
 // Format-Check für Message-IDs: msg_<nanoid(16)>. Verhindert DB-Lookups mit
@@ -52,6 +59,7 @@ export async function createServer(deps: ServerDeps) {
   });
 
   const auth = requireTwinAuth(deps.twins);
+  const admin = requireAdmin(deps.adminToken);
 
   // ─── Health ────────────────────────────────────────────────────────────────
   app.get("/health", async () => ({
@@ -152,6 +160,25 @@ export async function createServer(deps: ServerDeps) {
         return reply.status(404).send({ error: "Handle nicht gefunden" });
       }
       return reply.status(204).send();
+    },
+  );
+
+  // ─── Admin-Deregister (Orphan-Cleanup, #744-Rest) ────────────────────────────
+  //
+  // Twin-UNABHÄNGIGER Deregister-Pfad: ein verwaister Handle (Runtime-Twin
+  // gelöscht, aber Bridge-Deregister damals fehlgeschlagen → bridgeOrphan) hat
+  // kein gültiges api_token mehr, also kann ihn die per-twin DELETE /twins/:handle
+  // oben NICHT entfernen. Hier zählt allein der Admin-Token (X-Admin-Token via
+  // requireAdmin) — kein Owner-Scope, kein Bearer. Idempotent: nicht-existenter
+  // Handle → 200 deleted:false (KEIN 404/throw), damit ein Cleanup-Lauf gegen
+  // einen schon weg-geräumten Handle sauber durchläuft.
+  app.delete<{ Params: { handle: string } }>(
+    "/admin/twins/:handle",
+    { preHandler: admin },
+    async (request, reply) => {
+      const handle = request.params.handle;
+      const deleted = deps.twins.delete(handle);
+      return reply.status(200).send({ handle, deleted });
     },
   );
 
