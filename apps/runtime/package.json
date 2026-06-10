@@ -17,6 +17,7 @@
     "twin:set-api-key": "tsx src/scripts/set-api-key.ts",
     "twin:auth-mode": "tsx src/scripts/set-auth-mode.ts",
     "twin:bind-bridge": "tsx src/scripts/bind-bridge.ts",
+    "twin:bridge-deregister": "tsx src/scripts/bridge-deregister.ts",
     "twin:skill-create": "tsx src/scripts/skill-create.ts",
     "twin:mcp-add": "tsx src/scripts/mcp-add.ts",
     "twin:mcp-list": "tsx src/scripts/mcp-list.ts",
