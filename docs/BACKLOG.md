@@ -3021,6 +3021,8 @@ Wenn ein Twin größere Doc-Sets braucht (Workshop-Materialien, Notizen, Wissens
 
 ### #94 Dream-Pattern für Memory-Kuratierung (L, nice)
 
+**✅ ERLEDIGT (Tag 43) — NEU ZUGESCHNITTEN als Facts-Kohärenz-Review.** Der ursprüngliche Dedup-Kern ist obsolet (UNIQUE-Schema verhindert Duplikate strukturell). Stattdessen gebaut: Erkennung semantischer Widersprüche + Veralteter Facts ÜBER fact_keys hinweg, Pending-Vorschläge (update/delete) via apply-on-approve, Markus approved. SS1 a5ed1ab / SS2 8f11764 / SS3 54b0cb3, Strategie e0ffa20. Prod-bewiesen: alle 3 gemessenen Schäden (wife_name-Widerspruch, 2 Tavryn-Altlasten) + 1 unerwarteter (Frühstück) erkannt, nach Approve sauber aufgeräumt (43→40 Facts, History erfasst). Loop-Wiring offen (eigenes Stück).
+
 Periodischer LLM-Job pro Twin der die Facts-Sammlung verdichtet, dedupliziert und mit Konversations-Insights ergänzt. Pattern adaptiert von Anthropic Managed-Agents-Dreams (Research Preview, claude.com/docs/managed-agents/dreams). Eigen-implementiert ohne Vendor-Lock. Architektur:
 - Cron-Job oder On-Demand-Trigger pro Twin
 - LLM-Call mit Persona + aktueller Facts-Liste + Konversations-Summary-Sample
