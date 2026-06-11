@@ -3306,9 +3306,31 @@ Ein **CLA** (Contributor License Agreement) oder mindestens **DCO** (Developer C
 ### 16. Backward-Compat-Aliases entfernen
 
 *(Triage 2c: zeit-vertagt — `TWIN_LAB_*`-Aliases noch in ~7 Dateien (crypto-utils, session, env.ts …), Hart-Cut bewusst 6–12 Monate später.)*
-Sub-Schritt 2d hat alte Pfade (`/chat`, `/twin-profile`, `/audit`, `/audit/pending`, etc.) als Aliases zu `/twins/@markus/...` umgeleitet. Sollte nach komplettem UI-Refresh-Cycle entfernt werden — sonst dauerhafter Tech-Debt.
+~~Sub-Schritt 2d hat alte Pfade (`/chat`, `/twin-profile`, `/audit`, `/audit/pending`, etc.) als Aliases zu `/twins/@markus/...` umgeleitet. Sollte nach komplettem UI-Refresh-Cycle entfernt werden — sonst dauerhafter Tech-Debt.~~ **✅ Routen-Aliases entfernt (Tag 44, 6904217)** — Security-Fix (unauth Legacy-Aliases, Tenant-Isolations-Audit), −130 Zeilen. Offen bleibt: `TWIN_LAB_*`-ENV-Aliases in ~7 Dateien (crypto-utils, session, env.ts …).
 **Größe:** S · **Priorität:** should · **Aus:** Sub-Schritt 2d Caveat #5
 
+
+---
+
+## Security / Tenant-Isolation
+
+### Tenant-Isolations-Audit (Distribution D4/Etappe 0) — ✅ durchgeführt Tag 44
+
+**Status:** ✅ **DONE — Audit Tag 44, kritischer Leak geschlossen (6904217, runtime-only deployt)**
+
+Read-only Audit aller DB-Zugriffspfade auf Owner-Scope. Befund: `/twins/:handle/*`-API lückenlos (`requireOwner` + IDOR-Checks auf `:auditId`/`:trustId`), alle Tenant-Tabellen `twin_id`/`owner_user_id`-gescoped. 🔴 Kritischer Fund: 7 Legacy-Routen ohne Auth (Daten-Leak + IDOR auf approve/reject) → ersatzlos entfernt. Rest-Befunde: #2 + #3 unten.
+
+### #2 — `GET /onboarding/check-handle` Handle-Enumeration ohne Auth (🟡 Existenz-Leak)
+
+**Status:** OFFEN · **Größe:** XS · **Priorität:** should (vor breiterem Zugang) · **Aus:** Tenant-Isolations-Audit Tag 44
+
+`GET /onboarding/check-handle?handle=@x` gibt `{ available: false }` zurück wenn Handle existiert — ohne Login. Alle registrierten Handles enumerierbar (@markus, @florian, @heiko → available: false). Muster identisch zur #59-Klasse (Existenz-Leak vor Auth). **Optionen:** (a) `getCurrentUser → 401` vorschalten (sauberste Lösung), (b) by-design dokumentieren wenn Onboarding-UX-Entscheidung bewusst ist.
+
+### #3 — `GET /health` gibt twins-Zähler zurück (🟢 niedrig)
+
+**Status:** OFFEN · **Größe:** XS · **Priorität:** nice · **Aus:** Tenant-Isolations-Audit Tag 44
+
+`GET /health` gibt `{ twins: N }` zurück (Anzahl aktiver Twins). Kein Auth, kein unmittelbarer Handlungsbedarf. Fix wenn gewünscht: Zähler aus dem Health-Response entfernen oder hinter Auth stellen.
 
 ---
 
