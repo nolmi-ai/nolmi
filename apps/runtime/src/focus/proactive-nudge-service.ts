@@ -71,6 +71,15 @@ const STUCK_WINDOW = 8;
  */
 const THEME_SIM_THRESHOLD = 0.85;
 
+/**
+ * Fokus-Nudge Episode-Dedup: zwei Fokus-Nudges gelten als „dieselbe Episode",
+ * wenn die Cosine-Ähnlichkeit ihrer Theme-Vektoren ≥ dieser Schwelle ist —
+ * stabil über die variablen LLM-`thema`-Strings hinweg (der frühere
+ * norm()-String-Vergleich matchte nie → Dauerfeuer). BEWUSST eigene Konstante,
+ * NICHT THEME_SIM_THRESHOLD (Detektion vs. Dedup unabhängig justierbar).
+ */
+const NUDGE_DEDUP_SIM_THRESHOLD = 0.85;
+
 /** Chat-Capabilities, die einen Owner↔Twin-Turn tragen (conversation_id gesetzt). */
 const CHAT_CAPABILITIES = new Set(["owner-direct", "respond_to_chat"]);
 /** Wie viele jüngste Audits die Offene-Frage-Detektion (Anlass 3) scannt. */
@@ -96,6 +105,13 @@ export interface StuckDetection {
   isStuck: boolean;
   /** Das stabile Thema (Original-Schreibweise des jüngsten Snapshots). */
   thema?: string;
+  /**
+   * Theme-Vektor des gewählten `thema` (= common[0].vec aus dem jüngsten
+   * Snapshot). Für den SEMANTISCHEN Episode-Dedup im Nudge-Pfad: stabil über
+   * die variablen LLM-Formulierungen hinweg, anders als der `thema`-STRING.
+   * null/undefined, wenn der Snapshot kein Theme-Embedding-BLOB hat (Alt-Daten).
+   */
+  themaVec?: Float32Array;
   /** Anzahl aufeinanderfolgender stabiler Snapshots (bei 24h-Loop ≈ Tage). */
   tageStabil?: number;
   /** Die Snapshots der Festhäng-Kette (jüngste zuerst). */
@@ -242,6 +258,41 @@ function cosineSim(a: Float32Array, b: Float32Array): number {
 }
 
 /**
+ * Fokus-Nudge Episode-Dedup: ist der aktuell detektierte Fokus DIESELBE Episode
+ * wie der jüngste Fokus-Nudge? SEMANTISCH über die Theme-Vektoren (Cosine ≥
+ * NUDGE_DEDUP_SIM_THRESHOLD) — stabil gegen variable LLM-`thema`-Strings.
+ *
+ * 🔴 ALTBESTAND-/Robustheits-Fallback: nur wenn BEIDE Vektoren vorliegen UND
+ * gleiche Dimension haben, entscheidet Cosine (autoritativ — auch ein klares
+ * „nein" bei <Schwelle). Fehlt das gespeicherte themaEmbedding (Audits VOR
+ * diesem Fix), fehlt der aktuelle Vektor (Alt-Snapshot ohne BLOB), passt die
+ * Dimension nicht ODER wirft das Parsen → exakter norm()-String-Vergleich (das
+ * bisherige Verhalten). Nie ein Throw im Loop-Hot-Path.
+ */
+function isSameNudgeEpisode(
+  latest: AuditEntry,
+  detection: StuckDetection,
+): boolean {
+  const input = latest.input as { thema?: string; themaEmbedding?: number[] };
+  const latestEmb = input.themaEmbedding;
+  const curVec = detection.themaVec;
+  if (
+    Array.isArray(latestEmb) &&
+    latestEmb.length > 0 &&
+    curVec &&
+    curVec.length === latestEmb.length
+  ) {
+    try {
+      return cosineSim(new Float32Array(latestEmb), curVec) >= NUDGE_DEDUP_SIM_THRESHOLD;
+    } catch {
+      // fällt auf den String-Vergleich durch
+    }
+  }
+  // Fallback: kein/inkompatibler Vektor → exakter norm()-String-Vergleich.
+  return norm(String(input.thema ?? "")) === norm(detection.thema ?? "");
+}
+
+/**
  * SS2: bleibt ein common-Eintrag (Theme des jüngsten Snapshots) im älteren
  * Snapshot bestehen? SEMANTISCH (Cosine ≥ Schwelle gegen IRGENDEINEN älteren
  * Theme-Vektor), wenn BEIDE Seiten Vektoren haben; sonst FALLBACK auf den
@@ -317,6 +368,9 @@ export class ProactiveNudgeService {
     return {
       isStuck: true,
       thema,
+      // Theme-Vektor des gewählten thema (für den semantischen Dedup im Nudge-
+      // Pfad). null → kein BLOB (Alt-Snapshot) → Dedup fällt auf String zurück.
+      themaVec: common[0]!.vec ?? undefined,
       tageStabil: chain,
       snapshots: recent.slice(0, chain),
     };
@@ -352,7 +406,7 @@ export class ProactiveNudgeService {
     //       nicht bei jedem Tick aufs Neue nerven. Erst wenn das Thema wechselt
     //       (Episode endet) und später wiederkehrt, gibt es wieder einen Nudge.
     const latest = nudges[0];
-    if (latest && norm(String((latest.input as { thema?: string }).thema ?? "")) === norm(detection.thema)) {
+    if (latest && isSameNudgeEpisode(latest, detection)) {
       return { created: false, reason: "already-nudged-this-episode" };
     }
 
@@ -386,6 +440,11 @@ export class ProactiveNudgeService {
     const input = {
       anlass: ANLASS_FOKUS,
       thema: detection.thema,
+      // Theme-Vektor des thema mitpersistieren (JSON-safe number[]) → der
+      // nächste Tick dedupt SEMANTISCH gegen ihn (isSameNudgeEpisode), statt
+      // gegen den variablen thema-String. Fehlt der Vektor (Alt-Snapshot) →
+      // undefined, Dedup fällt dann auf den String zurück.
+      themaEmbedding: detection.themaVec ? Array.from(detection.themaVec) : undefined,
       tageStabil: detection.tageStabil ?? 0,
       message,
       reasoning: out.reasoning?.trim() ?? "",
