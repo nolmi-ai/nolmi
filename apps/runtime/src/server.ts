@@ -104,16 +104,6 @@ import { registerTelegramApiRoutes } from "./telegram/api-routes.js";
 //   POST /twins/:handle/audit/:id/reject              → Reject
 //   GET  /twins/:handle/stream                        → SSE für einen Twin
 //
-// Backward-Compat (legacy, route auf @markus):
-//   POST /chat                              → POST /twins/@markus/chat
-//   GET  /audit, /audit/pending             → /twins/@markus/audit*
-//   POST /audit/:id/approve, /audit/:id/reject
-//   GET  /stream                            → /twins/@markus/stream
-//   GET  /twin-profile                      → /twins/@markus/profile
-//
-// Phase 1: keine Auth — läuft nur lokal auf 127.0.0.1.
-
-const LEGACY_HANDLE = "@markus";
 
 export interface ServerDeps {
   audit: AuditRepository;
@@ -560,127 +550,7 @@ export async function createServer(deps: ServerDeps) {
     },
   );
 
-  // ─── Legacy-Aliases (route auf @markus) ────────────────────────────────────
-  // Heute: erhält die Phase-2-UI am Leben, solange sie noch nicht alle
-  // Endpoints umgestellt hat. Soll nach UI-Migration entfernt werden.
-
-  registerLegacyAliases(app, deps, profileToResponse);
-
   return app;
-}
-
-// ─── Legacy-Aliases ──────────────────────────────────────────────────────────
-
-function registerLegacyAliases(
-  app: FastifyInstance,
-  deps: ServerDeps,
-  profileToResponse: (entry: RegistryEntry) => unknown,
-) {
-  const requireLegacyEntry = (reply: FastifyReply): RegistryEntry | null => {
-    const entry = deps.registry.getEntry(LEGACY_HANDLE);
-    if (!entry) {
-      reply.status(404).send({
-        error: `Legacy-Default-Twin "${LEGACY_HANDLE}" nicht aktiv — Endpoints sind deprecated, nutze /twins/<handle>/...`,
-      });
-      return null;
-    }
-    return entry;
-  };
-
-  app.get("/twin-profile", async (_request, reply) => {
-    const entry = requireLegacyEntry(reply);
-    if (!entry) return;
-    return profileToResponse(entry);
-  });
-
-  app.post("/chat", async (request, reply) => {
-    const entry = requireLegacyEntry(reply);
-    if (!entry) return;
-    const parsed = ChatRequestSchema.safeParse(request.body);
-    if (!parsed.success) return reply.status(400).send({ error: parsed.error.message });
-    try {
-      return await entry.service.chat(parsed.data.messages);
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : "Unknown error";
-      return reply.status(500).send({ error: msg });
-    }
-  });
-
-  app.get<{ Querystring: { limit?: string; offset?: string } }>(
-    "/audit",
-    async (request, reply) => {
-      const entry = requireLegacyEntry(reply);
-      if (!entry) return;
-      const limit = Math.min(Number(request.query.limit ?? 50), 200);
-      const offset = Number(request.query.offset ?? 0);
-      const entries = await deps.audit.list({ limit, offset, twinId: entry.twinId });
-      return { entries };
-    },
-  );
-
-  app.get("/audit/pending", async (_request, reply) => {
-    const entry = requireLegacyEntry(reply);
-    if (!entry) return;
-    const entries = await deps.audit.list({ limit: 200, twinId: entry.twinId });
-    return { entries: entries.filter((e) => e.status === "pending") };
-  });
-
-  app.post<{ Params: { id: string } }>(
-    "/audit/:id/approve",
-    async (request, reply) => {
-      const entry = requireLegacyEntry(reply);
-      if (!entry) return;
-      try {
-        return await entry.service.approvePending(request.params.id);
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : "Unknown error";
-        return reply.status(400).send({ error: msg });
-      }
-    },
-  );
-
-  app.post<{ Params: { id: string }; Body: { reason?: string } }>(
-    "/audit/:id/reject",
-    async (request, reply) => {
-      const entry = requireLegacyEntry(reply);
-      if (!entry) return;
-      try {
-        const reason = request.body?.reason ?? "Rejected by user";
-        await entry.service.rejectPending(request.params.id, reason);
-        return { ok: true };
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : "Unknown error";
-        return reply.status(400).send({ error: msg });
-      }
-    },
-  );
-
-  app.get("/stream", async (request, reply) => {
-    const entry = requireLegacyEntry(reply);
-    if (!entry) return;
-    // Origin reflektieren statt "*", damit EventSource(withCredentials:true)
-    // nicht vom Browser geblockt wird (CORS verbietet Wildcard bei creds).
-    const origin = request.headers.origin ?? "*";
-    reply.raw.writeHead(200, {
-      "Content-Type": "text/event-stream",
-      "Cache-Control": "no-cache",
-      Connection: "keep-alive",
-      "Access-Control-Allow-Origin": origin,
-      "Access-Control-Allow-Credentials": "true",
-    });
-    const send = (event: unknown) => {
-      reply.raw.write(`data: ${JSON.stringify(event)}\n\n`);
-    };
-    send({ type: "heartbeat", payload: { timestamp: new Date().toISOString() } });
-    const unsubscribe = entry.bus.subscribe((event) => send(event));
-    const heartbeat = setInterval(() => {
-      send({ type: "heartbeat", payload: { timestamp: new Date().toISOString() } });
-    }, 15_000);
-    request.raw.on("close", () => {
-      clearInterval(heartbeat);
-      unsubscribe();
-    });
-  });
 }
 
 // ─── ONBOARDING ──────────────────────────────────────────────────────────────
