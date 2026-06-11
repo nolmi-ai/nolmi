@@ -71,12 +71,16 @@ function makeService(
   db: Database.Database,
   audit: AuditService,
   generate: (p: { system: string; prompt: string }) => Promise<NudgeOutput>,
+  cooldownHours?: number,
 ): ProactiveNudgeService {
   return new ProactiveNudgeService({
     db, auditService: audit,
     focusRepo: new FocusSnapshotsRepo(db),
     twinId: T, twinName: "Twin", ownerName: "Markus",
     generate,
+    // Default (undefined) = produktiver 48h-Zeit-Cooldown. Tests, die gezielt den
+    // Episode-COSINE-Dedup (statt des Zeit-Bodens) prüfen, setzen 0.
+    focusNudgeCooldownHours: cooldownHours,
   });
 }
 
@@ -244,7 +248,9 @@ async function main(): Promise<void> {
     process.env.PROACTIVE_NUDGE_AUTOSEND_ENABLED = "true";
     const audit = makeAudit();
     const spy = spySender({ sent: true });
-    const svc2 = makeService(seedStuck("Dedup-Thema"), audit, okGen);
+    // Zeit-Cooldown=0 → isoliert den Episode-COSINE-Dedup (sonst blockt der
+    // 48h-Zeit-Boden den zweiten Tick zuerst mit 'focus-cooldown-active').
+    const svc2 = makeService(seedStuck("Dedup-Thema"), audit, okGen, 0);
     const a = await svc2.nudge(spy.fn);
     const b = await svc2.nudge(spy.fn);
     assert(a.created === true && a.pushed === true, "erster Tick → Push (Status 'sent')");

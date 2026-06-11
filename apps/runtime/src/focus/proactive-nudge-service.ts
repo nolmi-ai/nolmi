@@ -80,6 +80,16 @@ const THEME_SIM_THRESHOLD = 0.85;
  */
 const NUDGE_DEDUP_SIM_THRESHOLD = 0.85;
 
+/**
+ * Fokus-Nudge Zeit-Cooldown-BODEN in Stunden (env FOCUS_NUDGE_COOLDOWN_HOURS,
+ * sonst 48). Themen-AGNOSTISCH: deckelt die Gesamt-Fokus-Nudge-Frequenz, egal
+ * welches Thema. Robuster Boden gegen Dauerfeuer, weil die Cosine-Trennung
+ * (isSameNudgeEpisode) bei e5-q8 die Bänder „gleiche Episode" vs. „anderes
+ * Thema" nicht sauber separiert. Muster identisch zum Reflexions-Nudge-Cooldown
+ * (Konstante × 3600000, Date.now()-Vergleich gegen den jüngsten Nudge-Timestamp).
+ */
+const DEFAULT_FOCUS_NUDGE_COOLDOWN_HOURS = 48;
+
 /** Chat-Capabilities, die einen Owner↔Twin-Turn tragen (conversation_id gesetzt). */
 const CHAT_CAPABILITIES = new Set(["owner-direct", "respond_to_chat"]);
 /** Wie viele jüngste Audits die Offene-Frage-Detektion (Anlass 3) scannt. */
@@ -130,6 +140,7 @@ export interface ProactiveNudgeResult {
     | "not-stuck"
     | "no-open-question"
     | "open-pending"
+    | "focus-cooldown-active"
     | "already-nudged-this-episode"
     | "twin-declined"
     | "llm-error";
@@ -196,6 +207,12 @@ export interface ProactiveNudgeDeps {
   summariesRepo?: ConversationSummariesRepo;
   /** Anlass-3-Recency-Cutoff in Stunden. Default `OPEN_QUESTION_MAX_AGE_HOURS`. */
   openQuestionMaxAgeHours?: number;
+  /**
+   * Fokus-Nudge Zeit-Cooldown in Stunden (Test-Override). Default
+   * `FOCUS_NUDGE_COOLDOWN_HOURS` env / 48. Muster wie der Reflexions-Nudge-
+   * Cooldown.
+   */
+  focusNudgeCooldownHours?: number;
 }
 
 /** Themen-Normalisierung: trimmt + lowercased. SS2 nur noch als FALLBACK, wenn
@@ -314,10 +331,22 @@ function entrySurvivesIn(
 
 export class ProactiveNudgeService {
   private readonly openQuestionMaxAgeHours: number;
+  /** Fokus-Nudge Zeit-Cooldown-Boden in Millisekunden. */
+  private readonly focusNudgeCooldownMs: number;
 
   constructor(private deps: ProactiveNudgeDeps) {
     this.openQuestionMaxAgeHours =
       deps.openQuestionMaxAgeHours ?? OPEN_QUESTION_MAX_AGE_HOURS;
+
+    // Fokus-Nudge-Cooldown (Test-Override > env > Default 48h) — Muster wie der
+    // Reflexions-Nudge (reflection-loop-service ownerNudgeCooldownMs).
+    const envCooldown = Number(process.env.FOCUS_NUDGE_COOLDOWN_HOURS);
+    const cooldownHours =
+      deps.focusNudgeCooldownHours ??
+      (Number.isFinite(envCooldown) && envCooldown > 0
+        ? envCooldown
+        : DEFAULT_FOCUS_NUDGE_COOLDOWN_HOURS);
+    this.focusNudgeCooldownMs = cooldownHours * 60 * 60 * 1000;
   }
 
   /**
@@ -402,10 +431,22 @@ export class ProactiveNudgeService {
     if (nudges.some((a) => a.status === "pending")) {
       return { created: false, reason: "open-pending" };
     }
-    //   (c) Episode-Cooldown: der jüngste Nudge war schon übers selbe Thema →
-    //       nicht bei jedem Tick aufs Neue nerven. Erst wenn das Thema wechselt
-    //       (Episode endet) und später wiederkehrt, gibt es wieder einen Nudge.
     const latest = nudges[0];
+    //   (NEU) Zeit-Cooldown-BODEN, themen-AGNOSTISCH: war der jüngste Fokus-Nudge
+    //       (jedes Thema, sent/pending) vor < FOCUS_NUDGE_COOLDOWN_HOURS → skip.
+    //       loadNudges ist DESC → latest.timestamp = lastFokusNudgeTs, kein neuer
+    //       Read. Deckelt die Gesamtfrequenz hart — selbst ein NEUES Thema feuert
+    //       nicht im offenen Fenster (robuster Boden, weil die Cosine-Trennung
+    //       unten bei e5-q8 nicht sauber separiert).
+    if (
+      latest &&
+      Date.now() - Date.parse(latest.timestamp) < this.focusNudgeCooldownMs
+    ) {
+      return { created: false, reason: "focus-cooldown-active" };
+    }
+    //   (c) Episode-Cosine: der jüngste Nudge war schon übers SEMANTISCH selbe
+    //       Thema → nicht aufs Neue nerven. Zweite Bremse INNERHALB des Fensters
+    //       (greift, falls der Cooldown später gesenkt wird).
     if (latest && isSameNudgeEpisode(latest, detection)) {
       return { created: false, reason: "already-nudged-this-episode" };
     }
