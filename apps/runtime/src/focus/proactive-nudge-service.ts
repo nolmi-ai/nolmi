@@ -90,6 +90,57 @@ const NUDGE_DEDUP_SIM_THRESHOLD = 0.85;
  */
 const DEFAULT_FOCUS_NUDGE_COOLDOWN_HOURS = 48;
 
+const DEFAULT_QUIET_HOURS_TZ = "Europe/Berlin";
+
+/**
+ * Quiet-Hours: autonome Nudges werden im konfigurierten Zeitfenster VERWORFEN
+ * (nicht aufgestaut). Opt-in — Feature ist nur aktiv, wenn QUIET_HOURS_START
+ * und QUIET_HOURS_END beide als gültige 0–23-Stunden gesetzt sind.
+ * Über-Mitternacht-Fenster (z.B. START=22, END=8) korrekt behandelt.
+ */
+const _envQhStart = Number(process.env.QUIET_HOURS_START);
+const _envQhEnd = Number(process.env.QUIET_HOURS_END);
+const QUIET_HOURS_START: number | null =
+  Number.isInteger(_envQhStart) && _envQhStart >= 0 && _envQhStart <= 23
+    ? _envQhStart
+    : null;
+const QUIET_HOURS_END: number | null =
+  Number.isInteger(_envQhEnd) && _envQhEnd >= 0 && _envQhEnd <= 23
+    ? _envQhEnd
+    : null;
+const QUIET_HOURS_TZ =
+  (process.env.QUIET_HOURS_TZ ?? "").trim() || DEFAULT_QUIET_HOURS_TZ;
+/** true wenn START und END beide valide gesetzt sind (Feature aktiv). */
+const quietHoursActive =
+  QUIET_HOURS_START !== null && QUIET_HOURS_END !== null;
+
+/**
+ * Gibt true zurück, wenn `now` im Quiet-Hours-Fenster liegt.
+ * Lokale Stunde via Intl (KEINE systemweite TZ-Env, KEIN getHours() = UTC).
+ * Über-Mitternacht-Wrap: START=22, END=8 → 22,23,0–7 quiet; 8+ nicht.
+ * Wirft nie — ungültiger TZ-String fällt sicher auf false (nicht quiet).
+ */
+export function isWithinQuietHours(now: Date): boolean {
+  let h: number;
+  try {
+    const fmt = new Intl.DateTimeFormat("en-GB", {
+      timeZone: QUIET_HOURS_TZ,
+      hour: "2-digit",
+      hour12: false,
+    });
+    h = parseInt(fmt.format(now), 10);
+    if (isNaN(h)) return false;
+  } catch {
+    return false;
+  }
+  const s = QUIET_HOURS_START!;
+  const e = QUIET_HOURS_END!;
+  // Normales Fenster (z.B. 09–17): s <= h < e
+  if (s <= e) return h >= s && h < e;
+  // Über-Mitternacht-Wrap (z.B. 22–8): h >= 22 ODER h < 8
+  return h >= s || h < e;
+}
+
 /** Chat-Capabilities, die einen Owner↔Twin-Turn tragen (conversation_id gesetzt). */
 const CHAT_CAPABILITIES = new Set(["owner-direct", "respond_to_chat"]);
 /** Wie viele jüngste Audits die Offene-Frage-Detektion (Anlass 3) scannt. */
@@ -143,7 +194,8 @@ export interface ProactiveNudgeResult {
     | "focus-cooldown-active"
     | "already-nudged-this-episode"
     | "twin-declined"
-    | "llm-error";
+    | "llm-error"
+    | "quiet-hours";
 }
 
 /** Ergebnis der Offene-Frage-Detektion (Anlass 3, rein lesend, kein LLM). */
@@ -618,6 +670,16 @@ export class ProactiveNudgeService {
     const { input, message, thema, autosend, sendToOwner } = args;
     const capability = args.capability ?? PROACTIVE_NUDGE_CAPABILITY;
     const anlass = String((input as { anlass?: string }).anlass ?? "");
+
+    // QUIET-HOURS-GATE — ganz oben, vor jedem Side-Effect und vor dem Cursor.
+    // Autonomer Nudge im Zeitfenster → verwerfen (nicht aufstauen), KEIN Audit
+    // angelegt → Cooldown-Cursor rückt NICHT vor.
+    if (quietHoursActive && isWithinQuietHours(new Date())) {
+      console.log(
+        `[nudge] quiet-hours für twin=${this.deps.twinId} — kein Nudge zwischen ${QUIET_HOURS_START}:00–${QUIET_HOURS_END}:00 ${QUIET_HOURS_TZ} (anlass="${anlass}")`,
+      );
+      return { created: false, reason: "quiet-hours" };
+    }
 
     // AUTOSEND (Flag AN + Sender da): Push versuchen.
     if (autosend && sendToOwner) {
