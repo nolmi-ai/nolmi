@@ -2743,6 +2743,7 @@ REGEL 6: Wenn der User dich explizit bittet, ein Tool zu nutzen ("rufe das X-Too
     // tool.call.start/complete kommen weiterhin aus tool-bridge.ts execute().
     // Audit-Vertrag und Approval-Detect identisch zum generateText-Pfad.
     if (options.onToken) {
+      try {
       const { onToken } = options;
       const streamRes = streamText({
         model: activeModel,
@@ -2873,6 +2874,20 @@ REGEL 6: Wenn der User dich explizit bittet, ein Tool zu nutzen ("rufe das X-Too
         },
         ...(prePassSkillName ? { prePassSkillName } : {}),
       };
+      } catch (streamErr) {
+        // ApprovalRequestedError ist erwartetes Business-Verhalten (Approval-Detect
+        // nach Stream-Ende) — weiterwerfen, NICHT als Provider-Fehler behandeln.
+        if (streamErr instanceof ApprovalRequestedError) throw streamErr;
+        // doStream nicht implementiert (z.B. OAuth/Codex-Provider in Phase 3.4.1)
+        // oder anderer Stream-Fehler → sauber auf blockenden generateText-Pfad fallen.
+        // doStream wirft sofort (kein Yield) → streamFullText war leer, kein Token
+        // wurde emittiert → Fallback ist sauber, kein Doppel-Aufruf.
+        console.warn(
+          `[stream] provider doStream nicht verfügbar für twin=${this.deps.twinId}, ` +
+            `Fallback auf generateText: ${streamErr instanceof Error ? streamErr.message : String(streamErr)}`,
+        );
+        // Fall-Through → generateText-Pfad unten
+      }
     }
 
     const result = await generateText({
