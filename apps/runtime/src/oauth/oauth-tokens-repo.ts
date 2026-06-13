@@ -160,11 +160,15 @@ export class OAuthTokensRepo {
     const cutoff = new Date(
       Date.now() + thresholdMinutes * 60 * 1000,
     ).toISOString();
+    // JOIN auf twin_profiles.auth_mode: nur oauth-Twins refreshen. Strukturelle
+    // Invariante — Loop berührt nie api_key-Twins, auch wenn Alt-OAuth-Tokens
+    // in der DB verbleiben (z.B. nach set-auth-mode api_key ohne Token-Cleanup).
     const rows = this.db
       .prepare(
-        `SELECT twin_id FROM oauth_tokens
-         WHERE provider = 'openai' AND expires_at < ?
-         ORDER BY expires_at ASC`,
+        `SELECT ot.twin_id FROM oauth_tokens ot
+         JOIN twin_profiles tp ON tp.twin_id = ot.twin_id
+         WHERE ot.provider = 'openai' AND ot.expires_at < ? AND tp.auth_mode = 'oauth'
+         ORDER BY ot.expires_at ASC`,
       )
       .all(cutoff) as Array<{ twin_id: string }>;
     return rows.map((r) => r.twin_id);
