@@ -66,7 +66,7 @@ const SCROLL_BOTTOM_THRESHOLD_PX = 100;
  * Genutzt von DirectChat und A2AChat. Liefert die Refs + onScroll-Handler,
  * die der Caller an Container und Bottom-Sentinel hängt.
  */
-function useAutoScroll(messageCount: number, switchKey: string) {
+function useAutoScroll(messageCount: number, switchKey: string, streamingLength = 0) {
   const containerRef = useRef<HTMLDivElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
   const wasAtBottomRef = useRef(true);
@@ -94,7 +94,7 @@ function useAutoScroll(messageCount: number, switchKey: string) {
     if (wasAtBottomRef.current && bottomRef.current) {
       bottomRef.current.scrollIntoView({ behavior: "smooth", block: "end" });
     }
-  }, [messageCount, switchKey]);
+  }, [messageCount, switchKey, streamingLength]);
 
   const onScroll = useCallback(() => {
     const el = containerRef.current;
@@ -1812,6 +1812,7 @@ function DirectChat({
   const { containerRef, bottomRef, onScroll } = useAutoScroll(
     chatBlocks.length,
     `direct:${handle}`,
+    streamingContent.length,
   );
 
   const loadAudits = useCallback(async () => {
