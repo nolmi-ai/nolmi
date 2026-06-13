@@ -2166,10 +2166,10 @@ function DirectChat({
           {toolCalls.length > 0 ? (
             <ResearchLiveProgress toolCalls={toolCalls} />
           ) : streamingContent && busy ? (
-            <div className="max-w-xl rounded px-4 py-3 bg-surface border border-border text-sm text-text whitespace-pre-wrap">
-              {streamingContent}
-              <span className="inline-block w-1.5 h-3.5 bg-accent ml-0.5 animate-pulse align-middle" />
-            </div>
+            // Gleiche <Bubble>-Komponente wie die finale Antwort: identisches
+            // Label/Layout/Border — kein Sprung beim Übergang Stream→final.
+            // Cursor ▌ am Ende des content-Strings; fällt beim Finalisieren weg.
+            <Bubble role="assistant" content={streamingContent + "▌"} />
           ) : busy ? (
             <div className="text-xs text-accent">twin denkt nach…</div>
           ) : null}
