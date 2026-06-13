@@ -3312,6 +3312,28 @@ Ein **CLA** (Contributor License Agreement) oder mindestens **DCO** (Developer C
 
 ---
 
+## Streaming / Approval / OAuth (Tag 45)
+
+### OAuth-Refresh-Loop: api_key-Twins skippen — ✅ DONE (ff4e2dc, Tag 45)
+
+`findTwinIdsExpiringSoon` per JOIN auf `twin_profiles.auth_mode = 'oauth'` gefiltert. Loop berührt nie api_key-Twins, auch wenn Alt-OAuth-Tokens in der DB liegen. Prod-verifiziert, Audit-Log sauber.
+
+### Tool-Call-Streaming: atomar → live deltas (🟢 niedrig, bewusst zurückgestellt)
+
+**Status:** OFFEN · **Priorität:** nice (Gold-Plating) · **Aus:** Tag 45 Streaming-Bogen
+
+Tool-Calls kommen heute atomar am Ende (fullStream, 892a4b8). Live `tool-input-delta`-Streaming wäre Feinschliff — kein Schmerz, kein Sofort-Druck.
+
+### Approval-Steuerung: requiresApproval per Skill konfigurierbar (🔴 Design-Entscheidung ausstehend)
+
+**Status:** OFFEN · **Diagnose done, Bau offen** · **Aus:** Tag 45 Backlog-Faden
+
+**Mechanismus (Befund read-only):** `skill.manifestJson.requiresApproval` pro Skill (`tool-bridge.ts:108`), änderbar via PATCH `/twins/:handle/skills/:skillId` (manifestJson), überlebt Re-Sync (`skill-sync.ts:109`). Server-Default `mcp_servers.default_requires_approval` = nur Erst-Quelle. UI: read-only-Badge, kein Toggle; kein CLI. Die zwei Server-Varianten (`-approval`/ohne) sind technisch unnötig — ein Server + Per-Skill-Toggle täte es.
+
+**🔴 Design-Entscheidung VOR dem Bau:** welche Tools auto-approve, welche behalten Freigabe-Pflicht? Kontrollgrenze Richtung A2A-Autonomie. Vorschlag-Trennung: read-only/lesend (list, scrape, search, echo) → auto; wirksam/schreibend (browser-agent, computer-use, später Kalender/Mail/A2A-Send) → Approval. Markus entscheidet.
+
+---
+
 ## Security / Tenant-Isolation
 
 ### Tenant-Isolations-Audit (Distribution D4/Etappe 0) — ✅ durchgeführt Tag 44
