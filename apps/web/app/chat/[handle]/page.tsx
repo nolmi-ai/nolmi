@@ -1758,9 +1758,9 @@ function DirectChat({
   // sendChat-Response-Body (`firstUseHint: 'research'`). Backend setzt das
   // Feld idempotent — gleiche Twin/Konv → kein erneutes Modal.
   const [showResearchHint, setShowResearchHint] = useState(false);
-  // #107: Live-Tool-Call-Stream für die Recherche-Progress-Anzeige. Hört auf
-  // tool.call.start/complete via SSE, leert sich nach twin.idle + Karenz.
-  const toolCalls = useToolCallStream({ twinHandle: handle });
+  // #107 + Token-Streaming: Live-Tool-Calls + progressiver Token-Buffer.
+  // tool.call.start/complete → toolCalls; twin.token → streamingContent.
+  const { toolCalls, streamingContent } = useToolCallStream({ twinHandle: handle });
 
   // #106: AuditEntries-Filter VOR buildChatBlocksFromAudits — ChatBlock
   // hat keinen timestamp, daher müssen wir auf der Audit-Ebene spalten.
@@ -2158,12 +2158,18 @@ function DirectChat({
               );
             })()
           )}
-          {/* #107: Recherche-Live-Progress ersetzt den generischen Spinner,
-              sobald Hyperbrowser-Tool-Calls über SSE reinkommen. Bei nicht-
-              Recherche-Sends (oder vor dem ersten Tool-Call) bleibt der
-              alte "denkt nach"-Indikator. */}
+          {/* Token-Streaming + Tool-Call-Progress + Fallback-Spinner.
+              Priorität: (1) Tool-Calls (Recherche-Live-Progress), (2) Token-
+              Stream (progressive Antwort-Bubble), (3) generischer Spinner.
+              streamingContent nur während busy=true anzeigen — nach
+              loadAudits() setzt busy=false und der Audit-Block übernimmt. */}
           {toolCalls.length > 0 ? (
             <ResearchLiveProgress toolCalls={toolCalls} />
+          ) : streamingContent && busy ? (
+            <div className="max-w-xl rounded px-4 py-3 bg-surface border border-border text-sm text-text whitespace-pre-wrap">
+              {streamingContent}
+              <span className="inline-block w-1.5 h-3.5 bg-accent ml-0.5 animate-pulse align-middle" />
+            </div>
           ) : busy ? (
             <div className="text-xs text-accent">twin denkt nach…</div>
           ) : null}

@@ -3,12 +3,19 @@
 import { useEffect, useState } from "react";
 import type { TwinEvent } from "@nolmi/shared";
 
-// ─── useToolCallStream (#107) ────────────────────────────────────────────────
+// ─── useToolCallStream (#107 + Token-Streaming) ──────────────────────────────
 //
-// Hört auf `tool.call.start` / `tool.call.complete` aus dem SSE-Stream des
-// Twins und hält pro callId einen ephemeren Live-State (running → executed
-// oder failed). Nach jedem `twin.idle`-Event leert sich die Map nach 1.5s
-// Karenz — gerade lang genug, dass der User die finale Status-Stufe sieht.
+// Hört auf `tool.call.start` / `tool.call.complete` + `twin.token` aus dem
+// SSE-Stream des Twins. Liefert:
+//   - toolCalls: ephemerer Live-State der laufenden MCP-Tool-Calls
+//   - streamingContent: akkumulierter Token-Buffer der laufenden Antwort
+//
+// twin.thinking → streamingContent zurücksetzen (neue Antwort startet).
+// twin.token    → chunk anhängen.
+// twin.idle     → Tool-Calls nach 1.5s-Karenz leeren; streamingContent
+//                 bleibt bis DirectChat nach loadAudits() busy=false setzt
+//                 (damit die Streaming-Bubble bis zum Audit-Eintrag sichtbar
+//                 bleibt und dann sauber durch den Audit-Block ersetzt wird).
 //
 // Diagnose Tag 20: Audit-Stream ist während Auto-Approve-Tool-Calls opak —
 // einzelne Calls werden nicht als Audit-Rows persistiert, sondern erscheinen
@@ -49,13 +56,20 @@ export interface UseToolCallStreamOptions {
   serverFilter?: string;
 }
 
+export interface UseToolCallStreamResult {
+  toolCalls: ToolCallState[];
+  /** Akkumulierter Token-Buffer der laufenden Antwort. Leer wenn kein Stream aktiv. */
+  streamingContent: string;
+}
+
 export function useToolCallStream({
   twinHandle,
   serverFilter,
-}: UseToolCallStreamOptions): ToolCallState[] {
+}: UseToolCallStreamOptions): UseToolCallStreamResult {
   const [toolCalls, setToolCalls] = useState<Map<string, ToolCallState>>(
     new Map(),
   );
+  const [streamingContent, setStreamingContent] = useState("");
 
   useEffect(() => {
     const url = `${RUNTIME_URL}/twins/${twinHandle}/stream`;
@@ -65,7 +79,12 @@ export function useToolCallStream({
     es.onmessage = (event) => {
       try {
         const parsed = JSON.parse(event.data) as TwinEvent;
-        if (parsed.type === "tool.call.start") {
+        if (parsed.type === "twin.thinking") {
+          // Neue Antwort beginnt → Token-Buffer zurücksetzen.
+          setStreamingContent("");
+        } else if (parsed.type === "twin.token") {
+          setStreamingContent((prev) => prev + parsed.payload.chunk);
+        } else if (parsed.type === "tool.call.start") {
           if (
             serverFilter &&
             parsed.payload.mcpServerId !== serverFilter
@@ -105,10 +124,9 @@ export function useToolCallStream({
             return next;
           });
         } else if (parsed.type === "twin.idle") {
-          // Send-Cycle complete — Live-Display nach Karenz leeren. setTimeout
-          // statt Direkt-Clear, damit der User die finale executed/failed-
-          // Markierung noch sieht. Race-safe: bei sofortigem nächsten Send
-          // bricht der tool.call.start-Branch oben den Timer ab.
+          // Send-Cycle complete — Tool-Call-Display nach Karenz leeren.
+          // streamingContent bleibt: DirectChat zeigt ihn solange busy=true,
+          // d.h. bis loadAudits() nach der POST-Response zurückkommt.
           if (idleTimer) clearTimeout(idleTimer);
           idleTimer = setTimeout(() => {
             setToolCalls(new Map());
@@ -132,7 +150,10 @@ export function useToolCallStream({
 
   // ASC-Sortierung nach startedAt — UI rendert chronologisch (Such-Step
   // zuerst, dann scrape-Steps in der Reihenfolge wie der LLM die URLs lädt).
-  return Array.from(toolCalls.values()).sort((a, b) =>
-    a.startedAt.localeCompare(b.startedAt),
-  );
+  return {
+    toolCalls: Array.from(toolCalls.values()).sort((a, b) =>
+      a.startedAt.localeCompare(b.startedAt),
+    ),
+    streamingContent,
+  };
 }
