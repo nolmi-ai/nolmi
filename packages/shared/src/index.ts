@@ -105,6 +105,12 @@ export const TwinEventSchema = z.discriminatedUnion("type", [
     type: z.literal("twin.thinking"),
     payload: z.object({ capability: z.string() }),
   }),
+  // Streaming-Token: wird pro Token-Chunk während streamText emittiert.
+  // Nur für den Web-Chat-Pfad — ephemer, nie DB-persistiert.
+  z.object({
+    type: z.literal("twin.token"),
+    payload: z.object({ chunk: z.string() }),
+  }),
   z.object({
     type: z.literal("twin.idle"),
     payload: z.object({}),

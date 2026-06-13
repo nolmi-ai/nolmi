@@ -11,6 +11,7 @@ import type {
 import {
   generateObject,
   generateText,
+  streamText,
   stepCountIs,
   type LanguageModel,
   type ModelMessage,
@@ -1057,6 +1058,12 @@ export class TwinService {
           factsBlock,
           episodicBlock,
           focusBlock,
+          // Token-Streaming für den Web-Chat-Pfad: jeder Token-Chunk geht
+          // als twin.token-Event auf den Bus → SSE → Browser. Telegram sieht
+          // die Bus-Events nicht (kein SSE in Telegram) — kein Behaviour-Change
+          // dort. Der Audit-Write unten bleibt auf dem vollen finalen Text.
+          onToken: (chunk: string) =>
+            this.deps.bus.emit({ type: "twin.token", payload: { chunk } }),
         },
       );
       // #100: Slim-Projektion der konsultierten Memory-Hits für die UI. Score-
@@ -2550,6 +2557,13 @@ export class TwinService {
        * fällt er im composeOwnerSystemPrompt-`.filter(Boolean)` raus.
        */
       focusBlock?: string | null;
+      /**
+       * Streaming-Callback: wird pro Token aufgerufen, wenn der streamText-Pfad
+       * aktiv ist (hasTools=false). Default=undefined → blockend (generateText).
+       * NUR für den Web-Owner-Chat gesetzt — alle anderen Caller (Telegram,
+       * A2A, Mandate, Reflect, …) übergeben kein onToken und bleiben blockend.
+       */
+      onToken?: (chunk: string) => void;
     } = {},
   ): Promise<{
     content: string;
@@ -2723,6 +2737,55 @@ REGEL 6: Wenn der User dich explizit bittet, ein Tool zu nutzen ("rufe das X-Too
     // Followup-Step). Vorher nur im Codex-Provider-Output, jetzt provider-
     // agnostisch in der Audit-Metadata sichtbar.
     const startedAt = Date.now();
+
+    // Streaming-Pfad (text-only, kein Tool-Use): Token-by-Token-Emit auf den
+    // Bus, finale Antwort aus akkumuliertem Buffer. Audit-Vertrag bleibt
+    // identisch (content = voller Text am Ende). Tool-Use-Pfad (hasTools=true)
+    // läuft weiter durch generateText — kein Behaviour-Change dort.
+    if (!hasTools && options.onToken) {
+      const { onToken } = options;
+      const streamRes = streamText({
+        model: activeModel,
+        system,
+        messages: toModelMessages(messages),
+      });
+      let streamFullText = "";
+      for await (const chunk of streamRes.textStream) {
+        onToken(chunk);
+        streamFullText += chunk;
+      }
+      const [sFinishReason, sUsage, sMeta, sResponse] = await Promise.all([
+        streamRes.finishReason,
+        streamRes.usage,
+        streamRes.providerMetadata,
+        streamRes.response,
+      ]);
+      const streamLatencyMs = Date.now() - startedAt;
+      const sPK = isOAuth ? "openai-codex" : "anthropic";
+      const sRawMeta = (sMeta ?? {}) as Record<string, unknown>;
+      const sNestedMeta =
+        (sRawMeta[sPK] as Record<string, unknown> | undefined) ?? {};
+      const [sProviderName, ...sModelParts] = activeModelLabel.split("/");
+      const sResponseModelId = (sResponse as { modelId?: string } | undefined)
+        ?.modelId;
+      const sModelName =
+        sResponseModelId || sModelParts.join("/") || undefined;
+      return {
+        content: streamFullText,
+        metadata: {
+          ...sNestedMeta,
+          provider: sProviderName ?? sPK,
+          ...(sModelName ? { model: sModelName } : {}),
+          authMode: isOAuth ? "oauth" : "api_key",
+          twinId: this.deps.twinId,
+          latencyMs: streamLatencyMs,
+          usage: sUsage,
+          finishReason: sFinishReason,
+        },
+        ...(prePassSkillName ? { prePassSkillName } : {}),
+      };
+    }
+
     const result = await generateText({
       model: activeModel,
       system,
