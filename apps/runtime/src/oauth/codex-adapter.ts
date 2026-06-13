@@ -131,6 +131,48 @@ export class CodexAdapter {
     });
   }
 
+  /**
+   * Streaming-Variante: gibt den rohen SSE-ReadableStream zurück (kein Retry,
+   * kein Parser-Akkumulation). Wird von doStream im Codex-Vercel-Provider
+   * genutzt, um SSE-Events inkrementell als LanguageModelV3StreamPart zu mappen.
+   * Kein Retry-Wrapper — ein unterbrochener Stream kann nicht sauber mid-stream
+   * neugestartet werden; Fehler propagieren direkt zum Caller.
+   */
+  async streamFetch(input: CodexAdapterInput): Promise<ReadableStream<Uint8Array>> {
+    const token = await this.refreshService.ensureFresh(input.twinId);
+    const body = {
+      model: input.model ?? DEFAULT_MODEL,
+      instructions: input.instructions,
+      input: input.input,
+      tools: input.tools ?? [],
+      tool_choice: "auto",
+      parallel_tool_calls: false,
+      store: false,
+      stream: true,
+    };
+    const res = await fetch(CODEX_ENDPOINT, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token.accessToken}`,
+        "Content-Type": "application/json",
+        "OpenAI-Beta": "responses=v1",
+      },
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) {
+      const snippet = await res.text().catch(() => "");
+      throw new CodexHttpError(
+        `[codex-adapter:stream] HTTP ${res.status}: ${snippet.slice(0, 300)}`,
+        res.status,
+        snippet.slice(0, 300),
+      );
+    }
+    if (!res.body) {
+      throw new CodexHttpError("[codex-adapter:stream] response.body ist null", 0, "");
+    }
+    return res.body;
+  }
+
   /** Ein vollständiger fetch + SSE-Parse-Durchlauf. Bei Retry wird das
    *  komplett neu gestartet — kein previous_response_id, frischer Parser. */
   private async executeRequest(

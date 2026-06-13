@@ -7,7 +7,9 @@ import type {
   LanguageModelV3GenerateResult,
   LanguageModelV3Prompt,
   LanguageModelV3ProviderTool,
+  LanguageModelV3StreamPart,
   LanguageModelV3StreamResult,
+  LanguageModelV3ToolCall,
 } from "@ai-sdk/provider";
 
 import { CodexAdapter } from "./codex-adapter.js";
@@ -100,13 +102,201 @@ class CodexLanguageModel implements LanguageModelV3 {
   }
 
   async doStream(
-    _options: LanguageModelV3CallOptions,
+    options: LanguageModelV3CallOptions,
   ): Promise<LanguageModelV3StreamResult> {
-    throw new Error(
-      "[codex-vercel-provider] doStream not implemented in Phase 3.4.1 — " +
-        "TwinService nutzt nur generateText (doGenerate-only). Phase 3.4.5 " +
-        "entscheidet ob doStream gebraucht wird.",
-    );
+    const { instructions, input } = mapV3PromptToCodex(options.prompt);
+    const tools = mapV3ToolsToCodex(options.tools);
+
+    const sseBody = await this.adapter.streamFetch({
+      twinId: this.twinId,
+      instructions,
+      input: input as never,
+      ...(tools.length > 0 ? { tools } : {}),
+      model: this.modelId,
+    });
+
+    const TEXT_ID = "text-1";
+
+    const stream = new ReadableStream<LanguageModelV3StreamPart>({
+      async start(controller) {
+        controller.enqueue({ type: "stream-start", warnings: [] });
+
+        const reader = sseBody.getReader();
+        const decoder = new TextDecoder();
+        let buffer = "";
+        let textStarted = false;
+        // Tool-Calls werden atomar am Ende geliefert (kein streaming der Args).
+        // Akkumulierung wie im CodexSSEParser (item_id als Key).
+        const toolCallsMap = new Map<
+          string,
+          { callId: string; name: string; arguments: string }
+        >();
+        let status: string | null = null;
+
+        const handleEvent = (parsed: Record<string, unknown>): void => {
+          const type = parsed.type;
+          if (typeof type !== "string") return;
+
+          if (type === "response.output_text.delta") {
+            const delta = typeof parsed.delta === "string" ? parsed.delta : "";
+            if (!delta) return;
+            if (!textStarted) {
+              controller.enqueue({ type: "text-start", id: TEXT_ID });
+              textStarted = true;
+            }
+            controller.enqueue({ type: "text-delta", id: TEXT_ID, delta });
+          } else if (
+            type === "response.output_item.added" ||
+            type === "response.output_item.done"
+          ) {
+            const item =
+              typeof parsed.item === "object" && parsed.item !== null
+                ? (parsed.item as Record<string, unknown>)
+                : null;
+            if (!item || item.type !== "function_call") return;
+            const itemId = typeof item.id === "string" ? item.id : "";
+            if (!itemId) return;
+            const callId =
+              typeof item.call_id === "string" ? item.call_id : "";
+            const name = typeof item.name === "string" ? item.name : "";
+            const args =
+              typeof item.arguments === "string" ? item.arguments : "";
+            const existing = toolCallsMap.get(itemId);
+            if (existing) {
+              if (callId) existing.callId = callId;
+              if (name) existing.name = name;
+              if (args) existing.arguments = args;
+            } else {
+              toolCallsMap.set(itemId, { callId, name, arguments: args });
+            }
+          } else if (type === "response.function_call_arguments.delta") {
+            const itemId =
+              typeof parsed.item_id === "string" ? parsed.item_id : "";
+            const delta =
+              typeof parsed.delta === "string" ? parsed.delta : "";
+            if (!itemId || !delta) return;
+            const tc = toolCallsMap.get(itemId);
+            if (tc) tc.arguments += delta;
+          } else if (type === "response.function_call_arguments.done") {
+            const itemId =
+              typeof parsed.item_id === "string" ? parsed.item_id : "";
+            const args =
+              typeof parsed.arguments === "string" ? parsed.arguments : "";
+            if (!itemId) return;
+            const tc = toolCallsMap.get(itemId);
+            if (tc && args) tc.arguments = args;
+          } else if (type === "response.completed") {
+            const resp =
+              typeof parsed.response === "object" && parsed.response !== null
+                ? (parsed.response as Record<string, unknown>)
+                : null;
+            if (resp && typeof resp.status === "string") status = resp.status;
+          } else if (
+            type === "response.failed" ||
+            type === "response.error"
+          ) {
+            const errObj =
+              typeof parsed.error === "object" && parsed.error !== null
+                ? (parsed.error as Record<string, unknown>)
+                : {};
+            const msg =
+              typeof errObj.message === "string"
+                ? errObj.message
+                : `Codex-Stream-Error (${type})`;
+            throw new Error(`[codex-vercel-provider:doStream] ${msg}`);
+          }
+          // Bekannte No-Op-Events + unbekannte → ignorieren
+        };
+
+        const processRawEvent = (rawEvent: string): void => {
+          const dataLine = rawEvent
+            .split("\n")
+            .find((l) => l.startsWith("data: "));
+          if (!dataLine) return;
+          const dataStr = dataLine.slice(6).trim();
+          if (dataStr === "[DONE]") return;
+          try {
+            const parsed = JSON.parse(dataStr) as unknown;
+            if (typeof parsed === "object" && parsed !== null) {
+              handleEvent(parsed as Record<string, unknown>);
+            }
+          } catch (parseErr) {
+            // JSON.parse-Fehler → ignorieren (Konsistenz mit CodexSSEParser).
+            // Alle anderen Fehler (aus handleEvent) nach oben propagieren.
+            if (parseErr instanceof SyntaxError) return;
+            throw parseErr;
+          }
+        };
+
+        try {
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) {
+              if (buffer.trim()) processRawEvent(buffer);
+              break;
+            }
+            buffer += decoder.decode(value, { stream: true });
+            const parts = buffer.split("\n\n");
+            buffer = parts.pop() ?? "";
+            for (const rawEvent of parts) {
+              if (rawEvent.trim()) processRawEvent(rawEvent);
+            }
+          }
+
+          // Text-Ende signalisieren
+          if (textStarted) {
+            controller.enqueue({ type: "text-end", id: TEXT_ID });
+          }
+
+          // Tool-Calls atomar am Ende (kein streaming der Args)
+          for (const tc of toolCallsMap.values()) {
+            controller.enqueue({
+              type: "tool-call",
+              toolCallId: tc.callId || tc.name,
+              toolName: tc.name,
+              input: tc.arguments,
+            } satisfies LanguageModelV3ToolCall);
+          }
+
+          // Finish-Chunk (Pflicht, letzter Chunk)
+          const hasToolCalls = toolCallsMap.size > 0;
+          controller.enqueue({
+            type: "finish",
+            finishReason: {
+              unified: hasToolCalls
+                ? "tool-calls"
+                : status === "completed"
+                  ? "stop"
+                  : status === "incomplete"
+                    ? "length"
+                    : "other",
+              raw: status ?? undefined,
+            },
+            usage: {
+              inputTokens: {
+                total: undefined,
+                noCache: undefined,
+                cacheRead: undefined,
+                cacheWrite: undefined,
+              },
+              outputTokens: {
+                total: undefined,
+                text: undefined,
+                reasoning: undefined,
+              },
+            },
+          });
+
+          controller.close();
+        } catch (err) {
+          controller.error(err);
+        } finally {
+          reader.releaseLock();
+        }
+      },
+    });
+
+    return { stream };
   }
 }
 
