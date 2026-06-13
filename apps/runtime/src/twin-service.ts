@@ -2738,28 +2738,114 @@ REGEL 6: Wenn der User dich explizit bittet, ein Tool zu nutzen ("rufe das X-Too
     // agnostisch in der Audit-Metadata sichtbar.
     const startedAt = Date.now();
 
-    // Streaming-Pfad (text-only, kein Tool-Use): Token-by-Token-Emit auf den
-    // Bus, finale Antwort aus akkumuliertem Buffer. Audit-Vertrag bleibt
-    // identisch (content = voller Text am Ende). Tool-Use-Pfad (hasTools=true)
-    // läuft weiter durch generateText — kein Behaviour-Change dort.
-    if (!hasTools && options.onToken) {
+    // Streaming-Pfad: fullStream liefert text-delta + tool-call/result-Chunks
+    // in einem Strom. Text-Deltas → onToken → Bus; Tool-Chunks durchlaufen —
+    // tool.call.start/complete kommen weiterhin aus tool-bridge.ts execute().
+    // Audit-Vertrag und Approval-Detect identisch zum generateText-Pfad.
+    if (options.onToken) {
       const { onToken } = options;
       const streamRes = streamText({
         model: activeModel,
         system,
         messages: toModelMessages(messages),
+        ...(hasTools
+          ? {
+              tools: mcpTools,
+              stopWhen: stepCountIs(5),
+              ...(forcedTool ? { toolChoice: forcedTool } : {}),
+            }
+          : {}),
       });
+
       let streamFullText = "";
-      for await (const chunk of streamRes.textStream) {
-        onToken(chunk);
-        streamFullText += chunk;
+      for await (const chunk of streamRes.fullStream) {
+        // AI SDK v6: text-delta-Chunks liefern das Delta im Feld `text`.
+        if (chunk.type === "text-delta") {
+          onToken(chunk.text);
+          streamFullText += chunk.text;
+        }
+        // Alle anderen Chunk-Typen (tool-call, tool-result, step-finish, …)
+        // stilll durchlaufen — kein Bus-Emit hier (kommt aus tool-bridge).
       }
-      const [sFinishReason, sUsage, sMeta, sResponse] = await Promise.all([
-        streamRes.finishReason,
-        streamRes.usage,
-        streamRes.providerMetadata,
-        streamRes.response,
-      ]);
+
+      const [sSteps, sFinishReason, sUsagePre, sMeta, sResponse] =
+        await Promise.all([
+          streamRes.steps,
+          streamRes.finishReason,
+          streamRes.usage,
+          streamRes.providerMetadata,
+          streamRes.response,
+        ]);
+
+      // Synthetisches Result-Objekt: dieselbe Schnittstelle wie GenerateTextOutcome,
+      // damit detectToolApprovalRequest + collectAllTool* unverändert laufen.
+      const streamResultLike = {
+        steps: sSteps,
+        toolCalls: sSteps.flatMap((s) => (s as { toolCalls?: unknown[] }).toolCalls ?? []),
+        toolResults: sSteps.flatMap((s) => (s as { toolResults?: unknown[] }).toolResults ?? []),
+        text: streamFullText,
+        finishReason: sFinishReason,
+      } as unknown as GenerateTextOutcome;
+
+      // Approval-Detect (heikelste Stelle): identische Logik wie generateText-Pfad,
+      // auf awaited steps/content — Verzweigung auto-approve vs. pending bleibt
+      // exakt gleich.
+      if (hasTools) {
+        const approval = detectToolApprovalRequest(streamResultLike);
+        if (approval) {
+          throw new ApprovalRequestedError(approval);
+        }
+      }
+
+      // Followup-Call (forcedTool-Edge-Case): selbe Bedingung wie generateText-Pfad.
+      // forcedTool → nur 1 Step, text="", finishReason="tool-calls" → Synthese-Step.
+      let sUsage = sUsagePre;
+      const sNeedsFollowUp =
+        forcedTool !== null &&
+        streamFullText === "" &&
+        (streamResultLike.toolCalls as unknown[]).length > 0 &&
+        sFinishReason === "tool-calls";
+
+      if (sNeedsFollowUp) {
+        console.log(
+          `[mcp:tools] forcedToolChoice + finishReason=tool-calls — running followup for final text (stream, twin=${this.deps.twinId})`,
+        );
+        const sResponseMessages =
+          (sResponse as { messages?: unknown[] } | undefined)?.messages ?? [];
+        const followupStreamRes = streamText({
+          model: activeModel,
+          system,
+          messages: [
+            ...toModelMessages(messages),
+            ...(sResponseMessages as Parameters<typeof toModelMessages>[0]),
+          ],
+          tools: mcpTools,
+          stopWhen: stepCountIs(2),
+        });
+        for await (const fChunk of followupStreamRes.fullStream) {
+          if (fChunk.type === "text-delta") {
+            onToken(fChunk.text);
+            streamFullText += fChunk.text;
+          }
+        }
+        const followupUsage = await followupStreamRes.usage;
+        sUsage = mergeTokenUsage(sUsage, followupUsage);
+      }
+
+      // Tool-Calls für Audit-Metadata — wie generateText-Pfad.
+      const sAllToolCalls = collectAllToolCalls(streamResultLike);
+      const sAllToolResults = collectAllToolResults(streamResultLike);
+      const sToolCallsForAudit: AuditToolCall[] = sAllToolCalls.map((tc) => {
+        const matchingResult = sAllToolResults.find(
+          (tr) => tr.toolCallId === tc.toolCallId,
+        );
+        return {
+          toolName: tc.toolName,
+          input: tc.input,
+          output: matchingResult ? matchingResult.output : null,
+        };
+      });
+
       const streamLatencyMs = Date.now() - startedAt;
       const sPK = isOAuth ? "openai-codex" : "anthropic";
       const sRawMeta = (sMeta ?? {}) as Record<string, unknown>;
@@ -2781,6 +2867,9 @@ REGEL 6: Wenn der User dich explizit bittet, ein Tool zu nutzen ("rufe das X-Too
           latencyMs: streamLatencyMs,
           usage: sUsage,
           finishReason: sFinishReason,
+          ...(sToolCallsForAudit.length > 0
+            ? { toolCalls: sToolCallsForAudit }
+            : {}),
         },
         ...(prePassSkillName ? { prePassSkillName } : {}),
       };
