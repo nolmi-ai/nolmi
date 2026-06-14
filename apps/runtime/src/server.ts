@@ -1163,6 +1163,42 @@ function registerSkillRoutes(
     },
   );
 
+  // ─── Approval-Toggle (pro Skill, auch für MCP-Skills) ──────────────────
+  // Dedizierter Partial-Endpoint analog /active. Der allgemeine PATCH
+  // /skills/:skillId sperrt MCP-Skills (403 mcp_skill_not_editable) —
+  // hier KEIN Source-Check, weil der explizite User-Override genau die
+  // Absicht ist. Manifest wird server-seitig gemergt — kein Feldverlust.
+  app.patch<{ Params: { handle: string; skillId: string } }>(
+    "/twins/:handle/skills/:skillId/approval",
+    async (request, reply) => {
+      const ctx = await requireOwner(request, reply, request.params.handle);
+      if (!ctx) return;
+      const { entry } = ctx;
+
+      const parsed = z
+        .object({ requiresApproval: z.boolean() })
+        .safeParse(request.body);
+      if (!parsed.success) {
+        return reply.status(400).send({ error: parsed.error.message });
+      }
+
+      const existing = deps.skillRepo.findById(request.params.skillId);
+      if (!existing || existing.twinId !== entry.twinId) {
+        return reply.status(404).send({ error: "Skill nicht für diesen Twin" });
+      }
+
+      // Nur requiresApproval überschreiben — alle anderen Manifest-Felder
+      // (capability, mcpServerId, mcpToolName, mcpInputSchema, etc.) bleiben.
+      const updated = deps.skillRepo.update(existing.skillId, {
+        manifestJson: {
+          ...existing.manifestJson,
+          requiresApproval: parsed.data.requiresApproval,
+        },
+      });
+      return toSkillUiPayload(updated);
+    },
+  );
+
   // ─── #86: Detail-View für Edit-Prefill ──────────────────────────────────
   app.get<{ Params: { handle: string; skillId: string } }>(
     "/twins/:handle/skills/:skillId",
