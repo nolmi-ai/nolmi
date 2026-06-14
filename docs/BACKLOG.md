@@ -3324,13 +3324,11 @@ Ein **CLA** (Contributor License Agreement) oder mindestens **DCO** (Developer C
 
 Tool-Calls kommen heute atomar am Ende (fullStream, 892a4b8). Live `tool-input-delta`-Streaming wäre Feinschliff — kein Schmerz, kein Sofort-Druck.
 
-### Approval-Steuerung: requiresApproval per Skill konfigurierbar (🔴 Design-Entscheidung ausstehend)
+### Approval-Steuerung: requiresApproval per Skill konfigurierbar — ✅ DONE (b95eb5c + d14816a, Tag 46)
 
-**Status:** OFFEN · **Diagnose done, Bau offen** · **Aus:** Tag 45 Backlog-Faden
+Dedizierter `/approval`-Endpoint + klickbarer Toggle in Settings-UI. Prod-verifiziert: auto-Tool läuft ohne Pending, zurückgeschaltet wieder pending. Default unverändert (Server-Default = requires approval).
 
-**Mechanismus (Befund read-only):** `skill.manifestJson.requiresApproval` pro Skill (`tool-bridge.ts:108`), änderbar via PATCH `/twins/:handle/skills/:skillId` (manifestJson), überlebt Re-Sync (`skill-sync.ts:109`). Server-Default `mcp_servers.default_requires_approval` = nur Erst-Quelle. UI: read-only-Badge, kein Toggle; kein CLI. Die zwei Server-Varianten (`-approval`/ohne) sind technisch unnötig — ein Server + Per-Skill-Toggle täte es.
-
-**🔴 Design-Entscheidung VOR dem Bau:** welche Tools auto-approve, welche behalten Freigabe-Pflicht? Kontrollgrenze Richtung A2A-Autonomie. Vorschlag-Trennung: read-only/lesend (list, scrape, search, echo) → auto; wirksam/schreibend (browser-agent, computer-use, später Kalender/Mail/A2A-Send) → Approval. Markus entscheidet.
+**Optional offen (nice-to-have, kein Druck):** Server-Sammelschalter (alle Tools eines Servers auf einmal). Die zwei Server-Varianten (`-approval`/ohne) sind jetzt technisch redundant — Aufräumen optional.
 
 ---
 
