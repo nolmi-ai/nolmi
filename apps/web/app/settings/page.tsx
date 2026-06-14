@@ -644,6 +644,52 @@ function SettingsInner() {
   }
 
   // #87: MCP-Server toggle is_active. Optimistic-Update + Revert bei Fehler,
+  // analog zu toggleSkill — nur anderer Endpoint + Feld.
+  async function toggleApproval(skill: Skill) {
+    if (!selectedHandle) return;
+    const next = !skill.requiresApproval;
+
+    setSkillError(null);
+    setSkills((curr) =>
+      curr.map((s) => (s.skillId === skill.skillId ? { ...s, requiresApproval: next } : s)),
+    );
+    setSkillBusyIds((curr) => new Set(curr).add(skill.skillId));
+
+    try {
+      const res = await fetch(
+        `${RUNTIME_URL}/twins/${selectedHandle}/skills/${skill.skillId}/approval`,
+        {
+          method: "PATCH",
+          credentials: "include",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ requiresApproval: next }),
+        },
+      );
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(
+          (body as { error?: string }).error ?? `HTTP ${res.status} — Approval-Toggle fehlgeschlagen`,
+        );
+      }
+      const updated = (await res.json()) as Skill;
+      setSkills((curr) => curr.map((s) => (s.skillId === updated.skillId ? updated : s)));
+    } catch (err) {
+      setSkills((curr) =>
+        curr.map((s) =>
+          s.skillId === skill.skillId ? { ...s, requiresApproval: skill.requiresApproval } : s,
+        ),
+      );
+      setSkillError(err instanceof Error ? err.message : "Approval-Toggle fehlgeschlagen");
+      setTimeout(() => setSkillError(null), 5000);
+    } finally {
+      setSkillBusyIds((curr) => {
+        const next = new Set(curr);
+        next.delete(skill.skillId);
+        return next;
+      });
+    }
+  }
+
   // analog zu toggleSkill.
   async function toggleMcpServer(server: McpServerUiPayload) {
     if (!selectedHandle) return;
@@ -1156,8 +1202,24 @@ function SettingsInner() {
                     <span className="text-muted">
                       {skill.instructionsLength} chars Instructions
                       {skill.hasScript && " · Script"}
-                      {skill.requiresApproval && " · requires approval"}
                     </span>
+                    {/* Approval-Toggle: Freigabe (sicher, Default) vs. auto-approve (autonom).
+                        Warn-Farbe bei auto-approve — sichtbares Signal dass das Tool autonom läuft. */}
+                    <button
+                      type="button"
+                      onClick={() => void toggleApproval(skill)}
+                      disabled={skillBusyIds.has(skill.skillId) || busy}
+                      title={skill.requiresApproval
+                        ? "Klick → auto-approve (läuft ohne Freigabe)"
+                        : "Klick → requires approval (Freigabe in Inbox)"}
+                      className={`font-mono text-xs px-1.5 py-0.5 rounded border disabled:opacity-40 disabled:cursor-not-allowed transition-colors ${
+                        skill.requiresApproval
+                          ? "border-border text-muted hover:border-warn hover:text-warn"
+                          : "border-warn text-warn hover:border-border hover:text-muted"
+                      }`}
+                    >
+                      {skill.requiresApproval ? "requires approval" : "auto-approve ⚠"}
+                    </button>
                     <span className="ml-auto">
                       {isMcp ? (
                         <span className="text-muted italic">
