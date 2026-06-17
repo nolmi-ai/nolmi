@@ -3318,19 +3318,17 @@ Ein **CLA** (Contributor License Agreement) oder mindestens **DCO** (Developer C
 
 Code war komplett. Ablauf live bestätigt auf Prod: Owner approved → @markus formuliert autonom → @florian antwortet autonom (familiarity=vertraut) → Owner sieht Antwort im A2AChat. Kein Bau nötig gewesen.
 
-### A2A Glied 2: mehrstufiger Austausch (twin-reply als Folgerunden-Einstieg) — OFFEN, nächster Bogen
+### A2A Glied 2: mehrstufiger Austausch — Etappe 1 ✅ LOKAL VERIFIZIERT (b357f6c+e44461d, Tag 47); Etappe 2 OFFEN
 
-**Status:** OFFEN · **Größe:** M-L · **Aus:** Tag 46 Live-Beweis (Florian fragte zurück, @markus reagierte nicht)
+**Etappe 1 (verifiziert):** Thread-ID-Fundament (a2aThreadId-Propagation) + EINE Folgerunde + Hard-Stop. Live-Smoke: Runde 2 lief autonom, Stop nach 1 Folgerunde hielt. Noch nicht deployt — Deploy zusammen mit Etappe 2.
 
-**Bruchpunkt heute:** `twin-reply` = Hard-Stop in `receiveBridgeMessage` (nur `reply-received`-Audit + Bus-Event, kein LLM, keine Folgerunde). Owner muss manuell neu anstoßen.
+**Etappe 2 (OFFEN, nächster frischer Bogen):** Grenze 1→5 Folgerunden pro Seite; Kontrollgrenzen festgelegt (Fundament bewiesen, Rundenzähler trägt):
+- **Abbruch-Mechanik** (einziger M-Baustein, neue Infra): `In-Memory Set abortedThreadIds` + `POST /twins/:handle/a2a/abort` + A2AChat-Abbruch-Button + Check vor jeder Folgerunde
+- **LLM-Zusammenfassung** bei Limit → Owner via `sendToOwner`/Telegram (vorhanden)
+- **Schleifenschutz** ergibt sich aus Rundenlimit (5/Seite)
+- **Owner-Mitlesen**: A2AChat existiert; Symmetrie für Test okay
 
-**Was gebraucht wird:**
-- `twin-reply` nicht als Endpunkt, sondern als möglichen Folgerunden-Einstieg behandeln (analog `handleTrustedBridgeMessage`) — mit Bedingung: war das ein "Folge-Austausch" oder eine finale Antwort?
-- Rundenlimit (Vorschlag max 5 Runden/Seite), danach Rückfall an Owner mit Zusammenfassung
-- Schleifenschutz (Twin A und B dürfen nicht endlos ping-pongen)
-- Owner-Mitlesen: A2AChat existiert; Abbruch-Möglichkeit mid-thread
-
-🔴 **Design-Entscheidung VOR Bau:** Kontrollgrenze — wie viele Runden autonom, Abbruch-Trigger, Owner-Eingriff. Heikelste Autonomie-Stufe im System (zwei Twins verhandeln autonom, reale Person auf beiden Seiten).
+🔴 Design-Entscheidungen VOR Etappe 2: Rundenlimit fest auf 5 bestätigt? Zusammenfassung via Telegram oder nur A2AChat? Abbruch: mid-thread nur für Owner oder auch bei Fehlerrate?
 
 ---
 
