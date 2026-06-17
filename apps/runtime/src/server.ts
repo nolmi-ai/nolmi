@@ -2784,6 +2784,39 @@ function registerConversationRoutes(
     },
   );
 
+  // POST /twins/:handle/a2a/abort — A2A-Thread abbrechen (Glied 2 Etappe 2).
+  // Owner bricht einen laufenden autonomen Twin-zu-Twin-Austausch ab.
+  // threadId = sentMessageId des eröffnenden send_to_twin (= a2aThreadId-Konvention).
+  // IDOR: threadId muss zu einem Audit dieses Twins gehören.
+  // In-Memory: pro Boot ephemer — Restart setzt alle Abbrüche zurück.
+  app.post<{ Params: { handle: string }; Body: { threadId?: string } }>(
+    "/twins/:handle/a2a/abort",
+    async (request, reply) => {
+      const ctx = await requireOwner(request, reply, request.params.handle);
+      if (!ctx) return;
+      const { entry } = ctx;
+
+      const threadId = request.body?.threadId;
+      if (!threadId || typeof threadId !== "string") {
+        return reply.status(400).send({ error: "threadId erforderlich" });
+      }
+
+      // IDOR: threadId muss zu einem Audit dieses Twins gehören.
+      const audits = await deps.audit.list({ limit: 500, twinId: entry.twinId });
+      const belongs = audits.some((a) => {
+        const outId = (a.output as { a2aThreadId?: string } | null)?.a2aThreadId;
+        const inId = (a.input as { a2aThreadId?: string })?.a2aThreadId;
+        return outId === threadId || inId === threadId;
+      });
+      if (!belongs) {
+        return reply.status(404).send({ error: "Thread nicht für diesen Twin" });
+      }
+
+      entry.service.abortThread(threadId);
+      return { ok: true };
+    },
+  );
+
   // POST /twins/:handle/conversations/reset — Direct-Chat-Konversation beenden
   // (#71b/#80 Sub-Schritt D). Lazy-Start der nächsten Konversation passiert
   // beim ersten Send via getOrStart() im TwinService. Idempotent: ohne aktive

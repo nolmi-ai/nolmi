@@ -397,6 +397,26 @@ export class TwinService {
    *  Auth-Modi laufen jetzt durch dieselbe Vercel-generateText-Pipeline. */
   private codexProvider: CodexProvider | null = null;
 
+  /**
+   * A2A Glied 2 — Abbruch-Mechanik: In-Memory-Set abgebrochener Threads.
+   * Pro Boot ephemer (bei Restart vergessen → Thread kann erneut anlaufen;
+   * für den Pilot akzeptiert, weil Neustart eine neue Verhandlungssitzung
+   * impliziert). Der Owner ruft POST /twins/:handle/a2a/abort, der Endpoint
+   * setzt die threadId hier. receiveBridgeMessage prüft vor jeder Folgerunde.
+   */
+  private readonly abortedThreadIds = new Set<string>();
+
+  /** Markiert einen A2A-Thread als abgebrochen — keine weiteren Folgerunden. */
+  abortThread(threadId: string): void {
+    this.abortedThreadIds.add(threadId);
+    console.log(`[a2a:glied2] Thread abgebrochen: ${threadId}`);
+  }
+
+  /** Prüft ob ein Thread abgebrochen wurde (vor Folgerunde aufrufen). */
+  isThreadAborted(threadId: string): boolean {
+    return this.abortedThreadIds.has(threadId);
+  }
+
   constructor(private deps: TwinServiceDeps) {
     this.mcp = new McpClientManager(
       deps.twinId,
@@ -1417,13 +1437,17 @@ export class TwinService {
         },
       });
 
-      // A2A Glied 2 — Etappe 1: EINE kontrollierte Folgerunde.
-      // Voraussetzungen: Thread-ID bekannt + Partner vertraut + noch keine
-      // eigene Follow-Up-Runde für diesen Thread. Danach immer Hard-Stop
-      // (Etappe-2-Loop kommt später, bewusst hier nicht freigeschaltet).
+      // A2A Glied 2 — Etappe 1→2: Kontrollierte Folgerunden.
+      // Voraussetzungen: Thread-ID bekannt + Partner vertraut + nicht abgebrochen
+      // + noch unter Rundengrenze. Etappe-1-Grenze (< 1) bleibt bis SS2 gesetzt.
       const mayAutoFollow =
         this.deps.trustRepo.canAutoRespond(this.deps.twinId, msg.fromHandle);
-      if (mayAutoFollow) {
+      // Abbruch-Check (Etappe 2, Bremse): Owner kann jederzeit stoppen.
+      if (mayAutoFollow && this.abortedThreadIds.has(a2aThreadId)) {
+        console.log(
+          `[a2a:glied2] Thread=${a2aThreadId} abgebrochen — kein weiterer Send`,
+        );
+      } else if (mayAutoFollow) {
         const followUpsDone = await this.countA2aFollowUpRounds(a2aThreadId);
         if (followUpsDone < 1) {
           console.log(

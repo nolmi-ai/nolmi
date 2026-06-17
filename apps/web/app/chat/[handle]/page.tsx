@@ -2248,11 +2248,41 @@ function A2AChat({
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // A2A Glied 2: Abbruch-State (optimistic, nur UI — Runtime hat eigenes Set).
+  const [aborted, setAborted] = useState(false);
   const markedRef = useRef<Set<string>>(new Set());
   const { containerRef, bottomRef, onScroll } = useAutoScroll(
     messages.length,
     `a2a:${partner}`,
   );
+
+  // Thread-ID = bridgeMessageId des eröffnenden send_to_twin (Konvention aus Glied 2).
+  const activeThreadId =
+    messages.find(
+      (m) => m.direction === "sent" && m.auditCapability === "send_to_twin",
+    )?.bridgeMessageId ?? null;
+
+  async function abortThread() {
+    if (!activeThreadId || aborted) return;
+    try {
+      const res = await fetch(
+        `${RUNTIME_URL}/twins/${handle}/a2a/abort`,
+        {
+          method: "POST",
+          credentials: "include",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ threadId: activeThreadId }),
+        },
+      );
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error((body as { error?: string }).error ?? `HTTP ${res.status}`);
+      }
+      setAborted(true);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Abbruch fehlgeschlagen");
+    }
+  }
 
   const load = useCallback(async () => {
     try {
@@ -2416,6 +2446,21 @@ function A2AChat({
           className="flex-1 h-full bg-bg border border-border rounded px-3 py-2 text-sm text-text resize-none focus:outline-none focus:border-accent"
           rows={2}
         />
+        {/* A2A Glied 2: Abbruch-Button — sichtbar wenn Thread aktiv + nicht schon abgebrochen */}
+        {activeThreadId && !aborted && (
+          <button
+            type="button"
+            onClick={() => void abortThread()}
+            disabled={busy}
+            title="Autonomen Austausch abbrechen — @markus sendet keine weiteren Folgerunden"
+            className="px-3 py-2 border border-warn/60 text-warn text-xs rounded disabled:opacity-30 disabled:cursor-not-allowed hover:bg-warn/10 transition-colors"
+          >
+            abbrechen
+          </button>
+        )}
+        {activeThreadId && aborted && (
+          <span className="text-xs text-muted">abgebrochen</span>
+        )}
         <button
           onClick={send}
           disabled={busy || !input.trim()}
