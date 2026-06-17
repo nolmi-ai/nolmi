@@ -3318,17 +3318,23 @@ Ein **CLA** (Contributor License Agreement) oder mindestens **DCO** (Developer C
 
 Code war komplett. Ablauf live bestätigt auf Prod: Owner approved → @markus formuliert autonom → @florian antwortet autonom (familiarity=vertraut) → Owner sieht Antwort im A2AChat. Kein Bau nötig gewesen.
 
-### A2A Glied 2: mehrstufiger Austausch — Etappe 1 ✅ LOKAL VERIFIZIERT (b357f6c+e44461d, Tag 47); Etappe 2 OFFEN
+### A2A Glied 2: mehrstufiger Austausch — Etappe 1+2 ✅ LOKAL VERIFIZIERT (Tag 47); 🔴 NICHT DEPLOYT
 
-**Etappe 1 (verifiziert):** Thread-ID-Fundament (a2aThreadId-Propagation) + EINE Folgerunde + Hard-Stop. Live-Smoke: Runde 2 lief autonom, Stop nach 1 Folgerunde hielt. Noch nicht deployt — Deploy zusammen mit Etappe 2.
+**Etappe 1 (verifiziert, b357f6c+e44461d):** Thread-ID-Fundament (a2aThreadId-Propagation) + EINE Folgerunde + Hard-Stop. Live-Smoke: Runde 2 lief autonom, Stop nach 1 Folgerunde hielt.
 
-**Etappe 2 (OFFEN, nächster frischer Bogen):** Grenze 1→5 Folgerunden pro Seite; Kontrollgrenzen festgelegt (Fundament bewiesen, Rundenzähler trägt):
-- **Abbruch-Mechanik** (einziger M-Baustein, neue Infra): `In-Memory Set abortedThreadIds` + `POST /twins/:handle/a2a/abort` + A2AChat-Abbruch-Button + Check vor jeder Folgerunde
-- **LLM-Zusammenfassung** bei Limit → Owner via `sendToOwner`/Telegram (vorhanden)
-- **Schleifenschutz** ergibt sich aus Rundenlimit (5/Seite)
-- **Owner-Mitlesen**: A2AChat existiert; Symmetrie für Test okay
+**Etappe 2 (verifiziert, SS1 `2275b3e` + SS2 `c163ede` + FIX `9ed53f0`):** Grenze 1→5 Folgerunden pro Seite, mit Bremse + Zusammenfassung. Reihenfolge im Loop bewusst **Bremse→Limit→Gas**:
+- **Abbruch-Mechanik** (SS1): In-Memory `abortedThreadIds`-Set + `POST /twins/:handle/a2a/abort` (requireOwner + IDOR) + A2AChat-Abbruch-Button + Check vor jeder Folgerunde.
+- **Loop** (SS2): `A2A_MAX_FOLLOWUP_ROUNDS` (Default 5, ENV, **Modul-Konstante → Restart-Pflicht**); Zählung pro Seite über `a2aThreadId`.
+- **LLM-Zusammenfassung** bei Limit ODER Abbruch: `summarizeA2aThreadOnce` → `a2a-summary`-Audit, dedup (`summarizedThreadIds`, ein Eintrag pro Thread).
+- **Abbruch-Fix** (9ed53f0): Button zielte via `.find()` auf den ältesten Eröffner (teils pre-SS1 `tid=null`); jetzt jüngster Thread-Anker `inReplyTo ?? bridgeMessageId`, null/System übersprungen. Empirisch gegen echte DBs: ins Set geschriebene ID == Live-Anker.
 
-🔴 Design-Entscheidungen VOR Etappe 2: Rundenlimit fest auf 5 bestätigt? Zusammenfassung via Telegram oder nur A2AChat? Abbruch: mid-thread nur für Owner oder auch bei Fehlerrate?
+**Live-Verifikation Tag 47:** (b) manueller Abbruch greift mid-thread ✅ · (e) Limit-Stop deterministisch via `A2A_MAX_FOLLOWUP_ROUNDS=2` ✅ (a2a-summary erzeugt, Loop gestoppt) · (f) Thread-ID konsistent/distinkt ✅.
+
+🔴 **NICHT DEPLOYT** — Etappe 1+2 sind lokal-only. Deploy = eigener Schritt (runtime+web, `NEXT_PUBLIC_RUNTIME_URL`-Build-Arg, Bundle-Check, Rollback-Tags).
+
+**Offene Folge-Bausteine (eigene spätere Bögen):**
+- **Beidseitiger Abbruch:** Abbruch ist heute EINSEITIG — nur der abbrechende Twin stoppt, die Gegenseite antwortet bis zu ihrem eigenen 5er-Limit weiter. Beidseitig braucht ein Bridge-Signal an die Gegenseite.
+- **Aktive Owner-Benachrichtigung:** `a2a-summary` landet als Audit im Inbox/Audit-Stream, NICHT als Push. TwinService hat keinen `sendToOwner`-Kanal (Telegram); aktive Zustellung ist der nächste gewünschte Baustein.
 
 ---
 
