@@ -3729,6 +3729,41 @@ Auch nicht "ae" für Eigennamen wie "Bär" oder Begriffe wie
 `.trim();
 
 /**
+ * Owner-lokale Anzeige-Zeitzone für den „Heute"-Block im System-Prompt.
+ * Reused dieselbe Env wie die Quiet-Hours (proactive-nudge-service), damit es
+ * EINE TZ-Quelle gibt; Default Europe/Berlin. Der Server läuft UTC — ohne TZ
+ * würde der Wochentag/das Datum nahe Mitternacht kippen.
+ */
+const OWNER_DISPLAY_TZ =
+  (process.env.QUIET_HOURS_TZ ?? "").trim() || "Europe/Berlin";
+
+/**
+ * Twin-Zeitgefühl: natürlichsprachlicher „Heute ist {Wochentag}, der {D}.
+ * {Monat} {Jahr}"-Block, owner-lokal formatiert. PRO REQUEST berechnet (now wird
+ * von composeOwnerSystemPrompt mit `new Date()` übergeben) — NICHT modul-
+ * konstant, sonst friert das Datum beim Boot ein. Ungültige TZ → UTC-Fallback
+ * (nie crashen).
+ */
+function buildDateBlock(now: Date): string {
+  const opts: Intl.DateTimeFormatOptions = {
+    weekday: "long",
+    day: "numeric",
+    month: "long",
+    year: "numeric",
+  };
+  let formatted: string;
+  try {
+    formatted = new Intl.DateTimeFormat("de-DE", {
+      timeZone: OWNER_DISPLAY_TZ,
+      ...opts,
+    }).format(now);
+  } catch {
+    formatted = new Intl.DateTimeFormat("de-DE", opts).format(now);
+  }
+  return `## Heute\n\nHeute ist ${formatted}.`;
+}
+
+/**
  * Composition des Owner-Direct-System-Prompts.
  *
  * Acht Schichten, Reihenfolge bewusst:
@@ -3772,9 +3807,15 @@ export function composeOwnerSystemPrompt(parts: {
   const personaWithFacts = parts.factsBlock
     ? `${parts.persona.systemPrompt}\n\n${parts.factsBlock}`
     : parts.persona.systemPrompt;
+  // Zeit-Anker: hohe Attention direkt nach Persona/Facts. PRO REQUEST via
+  // new Date() (per-Call von composeOwnerSystemPrompt) → kein eingefrorenes
+  // Boot-Datum. Greift über beide Modell-Pfade (Vercel + Codex), da runModel
+  // genau einmal hier durchgeht.
+  const dateBlock = buildDateBlock(new Date());
   return [
     parts.extraSystem,
     personaWithFacts,
+    dateBlock,
     parts.focusBlock,
     parts.skillsBlock,
     parts.toolUseDirective,
