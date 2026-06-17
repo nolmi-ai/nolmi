@@ -3281,6 +3281,30 @@ REGEL 6: Wenn der User dich explizit bittet, ein Tool zu nutzen ("rufe das X-Too
   }
 
   /**
+   * A2A Glied 2 — Etappe 3 SS2: Eröffnungstext eines Threads = der vom Twin
+   * formulierte send_to_twin-Text an den Partner (output.reply des Openers mit
+   * output.a2aThreadId === threadId). Dient als Auslöser-Vorspann der
+   * Zusammenfassung. Gibt null zurück, wenn der Twin den Thread NICHT eröffnet
+   * hat (Partner-initiiert → kein send_to_twin auf unserer Seite) → dann kein
+   * (erfundener) Vorspann.
+   */
+  private async getA2aOpeningText(threadId: string): Promise<string | null> {
+    const all = await this.deps.audit.repo.list({
+      limit: 500,
+      twinId: this.deps.twinId,
+    });
+    for (const e of all) {
+      if (e.capability !== "send_to_twin") continue;
+      if (e.status !== "executed") continue;
+      const out = e.output as { a2aThreadId?: string; reply?: string } | null;
+      if (out?.a2aThreadId === threadId && typeof out.reply === "string") {
+        return out.reply;
+      }
+    }
+    return null;
+  }
+
+  /**
    * A2A Glied 2 — Etappe 2: Zählt wie viele autonome Follow-Up-Runden
    * DIESE Seite für den gegebenen Thread bereits GESENDET hat (=trusted-bypass-
    * Audits mit passendem input.a2aThreadId). Die initiale send_to_twin-Runde
@@ -3337,7 +3361,19 @@ REGEL 6: Wenn der User dich explizit bittet, ein Tool zu nutzen ("rufe das X-Too
     const NEUTRAL_GUARD =
       ` Fasse ausschließlich zusammen, was im Austausch tatsächlich besprochen ` +
       `wurde — erfinde keine Zusagen, Termine oder Aktionen, die nicht gefallen sind.`;
+
+    // SS2: Auslöser-Vorspann (Variante A) — nur bei owner-initiiertem Thread
+    // (send_to_twin-Opener vorhanden). Das LLM webt den Aufhänger ein; bei
+    // Partner-initiierten Threads bleibt es leer → kein erfundener Vorspann.
+    const opening = await this.getA2aOpeningText(threadId);
+    const OPENING_PREFIX = opening
+      ? `Der Austausch begann mit dieser Anfrage an ${partnerHandle}: ` +
+        `„${opening.trim()}". Beginne deine Zusammenfassung mit einem kurzen ` +
+        `Aufhänger (worum es ging), dann der Stand. `
+      : "";
+
     const instruction =
+      OPENING_PREFIX +
       (reason === "limit"
         ? `Fasse für mich (Owner) den Stand der Verhandlung mit ${partnerHandle} ` +
           `in 3-5 Sätzen zusammen: Was wurde besprochen, worauf habt ihr euch ` +
