@@ -320,7 +320,13 @@ Der getaktete Production-Deploy ist durch: **`86ed1e4` → `6e32813`** auf `srv1
 - **Befund beim Build (jetzt dokumentiert):** der Prod-Stack nutzt `image:latest` ohne `build:` → `docker compose up -d` baut nichts; explizites `docker build` aus dem Repo-Root gehört davor. **DEPLOYMENT.md §3 entsprechend korrigiert** (inkl. Literal-Build-Arg-Warnung, da der #126-Guard ein leeres `${DOMAIN}` nicht abfängt).
 - **Smoke deckte eine UX-Lücke auf:** ein im Wizard angelegter Twin ist über die UI **nicht löschbar** (musste per DB-Skript raus) → neues BACKLOG-Item.
 
-## Tag 47 (17. Juni 2026) — 🚀 Tag-47-Bündel auf Prod deployt + verifiziert (srv1712371)
+## Tag 47 (17. Juni 2026) — 🚀 Summary-Scoping + Auslöser-Vorspann auf Prod (Runtime-only)
+
+**Tag 47 (Forts.) — A2A-Summary-Verbesserungen live auf Prod.** Runtime-only-Deploy `a817c2a → 870a38a` auf srv1712371. Zwei Commits: **`300d27d`** (Summary scopt das Thread-Material per `a2aThreadId` + volle Historie statt `partnerHandle`/`slice(-5)` → keine Vermischung paralleler Threads, ganzer Verlauf von Anfang bis Ende) und **`870a38a`** (Summary öffnet mit der ursprünglichen Auslöser-Frage bei **owner-initiierten** Threads, Variante A — ein `output.reply` für Telegram + Bubble; partner-initiiert → kein Vorspann). **Nur runtime-Image neu** (web+bridge unberührt → kein Bundle-Check), **keine Migration**. Boot grün: `[a2a-sweep] started`, 3 Twins, kein Crash. Rollback-Tag `nolmi-runtime:rollback-tag47`.
+
+**Lokaler Befund beim Bau (KEIN Prod-Problem):** Während der inkrementellen lokalen Builds entstand ein Bubble-Schwall (14 `a2a-summary-notice` aus dem Pre-armed-Fenster ~10:01, vor armedAt ~10:10). Ursache: ein Zwischen-Build hatte die Bubble (SS-C) schon, aber noch **ohne** das Backfill-Gate (`a817c2a`) und lieferte im 60s-Sweep alle undelivered Summaries. **Kein Code-Bug** — der aktuelle Code gated Bubble **und** Telegram korrekt hinter armedAt (`continue` vor `ensureA2aSummaryBubble`). Lokal bereinigt (14 stale notices gelöscht). **Prod unbetroffen:** das Tag-47-Bündel kam atomar inkl. `a817c2a` → erster Sweep lief armedAt-first, keine rückwirkenden Bubbles.
+
+
 
 **Tag 47 (Forts.) — A2A Etappe 1+2 + @-Mention-Autocomplete + A2A-Zusammenfassungs-Zustellung live auf Prod.** Deployt `d14816a → a817c2a` auf srv1712371; **beide Images neu** (runtime+web), **Bridge unberührt**, **keine Migration**. Enthalten: A2A Glied 2 Etappe 1+2 (`b357f6c`, `e44461d`, `2275b3e`, `c163ede`, `9ed53f0`), @-Mention-Autocomplete (`5b4887b`), A2A-Zusammenfassungs-Zustellung (`96e1b45`, `4a43128`, `949b823`, `a817c2a`). **Prod-Smoke grün:** Chat + Streaming (OAuth/codex-Pfad bei @markus), @-Autocomplete (vertraute Twins), **A2A autonom mehrrundig** (echte Terminverhandlung @markus↔@florian), Abbruch-Button sichtbar. Sweep aktiv (`[a2a-sweep] started`, quiescence 5 min). Rollback-Tags `nolmi-{runtime,web}:rollback-tag46` gesetzt.
 

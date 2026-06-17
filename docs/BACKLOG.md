@@ -3362,6 +3362,39 @@ Code war komplett. Ablauf live bestätigt auf Prod: Owner approved → @markus f
 
 ---
 
+## Nächste Bögen (Tag 47, sortiert)
+
+### 🔴 Twin-Zeitgefühl: aktuelles Datum/Wochentag im Kontext (HOHE Wirkung)
+
+**Status:** OFFEN · **Größe:** vmtl. S · **Priorität:** 🔴 hoch (Realismus-Bruch) · **Aus:** Tag-47-Prod-Beobachtung
+
+**Befund:** Twins kennen das aktuelle Datum / den Wochentag nicht → verorten Termine falsch und wünschen z.B. „schönes Wochenende" am Mittwoch. Bricht die Glaubwürdigkeit sichtbar. **Vermuteter Fix (klein):** aktuelles Datum + Wochentag in den System-Prompt / Persona-Kontext injizieren (eine Stelle im Prompt-Aufbau). Hohe Wirkung bei geringem Aufwand → guter nächster Bogen.
+
+### 🟡 Ungelesen-Indikator @florian bleibt trotz aktivem Lesen — Re-Diagnose (Faktenlage geändert)
+
+**Status:** OFFEN, **Re-Diagnose nötig** · **Größe:** unklar bis Diagnose · **Aus:** Tag 47
+
+**Befund:** Der A2A-Ungelesen-Indikator für @florian bleibt sichtbar, obwohl der Owner die Konversation **aktiv gelesen** hat. Früher (Tag 47) als Test-Artefakt eingeordnet (Reste aus Test-Austauschen, Mark-Read nachweislich funktional). 🔴 **Faktenlage geändert:** jetzt aktives Lesen → Indikator bleibt trotzdem. Frische Diagnose nötig (mark-read-Pfad vs. `countUnreadRepliesByPartner` vs. ob die betroffenen `reply-received` im A2AChat-View landen).
+
+### Multimodaler Input: Bilder/Dokumente an Twin senden
+
+**Status:** OFFEN · **Größe:** L (eigenes Feature) · **Aus:** Tag 47
+
+Bilder/Dokumente an den Twin senden — Upload-UI + Speicherung + Weitergabe ans LLM (multimodaler Pfad). Eigener größerer Bogen.
+
+### Telegram: Rich Messages + @-Mention im Telegram-Kanal
+
+**Status:** OFFEN, **Design-Klärung** · **Größe:** S–M · **Aus:** Tag 47
+
+- **Rich Messages:** Umfang zu präzisieren — die A2A-Summary ist bereits Markdown-formatiert (`sendToOwner` → Markdown→HTML). Klären, was darüber hinaus gewünscht ist (Buttons? strukturierte Karten?).
+- 🔴 **@-Mention im Telegram-Kanal geht NICHT wie im Web:** Telegram-Bots haben kein freies Eingabefeld-Autocomplete. Möglich nur Inline-Mode oder Button-/Custom-Keyboard. **Design-Klärung nötig**, bevor gebaut wird — das Web-`@-Autocomplete`-Muster (`5b4887b`) ist hier nicht übertragbar.
+
+### Bestehende offene Items (Erinnerung)
+
+Compose-Drift konsolidieren (oben), beidseitiger A2A-Abbruch (Bridge-Signal), Twin behauptet Aktion ohne Tool-Call bei verbloser Mention (🟡), Twin-Löschung verwaister Bridge-Handles, OAuth-Backlog.
+
+---
+
 ## Streaming / Approval / OAuth (Tag 45)
 
 ### OAuth-Refresh-Loop: api_key-Twins skippen — ✅ DONE (ff4e2dc, Tag 45)
