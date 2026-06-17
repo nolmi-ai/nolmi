@@ -3342,7 +3342,10 @@ REGEL 6: Wenn der User dich explizit bittet, ein Tool zu nutzen ("rufe das X-Too
    * aus den Thread-Audits abgeleitet (send_to_twin.output.targetHandle bzw.
    * fromHandle bei eingehenden). Gibt die Zahl frisch erzeugter Summaries zurück.
    */
-  async sweepA2aThreadClosures(quiescenceMs: number): Promise<number> {
+  async sweepA2aThreadClosures(
+    quiescenceMs: number,
+    armedAtMs: number,
+  ): Promise<number> {
     const all = await this.deps.audit.repo.list({
       limit: 1000,
       twinId: this.deps.twinId,
@@ -3386,6 +3389,11 @@ REGEL 6: Wenn der User dich explizit bittet, ein Tool zu nutzen ("rufe das X-Too
       if (info.hasSummary) continue; // Limit/Abbruch o. früherer Sweep
       if (!info.partner) continue; // ohne Partner kein sinnvoller Summary-Prompt
       if (now - info.lastTs <= quiescenceMs) continue; // noch aktiv
+      // Backfill-Schutz: Threads, die schon VOR dem Scharfschalten verstummt
+      // waren, sind Alt-Bestand → KEINE rückwirkende Summary (und damit kein
+      // späterer Push). Nur Threads, deren letzte Aktivität ab armedAt liegt,
+      // werden zusammengefasst.
+      if (info.lastTs < armedAtMs) continue;
       await this.summarizeA2aThreadOnce(tid, info.partner, "quiescence");
       created += 1;
     }
@@ -3406,6 +3414,7 @@ REGEL 6: Wenn der User dich explizit bittet, ein Tool zu nutzen ("rufe das X-Too
    */
   async deliverPendingA2aSummaries(
     sender: (text: string) => Promise<{ sent: boolean; reason?: string }>,
+    armedAtMs: number,
   ): Promise<number> {
     const all = await this.deps.audit.repo.list({
       limit: 500,
@@ -3420,6 +3429,17 @@ REGEL 6: Wenn der User dich explizit bittet, ein Tool zu nutzen ("rufe das X-Too
 
     let delivered = 0;
     for (const entry of pending) {
+      // 🔴 Stiller Backfill: Summaries, die VOR dem Scharfschalten entstanden
+      // (Alt-Bestand — z.B. heutige Limit/Abbruch-Threads), werden OHNE Push und
+      // OHNE Direct-Chat-Bubble als delivered markiert. Kein rückwirkender
+      // Telegram-Schwall beim ersten Lauf. Maßstab ist der Summary-Timestamp
+      // (≈ Thread-Abschlusszeit); restart-sicher, weil armedAt persistent ist.
+      const summaryTs = Date.parse(entry.timestamp);
+      if (Number.isFinite(summaryTs) && summaryTs < armedAtMs) {
+        await this.markA2aSummaryDelivered(entry.id);
+        continue;
+      }
+
       const out = entry.output as {
         reply?: string;
         partnerHandle?: string;
@@ -3444,16 +3464,54 @@ REGEL 6: Wenn der User dich explizit bittet, ein Tool zu nutzen ("rufe das X-Too
       const result = await sender(text);
       if (!result.sent) continue; // deliveredAt bleibt null → Retry nächster Sweep
 
-      // Persistenter Marker: deliveredAt ins Audit-output mergen (repo-Read-Merge).
-      const existing = await this.deps.audit.repo.get(entry.id);
-      const mergedOutput = {
-        ...((existing?.output as Record<string, unknown> | null) ?? {}),
-        deliveredAt: new Date().toISOString(),
-      };
-      await this.deps.audit.repo.update(entry.id, { output: mergedOutput });
+      await this.markA2aSummaryDelivered(entry.id);
       delivered += 1;
     }
     return delivered;
+  }
+
+  /**
+   * Setzt `output.deliveredAt = jetzt` persistent (repo-Read-Merge, NICHT
+   * read_at). Restart-sicherer Dedup-Marker gegen Doppel-Push/-Backfill.
+   */
+  private async markA2aSummaryDelivered(auditId: string): Promise<void> {
+    const existing = await this.deps.audit.repo.get(auditId);
+    const mergedOutput = {
+      ...((existing?.output as Record<string, unknown> | null) ?? {}),
+      deliveredAt: new Date().toISOString(),
+    };
+    await this.deps.audit.repo.update(auditId, { output: mergedOutput });
+  }
+
+  /**
+   * A2A Glied 2 — Etappe 3 Fix: Scharfschalt-Zeitpunkt (armedAt) des
+   * Quiescence-Sweeps — persistent + restart-sicher als Audit "a2a-sweep-armed"
+   * (genau einer pro Twin, idempotent). Beim allerersten Sweep gesetzt = jetzt.
+   * Threads/Summaries, deren Aktivität/Erzeugung DAVOR liegt, sind Alt-Bestand
+   * und werden nie rückwirkend gepusht (stiller Backfill). Gibt armedAt in ms.
+   */
+  async ensureSweepArmed(): Promise<number> {
+    const existing = await this.deps.audit.repo.findByInputField(
+      "sweepArmedMarker",
+      "a2a-sweep-armed",
+      { twinId: this.deps.twinId },
+    );
+    if (existing) {
+      const armed =
+        (existing.input as { armedAt?: string })?.armedAt ?? existing.timestamp;
+      const ms = Date.parse(armed);
+      return Number.isFinite(ms) ? ms : Date.now();
+    }
+    const nowIso = new Date().toISOString();
+    await this.deps.audit.start({
+      capability: "a2a-sweep-armed",
+      mandateId: null,
+      // sweepArmedMarker: fester Wert für die gezielte findByInputField-Query
+      // (robust unabhängig vom Audit-Volumen, kein limit-Cutoff).
+      input: { sweepArmedMarker: "a2a-sweep-armed", armedAt: nowIso },
+      initialStatus: "executed",
+    });
+    return Date.parse(nowIso);
   }
 
   /**

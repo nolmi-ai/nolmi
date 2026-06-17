@@ -121,8 +121,15 @@ export class A2ACloseSweepService {
         const twin = this.deps.registry.getByHandle(summary.handle);
         if (!twin) continue; // Race: Twin zwischen list() und getByHandle entfernt
         try {
-          // 1. Erkennung: verstummte Threads → a2a-summary (Grund quiescence).
-          const created = await twin.sweepA2aThreadClosures(this.quiescenceMs);
+          // 0. Scharfschalt-Zeitpunkt (persistent, einmalig pro Twin). Alles,
+          // was davor verstummte/entstand, ist Alt-Bestand → stiller Backfill,
+          // kein rückwirkender Push.
+          const armedAtMs = await twin.ensureSweepArmed();
+          // 1. Erkennung: verstummte Threads (ab armedAt) → a2a-summary (quiescence).
+          const created = await twin.sweepA2aThreadClosures(
+            this.quiescenceMs,
+            armedAtMs,
+          );
           if (created > 0) {
             this.logger?.info(
               { twinId: summary.twinId, handle: summary.handle, created },
@@ -131,12 +138,14 @@ export class A2ACloseSweepService {
           }
           // 2. Zustellung (SS-B): jede noch-nicht-zugestellte a2a-summary via
           // Telegram an den Owner. Nur wenn die BotRegistry da ist (Push-Kanal).
-          // deliveredAt-Persistenz verhindert Doppel-Push über Restart.
+          // deliveredAt-Persistenz verhindert Doppel-Push über Restart; Summaries
+          // von vor armedAt werden still (ohne Push/Bubble) als delivered markiert.
           if (this.deps.botRegistry) {
             const botRegistry = this.deps.botRegistry;
             const twinId = summary.twinId;
-            const sent = await twin.deliverPendingA2aSummaries((text) =>
-              botRegistry.sendToOwner(twinId, text),
+            const sent = await twin.deliverPendingA2aSummaries(
+              (text) => botRegistry.sendToOwner(twinId, text),
+              armedAtMs,
             );
             if (sent > 0) {
               this.logger?.info(
