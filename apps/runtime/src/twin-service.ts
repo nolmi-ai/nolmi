@@ -3209,6 +3209,78 @@ REGEL 6: Wenn der User dich explizit bittet, ein Tool zu nutzen ("rufe das X-Too
   }
 
   /**
+   * A2A Glied 2 — Etappe 3 SS1: Rekonstruiert den VOLLEN Verlauf EINES Threads
+   * (scoped auf `threadId`) für die Zusammenfassung — anders als buildBridgeThread,
+   * das für Live-Antworten bewusst nur das letzte 6-Message-Fenster über alle
+   * Partner-Threads zieht. Hier:
+   *   - Scoping über a2aThreadId (input.a2aThreadId ODER output.a2aThreadId, tiefe
+   *     JSON-Ebene) statt partnerHandle → keine Vermischung paralleler Threads.
+   *   - GANZE Thread-Historie (kein slice(-5)); ein Thread ist durch das
+   *     5-Runden/Seite-Limit ohnehin gedeckelt (~12 Items). Defensiver slice(-40)
+   *     nur gegen pathologische/Alt-Daten.
+   *   - Eingehende Partner-Nachrichten dedupliziert über bridgeMessageId, weil
+   *     reply-received UND trusted-bypass dieselbe Partner-Message tragen.
+   * Chronologisch (ältester zuerst), damit das LLM den Verlauf von Anfang bis
+   * Ende sieht. Capabilities: send_to_twin (Eröffnung, output.reply),
+   * reply-received (eingehend, input.content), trusted-bypass /
+   * respond_to_twin_message (eigene Antwort output.reply + ggf. eingehend input).
+   */
+  private async buildA2aThreadForSummary(
+    threadId: string,
+  ): Promise<ChatMessage[]> {
+    type ThreadItem = { ts: string; role: ChatMessage["role"]; content: string };
+    const items: ThreadItem[] = [];
+    const seenIncoming = new Set<string>();
+
+    const all = await this.deps.audit.repo.list({
+      limit: 500,
+      twinId: this.deps.twinId,
+    });
+
+    // Nur echte Verhandlungs-Audits ins Material — schließt insbesondere
+    // a2a-summary / a2a-summary-notice aus (die tragen ebenfalls threadId +
+    // output.reply und würden sonst eine frühere Zusammenfassung in den
+    // Verlauf zurückspeisen; hasA2aSummary verhindert das im Normalfall,
+    // die Allowlist ist die robuste Leitplanke).
+    const THREAD_CAPS = new Set([
+      "send_to_twin",
+      "reply-received",
+      "trusted-bypass",
+      "respond_to_twin_message",
+    ]);
+    for (const e of all) {
+      if (e.status !== "executed") continue;
+      if (!THREAD_CAPS.has(e.capability)) continue;
+      const input = e.input as {
+        a2aThreadId?: string;
+        content?: string;
+        bridgeMessageId?: string;
+      };
+      const output = e.output as
+        | { a2aThreadId?: string; reply?: string }
+        | null;
+      const tid = input?.a2aThreadId ?? output?.a2aThreadId;
+      if (tid !== threadId) continue;
+
+      // Eingehende Partner-Nachricht (reply-received + trusted-bypass tragen sie
+      // beide → dedup über die Bridge-Message-ID, sonst Doppeln pro Runde).
+      if (typeof input?.content === "string" && input.bridgeMessageId) {
+        if (!seenIncoming.has(input.bridgeMessageId)) {
+          seenIncoming.add(input.bridgeMessageId);
+          items.push({ ts: e.timestamp, role: "user", content: input.content });
+        }
+      }
+      // Eigene ausgehende Nachricht (Eröffnung bei send_to_twin, sonst Antwort).
+      if (typeof output?.reply === "string") {
+        items.push({ ts: e.timestamp, role: "assistant", content: output.reply });
+      }
+    }
+
+    items.sort((a, b) => a.ts.localeCompare(b.ts));
+    return items.slice(-40).map(({ role, content }) => ({ role, content }));
+  }
+
+  /**
    * A2A Glied 2 — Etappe 2: Zählt wie viele autonome Follow-Up-Runden
    * DIESE Seite für den gegebenen Thread bereits GESENDET hat (=trusted-bypass-
    * Audits mit passendem input.a2aThreadId). Die initiale send_to_twin-Runde
@@ -3297,9 +3369,13 @@ REGEL 6: Wenn der User dich explizit bittet, ein Tool zu nutzen ("rufe das X-Too
       payload: { capability: "a2a-summary" },
     });
     try {
-      // Verhandlungsverlauf rekonstruieren (gleiche Quelle wie eine Folgerunde)
-      // und das Modell den Stand zusammenfassen lassen.
-      const thread = await this.buildBridgeThread(audit, partnerHandle);
+      // SS1: VOLLEN Verlauf NUR dieses Threads rekonstruieren (threadId-scoped,
+      // keine slice-Kappung) — damit die Zusammenfassung Anfang bis Ende abdeckt
+      // und keine parallelen @partner-Threads vermischt. Die instruction als
+      // finalen User-Turn anhängen (vorher übernahm das buildBridgeThread via
+      // current.input.content).
+      const thread = await this.buildA2aThreadForSummary(threadId);
+      thread.push({ role: "user", content: instruction });
       const reply = await this.runModel(this.deps.persona, thread, undefined);
       await this.deps.audit.complete(audit.id, {
         reply: reply.content,
