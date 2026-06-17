@@ -121,12 +121,29 @@ export class A2ACloseSweepService {
         const twin = this.deps.registry.getByHandle(summary.handle);
         if (!twin) continue; // Race: Twin zwischen list() und getByHandle entfernt
         try {
+          // 1. Erkennung: verstummte Threads → a2a-summary (Grund quiescence).
           const created = await twin.sweepA2aThreadClosures(this.quiescenceMs);
           if (created > 0) {
             this.logger?.info(
               { twinId: summary.twinId, handle: summary.handle, created },
               "[a2a-sweep] quiescence summaries erzeugt",
             );
+          }
+          // 2. Zustellung (SS-B): jede noch-nicht-zugestellte a2a-summary via
+          // Telegram an den Owner. Nur wenn die BotRegistry da ist (Push-Kanal).
+          // deliveredAt-Persistenz verhindert Doppel-Push über Restart.
+          if (this.deps.botRegistry) {
+            const botRegistry = this.deps.botRegistry;
+            const twinId = summary.twinId;
+            const sent = await twin.deliverPendingA2aSummaries((text) =>
+              botRegistry.sendToOwner(twinId, text),
+            );
+            if (sent > 0) {
+              this.logger?.info(
+                { twinId, handle: summary.handle, sent },
+                "[a2a-sweep] summaries an owner zugestellt (telegram)",
+              );
+            }
           }
         } catch (err) {
           this.logger?.error(

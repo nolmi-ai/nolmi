@@ -3392,6 +3392,62 @@ REGEL 6: Wenn der User dich explizit bittet, ein Tool zu nutzen ("rufe das X-Too
     return created;
   }
 
+  /**
+   * A2A Glied 2 — Etappe 3 SS-B: Stellt noch-nicht-zugestellte a2a-summaries
+   * aktiv an den Owner zu (Telegram via `sender`). `sender` ist die an diesen
+   * Twin gebundene `BotRegistry.sendToOwner`-Closure (der Sweep reicht sie rein,
+   * weil die BotRegistry erst nach der Registry existiert).
+   *
+   * Idempotenz / kein Doppel-Push: nur Summaries mit `output.deliveredAt == null`;
+   * bei erfolgreichem Send wird `deliveredAt` PERSISTENT im Audit gesetzt
+   * (repo.update, NICHT read_at) — restart-sicher. Schlägt der Send fehl
+   * (z.B. nicht gepaart, Bot blockiert), bleibt `deliveredAt` null → nächster
+   * Sweep versucht es erneut. Gibt die Zahl frisch zugestellter Summaries zurück.
+   */
+  async deliverPendingA2aSummaries(
+    sender: (text: string) => Promise<{ sent: boolean; reason?: string }>,
+  ): Promise<number> {
+    const all = await this.deps.audit.repo.list({
+      limit: 500,
+      twinId: this.deps.twinId,
+    });
+    const pending = all.filter((e) => {
+      if (e.capability !== "a2a-summary") return false;
+      if (e.status !== "executed") return false; // gescheiterte (kein reply) skip
+      const out = e.output as { reply?: string; deliveredAt?: string } | null;
+      return typeof out?.reply === "string" && !out.deliveredAt;
+    });
+
+    let delivered = 0;
+    for (const entry of pending) {
+      const out = entry.output as {
+        reply?: string;
+        partnerHandle?: string;
+        deliveredAt?: string;
+      } | null;
+      const reply = out?.reply;
+      if (!reply) continue;
+      const partner = out?.partnerHandle ?? "einem anderen Twin";
+
+      // Rich-Message: Markdown — sendToOwner macht Markdown→HTML (mit Plain-
+      // Fallback). Überschrift + die neutrale Zusammenfassung.
+      const text = `*🤝 Austausch mit ${partner} abgeschlossen*\n\n${reply}`;
+
+      const result = await sender(text);
+      if (!result.sent) continue; // deliveredAt bleibt null → Retry nächster Sweep
+
+      // Persistenter Marker: deliveredAt ins Audit-output mergen (repo-Read-Merge).
+      const existing = await this.deps.audit.repo.get(entry.id);
+      const mergedOutput = {
+        ...((existing?.output as Record<string, unknown> | null) ?? {}),
+        deliveredAt: new Date().toISOString(),
+      };
+      await this.deps.audit.repo.update(entry.id, { output: mergedOutput });
+      delivered += 1;
+    }
+    return delivered;
+  }
+
   private async failWithReason(auditId: string, err: unknown): Promise<void> {
     const reason = err instanceof Error ? err.message : String(err);
     await this.deps.audit.fail(auditId, reason);
