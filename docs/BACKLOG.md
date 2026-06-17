@@ -3318,7 +3318,7 @@ Ein **CLA** (Contributor License Agreement) oder mindestens **DCO** (Developer C
 
 Code war komplett. Ablauf live bestätigt auf Prod: Owner approved → @markus formuliert autonom → @florian antwortet autonom (familiarity=vertraut) → Owner sieht Antwort im A2AChat. Kein Bau nötig gewesen.
 
-### A2A Glied 2: mehrstufiger Austausch — Etappe 1+2 ✅ LOKAL VERIFIZIERT (Tag 47); 🔴 NICHT DEPLOYT
+### A2A Glied 2: mehrstufiger Austausch — Etappe 1+2+3 ✅ AUF PROD (Tag 47, `d14816a → a817c2a`)
 
 **Etappe 1 (verifiziert, b357f6c+e44461d):** Thread-ID-Fundament (a2aThreadId-Propagation) + EINE Folgerunde + Hard-Stop. Live-Smoke: Runde 2 lief autonom, Stop nach 1 Folgerunde hielt.
 
@@ -3330,11 +3330,13 @@ Code war komplett. Ablauf live bestätigt auf Prod: Owner approved → @markus f
 
 **Live-Verifikation Tag 47:** (b) manueller Abbruch greift mid-thread ✅ · (e) Limit-Stop deterministisch via `A2A_MAX_FOLLOWUP_ROUNDS=2` ✅ (a2a-summary erzeugt, Loop gestoppt) · (f) Thread-ID konsistent/distinkt ✅.
 
-🔴 **NICHT DEPLOYT** — Etappe 1+2 sind lokal-only. Deploy = eigener Schritt (runtime+web, `NEXT_PUBLIC_RUNTIME_URL`-Build-Arg, Bundle-Check, Rollback-Tags).
+**Etappe 3 (Zustellung, `96e1b45` + `4a43128` + `949b823` + `a817c2a`):** A2ACloseSweepService (ENV-gated `A2A_CLOSE_SWEEP_ENABLED`, 60s-Poll, Quiescence 5 min) als einzige Zustellstelle — erkennt verstummte Threads → `summarizeA2aThreadOnce("quiescence")`, liefert via `BotRegistry.sendToOwner` (Telegram) **und** proaktive Direct-Chat-Bubble (`a2a-summary-notice`, assistant-only). Persistenter `deliveredAt`-Marker gegen Doppel-Push; einmaliger stiller Backfill (`a2a-sweep-armed`-Audit als armedAt) → kein rückwirkender Push für Alt-Threads.
+
+✅ **AUF PROD (Tag 47):** deployt `d14816a → a817c2a`, runtime+web neu, Bridge unberührt, keine Migration. Prod-Smoke grün (Chat+Streaming OAuth-Pfad, Autocomplete, A2A autonom mehrrundig — echte Terminverhandlung @markus↔@florian, Abbruch-Button). Sweep aktiv (`[a2a-sweep] started`). 🔴 Prod-ENV: `A2A_CLOSE_SWEEP_ENABLED=true` via Whitelist-Durchreichung in `/docker/nolmi/docker-compose.yml` + VPS-`.env`.
 
 **Offene Folge-Bausteine (eigene spätere Bögen):**
 - **Beidseitiger Abbruch:** Abbruch ist heute EINSEITIG — nur der abbrechende Twin stoppt, die Gegenseite antwortet bis zu ihrem eigenen 5er-Limit weiter. Beidseitig braucht ein Bridge-Signal an die Gegenseite.
-- **Aktive Owner-Benachrichtigung:** `a2a-summary` landet als Audit im Inbox/Audit-Stream, NICHT als Push. TwinService hat keinen `sendToOwner`-Kanal (Telegram); aktive Zustellung ist der nächste gewünschte Baustein.
+- ~~Aktive Owner-Benachrichtigung~~ ✅ **ERLEDIGT (Etappe 3):** Telegram-Push (`sendToOwner`) + proaktive Direct-Chat-Bubble, beide live auf Prod.
 
 ### 🟡 Twin behauptet Aktion ohne Tool-Call bei verbloser Mention (Zuverlässigkeit)
 
@@ -3347,6 +3349,16 @@ Code war komplett. Ablauf live bestätigt auf Prod: Owner approved → @markus f
 **Fix-Optionen (später):** (a) Persona-Hinweis ("behaupte nie eine Aktion, die du nicht per Tool-Call ausgelöst hast; bei bloßer Mention ohne Auftrag: nachfragen"); oder (b) Guard gegen Aktions-Behauptung ohne korrespondierenden Tool-Call.
 
 🔵 **Verschärfungs-Trigger:** Das @-Mention-Autocomplete (`5b4887b`) macht verblose Mentions leichter — Mentions ohne Handlungsverb werden häufiger, also steigt die Wahrscheinlichkeit dieser Fehl-Behauptung.
+
+### 🔴 Repo- vs. Prod-Compose-Drift konsolidieren (Infra-Hygiene)
+
+**Status:** OFFEN (notiert, nicht dringend, aber Deploy-Risiko) · **Größe:** S · **Aus:** Tag-47-Deploy-Befund
+
+**Befund:** `/docker/nolmi/docker-compose.yml` auf der Prod-VPS (srv1712371) ist eine **eigenständige Datei** (zuletzt ~10. Juni editiert), **KEIN Symlink** auf `repo/docker/nolmi/docker-compose.yml` (frühere Annahme war falsch). Beide Dateien sind **auseinandergedriftet** — die Loop-Flags (`FOCUS_LOOP_ENABLED`, `REFLECTION_LOOP_ENABLED`) und das neue `A2A_CLOSE_SWEEP_ENABLED` leben nur in der Prod-Datei + VPS-`.env` und sind **nie eingecheckt**. Wer den Repo-Compose liest, hat ein falsches Bild vom Prod-Zustand.
+
+**Risiko:** Deploys/Diagnosen stolpern über veraltete Annahmen (z.B. „Env-Var im Repo-Compose ⇒ landet auf Prod" — stimmt NICHT). Konkret manifestiert sich das schon: das Whitelist-`environment:`-Muster muss pro neuer Var doppelt gepflegt werden (Repo-Compose + Prod-Compose), sonst läuft ein Feature still tot.
+
+**Fix (später):** Repo- und Prod-Compose konsolidieren bzw. das Prod-Delta (Loop-/Sweep-Flags als `${VAR:-}`-Durchreichung) ins eingecheckte `repo/docker/nolmi/docker-compose.yml` ziehen, sodass der Repo-Stand den Prod-Stand abbildet. **Memory `prod-vps-deploy-mechanik` ist bereits korrigiert** (Symlink-Behauptung entfernt, ENV-Whitelist-Muster + Build-ARG/force-recreate-Sequenz dokumentiert). Verifikation der gemergten Config IMMER via `docker compose config` vor `--force-recreate`.
 
 ---
 
