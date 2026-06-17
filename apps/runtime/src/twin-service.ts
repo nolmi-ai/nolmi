@@ -1416,6 +1416,31 @@ export class TwinService {
           content: msg.content,
         },
       });
+
+      // A2A Glied 2 — Etappe 1: EINE kontrollierte Folgerunde.
+      // Voraussetzungen: Thread-ID bekannt + Partner vertraut + noch keine
+      // eigene Follow-Up-Runde für diesen Thread. Danach immer Hard-Stop
+      // (Etappe-2-Loop kommt später, bewusst hier nicht freigeschaltet).
+      const mayAutoFollow =
+        this.deps.trustRepo.canAutoRespond(this.deps.twinId, msg.fromHandle);
+      if (mayAutoFollow) {
+        const followUpsDone = await this.countA2aFollowUpRounds(a2aThreadId);
+        if (followUpsDone < 1) {
+          console.log(
+            `[a2a:glied2] Folgerunde für Thread=${a2aThreadId}, ` +
+              `followUpsDone=${followUpsDone}, partner=${msg.fromHandle}`,
+          );
+          // handleTrustedBridgeMessage erzeugt trusted-bypass-Audit mit
+          // a2aThreadId im input → nächste countA2aFollowUpRounds gibt 1.
+          await this.handleTrustedBridgeMessage(msg);
+        } else {
+          console.log(
+            `[a2a:glied2] Hard-Stop: Etappe-1-Limit erreicht ` +
+              `(followUpsDone=${followUpsDone}) für Thread=${a2aThreadId}`,
+          );
+        }
+      }
+
       return;
     }
 
@@ -3131,6 +3156,23 @@ REGEL 6: Wenn der User dich explizit bittet, ein Tool zu nutzen ("rufe das X-Too
     });
 
     return recent.map(({ role, content }) => ({ role, content }));
+  }
+
+  /**
+   * A2A Glied 2 — Etappe 1: Zählt wie viele autonome Follow-Up-Runden
+   * @markus' Seite für diesen Thread bereits GESENDET hat (=trusted-bypass-
+   * Audits mit passendem a2aThreadId). Die initiale send_to_twin-Runde zählt
+   * NICHT (ist bereits im Thread-Opener, kein Follow-Up). Damit können wir
+   * "max 1 Follow-Up" hart begrenzen.
+   */
+  private async countA2aFollowUpRounds(threadId: string): Promise<number> {
+    const all = await this.deps.audit.repo.list({ limit: 200 });
+    return all.filter((e) => {
+      if (e.status !== "executed") return false;
+      if (e.capability !== "trusted-bypass") return false;
+      const inId = (e.input as { a2aThreadId?: string })?.a2aThreadId;
+      return inId === threadId;
+    }).length;
   }
 
   private async failWithReason(auditId: string, err: unknown): Promise<void> {
