@@ -2256,11 +2256,25 @@ function A2AChat({
     `a2a:${partner}`,
   );
 
-  // Thread-ID = bridgeMessageId des eröffnenden send_to_twin (Konvention aus Glied 2).
-  const activeThreadId =
-    messages.find(
-      (m) => m.direction === "sent" && m.auditCapability === "send_to_twin",
-    )?.bridgeMessageId ?? null;
+  // A2A Glied 2 — Abbruch-Fix: Anker des LAUFENDEN Austauschs, nicht des
+  // ältesten. Der bisherige .find() nahm den ERSTEN send_to_twin der gesamten
+  // Partner-History (chronologisch ASC) — bei mehreren Eröffnungen also einen
+  // veralteten (oder pre-SS1 ohne a2aThreadId). Der Loop prüft aber
+  // a2aThreadId = msg.inReplyTo ?? msg.id der eingehenden Nachricht. Genau
+  // diesen Wert rekonstruieren wir hier aus der JÜNGSTEN Thread-Nachricht
+  // (inReplyTo ?? bridgeMessageId) — von hinten suchen, da ASC. System-
+  // Nachrichten überspringen (deren inReplyTo zeigt auf die Trigger-Message,
+  // nicht auf die Thread-Root). So matcht die ins Abbruch-Set geschriebene ID
+  // exakt den Loop-Check — nie null, nie veraltet.
+  const activeThreadId = (() => {
+    for (let i = messages.length - 1; i >= 0; i--) {
+      const m = messages[i];
+      if (!m || m.messageType === "system") continue;
+      const anchor = m.inReplyTo ?? m.bridgeMessageId;
+      if (anchor) return anchor;
+    }
+    return null;
+  })();
 
   async function abortThread() {
     if (!activeThreadId || aborted) return;
