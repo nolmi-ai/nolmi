@@ -3245,22 +3245,40 @@ REGEL 6: Wenn der User dich explizit bittet, ein Tool zu nutzen ("rufe das X-Too
   private async summarizeA2aThreadOnce(
     threadId: string,
     partnerHandle: string,
-    reason: "limit" | "abort",
+    reason: "limit" | "abort" | "quiescence",
   ): Promise<void> {
     if (this.summarizedThreadIds.has(threadId)) return;
+    // DB-Dedup (restart-sicher): existiert schon eine a2a-summary für diesen
+    // Thread, NICHT erneut summarizen. Deckt den Quiescence-Sweep gegen den
+    // synchronen Limit/Abbruch-Pfad ab und überlebt Neustarts (das in-memory
+    // Set wird beim Boot vergessen).
+    if (await this.hasA2aSummary(threadId)) {
+      this.summarizedThreadIds.add(threadId);
+      return;
+    }
     this.summarizedThreadIds.add(threadId);
 
     // input.content wird von buildBridgeThread als finaler User-Turn an das
     // Modell gehängt — daher ist es zugleich der Zusammenfassungs-Auftrag.
+    // 🔴 Persona-Disziplin: NEUTRALE Zusammenfassung des tatsächlich Besprochenen
+    // — keine erfundenen Zusagen, keine Aktionen, die nicht im Thread standen.
+    const NEUTRAL_GUARD =
+      ` Fasse ausschließlich zusammen, was im Austausch tatsächlich besprochen ` +
+      `wurde — erfinde keine Zusagen, Termine oder Aktionen, die nicht gefallen sind.`;
     const instruction =
-      reason === "limit"
+      (reason === "limit"
         ? `Fasse für mich (Owner) den Stand der Verhandlung mit ${partnerHandle} ` +
           `in 3-5 Sätzen zusammen: Was wurde besprochen, worauf habt ihr euch ` +
           `geeinigt, was ist noch offen? Der autonome Austausch wurde nach ` +
           `${A2A_MAX_FOLLOWUP_ROUNDS} Runden pro Seite automatisch gestoppt.`
-        : `Fasse für mich (Owner) den Stand der Verhandlung mit ${partnerHandle} ` +
-          `in 3-5 Sätzen zusammen: Was wurde besprochen, was ist noch offen? ` +
-          `Ich habe den autonomen Austausch gerade abgebrochen.`;
+        : reason === "abort"
+          ? `Fasse für mich (Owner) den Stand der Verhandlung mit ${partnerHandle} ` +
+            `in 3-5 Sätzen zusammen: Was wurde besprochen, was ist noch offen? ` +
+            `Ich habe den autonomen Austausch gerade abgebrochen.`
+          : `Fasse für mich (Owner) den Stand des Austauschs mit ${partnerHandle} ` +
+            `in 3-5 Sätzen zusammen: Was wurde besprochen, worauf habt ihr euch ` +
+            `geeinigt, was ist noch offen? Der Austausch ist zur Ruhe gekommen ` +
+            `(keine neuen Nachrichten mehr).`) + NEUTRAL_GUARD;
 
     const audit = await this.deps.audit.start({
       capability: "a2a-summary",
@@ -3294,6 +3312,84 @@ REGEL 6: Wenn der User dich explizit bittet, ein Tool zu nutzen ("rufe das X-Too
     } catch (err) {
       await this.failWithReason(audit.id, err);
     }
+  }
+
+  /**
+   * A2A Glied 2 — Etappe 3 (Zustellung): Existiert bereits eine a2a-summary
+   * (egal welcher Grund/Status) für diesen Thread? DB-basierte, restart-sichere
+   * Dedup-Quelle für summarizeA2aThreadOnce und den Quiescence-Sweep.
+   */
+  private async hasA2aSummary(threadId: string): Promise<boolean> {
+    const all = await this.deps.audit.repo.list({
+      limit: 500,
+      twinId: this.deps.twinId,
+    });
+    return all.some(
+      (e) =>
+        e.capability === "a2a-summary" &&
+        (e.input as { a2aThreadId?: string })?.a2aThreadId === threadId,
+    );
+  }
+
+  /**
+   * A2A Glied 2 — Etappe 3 SS-A: Quiescence-Sweep. Findet A2A-Threads dieses
+   * Twins, die seit `quiescenceMs` keine neue Nachricht mehr hatten und noch
+   * KEINE a2a-summary haben → erzeugt sie mit Grund "quiescence". Limit/Abbruch-
+   * Threads sind bereits summarized (synchroner Pfad) und werden via hasA2aSummary
+   * übersprungen — kein Doppel-Summary. Aufgerufen vom A2ACloseSweepService.
+   *
+   * Thread-Identität = a2aThreadId (in input ODER output). Partner-Handle wird
+   * aus den Thread-Audits abgeleitet (send_to_twin.output.targetHandle bzw.
+   * fromHandle bei eingehenden). Gibt die Zahl frisch erzeugter Summaries zurück.
+   */
+  async sweepA2aThreadClosures(quiescenceMs: number): Promise<number> {
+    const all = await this.deps.audit.repo.list({
+      limit: 1000,
+      twinId: this.deps.twinId,
+    });
+
+    // Pro Thread: jüngster Timestamp + ein Partner-Handle. Nur Audits, die eine
+    // a2aThreadId tragen (send_to_twin / reply-received / trusted-bypass).
+    const threads = new Map<
+      string,
+      { lastTs: number; partner: string | null; hasSummary: boolean }
+    >();
+    for (const e of all) {
+      const input = e.input as {
+        a2aThreadId?: string;
+        fromHandle?: string;
+      };
+      const output = e.output as
+        | { a2aThreadId?: string; targetHandle?: string }
+        | null;
+      const tid = input?.a2aThreadId ?? output?.a2aThreadId;
+      if (!tid) continue;
+      const ts = Date.parse(e.timestamp);
+      const partner = output?.targetHandle ?? input?.fromHandle ?? null;
+      const cur = threads.get(tid);
+      if (!cur) {
+        threads.set(tid, {
+          lastTs: Number.isFinite(ts) ? ts : 0,
+          partner,
+          hasSummary: e.capability === "a2a-summary",
+        });
+      } else {
+        if (Number.isFinite(ts) && ts > cur.lastTs) cur.lastTs = ts;
+        if (!cur.partner && partner) cur.partner = partner;
+        if (e.capability === "a2a-summary") cur.hasSummary = true;
+      }
+    }
+
+    const now = Date.now();
+    let created = 0;
+    for (const [tid, info] of threads) {
+      if (info.hasSummary) continue; // Limit/Abbruch o. früherer Sweep
+      if (!info.partner) continue; // ohne Partner kein sinnvoller Summary-Prompt
+      if (now - info.lastTs <= quiescenceMs) continue; // noch aktiv
+      await this.summarizeA2aThreadOnce(tid, info.partner, "quiescence");
+      created += 1;
+    }
+    return created;
   }
 
   private async failWithReason(auditId: string, err: unknown): Promise<void> {

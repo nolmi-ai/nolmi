@@ -25,6 +25,7 @@ import { OAuthTokensRepo } from "./oauth/oauth-tokens-repo.js";
 import { OAuthRefreshService } from "./oauth/refresh-service.js";
 import { ReflectionLoopService } from "./reflection/reflection-loop-service.js";
 import { FocusLoopService } from "./focus/focus-loop-service.js";
+import { A2ACloseSweepService } from "./a2a/close-sweep-service.js";
 
 // ─── BOOTSTRAP ───────────────────────────────────────────────────────────────
 //
@@ -231,6 +232,17 @@ async function main() {
   });
   focusLoopService.start(app.log);
 
+  // A2A Glied 2 Etappe 3 — Quiescence-Sweep: erkennt abgeschlossene A2A-Threads
+  // (verstummt ODER Limit/Abbruch) und stellt die Zusammenfassung an den Owner
+  // zu. OPT-IN: ohne A2A_CLOSE_SWEEP_ENABLED=true tut start() nichts. botRegistry
+  // (für die Telegram-Zustellung, SS-B) wie bei den anderen Loops durchgereicht,
+  // weil sie erst NACH der Twin-Registry konstruiert ist.
+  const a2aCloseSweepService = new A2ACloseSweepService({
+    registry,
+    botRegistry: telegramBotRegistry,
+  });
+  a2aCloseSweepService.start(app.log);
+
   // 9. Graceful Shutdown
   const shutdown = async (signal: string) => {
     console.log(`[shutdown] ${signal} empfangen — fahre runter`);
@@ -242,6 +254,7 @@ async function main() {
     oauthRefreshService.stop();
     reflectionLoopService.stop();
     focusLoopService.stop();
+    a2aCloseSweepService.stop();
     await registry.disposeAll();
     try {
       await app.close();
