@@ -273,6 +273,15 @@ export interface ChatRequestContext {
   channel?: "telegram" | "discord" | "whatsapp";
 }
 
+/**
+ * A2A Glied 2 — Etappe 2: Maximale autonome Folgerunden PRO SEITE in einem
+ * Twin-zu-Twin-Thread. Kontrollgrenze von Markus (nicht verhandelbar): bei
+ * Erreichen → harter Stopp + einmalige Owner-Zusammenfassung. ENV-konfigurierbar
+ * (A2A_MAX_FOLLOWUP_ROUNDS), Default 5. Die initiale send_to_twin-Eröffnung
+ * zählt NICHT mit — nur die autonomen Reaktionen dieser Seite.
+ */
+const A2A_MAX_FOLLOWUP_ROUNDS = Number(process.env.A2A_MAX_FOLLOWUP_ROUNDS) || 5;
+
 export class TwinService {
   /**
    * MCP-Lifecycle-Manager dieses Twins. Hält pro Server-ID einen Subprocess
@@ -405,6 +414,15 @@ export class TwinService {
    * setzt die threadId hier. receiveBridgeMessage prüft vor jeder Folgerunde.
    */
   private readonly abortedThreadIds = new Set<string>();
+
+  /**
+   * A2A Glied 2 — Etappe 2: Threads, für die bereits eine Owner-Zusammenfassung
+   * erzeugt wurde. Verhindert, dass weitere eingehende Replies eines bereits
+   * gestoppten (Limit erreicht ODER abgebrochenen) Threads erneut summarizen —
+   * die Zusammenfassung läuft EINMAL, nicht pro Runde. Pro Boot ephemer, analog
+   * zu abortedThreadIds (Pilot-Scope).
+   */
+  private readonly summarizedThreadIds = new Set<string>();
 
   /** Markiert einen A2A-Thread als abgebrochen — keine weiteren Folgerunden. */
   abortThread(threadId: string): void {
@@ -1437,31 +1455,39 @@ export class TwinService {
         },
       });
 
-      // A2A Glied 2 — Etappe 1→2: Kontrollierte Folgerunden.
-      // Voraussetzungen: Thread-ID bekannt + Partner vertraut + nicht abgebrochen
-      // + noch unter Rundengrenze. Etappe-1-Grenze (< 1) bleibt bis SS2 gesetzt.
+      // A2A Glied 2 — Etappe 2: Kontrollierte Folgerunden-Schleife (bis 5/Seite).
+      // Voraussetzung: Partner vertraut. Reihenfolge der Kontrollgrenzen (von
+      // Markus festgelegt): erst die Bremse (Abbruch), dann das Rundenlimit,
+      // dann erst die nächste autonome Folgerunde. Bei Abbruch ODER Limit →
+      // harter Stopp + EINMALIGE Owner-Zusammenfassung (kein Send mehr).
       const mayAutoFollow =
         this.deps.trustRepo.canAutoRespond(this.deps.twinId, msg.fromHandle);
-      // Abbruch-Check (Etappe 2, Bremse): Owner kann jederzeit stoppen.
-      if (mayAutoFollow && this.abortedThreadIds.has(a2aThreadId)) {
-        console.log(
-          `[a2a:glied2] Thread=${a2aThreadId} abgebrochen — kein weiterer Send`,
-        );
-      } else if (mayAutoFollow) {
-        const followUpsDone = await this.countA2aFollowUpRounds(a2aThreadId);
-        if (followUpsDone < 1) {
+      if (mayAutoFollow) {
+        if (this.abortedThreadIds.has(a2aThreadId)) {
+          // (a) Bremse: Owner hat abgebrochen → kein Send, Zusammenfassung.
           console.log(
-            `[a2a:glied2] Folgerunde für Thread=${a2aThreadId}, ` +
-              `followUpsDone=${followUpsDone}, partner=${msg.fromHandle}`,
+            `[a2a:glied2] Thread=${a2aThreadId} abgebrochen — kein weiterer Send`,
           );
-          // handleTrustedBridgeMessage erzeugt trusted-bypass-Audit mit
-          // a2aThreadId im input → nächste countA2aFollowUpRounds gibt 1.
-          await this.handleTrustedBridgeMessage(msg);
+          await this.summarizeA2aThreadOnce(a2aThreadId, msg.fromHandle, "abort");
         } else {
-          console.log(
-            `[a2a:glied2] Hard-Stop: Etappe-1-Limit erreicht ` +
-              `(followUpsDone=${followUpsDone}) für Thread=${a2aThreadId}`,
-          );
+          const followUpsDone = await this.countA2aFollowUpRounds(a2aThreadId);
+          if (followUpsDone < A2A_MAX_FOLLOWUP_ROUNDS) {
+            // (b) Unter Limit → eine weitere autonome Folgerunde.
+            console.log(
+              `[a2a:glied2] Folgerunde ${followUpsDone + 1}/${A2A_MAX_FOLLOWUP_ROUNDS} ` +
+                `für Thread=${a2aThreadId}, partner=${msg.fromHandle}`,
+            );
+            // handleTrustedBridgeMessage erzeugt trusted-bypass-Audit mit
+            // a2aThreadId im input → countA2aFollowUpRounds steigt um 1.
+            await this.handleTrustedBridgeMessage(msg);
+          } else {
+            // (c) Rundenlimit erreicht → harter Stopp + Zusammenfassung.
+            console.log(
+              `[a2a:glied2] Hard-Stop: Rundenlimit ${A2A_MAX_FOLLOWUP_ROUNDS} erreicht ` +
+                `für Thread=${a2aThreadId} — Zusammenfassung an Owner`,
+            );
+            await this.summarizeA2aThreadOnce(a2aThreadId, msg.fromHandle, "limit");
+          }
         }
       }
 
@@ -3183,11 +3209,10 @@ REGEL 6: Wenn der User dich explizit bittet, ein Tool zu nutzen ("rufe das X-Too
   }
 
   /**
-   * A2A Glied 2 — Etappe 1: Zählt wie viele autonome Follow-Up-Runden
-   * @markus' Seite für diesen Thread bereits GESENDET hat (=trusted-bypass-
-   * Audits mit passendem a2aThreadId). Die initiale send_to_twin-Runde zählt
-   * NICHT (ist bereits im Thread-Opener, kein Follow-Up). Damit können wir
-   * "max 1 Follow-Up" hart begrenzen.
+   * A2A Glied 2 — Etappe 2: Zählt wie viele autonome Follow-Up-Runden
+   * DIESE Seite für den gegebenen Thread bereits GESENDET hat (=trusted-bypass-
+   * Audits mit passendem input.a2aThreadId). Die initiale send_to_twin-Runde
+   * zählt NICHT. Grenze: A2A_MAX_FOLLOWUP_ROUNDS (Default 5, ENV-konfigurierbar).
    */
   private async countA2aFollowUpRounds(threadId: string): Promise<number> {
     const all = await this.deps.audit.repo.list({ limit: 200 });
@@ -3197,6 +3222,78 @@ REGEL 6: Wenn der User dich explizit bittet, ein Tool zu nutzen ("rufe das X-Too
       const inId = (e.input as { a2aThreadId?: string })?.a2aThreadId;
       return inId === threadId;
     }).length;
+  }
+
+  /**
+   * A2A Glied 2 — Etappe 2: Erzeugt EINMAL pro Thread eine LLM-Zusammenfassung
+   * des Verhandlungsstands mit `partnerHandle` und legt sie als Audit ab
+   * (Capability "a2a-summary"). Trigger: Rundenlimit erreicht ("limit") ODER
+   * Owner-Abbruch ("abort").
+   *
+   * Surface: Der Audit (+ die von AuditService emittierten audit.created/
+   * audit.updated-Events) erscheint im Inbox-/Audit-Stream des Owners. Ein
+   * Telegram-Push an den Owner (sendToOwner) existiert in TwinService NOCH NICHT
+   * (vgl. approveProactiveNudge — spätere Freischaltung); die Zusammenfassung
+   * landet daher als Audit, nicht als Telegram-Nachricht.
+   *
+   * Dedup über summarizedThreadIds (in-memory, pro Boot): weitere eingehende
+   * Replies eines bereits gestoppten Threads triggern KEINE zweite
+   * Zusammenfassung. Markiert wird VOR dem Modell-Call, damit parallele Replies
+   * nicht doppelt summarizen; bei Modell-Fehler bleibt der Audit "failed", der
+   * Thread gilt aber als summarized (Pilot-Scope, dokumentiert).
+   */
+  private async summarizeA2aThreadOnce(
+    threadId: string,
+    partnerHandle: string,
+    reason: "limit" | "abort",
+  ): Promise<void> {
+    if (this.summarizedThreadIds.has(threadId)) return;
+    this.summarizedThreadIds.add(threadId);
+
+    // input.content wird von buildBridgeThread als finaler User-Turn an das
+    // Modell gehängt — daher ist es zugleich der Zusammenfassungs-Auftrag.
+    const instruction =
+      reason === "limit"
+        ? `Fasse für mich (Owner) den Stand der Verhandlung mit ${partnerHandle} ` +
+          `in 3-5 Sätzen zusammen: Was wurde besprochen, worauf habt ihr euch ` +
+          `geeinigt, was ist noch offen? Der autonome Austausch wurde nach ` +
+          `${A2A_MAX_FOLLOWUP_ROUNDS} Runden pro Seite automatisch gestoppt.`
+        : `Fasse für mich (Owner) den Stand der Verhandlung mit ${partnerHandle} ` +
+          `in 3-5 Sätzen zusammen: Was wurde besprochen, was ist noch offen? ` +
+          `Ich habe den autonomen Austausch gerade abgebrochen.`;
+
+    const audit = await this.deps.audit.start({
+      capability: "a2a-summary",
+      mandateId: null,
+      input: {
+        a2aThreadId: threadId,
+        partnerHandle,
+        reason,
+        content: instruction,
+      },
+      initialStatus: "executed",
+    });
+
+    this.deps.bus.emit({
+      type: "twin.thinking",
+      payload: { capability: "a2a-summary" },
+    });
+    try {
+      // Verhandlungsverlauf rekonstruieren (gleiche Quelle wie eine Folgerunde)
+      // und das Modell den Stand zusammenfassen lassen.
+      const thread = await this.buildBridgeThread(audit, partnerHandle);
+      const reply = await this.runModel(this.deps.persona, thread, undefined);
+      await this.deps.audit.complete(audit.id, {
+        reply: reply.content,
+        partnerHandle,
+        a2aThreadId: threadId,
+        reason,
+        providerMetadata: reply.metadata,
+      });
+      this.deps.bus.emit({ type: "twin.idle", payload: {} });
+    } catch (err) {
+      await this.failWithReason(audit.id, err);
+    }
   }
 
   private async failWithReason(auditId: string, err: unknown): Promise<void> {

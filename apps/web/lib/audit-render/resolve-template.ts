@@ -28,6 +28,10 @@ const CAPABILITY_TO_TEMPLATE: Record<string, AuditTemplateClass> = {
   "reply-received": "a2a-activity",
   "system-message-received": "a2a-activity",
   respond_to_twin_message: "a2a-activity",
+  // A2A Glied 2 — Etappe 2: Owner-Zusammenfassung bei Limit/Abbruch eines
+  // Twin-zu-Twin-Threads. Twin-generierter Text → twin-answer-Template
+  // (zeigt input.content als Auftrag + output.reply als Zusammenfassung).
+  "a2a-summary": "twin-answer",
 };
 
 export function resolveAuditTemplate(capability: string): AuditTemplateClass {
