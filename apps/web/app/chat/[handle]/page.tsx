@@ -138,6 +138,16 @@ interface ConversationItem {
 
 interface TrustEntry {
   trustedHandle: string;
+  /** Spiegelt FamiliarityLevel aus trust-repo.ts. Nur 'vertraut'/'eng' sind
+   *  AUTO_RESPONABLE_LEVELS — die werden im @-Mention-Autocomplete vorgeschlagen. */
+  familiarityLevel?: "fremd" | "bekannt" | "vertraut" | "eng";
+}
+
+/** @-Mention-Vorschlag: ein vertrauter Twin, optional mit Anzeigename aus der
+ *  Konversations-Liste. Nur Komfort — der User kann jeden Handle manuell tippen. */
+interface MentionCandidate {
+  handle: string;
+  displayName: string | null;
 }
 
 // Spiegelt MergedMessage aus apps/runtime/src/audit/conversation-merge.ts.
@@ -182,6 +192,9 @@ export default function ChatPage({
 function ChatLayout({ handle }: { handle: string }) {
   const [conversations, setConversations] = useState<ConversationItem[]>([]);
   const [trustedSet, setTrustedSet] = useState<Set<string>>(new Set());
+  // @-Mention-Autocomplete: nur auto-respondable Trusts (vertraut/eng), Handles
+  // lowercased. Gespeist aus demselben /trust-Fetch wie trustedSet (kein extra Call).
+  const [mentionHandles, setMentionHandles] = useState<string[]>([]);
   const [selection, setSelection] = useState<Selection>({ kind: "direct" });
   const [showNewModal, setShowNewModal] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -225,6 +238,16 @@ function ChatLayout({ handle }: { handle: string }) {
       const body = (await res.json()) as { trusts: TrustEntry[] };
       setTrustedSet(
         new Set(body.trusts.map((t) => t.trustedHandle.toLowerCase())),
+      );
+      // Nur vertraut/eng (AUTO_RESPONABLE_LEVELS) vorschlagen — Test-/bekannt-
+      // Accounts fallen damit automatisch raus.
+      setMentionHandles(
+        body.trusts
+          .filter(
+            (t) =>
+              t.familiarityLevel === "vertraut" || t.familiarityLevel === "eng",
+          )
+          .map((t) => t.trustedHandle.toLowerCase()),
       );
     } catch {
       // Trust-Fetch ist nice-to-have für den Indikator — kein Blocker.
@@ -290,6 +313,21 @@ function ChatLayout({ handle }: { handle: string }) {
     selection.kind === "a2a" &&
     trustedSet.has(selection.partner.toLowerCase());
 
+  // @-Mention-Kandidaten: vertraute Handles, angereichert mit Anzeigename aus
+  // der Konversations-Liste (falls vorhanden). Nur Komfort-Vorschlag.
+  const mentionCandidates = useMemo<MentionCandidate[]>(() => {
+    const nameByHandle = new Map(
+      conversations.map((c) => [
+        c.partnerHandle.toLowerCase(),
+        c.partnerDisplayName ?? null,
+      ]),
+    );
+    return mentionHandles.map((h) => ({
+      handle: h,
+      displayName: nameByHandle.get(h) ?? null,
+    }));
+  }, [mentionHandles, conversations]);
+
   return (
     // Fixe Höhe = Viewport minus AppHeader (~65px). overflow-hidden klemmt
     // alle internen Bereiche sauber ein — die Page selbst scrollt nie, nur
@@ -320,6 +358,7 @@ function ChatLayout({ handle }: { handle: string }) {
             handle={handle}
             resetSeq={directChatResetSeq}
             onConvIdChange={setDirectChatConvId}
+            mentionCandidates={mentionCandidates}
           />
         ) : (
           <A2AChat
@@ -1710,16 +1749,43 @@ function buildChatBlocksFromAudits(entries: AuditEntry[]): {
   return { blocks, newestConvId };
 }
 
+/**
+ * @-Mention-Erkennung: liefert das aktive "@…"-Token unmittelbar vor dem Cursor,
+ * sofern es am Wortanfang steht (Input-Start oder Whitespace davor) und nur
+ * Handle-Zeichen enthält. null, wenn an der Cursor-Position keine Mention läuft.
+ */
+function detectMention(
+  text: string,
+  caret: number,
+): { query: string; start: number } | null {
+  for (let i = caret - 1; i >= 0; i--) {
+    const ch = text[i];
+    if (ch === "@") {
+      const prev = i > 0 ? text[i - 1] ?? "" : "";
+      if (i === 0 || /\s/.test(prev)) {
+        const query = text.slice(i + 1, caret);
+        if (/^[a-z0-9_-]*$/i.test(query)) return { query, start: i };
+      }
+      return null;
+    }
+    if (ch === undefined || /\s/.test(ch)) return null;
+  }
+  return null;
+}
+
 function DirectChat({
   handle,
   resetSeq,
   onConvIdChange,
+  mentionCandidates,
 }: {
   handle: string;
   resetSeq: number;
   /** 3.3.G3: liftet die jüngste Conv-ID nach oben, damit der Conversation-
    *  Header sie für Extract-Calls nutzen kann. */
   onConvIdChange?: (id: string | null) => void;
+  /** @-Mention-Autocomplete: vertraute Twins (vertraut/eng). Reiner Komfort. */
+  mentionCandidates: MentionCandidate[];
 }) {
   const [auditEntries, setAuditEntries] = useState<AuditEntry[]>([]);
   // #106: Reset-Boundary aus dem Conversation-Detail. NULL = nie zurück-
@@ -1738,6 +1804,13 @@ function DirectChat({
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // @-Mention-Autocomplete: aktives Mention-Token (Query + Start-Offset im
+  // Input) oder null, plus markierter Listenindex für Tastatur-Navigation.
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const [mention, setMention] = useState<{ query: string; start: number } | null>(
+    null,
+  );
+  const [mentionIndex, setMentionIndex] = useState(0);
   // 3.2.G: Loading-State pro Audit für Approve/Reject — Tool-Call braucht
   // 5-10s (Spawn + LLM-Resume), Buttons werden in der Zeit disabled.
   const [loadingAuditId, setLoadingAuditId] = useState<string | null>(null);
@@ -1892,7 +1965,49 @@ function DirectChat({
     if (!input.trim() || busy) return;
     const userText = input;
     setInput("");
+    setMention(null);
     await sendChat(userText);
+  }
+
+  // @-Mention: gefilterte Kandidaten zur aktuellen Query (Prefix-Match auf
+  // Handle ohne "@" oder Anzeigename). Leere Query (gerade "@" getippt) → alle.
+  const mentionMatches = useMemo<MentionCandidate[]>(() => {
+    if (!mention) return [];
+    const q = mention.query.toLowerCase();
+    return mentionCandidates.filter((c) => {
+      const bare = c.handle.replace(/^@/, "").toLowerCase();
+      return (
+        bare.startsWith(q) ||
+        (c.displayName?.toLowerCase().startsWith(q) ?? false)
+      );
+    });
+  }, [mention, mentionCandidates]);
+
+  function handleInputChange(e: React.ChangeEvent<HTMLTextAreaElement>) {
+    const value = e.target.value;
+    setInput(value);
+    const caret = e.target.selectionStart ?? value.length;
+    setMention(detectMention(value, caret));
+    setMentionIndex(0);
+  }
+
+  // Fügt den gewählten Handle anstelle des "@query"-Tokens ein (+ Leerzeichen),
+  // schließt das Dropdown und setzt den Cursor dahinter.
+  function applyMention(candidate: MentionCandidate) {
+    if (!mention) return;
+    const before = input.slice(0, mention.start);
+    const after = input.slice(mention.start + 1 + mention.query.length);
+    const insert = `${candidate.handle} `;
+    setInput(before + insert + after);
+    setMention(null);
+    const caretPos = before.length + insert.length;
+    requestAnimationFrame(() => {
+      const ta = textareaRef.current;
+      if (ta) {
+        ta.focus();
+        ta.setSelectionRange(caretPos, caretPos);
+      }
+    });
   }
 
   async function sendChat(
@@ -2183,19 +2298,79 @@ function DirectChat({
         </div>
       </div>
       <div className="h-20 border-t border-border bg-surface px-6 py-3 flex items-center gap-2 flex-shrink-0">
-        <textarea
-          value={input}
-          onChange={(e) => setInput(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter" && !e.shiftKey) {
-              e.preventDefault();
-              send();
-            }
-          }}
-          placeholder="Frage an den Twin… (Enter zum senden, Shift+Enter für Zeilenumbruch)"
-          className="flex-1 h-full bg-bg border border-border rounded px-3 py-2 text-sm text-text resize-none focus:outline-none focus:border-accent"
-          rows={2}
-        />
+        <div className="relative flex-1 h-full">
+          {mention && mentionMatches.length > 0 && (
+            <ul className="absolute bottom-full mb-1 left-0 w-64 max-h-48 overflow-y-auto bg-surface border border-border rounded shadow-lg z-20 py-1">
+              {mentionMatches.map((c, idx) => (
+                <li key={c.handle}>
+                  <button
+                    type="button"
+                    // onMouseDown statt onClick: verhindert (mit preventDefault)
+                    // das Blur der textarea, sodass der Klick zuverlässig greift.
+                    onMouseDown={(e) => {
+                      e.preventDefault();
+                      applyMention(c);
+                    }}
+                    className={`block w-full text-left px-3 py-1.5 text-sm transition-colors ${
+                      idx === mentionIndex
+                        ? "bg-accent/20 text-text"
+                        : "text-muted hover:bg-bg"
+                    }`}
+                  >
+                    <span className="font-mono text-text">{c.handle}</span>
+                    {c.displayName && (
+                      <span className="text-muted"> · {c.displayName}</span>
+                    )}
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+          <textarea
+            ref={textareaRef}
+            value={input}
+            onChange={handleInputChange}
+            onBlur={() => setMention(null)}
+            onKeyDown={(e) => {
+              // Mention-Dropdown offen: Navigation/Auswahl fängt die Tasten ab,
+              // BEVOR Enter den Send-Flow auslöst.
+              if (mention && mentionMatches.length > 0) {
+                if (e.key === "ArrowDown") {
+                  e.preventDefault();
+                  setMentionIndex((i) => (i + 1) % mentionMatches.length);
+                  return;
+                }
+                if (e.key === "ArrowUp") {
+                  e.preventDefault();
+                  setMentionIndex(
+                    (i) =>
+                      (i - 1 + mentionMatches.length) % mentionMatches.length,
+                  );
+                  return;
+                }
+                if (e.key === "Enter" || e.key === "Tab") {
+                  e.preventDefault();
+                  const chosen =
+                    mentionMatches[mentionIndex] ?? mentionMatches[0];
+                  if (chosen) applyMention(chosen);
+                  return;
+                }
+                if (e.key === "Escape") {
+                  e.preventDefault();
+                  setMention(null);
+                  return;
+                }
+              }
+              if (e.key === "Enter" && !e.shiftKey) {
+                e.preventDefault();
+                send();
+              }
+            }}
+            placeholder="Frage an den Twin… (Enter zum senden, Shift+Enter für Zeilenumbruch)"
+            className="w-full h-full bg-bg border border-border rounded px-3 py-2 text-sm text-text resize-none focus:outline-none focus:border-accent"
+            rows={2}
+          />
+        </div>
         {/* 3.2.H: Tool-Picker zwischen Input und Send. Klick öffnet Modal mit
             aktiven MCP-Tools, Submit zwingt den Tool-Call. */}
         <ToolPicker handle={handle} disabled={busy} onSend={sendToolFromPicker} />
