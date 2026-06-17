@@ -47,6 +47,9 @@ const DIRECT_CHAT_CAPABILITIES = new Set([
   "respond_to_chat",
   "owner-direct",
   "mcp-tool-use",
+  // A2A Glied 2 Etappe 3 SS-C: proaktive Zusammenfassungs-Bubble des Twins
+  // (assistant-only, kein Owner-Input vorausgegangen) — siehe Render-Zweig.
+  "a2a-summary-notice",
 ]);
 
 // Threshold in px: User gilt als "unten", wenn er weniger als so viel vom
@@ -1711,6 +1714,24 @@ function buildChatBlocksFromAudits(entries: AuditEntry[]): {
           channel,
         });
       }
+      newestConvId = cid;
+      continue;
+    }
+
+    // A2A Glied 2 Etappe 3 SS-C: proaktive Summary-Bubble — assistant-only,
+    // KEIN user-Turn (der Twin meldet sich von selbst). Eigener Zweig, weil der
+    // owner-direct-Zweig unten user+assistant erzwingt (würde sie sonst skippen).
+    if (entry.capability === "a2a-summary-notice") {
+      if (entry.status !== "executed") continue;
+      const out = (entry.output ?? null) as AuditExecutedOutputShape | null;
+      const summary = out && typeof out.reply === "string" ? out.reply : null;
+      if (!summary) continue;
+      blocks.push({
+        kind: "assistant",
+        content: summary,
+        conversationId: cid,
+        auditId: entry.id,
+      });
       newestConvId = cid;
       continue;
     }

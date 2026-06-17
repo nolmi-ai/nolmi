@@ -3428,6 +3428,14 @@ REGEL 6: Wenn der User dich explizit bittet, ein Tool zu nutzen ("rufe das X-Too
       const reply = out?.reply;
       if (!reply) continue;
       const partner = out?.partnerHandle ?? "einem anderen Twin";
+      const threadId = (entry.input as { a2aThreadId?: string })?.a2aThreadId;
+
+      // SS-C: Proaktive Direct-Chat-Bubble — idempotent (eigene Notice-Audit-
+      // Existenz), unabhängig vom Telegram-Erfolg. So erscheint die Summary
+      // als Twin-Bubble im Owner-Chat, auch wenn der Telegram-Push (noch) fehlt.
+      if (threadId) {
+        await this.ensureA2aSummaryBubble(threadId, partner, reply);
+      }
 
       // Rich-Message: Markdown — sendToOwner macht Markdown→HTML (mit Plain-
       // Fallback). Überschrift + die neutrale Zusammenfassung.
@@ -3446,6 +3454,59 @@ REGEL 6: Wenn der User dich explizit bittet, ein Tool zu nutzen ("rufe das X-Too
       delivered += 1;
     }
     return delivered;
+  }
+
+  /**
+   * A2A Glied 2 — Etappe 3 SS-C: Schreibt die Zusammenfassung als proaktive
+   * Twin-Bubble in den Owner-Direct-Chat (Capability "a2a-summary-notice",
+   * verknüpft mit der Owner-Direct-Konversation). assistant-only — kein
+   * Owner-Input ging voraus. Idempotent: existiert für diesen Thread schon eine
+   * Notice, passiert nichts (verhindert Doppel-Bubble bei Telegram-Retries).
+   * Kein read_at — Direct-Chat-Bubbles tragen keinen Lesestatus (wie owner-direct).
+   */
+  private async ensureA2aSummaryBubble(
+    threadId: string,
+    partnerHandle: string,
+    summaryText: string,
+  ): Promise<void> {
+    if (this.deps.ownerUserId === null) return; // ohne Owner keine Direct-Konv
+
+    const all = await this.deps.audit.repo.list({
+      limit: 500,
+      twinId: this.deps.twinId,
+    });
+    const exists = all.some(
+      (e) =>
+        e.capability === "a2a-summary-notice" &&
+        (e.input as { a2aThreadId?: string })?.a2aThreadId === threadId,
+    );
+    if (exists) return;
+
+    // Owner-Direct-Konversation auflösen (gleicher Resolver wie der Owner-Pfad):
+    // Direct-Chat-Partner = der Twin-Handle selbst.
+    const ownHandle = this.deps.persona.handle.startsWith("@")
+      ? this.deps.persona.handle
+      : `@${this.deps.persona.handle}`;
+    const conv = this.deps.conversations.getOrStart(
+      this.deps.ownerUserId,
+      ownHandle,
+      this.deps.twinId,
+    );
+
+    const audit = await this.deps.audit.start({
+      capability: "a2a-summary-notice",
+      mandateId: null,
+      input: { a2aThreadId: threadId, partnerHandle },
+      initialStatus: "executed",
+      conversationId: conv.id,
+    });
+    // Summary-Text ins output.reply → der Direct-Chat-Renderer zeigt ihn als
+    // assistant-only-Bubble.
+    await this.deps.audit.complete(audit.id, {
+      reply: summaryText,
+      partnerHandle,
+      a2aThreadId: threadId,
+    });
   }
 
   private async failWithReason(auditId: string, err: unknown): Promise<void> {
