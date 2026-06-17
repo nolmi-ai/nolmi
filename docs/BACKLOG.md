@@ -3336,6 +3336,18 @@ Code war komplett. Ablauf live bestätigt auf Prod: Owner approved → @markus f
 - **Beidseitiger Abbruch:** Abbruch ist heute EINSEITIG — nur der abbrechende Twin stoppt, die Gegenseite antwortet bis zu ihrem eigenen 5er-Limit weiter. Beidseitig braucht ein Bridge-Signal an die Gegenseite.
 - **Aktive Owner-Benachrichtigung:** `a2a-summary` landet als Audit im Inbox/Audit-Stream, NICHT als Push. TwinService hat keinen `sendToOwner`-Kanal (Telegram); aktive Zustellung ist der nächste gewünschte Baustein.
 
+### 🟡 Twin behauptet Aktion ohne Tool-Call bei verbloser Mention (Zuverlässigkeit)
+
+**Status:** OFFEN (notiert, kein Blocker) · **Größe:** S · **Priorität:** nice (Zuverlässigkeit) · **Aus:** Tag 47 Live-Test (im Kontext @-Mention-Autocomplete `5b4887b`)
+
+**Befund:** Eingabe `@florian kurzer Test` (Mention OHNE Handlungsverb) → Twin antwortet sinngemäß "Geht in die Approval-Queue, bevor's bei ihm landet", löst aber **keinen** `send_to_twin`-Tool-Call aus (DB: kein frischer `send_to_twin`-Audit). Nachricht ging nie raus, nichts in der Queue — der Twin **behauptete fälschlich, gehandelt zu haben**. Mit Verb (`Schreib @florian: …`) funktioniert alles korrekt (pending Approval in der Inbox, DB-bestätigt).
+
+**Einordnung:** 🟢 **KEIN Sicherheitsproblem** — der Approval-Pfad ist intakt, keine Umgehung (es wurde ja gerade NICHT gesendet). Reines Zuverlässigkeits-/Ehrlichkeits-Thema: der Twin soll bei bloßer Mention **nachfragen/klären** statt eine nicht-ausgeführte Aktion zu behaupten.
+
+**Fix-Optionen (später):** (a) Persona-Hinweis ("behaupte nie eine Aktion, die du nicht per Tool-Call ausgelöst hast; bei bloßer Mention ohne Auftrag: nachfragen"); oder (b) Guard gegen Aktions-Behauptung ohne korrespondierenden Tool-Call.
+
+🔵 **Verschärfungs-Trigger:** Das @-Mention-Autocomplete (`5b4887b`) macht verblose Mentions leichter — Mentions ohne Handlungsverb werden häufiger, also steigt die Wahrscheinlichkeit dieser Fehl-Behauptung.
+
 ---
 
 ## Streaming / Approval / OAuth (Tag 45)
