@@ -3364,11 +3364,11 @@ Code war komplett. Ablauf live bestätigt auf Prod: Owner approved → @markus f
 
 ## Nächste Bögen (Tag 47, sortiert)
 
-### 🔴 Twin-Zeitgefühl: aktuelles Datum/Wochentag im Kontext (HOHE Wirkung)
+### ✅ Twin-Zeitgefühl: aktuelles Datum/Wochentag im Kontext — DONE (ec68aac, Tag 47, auf Prod)
 
-**Status:** OFFEN · **Größe:** vmtl. S · **Priorität:** 🔴 hoch (Realismus-Bruch) · **Aus:** Tag-47-Prod-Beobachtung
+**Status:** ✅ DONE & deployt (`870a38a → ec68aac`, runtime-only) · **Größe war:** S
 
-**Befund:** Twins kennen das aktuelle Datum / den Wochentag nicht → verorten Termine falsch und wünschen z.B. „schönes Wochenende" am Mittwoch. Bricht die Glaubwürdigkeit sichtbar. **Vermuteter Fix (klein):** aktuelles Datum + Wochentag in den System-Prompt / Persona-Kontext injizieren (eine Stelle im Prompt-Aufbau). Hohe Wirkung bei geringem Aufwand → guter nächster Bogen.
+**Befund (behoben):** Twins kannten Datum/Wochentag nicht → verorteten Termine falsch („schönes Wochenende" am Mittwoch). **Fix:** `composeOwnerSystemPrompt` injiziert einen `## Heute`-Block (de-DE, pro Request, owner-lokale TZ via `OWNER_DISPLAY_TZ`/`QUIET_HOURS_TZ` Default `Europe/Berlin`) — erreicht alle Konversations-Pfade + beide Modell-Pfade (Vercel + Codex). Prod-Smoke: korrektes Datum + Wochentag-Verortung. Autonome Engines bewusst außen vor.
 
 ### 🟡 Ungelesen-Indikator @florian bleibt trotz aktivem Lesen — Re-Diagnose (Faktenlage geändert)
 

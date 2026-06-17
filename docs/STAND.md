@@ -320,7 +320,11 @@ Der getaktete Production-Deploy ist durch: **`86ed1e4` → `6e32813`** auf `srv1
 - **Befund beim Build (jetzt dokumentiert):** der Prod-Stack nutzt `image:latest` ohne `build:` → `docker compose up -d` baut nichts; explizites `docker build` aus dem Repo-Root gehört davor. **DEPLOYMENT.md §3 entsprechend korrigiert** (inkl. Literal-Build-Arg-Warnung, da der #126-Guard ein leeres `${DOMAIN}` nicht abfängt).
 - **Smoke deckte eine UX-Lücke auf:** ein im Wizard angelegter Twin ist über die UI **nicht löschbar** (musste per DB-Skript raus) → neues BACKLOG-Item.
 
-## Tag 47 (17. Juni 2026) — 🚀 Summary-Scoping + Auslöser-Vorspann auf Prod (Runtime-only)
+## Tag 47 (17. Juni 2026) — 🚀 Twin-Zeitgefühl auf Prod (aktuelles Datum/Wochentag im System-Prompt)
+
+**Tag 47 (Forts.) — Twins kennen jetzt Datum + Wochentag.** Runtime-only-Deploy `870a38a → ec68aac` auf srv1712371. `composeOwnerSystemPrompt` injiziert einen `## Heute`-Block („Heute ist {Wochentag}, {D}. {Monat} {Jahr}.", de-DE) — **pro Request** via `new Date()` (kein eingefrorenes Boot-Datum), **owner-lokale TZ** via `OWNER_DISPLAY_TZ` (reused `QUIET_HOURS_TZ`-Env, Default `Europe/Berlin`; ungültige TZ → UTC-Fallback). Greift über **alle Konversations-Pfade** (Owner-Chat, A2A trusted-bypass, send_to_twin, Summary) **und beide Modell-Pfade** (Vercel + Codex) — `runModel` baut `system` genau einmal hier. Autonome Engines (focus/reflection/nudge/extraction) bewusst außen vor (eigene `buildSystemPrompt`, kein Zeitgefühl-Symptom). **Prod-Smoke beidseitig:** Owner-Chat nennt korrektes Datum (Codex-Pfad bestätigt), A2A verortet Wochentage/Termine korrekt relativ zu heute (lokal: „übermorgen = Freitag" sauber). Boot grün, **nur runtime-Image**, keine Migration. Rollback-Tag `nolmi-runtime:rollback-tag47b`. → **Backlog-Item #1 (Zeitgefühl) erledigt.**
+
+
 
 **Tag 47 (Forts.) — A2A-Summary-Verbesserungen live auf Prod.** Runtime-only-Deploy `a817c2a → 870a38a` auf srv1712371. Zwei Commits: **`300d27d`** (Summary scopt das Thread-Material per `a2aThreadId` + volle Historie statt `partnerHandle`/`slice(-5)` → keine Vermischung paralleler Threads, ganzer Verlauf von Anfang bis Ende) und **`870a38a`** (Summary öffnet mit der ursprünglichen Auslöser-Frage bei **owner-initiierten** Threads, Variante A — ein `output.reply` für Telegram + Bubble; partner-initiiert → kein Vorspann). **Nur runtime-Image neu** (web+bridge unberührt → kein Bundle-Check), **keine Migration**. Boot grün: `[a2a-sweep] started`, 3 Twins, kein Crash. Rollback-Tag `nolmi-runtime:rollback-tag47`.
 
