@@ -1390,6 +1390,10 @@ export class TwinService {
       msg.messageType === "twin" ? "twin-initiated" : msg.messageType;
 
     if (normalizedType === "twin-reply") {
+      // A2A Glied 2: Thread-Anker aus inReplyTo ableiten (= Root-messageId
+      // des Austauschs). Falls inReplyTo null, ist msg selbst die Root.
+      const a2aThreadId = msg.inReplyTo ?? msg.id;
+
       const audit = await this.deps.audit.start({
         capability: "reply-received",
         mandateId: null,
@@ -1399,6 +1403,7 @@ export class TwinService {
           content: msg.content,
           inReplyTo: msg.inReplyTo,
           receivedAt: new Date().toISOString(),
+          a2aThreadId,
         },
         initialStatus: "executed",
       });
@@ -2180,11 +2185,16 @@ export class TwinService {
         // via LLM. Cross-Ref Tag-28-Block-16.
         messageType: "twin-initiated",
       });
+      // A2A Glied 2: die sentMessageId des ersten Sends ist der Thread-Anker.
+      // Alle Folgenachrichten dieser Verhandlungssitzung tragen dieselbe
+      // a2aThreadId im Audit-input/-output und im Bridge-inReplyTo-Feld.
+      const a2aThreadId = sent.messageId;
       await this.deps.audit.complete(entry.id, {
         reply: reply.content,
         sentMessageId: sent.messageId,
         targetHandle,
         providerMetadata: reply.metadata,
+        a2aThreadId,
       });
       this.deps.bus.emit({ type: "twin.idle", payload: {} });
       return {
@@ -2266,6 +2276,10 @@ export class TwinService {
       throw new Error("handleTrustedBridgeMessage ohne aktiven BridgeClient");
     }
 
+    // A2A Glied 2: Thread-Anker ableiten. Wenn msg.inReplyTo gesetzt ist,
+    // ist die Root-Nachricht bekannt; sonst ist msg selbst die Root.
+    const a2aThreadId = msg.inReplyTo ?? msg.id;
+
     const audit = await this.deps.audit.start({
       capability: "trusted-bypass",
       mandateId: null,
@@ -2276,6 +2290,8 @@ export class TwinService {
         inReplyTo: msg.inReplyTo,
         // Trace, welche Capability der External-Pfad gewählt hätte.
         originalCapability: "respond_to_twin_message",
+        // Thread-Anker für Rundenzählung (Glied 2).
+        a2aThreadId,
       },
       // Konsistent mit owner-direct-send / system-message: kein Approval-
       // Workflow, der Bypass ist direkt — daher "executed" als initial. Nach
@@ -2306,12 +2322,17 @@ export class TwinService {
         // ist das die Antwort auf seine Anfrage → twin-reply.
         // Cross-Ref Tag-28-Block-16.
         messageType: "twin-reply",
+        // A2A Glied 2: Thread-Anker als inReplyTo weiterführen, damit der
+        // Empfänger die a2aThreadId rekonstruieren kann (msg.inReplyTo ?? msg.id).
+        // Heute fehlend — das ist der Thread-Bruch aus Diagnose Befund B.
+        inReplyTo: a2aThreadId,
       });
       await this.deps.audit.complete(audit.id, {
         reply: reply.content,
         sentMessageId: sent.messageId,
         targetHandle: msg.fromHandle,
         providerMetadata: reply.metadata,
+        a2aThreadId,
       });
       this.deps.bus.emit({ type: "twin.idle", payload: {} });
     } catch (err) {
