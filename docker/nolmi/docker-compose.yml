@@ -80,6 +80,20 @@ services:
       - ACTIVE_PROVIDER=${ACTIVE_PROVIDER:-anthropic}
       - TELEGRAM_USE_POLLING=${TELEGRAM_USE_POLLING:-false}
       - RUNTIME_PUBLIC_URL=${RUNTIME_PUBLIC_URL:-}
+      # Autonome-Feature-Flags: Durchreichung aus der VPS-.env (Werte NICHT
+      # hier — leben in /docker/nolmi/.env). ${VAR:-} = harmlos wenn unset
+      # (Default AUS / Engine-Default). Synchronisiert die seit 2. Juni nur in
+      # der Prod-Compose vorhandenen Zeilen ins Repo (Drift-Ende).
+      - FOCUS_LOOP_ENABLED=${FOCUS_LOOP_ENABLED:-}
+      - FOCUS_LOOP_INTERVAL_HOURS=${FOCUS_LOOP_INTERVAL_HOURS:-}
+      - REFLECTION_LOOP_ENABLED=${REFLECTION_LOOP_ENABLED:-}
+      - REFLECTION_LOOP_INTERVAL_HOURS=${REFLECTION_LOOP_INTERVAL_HOURS:-}
+      - A2A_CLOSE_SWEEP_ENABLED=${A2A_CLOSE_SWEEP_ENABLED:-}
+      - PROACTIVE_NUDGE_AUTOSEND_ENABLED=${PROACTIVE_NUDGE_AUTOSEND_ENABLED:-}
+      - TAIL_FLUSH_AUTONOMOUS_ENABLED=${TAIL_FLUSH_AUTONOMOUS_ENABLED:-}
+      - REFLECTION_NUDGE_AUTOSEND_ENABLED=${REFLECTION_NUDGE_AUTOSEND_ENABLED:-}
+      - PROACTIVE_NUDGE_ANLASS3_AUTOSEND_ENABLED=${PROACTIVE_NUDGE_ANLASS3_AUTOSEND_ENABLED:-}
+      - OPEN_QUESTION_MAX_AGE_HOURS=${OPEN_QUESTION_MAX_AGE_HOURS:-}
     labels:
       - "traefik.enable=true"
       - "traefik.docker.network=traefik-proxy"
@@ -106,6 +120,9 @@ services:
       - BRIDGE_PORT=5100
       - BRIDGE_DATABASE_PATH=/data/bridge.db
       - BRIDGE_REGISTER_TOKEN=${BRIDGE_REGISTER_TOKEN}
+      # Admin-Cleanup-Endpoint (apps/bridge/src/index.ts) — Pflicht-Secret,
+      # KEIN Default: fehlt es, soll Compose fail-fast melden (variable not set).
+      - BRIDGE_ADMIN_TOKEN=${BRIDGE_ADMIN_TOKEN}
     labels:
       - "traefik.enable=true"
       - "traefik.docker.network=traefik-proxy"
