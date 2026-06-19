@@ -62,8 +62,26 @@ export function mergeAuditIntoBridgeMessages(
       if (!sentIndex.has(out.sentMessageId)) sentIndex.set(out.sentMessageId, a);
     }
     if (inp?.bridgeMessageId) {
-      if (!receivedIndex.has(inp.bridgeMessageId))
+      // Präzedenz: reply-received gewinnt den received-Slot. Eine eingehende
+      // Twin-Reply hat ZWEI Audits mit derselben input.bridgeMessageId — die
+      // reply-received-Audit (älter) UND die trusted-bypass-Antwort-Audit
+      // (µs später, neuer). Ohne Präzedenz gewinnt bei DESC-first-wins der
+      // neuere trusted-bypass → die Message rendert als trusted-bypass → der
+      // mark-read-Filter (auditCapability === "reply-received", page.tsx) verfehlt
+      // sie → read_at bleibt NULL → Ungelesen-Indikator bleibt ewig hängen.
+      // trusted-bypass gehört ohnehin via output.sentMessageId in den sentIndex
+      // (die ausgehende Antwort); im received-Slot ist es redundant, solange eine
+      // reply-received existiert. Fallback bleibt: florian-INITIIERTE Nachrichten
+      // (mayAuto-Pfad) haben NUR trusted-bypass — die behalten ihren Audit-Link.
+      const existing = receivedIndex.get(inp.bridgeMessageId);
+      if (!existing) {
         receivedIndex.set(inp.bridgeMessageId, a);
+      } else if (
+        existing.capability !== "reply-received" &&
+        a.capability === "reply-received"
+      ) {
+        receivedIndex.set(inp.bridgeMessageId, a);
+      }
     }
   }
 
