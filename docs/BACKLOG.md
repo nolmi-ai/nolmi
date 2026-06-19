@@ -3338,17 +3338,17 @@ Code war komplett. Ablauf live bestätigt auf Prod: Owner approved → @markus f
 - **Beidseitiger Abbruch:** Abbruch ist heute EINSEITIG — nur der abbrechende Twin stoppt, die Gegenseite antwortet bis zu ihrem eigenen 5er-Limit weiter. Beidseitig braucht ein Bridge-Signal an die Gegenseite.
 - ~~Aktive Owner-Benachrichtigung~~ ✅ **ERLEDIGT (Etappe 3):** Telegram-Push (`sendToOwner`) + proaktive Direct-Chat-Bubble, beide live auf Prod.
 
-### 🟡 Twin behauptet Aktion ohne Tool-Call bei verbloser Mention (Zuverlässigkeit)
+### ✅ Twin behauptet Aktion ohne Tool-Call bei verbloser Mention — DONE (7ee9bc9, Tag 48, auf Prod)
 
-**Status:** OFFEN (notiert, kein Blocker) · **Größe:** S · **Priorität:** nice (Zuverlässigkeit) · **Aus:** Tag 47 Live-Test (im Kontext @-Mention-Autocomplete `5b4887b`)
+**Status:** ✅ DONE & deployt (`87b3e83 → 7ee9bc9`, runtime-only) · **War:** 🟡 Zuverlässigkeit/Ehrlichkeit
 
-**Befund:** Eingabe `@florian kurzer Test` (Mention OHNE Handlungsverb) → Twin antwortet sinngemäß "Geht in die Approval-Queue, bevor's bei ihm landet", löst aber **keinen** `send_to_twin`-Tool-Call aus (DB: kein frischer `send_to_twin`-Audit). Nachricht ging nie raus, nichts in der Queue — der Twin **behauptete fälschlich, gehandelt zu haben**. Mit Verb (`Schreib @florian: …`) funktioniert alles korrekt (pending Approval in der Inbox, DB-bestätigt).
+**Behoben (Weg 3 — ehrlicher Hint, kein Re-Routing):** Bei verbloser @-Mention im Owner-Chat (`respond_to_chat` + Target erkannt + KEIN `SEND_TRIGGERS`-Verb) injiziert `runOwnerDirect` einen weichen `extraSystem`-Hint → der Twin behauptet nicht mehr zu senden, sondern weist auf „Schreib @X: …" hin. Self-Mention ausgenommen; weicher Wortlaut hält Referenz-Fragen auf Kurs. `SEND_TRIGGERS` zu Modul-Konstante extrahiert. Verifiziert: verblos → Hint; Referenz-Frage → normal; mit Verb → send_to_twin via Approval. Bonus: alle 16 send_to_twin-Audits tragen ein Verb → 0 verblose Sends (das eine gemeldete „verbloses Send" war ein Reporting-Artefakt — echter Text trug „Schreib @florian:").
 
-**Einordnung:** 🟢 **KEIN Sicherheitsproblem** — der Approval-Pfad ist intakt, keine Umgehung (es wurde ja gerade NICHT gesendet). Reines Zuverlässigkeits-/Ehrlichkeits-Thema: der Twin soll bei bloßer Mention **nachfragen/klären** statt eine nicht-ausgeführte Aktion zu behaupten.
+### @-Mention soll autonom senden (Weg 2: Modell-Detektor-Pass) — OFFEN, eigener Bogen
 
-**Fix-Optionen (später):** (a) Persona-Hinweis ("behaupte nie eine Aktion, die du nicht per Tool-Call ausgelöst hast; bei bloßer Mention ohne Auftrag: nachfragen"); oder (b) Guard gegen Aktions-Behauptung ohne korrespondierenden Tool-Call.
+**Status:** OFFEN (geparkt, nicht dringend) · **Größe:** L · **Aus:** Tag 48 (Folge von Weg 3)
 
-🔵 **Verschärfungs-Trigger:** Das @-Mention-Autocomplete (`5b4887b`) macht verblose Mentions leichter — Mentions ohne Handlungsverb werden häufiger, also steigt die Wahrscheinlichkeit dieser Fehl-Behauptung.
+**Idee:** Verbloses `@X …` automatisch als **Sende-Absicht** erkennen (statt nur ehrlich auf das Verb hinzuweisen), sodass der Owner keine Verb-Form mehr tippen muss. 🔴 **Kern-Schwierigkeit:** robuste Disambiguierung Sende vs. Referenz/Frage (`@florian kurzer Test` = senden vs. `was hat @florian gesagt?` = Frage). Keyword-Heuristik zu brittle → der Code-Kommentar in `detectCapability` sieht selbst einen **Modell-Detektor-Pass** vor (ein kleiner Klassifikator-Call, der die Absicht bestimmt). Eigener Bogen, baut auf dem Weg-3-Hint auf (der bis dahin die ehrliche Zwischenlösung bleibt).
 
 ### ✅ Repo- vs. Prod-Compose-Drift konsolidieren (Infra-Hygiene) — DONE (717721c, Tag 48)
 
@@ -3397,7 +3397,7 @@ Bilder/Dokumente an den Twin senden — Upload-UI + Speicherung + Weitergabe ans
 
 ### Bestehende offene Items (Erinnerung)
 
-Compose-Drift konsolidieren (oben), beidseitiger A2A-Abbruch (Bridge-Signal), Twin behauptet Aktion ohne Tool-Call bei verbloser Mention (🟡), Twin-Löschung verwaister Bridge-Handles, OAuth-Backlog.
+Beidseitiger A2A-Abbruch (Bridge-Signal), @-Mention soll autonom senden (Weg 2, Modell-Detektor, oben), multimodaler Input, Telegram Rich-Messages/@-Mention, Twin-Löschung verwaister Bridge-Handles, OAuth-Backlog. (Compose-Drift + Mention-ohne-Verb + Ungelesen-Indikator + Zeitgefühl = ✅ erledigt, Tag 47/48.)
 
 ---
 
