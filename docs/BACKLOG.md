@@ -3350,15 +3350,21 @@ Code war komplett. Ablauf live bestätigt auf Prod: Owner approved → @markus f
 
 🔵 **Verschärfungs-Trigger:** Das @-Mention-Autocomplete (`5b4887b`) macht verblose Mentions leichter — Mentions ohne Handlungsverb werden häufiger, also steigt die Wahrscheinlichkeit dieser Fehl-Behauptung.
 
-### 🔴 Repo- vs. Prod-Compose-Drift konsolidieren (Infra-Hygiene)
+### ✅ Repo- vs. Prod-Compose-Drift konsolidieren (Infra-Hygiene) — DONE (717721c, Tag 48)
 
-**Status:** OFFEN (notiert, nicht dringend, aber Deploy-Risiko) · **Größe:** S · **Aus:** Tag-47-Deploy-Befund
+**Status:** ✅ DONE (`717721c`, Tag 48) — 11 `${VAR:-}`-Durchreichungs-Zeilen (10 Autonome-Feature-Flags + `BRIDGE_ADMIN_TOKEN`) additiv ins `repo/docker/nolmi/docker-compose.yml` gezogen; Werte bleiben in der VPS-`.env`. **Praktisch bewährt:** beim Tag-48-Deploy war `git status` auf der VPS clean — kein Drift, kein Stash-Manöver. Memory `prod-vps-deploy-mechanik` korrigiert. **Verbleibend (optional):** falls ~10.-Juni-Prod-Tweaks außerhalb der 11 Zeilen existieren, beim nächsten VPS-`diff` prüfen.
+
+<details><summary>Ursprünglicher Befund (historisch)</summary>
+
+**War:** OFFEN (notiert, nicht dringend, aber Deploy-Risiko) · **Größe:** S · **Aus:** Tag-47-Deploy-Befund
 
 **Befund:** `/docker/nolmi/docker-compose.yml` auf der Prod-VPS (srv1712371) ist eine **eigenständige Datei** (zuletzt ~10. Juni editiert), **KEIN Symlink** auf `repo/docker/nolmi/docker-compose.yml` (frühere Annahme war falsch). Beide Dateien sind **auseinandergedriftet** — die Loop-Flags (`FOCUS_LOOP_ENABLED`, `REFLECTION_LOOP_ENABLED`) und das neue `A2A_CLOSE_SWEEP_ENABLED` leben nur in der Prod-Datei + VPS-`.env` und sind **nie eingecheckt**. Wer den Repo-Compose liest, hat ein falsches Bild vom Prod-Zustand.
 
 **Risiko:** Deploys/Diagnosen stolpern über veraltete Annahmen (z.B. „Env-Var im Repo-Compose ⇒ landet auf Prod" — stimmt NICHT). Konkret manifestiert sich das schon: das Whitelist-`environment:`-Muster muss pro neuer Var doppelt gepflegt werden (Repo-Compose + Prod-Compose), sonst läuft ein Feature still tot.
 
 **Fix (später):** Repo- und Prod-Compose konsolidieren bzw. das Prod-Delta (Loop-/Sweep-Flags als `${VAR:-}`-Durchreichung) ins eingecheckte `repo/docker/nolmi/docker-compose.yml` ziehen, sodass der Repo-Stand den Prod-Stand abbildet. **Memory `prod-vps-deploy-mechanik` ist bereits korrigiert** (Symlink-Behauptung entfernt, ENV-Whitelist-Muster + Build-ARG/force-recreate-Sequenz dokumentiert). Verifikation der gemergten Config IMMER via `docker compose config` vor `--force-recreate`.
+
+</details>
 
 ---
 
@@ -3370,11 +3376,11 @@ Code war komplett. Ablauf live bestätigt auf Prod: Owner approved → @markus f
 
 **Befund (behoben):** Twins kannten Datum/Wochentag nicht → verorteten Termine falsch („schönes Wochenende" am Mittwoch). **Fix:** `composeOwnerSystemPrompt` injiziert einen `## Heute`-Block (de-DE, pro Request, owner-lokale TZ via `OWNER_DISPLAY_TZ`/`QUIET_HOURS_TZ` Default `Europe/Berlin`) — erreicht alle Konversations-Pfade + beide Modell-Pfade (Vercel + Codex). Prod-Smoke: korrektes Datum + Wochentag-Verortung. Autonome Engines bewusst außen vor.
 
-### 🟡 Ungelesen-Indikator @florian bleibt trotz aktivem Lesen — Re-Diagnose (Faktenlage geändert)
+### ✅ Ungelesen-Indikator @florian bleibt trotz Lesen — DONE (87b3e83, Tag 48, auf Prod)
 
-**Status:** OFFEN, **Re-Diagnose nötig** · **Größe:** unklar bis Diagnose · **Aus:** Tag 47
+**Status:** ✅ DONE & deployt (`717721c → 87b3e83`, runtime-only) · **War:** echter Bug, nicht Test-Artefakt
 
-**Befund:** Der A2A-Ungelesen-Indikator für @florian bleibt sichtbar, obwohl der Owner die Konversation **aktiv gelesen** hat. Früher (Tag 47) als Test-Artefakt eingeordnet (Reste aus Test-Austauschen, Mark-Read nachweislich funktional). 🔴 **Faktenlage geändert:** jetzt aktives Lesen → Indikator bleibt trotzdem. Frische Diagnose nötig (mark-read-Pfad vs. `countUnreadRepliesByPartner` vs. ob die betroffenen `reply-received` im A2AChat-View landen).
+**Wurzel (DB-bewiesen):** Merge-Slot-Kollision — `reply-received` + `trusted-bypass` teilen `input.bridgeMessageId`; `mergeAuditIntoBridgeMessages` (DESC-first-wins) gab den `receivedIndex`-Slot dem neueren `trusted-bypass` → Message rendert als trusted-bypass → mark-read-Filter (`=== "reply-received"`) übersprang sie → `read_at` blieb NULL → `countUnreadRepliesByPartner` zählte ewig. Vierfelder-Korrelation 14/0/0/9. **Fix:** `reply-received` bekommt Präzedenz im received-Slot, `trusted-bypass` bleibt Fallback (florian-initiierte Nachrichten haben NUR trusted-bypass). Live: unread 14→0 nach Öffnen, Indikator verschwindet.
 
 ### Multimodaler Input: Bilder/Dokumente an Twin senden
 
