@@ -1076,11 +1076,38 @@ export class TwinService {
       this.deps.persona.name,
     );
 
+    // Weg 3: ehrlicher Hint bei VERBLOSER @-Mention. Der Chat-LLM kennt
+    // send_to_twin nicht und würde sonst „geht in die Queue" halluzinieren.
+    // Feuert NUR bei respond_to_chat + erkanntem FREMDEN @-Handle OHNE Sende-Verb
+    // (dieselbe SEND_TRIGGERS-Liste wie detectCapability). Self-Mention ausgenommen.
+    // Kein Re-Routing — reine Prompt-Schicht; bei false bleibt extraSystem undefined.
+    let verblessMentionHint: string | undefined;
+    if (originalCapability === "respond_to_chat") {
+      const mentioned = detectTargetHandle(lastUser);
+      const ownHandle = (
+        this.deps.persona.handle.startsWith("@")
+          ? this.deps.persona.handle
+          : `@${this.deps.persona.handle}`
+      ).toLowerCase();
+      const hasSendVerb = SEND_TRIGGERS.some((t) =>
+        lastUser.toLowerCase().includes(t),
+      );
+      if (mentioned && mentioned !== ownHandle && !hasSendVerb) {
+        verblessMentionHint =
+          `Hinweis: Der Owner hat ${mentioned} erwähnt, aber ohne Sende-Verb. ` +
+          `Es wurde KEINE Nachricht an ${mentioned} gesendet. Behaupte nicht, etwas ` +
+          `gesendet oder in eine Queue gelegt zu haben. Falls der Owner tatsächlich eine ` +
+          `Nachricht an ${mentioned} schicken möchte, weise ihn freundlich darauf hin, dass ` +
+          `er das mit einem klaren Verb tun kann, z.B. „Schreib ${mentioned}: …". Falls es ` +
+          `nur eine Erwähnung oder Frage über ${mentioned} war, beantworte sie normal.`;
+      }
+    }
+
     try {
       const reply = await this.runModel(
         this.deps.persona,
         llmMessages,
-        undefined,
+        verblessMentionHint,
         {
           enableMcpTools: true,
           forcedToolChoice: options.forcedToolChoice,
@@ -4149,12 +4176,18 @@ const KNOWN_HANDLES: Record<string, string> = {
   dev: "@dev",
 };
 
+/**
+ * Sende-Trigger-Verben für die send_to_twin-Capability-Erkennung. Modul-Konstante
+ * (statt lokal in detectCapability), damit der Weg-3-Hint in runOwnerDirect
+ * exakt dieselbe Liste prüft — eine Quelle, kein Drift.
+ */
+const SEND_TRIGGERS = ["sende", "schicke", "frag ", "frage ", "schreib", "kontaktier"];
+
 export function detectCapability(userMessage: string): CapabilityDetectionResult {
   const lower = userMessage.toLowerCase();
 
   // 1. send_to_twin: Trigger-Wort + Empfänger erkennbar
-  const sendTriggers = ["sende", "schicke", "frag ", "frage ", "schreib", "kontaktier"];
-  const hasSendTrigger = sendTriggers.some((t) => lower.includes(t));
+  const hasSendTrigger = SEND_TRIGGERS.some((t) => lower.includes(t));
   if (hasSendTrigger) {
     const target = detectTargetHandle(userMessage);
     if (target) {
