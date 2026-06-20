@@ -1071,9 +1071,22 @@ export class TwinService {
     // runModel versuchen — wenn es McpToolApprovalRequiredError wirft, einen
     // Pending-Audit `mcp-tool-use` anlegen; sonst den normalen owner-direct-
     // Audit. Konsistente Audit-Trail-Reihenfolge: ein Audit pro User-Send.
+    // Multimodal SS4: die Attachments der LETZTEN User-Message müssen erhalten
+    // bleiben — `lastUser` ist nur der Text. Ohne das Durchreichen droppt diese
+    // Rekonstruktion das Bild VOR toModelMessages (beide Modell-Pfade), und ein
+    // Bild-only-Send (content="") erzeugte einen leeren Text-Block → Anthropic
+    // "text content blocks must be non-empty". History-Messages tragen keine
+    // Attachments (Text-Audits), nur die neue Message.
+    const lastMsg = messages.at(-1);
     const llmMessages: ChatMessage[] = [
       ...history,
-      { role: "user", content: lastUser },
+      {
+        role: "user",
+        content: lastUser,
+        ...(lastMsg?.attachments && lastMsg.attachments.length > 0
+          ? { attachments: lastMsg.attachments }
+          : {}),
+      },
     ];
 
     this.deps.bus.emit({
@@ -4201,8 +4214,10 @@ export function toModelMessages(
       // 🔴 Codex-Pfad (mapV3PromptToCodex) bleibt unberührt — das ist SS3b.
       if (m.attachments && m.attachments.length > 0) {
         const parts: unknown[] = [];
-        // Leeren Text-Part vermeiden (Anthropic mag keine leeren Text-Blocks).
-        if (m.content) parts.push({ type: "text", text: m.content });
+        // 🔴 Leeren/whitespace-only Text-Part vermeiden — Anthropic lehnt leere
+        // Text-Blöcke ab ("text content blocks must be non-empty"). Bei Bild-only
+        // (content="") enthält das Array NUR den/die Image-Part(s).
+        if (m.content.trim()) parts.push({ type: "text", text: m.content });
         for (const a of m.attachments) {
           parts.push(buildImagePart(a, twinId));
         }

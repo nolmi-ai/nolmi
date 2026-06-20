@@ -51,6 +51,25 @@ async function main() {
     dumpShape("text-only", [{ role: "user", content: "hallo" }]);
     dumpShape("with-image", [imageMsg]);
 
+    // 🔴 Bild-only (content="") → content-Array NUR mit Image-Part, KEIN leerer
+    // Text-Part (sonst Anthropic "text content blocks must be non-empty").
+    const imageOnly = toModelMessages(
+      [{ role: "user", content: "", attachments: imageMsg.attachments }],
+      TEST_TWIN,
+    );
+    const parts = (imageOnly[0] as { content: Array<{ type: string }> }).content;
+    const hasEmptyText = parts.some((p) => p.type === "text");
+    const hasImage = parts.some((p) => p.type === "image");
+    console.log(`  image-only parts: ${parts.map((p) => p.type).join(", ")}`);
+    console.log(`  → kein leerer Text-Part: ${!hasEmptyText ? "✅" : "❌"}, Image vorhanden: ${hasImage ? "✅" : "❌"}`);
+    // Whitespace-only content → ebenfalls kein Text-Part.
+    const wsOnly = toModelMessages(
+      [{ role: "user", content: "   ", attachments: imageMsg.attachments }],
+      TEST_TWIN,
+    );
+    const wsParts = (wsOnly[0] as { content: Array<{ type: string }> }).content;
+    console.log(`  → whitespace-only kein Text-Part: ${!wsParts.some((p) => p.type === "text") ? "✅" : "❌"}`);
+
     const cfg = loadTwinLlmConfig();
     if (!cfg.apiKey) {
       console.log("\nÜBERSPRUNGEN (Live-Calls) — kein LLM-API-Key in der Env.");
