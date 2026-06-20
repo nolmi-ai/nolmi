@@ -1,12 +1,16 @@
 import "dotenv/config";
+import Database from "better-sqlite3";
 import type { LanguageModel } from "ai";
 import {
   classifyMentionIntent,
   type MentionIntent,
 } from "../a2a/mention-intent-classifier.js";
-import { loadTwinLlmConfig } from "../llm-config.js";
+import { loadTwinLlmConfig, type TwinLlmConfig } from "../llm-config.js";
 import { createLlmClient } from "../llm-client.js";
 import { resolveClassifierConfig } from "../skills/classifier-map.js";
+import { loadRuntimeConfig } from "../config.js";
+import { TwinProfilesRepo } from "../twin-profiles-repo.js";
+import { loadMasterKey, decrypt } from "../crypto-utils.js";
 
 // ─── SMOKE-HARNESS: @-Mention-Intent-Klassifikator (Weg 2 SS1) ───────────────
 //
@@ -59,20 +63,87 @@ async function runFailsafe(): Promise<boolean> {
   return ok;
 }
 
-async function runReal(): Promise<void> {
-  const cfg = loadTwinLlmConfig();
-  if (!cfg.apiKey) {
-    console.log(
-      "\n=== Teil 2: ÜBERSPRUNGEN — kein TWIN_LLM_API_KEY in der .env ===\n" +
-        "    (Markus mit Key: pnpm --filter @nolmi/runtime exec tsx src/scripts/test-mention-intent.ts)",
-    );
-    return;
+/** CLI-Arg `--key=value` lesen. */
+function arg(name: string): string | undefined {
+  const hit = process.argv.find((a) => a.startsWith(`${name}=`));
+  return hit ? hit.slice(name.length + 1) : undefined;
+}
+
+/**
+ * Resolvt das classifierModel für den echten Lauf. Drei Quellen:
+ *   --twin=<handle>  → der ECHTE classifierModel dieses Twins aus der DB
+ *                      (llm_config entschlüsselt + resolveClassifierConfig).
+ *                      🔴 Nutzt NIE den Codex/OAuth-Pfad — der #107-Classifier
+ *                      läuft IMMER über createLlmClient (provider-switch).
+ *   --model=<m>      → überschreibt nur das Modell (Provider/Key wie Quelle).
+ *   (default)        → loadTwinLlmConfig() aus den TWIN_LLM_*-Env-Vars.
+ * Gibt null, wenn kein Key auflösbar (→ echter Lauf übersprungen).
+ */
+function resolveClassifierModel(): { model: LanguageModel; label: string } | null {
+  const twinArg = arg("--twin");
+  const modelOverride = arg("--model");
+
+  let base: TwinLlmConfig;
+  let origin: string;
+
+  if (twinArg) {
+    const handle = twinArg.startsWith("@") ? twinArg : `@${twinArg}`;
+    const config = loadRuntimeConfig();
+    const db = new Database(config.dbPath, { readonly: true });
+    try {
+      const profile = new TwinProfilesRepo(db).findByHandle(handle);
+      if (!profile) {
+        console.log(`\n=== Teil 2: ÜBERSPRUNGEN — Twin ${handle} nicht in DB ===`);
+        return null;
+      }
+      const stored = profile.llmConfig;
+      if (!stored.apiKeyEncrypted) {
+        console.log(
+          `\n=== Teil 2: ÜBERSPRUNGEN — ${handle} hat keinen apiKeyEncrypted ` +
+            `(auth_mode=${profile.authMode}). Standalone nicht baubar. ===\n` +
+            `    Hinweis: der #107-Classifier nutzt NIE Codex/OAuth — er läuft ` +
+            `über createLlmClient(provider). Auf einem oauth-Twin ohne gespeicherten ` +
+            `Key bitte direkt auf Prod testen (dort liegt @markus' llm_config).`,
+        );
+        return null;
+      }
+      const apiKey = decrypt(stored.apiKeyEncrypted, loadMasterKey());
+      base = {
+        provider: stored.provider,
+        model: stored.model,
+        apiKey,
+        baseUrl: stored.baseUrl,
+      };
+      origin = `twin ${handle} (auth_mode=${profile.authMode})`;
+    } finally {
+      db.close();
+    }
+  } else {
+    base = loadTwinLlmConfig();
+    origin = "env-default (TWIN_LLM_*)";
   }
-  const classifierCfg = resolveClassifierConfig(cfg);
-  const model = createLlmClient(classifierCfg);
-  console.log(
-    `\n=== Teil 2: Echter Lauf — classifier=${classifierCfg.provider}/${classifierCfg.model} ===`,
-  );
+
+  if (!base.apiKey) {
+    console.log(
+      "\n=== Teil 2: ÜBERSPRUNGEN — kein API-Key auflösbar ===\n" +
+        "    Optionen: --twin=@markus (DB) ODER TWIN_LLM_API_KEY in der .env.",
+    );
+    return null;
+  }
+
+  let classifierCfg = resolveClassifierConfig(base);
+  if (modelOverride) classifierCfg = { ...classifierCfg, model: modelOverride };
+  return {
+    model: createLlmClient(classifierCfg),
+    label: `${classifierCfg.provider}/${classifierCfg.model} — ${origin}`,
+  };
+}
+
+async function runReal(): Promise<void> {
+  const resolved = resolveClassifierModel();
+  if (!resolved) return;
+  const { model, label } = resolved;
+  console.log(`\n=== Teil 2: Echter Lauf — classifier=${label} ===`);
 
   let pass = 0;
   let deferredOk = true;
