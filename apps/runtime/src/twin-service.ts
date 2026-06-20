@@ -21,7 +21,7 @@ import {
 } from "ai";
 import type Database from "better-sqlite3";
 import { checkMandate } from "./mandates/service.js";
-import { loadAttachmentBytes } from "./multimodal/attachment-loader.js";
+import { loadAttachmentBytes } from "./multimodal/attachment-store.js";
 import { AuditService } from "./audit/service.js";
 import type { EventBus } from "./events/bus.js";
 import type { BridgeClient } from "./bridge/client.js";
@@ -2929,7 +2929,7 @@ REGEL 6: Wenn der User dich explizit bittet, ein Tool zu nutzen ("rufe das X-Too
       const streamRes = streamText({
         model: activeModel,
         system,
-        messages: toModelMessages(messages),
+        messages: toModelMessages(messages, this.deps.twinId),
         ...(hasTools
           ? {
               tools: allTools,
@@ -2998,7 +2998,7 @@ REGEL 6: Wenn der User dich explizit bittet, ein Tool zu nutzen ("rufe das X-Too
           model: activeModel,
           system,
           messages: [
-            ...toModelMessages(messages),
+            ...toModelMessages(messages, this.deps.twinId),
             ...(sResponseMessages as Parameters<typeof toModelMessages>[0]),
           ],
           tools: allTools,
@@ -3077,7 +3077,7 @@ REGEL 6: Wenn der User dich explizit bittet, ein Tool zu nutzen ("rufe das X-Too
     const result = await generateText({
       model: activeModel,
       system,
-      messages: toModelMessages(messages),
+      messages: toModelMessages(messages, this.deps.twinId),
       ...(hasTools
         ? {
             tools: allTools,
@@ -3132,7 +3132,7 @@ REGEL 6: Wenn der User dich explizit bittet, ein Tool zu nutzen ("rufe das X-Too
         // tool-Result-Messages aus dem ersten Step — direkt anhängen, dann
         // ist der Kontext komplett.
         messages: [
-          ...toModelMessages(messages),
+          ...toModelMessages(messages, this.deps.twinId),
           ...result.response.messages,
         ],
         tools: allTools,
@@ -4181,7 +4181,15 @@ function extractMessages(entry: { input: Record<string, unknown> }, key: string)
  * Persona kommt über den `system`-Parameter von `generateText`, system-Slots
  * im messages-Array sind in der neuen API verboten/redundant.
  */
-export function toModelMessages(messages: ChatMessage[]): ModelMessage[] {
+// 🔴 twinId ist Parameter 2 (NICHT 1): Zeile ~3002 nutzt
+// `Parameters<typeof toModelMessages>[0]` = ChatMessage[] für einen Cast — der
+// MUSS unverändert bleiben, deshalb hängt twinId hinten. twinId kommt aus
+// `this.deps.twinId` (server-kontrolliert) und gated den Attachment-Load auf
+// den Ordner DIESES Twins (harte Isolation, Weg B).
+export function toModelMessages(
+  messages: ChatMessage[],
+  twinId: string,
+): ModelMessage[] {
   return messages
     .filter((m) => m.role !== "system")
     .map((m) => {
@@ -4196,7 +4204,7 @@ export function toModelMessages(messages: ChatMessage[]): ModelMessage[] {
         // Leeren Text-Part vermeiden (Anthropic mag keine leeren Text-Blocks).
         if (m.content) parts.push({ type: "text", text: m.content });
         for (const a of m.attachments) {
-          parts.push(buildImagePart(a));
+          parts.push(buildImagePart(a, twinId));
         }
         return { role: m.role, content: parts } as unknown as ModelMessage;
       }
@@ -4220,14 +4228,17 @@ export function toModelMessages(messages: ChatMessage[]): ModelMessage[] {
  * Storage-Naht (SS3a: Test-Stub; SS2: echter /data-Store). `mediaType` kommt
  * aus dem Schema-Feld `mimeType`.
  */
-function buildImagePart(a: Attachment): {
+function buildImagePart(
+  a: Attachment,
+  twinId: string,
+): {
   type: "image";
   image: Buffer;
   mediaType: string;
 } {
   return {
     type: "image",
-    image: loadAttachmentBytes(a.ref),
+    image: loadAttachmentBytes(twinId, a.ref),
     mediaType: a.mimeType,
   };
 }

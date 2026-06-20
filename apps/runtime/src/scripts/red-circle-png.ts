@@ -1,37 +1,10 @@
 import { deflateSync } from "node:zlib";
 
-// ─── ATTACHMENT-LOADER (Multimodal SS3a — Storage-Naht) ──────────────────────
-//
-// Klare Schnittstelle zwischen Message-Bau (SS3) und Storage (SS2). `toModel-
-// Messages` ruft NUR `loadAttachmentBytes(ref)` — woher die Bytes kommen, ist
-// hier gekapselt. 🔴 Bytes werden NIE in der Message/Audit persistiert (Schema
-// hält nur die `ref`, Diagnose-Befund C); sie werden erst hier, zur Call-Zeit,
-// geladen.
-//
-// 🔴 SS3a-STAND: TEST-STUB. `loadAttachmentBytes` ignoriert `ref` und liefert
-// immer ein fest verdrahtetes Test-PNG (roter Kreis auf weiß, wie im Codex-
-// Spike d5e757e). Das beweist den Message-Bau-Pfad Ende-zu-Ende, OHNE dass der
-// /data-Store schon existiert.
-//   TODO SS2: ref = Pfad/ID im /data-Store → echtes Laden, z.B.
-//     return readFileSync(resolve(ATTACHMENT_STORE_DIR, ref));
-//   plus Guards (Pfad-Traversal, Größe, MIME-Whitelist) — analog web_fetch.
-
-/**
- * Lädt die Roh-Bytes eines Attachments anhand seiner Store-Referenz.
- *
- * 🔴 SS3a: TEST-Implementierung — gibt immer das Test-PNG zurück, `ref` wird
- * (noch) ignoriert. SS2 ersetzt den Body durch echten /data-Store-Zugriff;
- * die Signatur (`ref` → `Buffer`) bleibt stabil.
- */
-export function loadAttachmentBytes(ref: string): Buffer {
-  // SS3a: ref bewusst ungenutzt — markiert die Naht, die SS2 füllt.
-  void ref;
-  return makeRedCirclePng(64);
-}
-
-// ─── TEST-PNG-Encoder (RGBA, color type 6, dep-frei) — NUR SS3a-Stub ─────────
-// Identisch zum Spike (d5e757e): roter, gefüllter Kreis auf weißem Grund.
-// 🔴 Wird mit SS2 (echter Store) überflüssig und entfernt.
+// ─── TEST-PNG-Encoder (RGBA, color type 6, dep-frei) — NUR für Tests ─────────
+// Erzeugt ein erkennbares Test-Bild: roter, gefüllter Kreis auf weißem Grund.
+// Aus dem SS3a-Loader-Stub (4da9152) hierher verschoben, als der echte Store
+// (attachment-store.ts) den Stub ersetzt hat. Identisch zum Codex-Spike
+// (d5e757e). KEIN Produktiv-Code — nur Test-/Spike-Fixture.
 
 const CRC_TABLE: number[] = (() => {
   const table: number[] = [];
