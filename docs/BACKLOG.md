@@ -3396,11 +3396,20 @@ Code war komplett. Ablauf live bestätigt auf Prod: Owner approved → @markus f
 
 **Wurzel (DB-bewiesen):** Merge-Slot-Kollision — `reply-received` + `trusted-bypass` teilen `input.bridgeMessageId`; `mergeAuditIntoBridgeMessages` (DESC-first-wins) gab den `receivedIndex`-Slot dem neueren `trusted-bypass` → Message rendert als trusted-bypass → mark-read-Filter (`=== "reply-received"`) übersprang sie → `read_at` blieb NULL → `countUnreadRepliesByPartner` zählte ewig. Vierfelder-Korrelation 14/0/0/9. **Fix:** `reply-received` bekommt Präzedenz im received-Slot, `trusted-bypass` bleibt Fallback (florian-initiierte Nachrichten haben NUR trusted-bypass). Live: unread 14→0 nach Öffnen, Indikator verschwindet.
 
-### Multimodaler Input: Bilder/Dokumente an Twin senden
+### ✅ Multimodaler Input: Bild an Twin — LOKAL VOLLSTÄNDIG (Tag 49), Prod-Deploy offen
 
-**Status:** OFFEN · **Größe:** L (eigenes Feature) · **Aus:** Tag 47
+**Status:** ✅ lokal Ende-zu-Ende (Backend + UI, beide Modell-Pfade) · **NICHT deployt** · **War:** L · **Aus:** Tag 47
 
-Bilder/Dokumente an den Twin senden — Upload-UI + Speicherung + Weitergabe ans LLM (multimodaler Pfad). Eigener größerer Bogen.
+**Gebaut (Tag 49):** Owner-Chat-Bild-Input. Spike `d5e757e` (Codex/gpt-5.5 `input_image` Gate GRÜN, Prod-bewiesen) → SS1 Schema `b1616e8` → SS3a Anthropic `4da9152` → SS3b Codex `8d57028` → SS2a Store+harte-twin-Isolation `d1623ec` → SS2b Upload-Endpoint (owner-only, Magic-Bytes, Größen-Limit) `3563d12` → SS4a Web-UI `1f73c1b` → Fixes `2c8b19a` (attachment-drop in runOwnerDirect) + `6f6b39d` (Render-Bugs + GET-Endpoint). Verifiziert lokal im Browser: Twin beschreibt das Bild spezifisch, bleibt nach Streaming/Reload sichtbar; harte Isolation (fremder twinId → 404). Bug-Lehren im STAND Tag 49.
+
+**🔴 OFFEN vor Prod-Deploy:** **SS2e** `ATTACHMENT_STORE_DIR=/data/attachments` in compose-Whitelist + VPS-`.env` (sonst Store im Container-FS, weg beim Recreate); **SS2d** Owner-only-Surface bestätigen (A2A/trusted-bypass trägt keine attachments); **Codex-Live-Smoke** auf Prod (gpt-5.5 über Produktiv-Adapter, wie Spike); `data/` zu `.gitignore`.
+
+### Multimodal/Provider — Folge-Bögen (Tag 49)
+
+- **(a) SS4b — UI-Verfeinerung:** „Bild"-Button raus → „+" wird Dropdown (Bild/Dokument/Tool); Drag-&-Drop ins Input-Feld; Paste (Clipboard-Bild); Multi-Image. Größe S–M.
+- **(b) Sprachnachrichten an den Twin:** eigener **STT-Pipeline-Bogen** (Audio → Whisper → Text → Modell), **NICHT** Vision — distinkter Pfad. Größe M–L.
+- **(c) Provider-Erweiterung:** Ollama Cloud + OpenRouter (Connector mit Modell-Wechsel, Open-Source-LLMs). Größe M.
+- **(d) PDF/Dokument-Support:** `AttachmentSchema.type`-Enum additiv erweitern (`image` → `+pdf`/`+doc`); Lade-/Weitergabe-Pfad analog Bild. Größe M.
 
 ### Telegram: Rich Messages + @-Mention im Telegram-Kanal
 
