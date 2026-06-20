@@ -2802,16 +2802,20 @@ export class TwinService {
       : { tools: {}, skillByToolKey: new Map<string, Skill>() };
     const mcpTools = mcpToolsResult.tools;
     const skillByToolKey = mcpToolsResult.skillByToolKey;
-    // web_fetch SS3: natives Tool IMMER ins Set — unabhängig vom enableMcpTools-
-    // Gate, also in JEDEM runModel-Pfad (Owner-Chat, A2A trusted-bypass,
-    // send_to_twin-Formulierung, Summary). onFetch schreibt pro Call einen
-    // web-fetch-Audit (url+status+bytes, KEIN Body) — die einzige Spur autonomer
-    // Web-Zugriffe. Autonome Engines (focus/reflection/nudge/extraction) gehen
-    // NICHT über runModel → kein web_fetch dort.
-    const allTools: ToolSet = {
-      ...mcpTools,
-      web_fetch: buildWebFetchTool((rec) => this.recordWebFetchAudit(rec)),
-    };
+    // web_fetch SS3b: NUR im Owner-Chat-Pfad verfügbar. `enableMcpTools` ist das
+    // explizite Tool-Enablement-Flag — gesetzt von runOwnerDirect (Owner-Chat-
+    // Antwort) + dessen Tool-Resume-Fortsetzungen, NICHT von trusted-bypass
+    // (eingehende Partner-Nachricht), approveTwinSend oder der Summary. Damit ist
+    // web_fetch im A2A-Pfad NICHT im Tool-Set → ein fremder Twin kann meinen Twin
+    // nicht zu einem Fetch verleiten (Prompt-Injection-Fläche geschlossen). Voller
+    // Owner-Use-Case bleibt. onFetch → recordWebFetchAudit (url+status+bytes, KEIN
+    // Body). Autonome Engines gehen ohnehin nicht über runModel.
+    const allTools: ToolSet = options.enableMcpTools
+      ? {
+          ...mcpTools,
+          web_fetch: buildWebFetchTool((rec) => this.recordWebFetchAudit(rec)),
+        }
+      : mcpTools;
     const hasTools = Object.keys(allTools).length > 0;
     if (hasTools) {
       console.log(
