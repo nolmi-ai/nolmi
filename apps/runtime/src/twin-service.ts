@@ -106,6 +106,7 @@ import {
   NudgeOutputSchema,
   type NudgeOutput,
 } from "./focus/proactive-nudge-service.js";
+import { classifyMentionIntent } from "./a2a/mention-intent-classifier.js";
 import { McpClientManager } from "./mcp/client-manager.js";
 import { McpSkillSync } from "./mcp/skill-sync.js";
 import { buildMcpToolsFromSkills } from "./mcp/tool-bridge.js";
@@ -799,7 +800,44 @@ export class TwinService {
   }> {
     // 1. Capability detecten
     const lastUser = messages.at(-1)?.content ?? "";
-    const detection = detectCapability(lastUser);
+    let detection = detectCapability(lastUser);
+
+    // 1b. A2A-Autosend Weg 2 SS2 — SCHATTEN-Modus. Bei VERBLOSER @-Mention
+    // (respond_to_chat + fremdes @-Target + KEIN Sende-Verb) klassifiziert ein
+    // kleiner Modell-Call die Absicht (SEND/CHAT) und LOGGT sie immer. Der
+    // detection-Override auf send_to_twin passiert NUR bei
+    // MENTION_AUTOSEND_ENABLED=true (opt-in). Ohne Flag: kein Verhaltens-Change
+    // — detection bleibt respond_to_chat, der Weg-3-Verb-Hint feuert weiter.
+    // 🔴 Selbst bei Override bleibt send_to_twin always_pending → Approval (kein
+    // Auto-Send); ownerBypass (unten) schließt send_to_twin bewusst aus.
+    if (detection.capability === "respond_to_chat") {
+      const mentioned = detectTargetHandle(lastUser);
+      const ownHandle = (
+        this.deps.persona.handle.startsWith("@")
+          ? this.deps.persona.handle
+          : `@${this.deps.persona.handle}`
+      ).toLowerCase();
+      const hasSendVerb = SEND_TRIGGERS.some((t) =>
+        lastUser.toLowerCase().includes(t),
+      );
+      if (mentioned && mentioned !== ownHandle && !hasSendVerb) {
+        const armed =
+          process.env.MENTION_AUTOSEND_ENABLED?.trim().toLowerCase() === "true";
+        const result = await classifyMentionIntent(
+          lastUser,
+          mentioned,
+          this.deps.classifierModel,
+        );
+        console.log(
+          `[mention-intent] twin=${this.deps.persona.handle} target=${mentioned} ` +
+            `intent=${result.intent} gate=${armed ? "armed" : "shadow"} ` +
+            `reason="${result.reason}" text="${lastUser.slice(0, 80).replace(/\n/g, " ")}"`,
+        );
+        if (armed && result.intent === "SEND") {
+          detection = { capability: "send_to_twin", targetHandle: mentioned };
+        }
+      }
+    }
 
     // 2. Trust-Level: Owner-Bypass nur für non-Bridge-Capabilities. Ein
     // send_to_twin-Aufruf hat extern-sichtbaren Side-Effect — den lassen wir

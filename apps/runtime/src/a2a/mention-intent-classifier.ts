@@ -17,7 +17,10 @@ import { z } from "zod";
 // keine Scharfschaltung (SS3). Muster gespiegelt von classifyForcedTool
 // (skills/pre-pass.ts): generateObject + deps.classifierModel + AbortController.
 
-const MENTION_INTENT_TIMEOUT_MS = 3000;
+// 5s (nicht 3s wie der Pre-Pass): 3s clippte Cold-Calls des classifierModels →
+// echte SENDs wären im Timeout fälschlich zu CHAT verfehlt. Der Call läuft vor
+// der eigentlichen Antwort, etwas mehr Latenz im Ambiguitäts-Fall ist okay.
+const MENTION_INTENT_TIMEOUT_MS = 5000;
 
 export type MentionIntent = "SEND" | "CHAT";
 
