@@ -1279,8 +1279,8 @@ function ConversationReadView({
 
   const blocks = useMemo<ChatBlock[]>(
     () =>
-      data ? buildChatBlocksFromAudits([...data.audits].reverse()).blocks : [],
-    [data],
+      data ? buildChatBlocksFromAudits([...data.audits].reverse(), handle).blocks : [],
+    [data, handle],
   );
 
   const meta = data?.conversation;
@@ -1595,10 +1595,10 @@ type ChatBlock =
       conversationId: string | null;
       auditId: string | null;
       channel?: MessageChannel;
-      // SS4a: lokale Vorschau-Bilder (objectURL) der gesendeten Message. Nur in
-      // der optimistischen Bubble gesetzt; Server-Blocks haben das (noch) nicht
-      // (kein GET-Endpoint → SS4b).
-      attachments?: { previewUrl: string; mimeType: string }[];
+      // SS4a/Fix: Bild-Vorschau(en). `src` ist entweder ein lokaler objectURL
+      // (optimistische Bubble) ODER die GET-Endpoint-URL (Server-Block, lädt
+      // owner-only + same-site-Cookie). Beide direkt in <img src> nutzbar.
+      attachments?: { src: string; mimeType: string }[];
     }
   | {
       kind: "assistant";
@@ -1634,6 +1634,14 @@ interface AuditMcpToolUseShape {
 
 interface AuditOwnerDirectShape {
   lastMessage?: string;
+  /** Multimodal: vollständige Messages (persistiert in audit.input.messages).
+   *  Die letzte User-Message trägt die Attachment-Referenzen (ref + mimeType);
+   *  Bytes sind NICHT enthalten (per Design). */
+  messages?: {
+    role?: string;
+    content?: string;
+    attachments?: { ref?: string; mimeType?: string }[];
+  }[];
   /** #130 Phase 3: optionaler Channel-Marker. */
   channel?: MessageChannel;
 }
@@ -1667,7 +1675,10 @@ interface AuditExecutedOutputShape {
  *   - mcp-tool-use/rejected → user + assistant(pendingReply) + tool-call(rejected) + assistant(rejectReply)
  * Ungültige/unvollständige Einträge werden geskippt.
  */
-function buildChatBlocksFromAudits(entries: AuditEntry[]): {
+function buildChatBlocksFromAudits(
+  entries: AuditEntry[],
+  handle: string,
+): {
   blocks: ChatBlock[];
   newestConvId: string | null;
 } {
@@ -1755,9 +1766,23 @@ function buildChatBlocksFromAudits(entries: AuditEntry[]): {
     if (entry.status !== "executed") continue;
     const input = entry.input as AuditOwnerDirectShape;
     const output = (entry.output ?? null) as AuditExecutedOutputShape | null;
-    const userText = typeof input.lastMessage === "string" ? input.lastMessage : null;
+    const userText = typeof input.lastMessage === "string" ? input.lastMessage : "";
     const replyText = output && typeof output.reply === "string" ? output.reply : null;
-    if (!userText || !replyText) continue;
+    // Multimodal-Fix: Attachment-Refs der letzten User-Message → src auf den
+    // owner-only GET-Endpoint (same-site-Cookie lädt das Bild im <img>).
+    const lastUserMsg = Array.isArray(input.messages)
+      ? [...input.messages].reverse().find((m) => m.role === "user")
+      : undefined;
+    const attachments = lastUserMsg?.attachments
+      ?.filter((a): a is { ref: string; mimeType?: string } => typeof a.ref === "string")
+      .map((a) => ({
+        src: `${RUNTIME_URL}/twins/${handle}/attachments/${encodeURIComponent(a.ref)}`,
+        mimeType: a.mimeType ?? "image/*",
+      }));
+    // 🔴 Bild-only (userText="") NICHT überspringen, solange ein Anhang da ist.
+    // Skip nur, wenn weder Text noch Anhang vorhanden, oder keine Antwort.
+    const hasUserContent = userText.length > 0 || (attachments?.length ?? 0) > 0;
+    if (!hasUserContent || !replyText) continue;
     const channel = normalizeChannel(input.channel);
     blocks.push({
       kind: "user",
@@ -1765,6 +1790,7 @@ function buildChatBlocksFromAudits(entries: AuditEntry[]): {
       conversationId: cid,
       auditId: entry.id,
       channel,
+      ...(attachments && attachments.length > 0 ? { attachments } : {}),
     });
     blocks.push({
       kind: "assistant",
@@ -1909,13 +1935,13 @@ function DirectChat({
   }, [auditEntries, lastResetAt]);
 
   const { blocks: visibleBlocks, newestConvId } = useMemo(
-    () => buildChatBlocksFromAudits(visibleAudits),
-    [visibleAudits],
+    () => buildChatBlocksFromAudits(visibleAudits, handle),
+    [visibleAudits, handle],
   );
 
   const { blocks: hiddenBlocks } = useMemo(
-    () => buildChatBlocksFromAudits(hiddenAudits),
-    [hiddenAudits],
+    () => buildChatBlocksFromAudits(hiddenAudits, handle),
+    [hiddenAudits, handle],
   );
 
   // Server-Blocks für den Render: bei showFullHistory hidden+visible
@@ -1940,7 +1966,7 @@ function DirectChat({
         attachments: optimisticAttachment
           ? [
               {
-                previewUrl: optimisticAttachment.previewUrl,
+                src: optimisticAttachment.previewUrl,
                 mimeType: optimisticAttachment.mimeType,
               },
             ]
@@ -2975,8 +3001,9 @@ function Bubble({
   content: string;
   /** #130 Phase 3 v2: Channel-Icon im Bubble-Header rechts. Undefined/`web` → kein Icon. */
   channel?: MessageChannel;
-  /** SS4a: lokale Bild-Vorschau(en) (objectURL) in der User-Bubble. */
-  attachments?: { previewUrl: string; mimeType: string }[];
+  /** SS4a/Fix: Bild-Vorschau(en) — `src` ist objectURL (optimistisch) ODER
+   *  GET-Endpoint-URL (Server-Block). Direkt in <img src> nutzbar. */
+  attachments?: { src: string; mimeType: string }[];
 }) {
   const isUser = role === "user";
   // ml-auto / mr-auto positioniert die Bubble innerhalb des max-w-3xl-
@@ -3011,10 +3038,10 @@ function Bubble({
       {attachments && attachments.length > 0 && (
         <div className="flex flex-wrap gap-2 mb-2">
           {attachments.map((a, i) => (
-            // eslint-disable-next-line @next/next/no-img-element -- objectURL-Vorschau, keine next/image-Optimierung möglich
+            // eslint-disable-next-line @next/next/no-img-element -- objectURL/GET-URL, keine next/image-Optimierung möglich
             <img
               key={i}
-              src={a.previewUrl}
+              src={a.src}
               alt="Anhang"
               className="max-h-40 max-w-full rounded border border-border"
             />

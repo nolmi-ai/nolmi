@@ -5,7 +5,9 @@ import multipart from "@fastify/multipart";
 import {
   readUploadedFile,
   validateAndSaveUpload,
+  sniffImageMime,
 } from "./multimodal/attachment-upload.js";
+import { loadAttachmentBytes } from "./multimodal/attachment-store.js";
 import { nanoid } from "nanoid";
 import { resolve } from "node:path";
 import { z } from "zod";
@@ -449,6 +451,32 @@ export async function createServer(deps: ServerDeps) {
         maxBytes: ATTACHMENT_MAX_BYTES,
       });
       return reply.status(result.status).send(result.body);
+    },
+  );
+
+  // ─── Attachment-Download (Multimodal-Fix) ──────────────────────────────────
+  // 🔴 Owner-only + twinId-isoliert: serviert die Bytes eines Anhangs für die
+  // Bild-Quelle der Chat-Bubble (<img src> nach optimistic→server-Reload). Der
+  // Content-Type kommt aus den Magic-Bytes (sniffImageMime), nicht aus Client-
+  // Angaben. ref liegt NUR im Ordner DIESES Twins → fremder Twin / Traversal →
+  // loadAttachmentBytes wirft → 404. Same-site-Cookie (sameSite:lax, Domain
+  // .nolmi.ai) wird vom <img> automatisch mitgeschickt.
+  app.get<{ Params: { handle: string; ref: string } }>(
+    "/twins/:handle/attachments/:ref",
+    async (request, reply) => {
+      const ctx = await requireOwner(request, reply, request.params.handle);
+      if (!ctx) return;
+      let bytes: Buffer;
+      try {
+        bytes = loadAttachmentBytes(ctx.entry.twinId, request.params.ref);
+      } catch {
+        return reply.status(404).send({ error: "Anhang nicht gefunden" });
+      }
+      const mime = sniffImageMime(bytes) ?? "application/octet-stream";
+      return reply
+        .header("Cache-Control", "private, max-age=3600")
+        .type(mime)
+        .send(bytes);
     },
   );
 

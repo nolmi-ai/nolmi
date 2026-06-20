@@ -6,7 +6,10 @@ import multipart from "@fastify/multipart";
 import { generateText } from "ai";
 import type { ChatMessage } from "@nolmi/shared";
 import { toModelMessages } from "../twin-service.js";
-import { getAttachmentStoreDir } from "../multimodal/attachment-store.js";
+import {
+  getAttachmentStoreDir,
+  loadAttachmentBytes,
+} from "../multimodal/attachment-store.js";
 import {
   sniffImageMime,
   validateAndSaveUpload,
@@ -82,6 +85,23 @@ async function main() {
       });
       return reply.status(r.status).send(r.body);
     });
+    // GET-Endpoint-Spiegel (Multimodal-Fix): twinId-isolierter Download +
+    // gesniffter Content-Type. `?twin=` simuliert den fremden Twin (Isolation).
+    app.get<{ Params: { ref: string }; Querystring: { twin?: string } }>(
+      "/file/:ref",
+      async (request, reply) => {
+        const twin = request.query.twin ?? TWIN;
+        let bytes: Buffer;
+        try {
+          bytes = loadAttachmentBytes(twin, request.params.ref);
+        } catch {
+          return reply.status(404).send({ error: "not found" });
+        }
+        return reply
+          .type(sniffImageMime(bytes) ?? "application/octet-stream")
+          .send(bytes);
+      },
+    );
 
     const B = "----nolmiss2b";
     // (a) valides PNG → 200 + ref, Datei auf Platte
@@ -119,6 +139,20 @@ async function main() {
       payload: `--${B}--\r\n`,
     });
     ok("kein File → 400", rEmpty.statusCode === 400);
+
+    // (e) GET-Endpoint: Download liefert Bytes + gesniffter Content-Type.
+    if (refBody.ref) {
+      const rGet = await app.inject({ method: "GET", url: `/file/${refBody.ref}` });
+      ok("GET ref → 200", rGet.statusCode === 200);
+      ok("GET Content-Type image/png", rGet.headers["content-type"] === "image/png");
+      ok("GET Bytes == hochgeladenes PNG", Buffer.compare(rGet.rawPayload, png) === 0);
+      // (f) 🔴 Isolation: fremder Twin → 404 (kein Cross-Twin-Download).
+      const rForeign = await app.inject({
+        method: "GET",
+        url: `/file/${refBody.ref}?twin=fremder-twin`,
+      });
+      ok("🔴 GET fremder twinId → 404", rForeign.statusCode === 404);
+    }
     await app.close();
 
     console.log(`\n  Zwischenstand: ${failed === 0 ? "✅ Endpoint-Logik grün" : `❌ ${failed} fehlgeschlagen`}`);
