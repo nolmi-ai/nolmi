@@ -1577,6 +1577,17 @@ function Sidebar({
  */
 type MessageChannel = "web" | "telegram" | "discord" | "whatsapp";
 
+// Multimodal SS4a: ein hochgeladenes Bild im Composer. `ref`/`id`/`mimeType`
+// gehen in die Chat-Message (Server lädt darüber die Bytes); `previewUrl` ist
+// ein lokaler objectURL nur für die Vorschau/optimistische Bubble.
+type PendingAttachment = {
+  ref: string;
+  id: string;
+  mimeType: string;
+  sizeBytes: number;
+  previewUrl: string;
+};
+
 type ChatBlock =
   | {
       kind: "user";
@@ -1584,6 +1595,10 @@ type ChatBlock =
       conversationId: string | null;
       auditId: string | null;
       channel?: MessageChannel;
+      // SS4a: lokale Vorschau-Bilder (objectURL) der gesendeten Message. Nur in
+      // der optimistischen Bubble gesetzt; Server-Blocks haben das (noch) nicht
+      // (kein GET-Endpoint → SS4b).
+      attachments?: { previewUrl: string; mimeType: string }[];
     }
   | {
       kind: "assistant";
@@ -1825,6 +1840,28 @@ function DirectChat({
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Multimodal SS4a: hochgeladenes, noch nicht gesendetes Bild. `previewUrl` ist
+  // ein objectURL der LOKAL gewählten Datei (kein Server-Download — SS4b).
+  const [pendingAttachment, setPendingAttachment] =
+    useState<PendingAttachment | null>(null);
+  // Bild der gerade in-flight gesendeten Message (für die optimistische Bubble).
+  const [optimisticAttachment, setOptimisticAttachment] =
+    useState<PendingAttachment | null>(null);
+  const [uploading, setUploading] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Entfernt das pending Bild + gibt den objectURL frei (verhindert Leak).
+  const clearPendingAttachment = useCallback(() => {
+    setPendingAttachment((prev) => {
+      if (prev) URL.revokeObjectURL(prev.previewUrl);
+      return null;
+    });
+  }, []);
+
+  // Pending-Bild bei Konversations-Reset/Unmount wegräumen (objectURL freigeben).
+  useEffect(() => {
+    return () => clearPendingAttachment();
+  }, [resetSeq, clearPendingAttachment]);
   // @-Mention-Autocomplete: aktives Mention-Token (Query + Start-Offset im
   // Input) oder null, plus markierter Listenindex für Tastatur-Navigation.
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -1891,17 +1928,26 @@ function DirectChat({
   );
 
   const chatBlocks = useMemo<ChatBlock[]>(() => {
-    if (!optimisticUser) return serverBlocks;
+    // SS4a: auch ein Bild-only-Send (leerer Text) erzeugt eine Bubble.
+    if (optimisticUser === null && !optimisticAttachment) return serverBlocks;
     return [
       ...serverBlocks,
       {
         kind: "user" as const,
-        content: optimisticUser,
+        content: optimisticUser ?? "",
         conversationId: activeConvId,
         auditId: null,
+        attachments: optimisticAttachment
+          ? [
+              {
+                previewUrl: optimisticAttachment.previewUrl,
+                mimeType: optimisticAttachment.mimeType,
+              },
+            ]
+          : undefined,
       },
     ];
-  }, [serverBlocks, optimisticUser, activeConvId]);
+  }, [serverBlocks, optimisticUser, optimisticAttachment, activeConvId]);
 
   const { containerRef, bottomRef, onScroll } = useAutoScroll(
     chatBlocks.length,
@@ -1983,11 +2029,17 @@ function DirectChat({
   }, [resetSeq, handle]);
 
   async function send() {
-    if (!input.trim() || busy) return;
+    // SS4a: sendbar bei Text ODER pending Bild (Bild-only erlaubt). Nicht
+    // während eines laufenden Uploads.
+    if ((!input.trim() && !pendingAttachment) || busy || uploading) return;
     const userText = input;
+    const attachment = pendingAttachment ?? undefined;
     setInput("");
     setMention(null);
-    await sendChat(userText);
+    // Ownership des objectURL geht an die optimistische Bubble über → hier KEIN
+    // revoke (clearPendingAttachment würde revoken); sendChat räumt am Ende auf.
+    setPendingAttachment(null);
+    await sendChat(userText, undefined, attachment);
   }
 
   // @-Mention: gefilterte Kandidaten zur aktuellen Query (Prefix-Match auf
@@ -2031,11 +2083,49 @@ function DirectChat({
     });
   }
 
+  // Multimodal SS4a: ein Bild hochladen → ref vom Server. FormData (kein
+  // Content-Type-Header: der Browser setzt multipart-boundary selbst), Owner-
+  // Cookie via credentials:"include". Fehler (413/415/400) landen im Banner.
+  async function handleFileSelected(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    e.target.value = ""; // erlaubt erneute Auswahl derselben Datei
+    if (!file) return;
+    setUploading(true);
+    setError(null);
+    try {
+      const fd = new FormData();
+      fd.append("file", file);
+      const res = await fetch(`${RUNTIME_URL}/twins/${handle}/attachments`, {
+        method: "POST",
+        credentials: "include",
+        body: fd,
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error((body as { error?: string }).error ?? `HTTP ${res.status}`);
+      }
+      const saved = body as {
+        ref: string;
+        id: string;
+        mimeType: string;
+        sizeBytes: number;
+      };
+      clearPendingAttachment(); // evtl. vorheriges Bild ersetzen (+ revoke)
+      setPendingAttachment({ ...saved, previewUrl: URL.createObjectURL(file) });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Upload fehlgeschlagen");
+    } finally {
+      setUploading(false);
+    }
+  }
+
   async function sendChat(
     userText: string,
     forcedToolChoice?: { type: "tool"; toolName: string },
+    attachment?: PendingAttachment,
   ) {
     setOptimisticUser(userText);
+    setOptimisticAttachment(attachment ?? null);
     setBusy(true);
     setError(null);
 
@@ -2049,8 +2139,27 @@ function DirectChat({
         // letzte User-Message mit, damit das alte Schema kompatibel bleibt.
         // 3.2.H: forcedToolChoice nur bei Picker-Submit gesetzt — für normale
         // Texteingaben bleibt es undefined → Default-Auto im Backend.
+        // SS4a: attachments trägt nur die Server-Referenz (ref/id/mimeType),
+        // KEINE Bytes — die lädt das Backend twinId-isoliert aus dem Store.
         body: JSON.stringify({
-          messages: [{ role: "user", content: userText }],
+          messages: [
+            {
+              role: "user",
+              content: userText,
+              ...(attachment
+                ? {
+                    attachments: [
+                      {
+                        id: attachment.id,
+                        type: "image",
+                        mimeType: attachment.mimeType,
+                        ref: attachment.ref,
+                      },
+                    ],
+                  }
+                : {}),
+            },
+          ],
           ...(forcedToolChoice ? { forcedToolChoice } : {}),
         }),
       });
@@ -2075,6 +2184,10 @@ function DirectChat({
       setError(err instanceof Error ? err.message : "Failed");
     } finally {
       setOptimisticUser(null);
+      // SS4a: optimistisches Bild abräumen + objectURL freigeben. Nach dem
+      // loadAudits()-Reload zeigt die Server-Bubble (noch) kein Bild (SS4b).
+      setOptimisticAttachment(null);
+      if (attachment) URL.revokeObjectURL(attachment.previewUrl);
       setBusy(false);
     }
   }
@@ -2282,10 +2395,12 @@ function DirectChat({
                   ) : (
                     // #130 Phase 3 v2: User-Bubble bekommt Channel-Icon
                     // direkt im Bubble-Header, kein externer Subline-Slot.
+                    // SS4a: optionale Bild-Vorschau(en) in der User-Bubble.
                     <Bubble
                       role={block.kind}
                       content={block.content}
                       channel={block.channel}
+                      attachments={block.attachments}
                     />
                   )}
                 </Fragment>
@@ -2319,6 +2434,33 @@ function DirectChat({
         </div>
       </div>
       <div className="h-20 border-t border-border bg-surface px-6 py-3 flex items-center gap-2 flex-shrink-0">
+        {/* SS4a: verstecktes File-Input — getriggert vom Bild-Button. */}
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept="image/png,image/jpeg,image/webp,image/gif"
+          onChange={handleFileSelected}
+          className="hidden"
+        />
+        {/* SS4a: Vorschau des pending Bildes mit Entfernen-Knopf. */}
+        {pendingAttachment && (
+          <div className="relative flex-shrink-0">
+            {/* eslint-disable-next-line @next/next/no-img-element -- objectURL-Vorschau */}
+            <img
+              src={pendingAttachment.previewUrl}
+              alt="Anhang"
+              className="h-12 w-12 object-cover rounded border border-border"
+            />
+            <button
+              type="button"
+              onClick={clearPendingAttachment}
+              title="Bild entfernen"
+              className="absolute -top-1.5 -right-1.5 h-4 w-4 flex items-center justify-center rounded-full bg-surface border border-border text-muted text-[10px] leading-none hover:border-warn hover:text-warn"
+            >
+              ×
+            </button>
+          </div>
+        )}
         <div className="relative flex-1 h-full">
           {mention && mentionMatches.length > 0 && (
             <ul className="absolute bottom-full mb-1 left-0 w-64 max-h-48 overflow-y-auto bg-surface border border-border rounded shadow-lg z-20 py-1">
@@ -2392,12 +2534,22 @@ function DirectChat({
             rows={2}
           />
         </div>
+        {/* SS4a: Bild anhängen. Öffnet den versteckten File-Dialog. */}
+        <button
+          type="button"
+          onClick={() => fileInputRef.current?.click()}
+          disabled={busy || uploading}
+          title="Bild anhängen (png/jpeg/webp/gif)"
+          className="px-3 py-2 border border-border text-muted text-sm rounded disabled:opacity-30 disabled:cursor-not-allowed hover:border-accent hover:text-accent transition-colors"
+        >
+          {uploading ? "…" : "Bild"}
+        </button>
         {/* 3.2.H: Tool-Picker zwischen Input und Send. Klick öffnet Modal mit
             aktiven MCP-Tools, Submit zwingt den Tool-Call. */}
         <ToolPicker handle={handle} disabled={busy} onSend={sendToolFromPicker} />
         <button
           onClick={send}
-          disabled={busy || !input.trim()}
+          disabled={busy || uploading || (!input.trim() && !pendingAttachment)}
           className="px-4 py-2 border border-accent text-accent text-sm rounded disabled:opacity-30 disabled:cursor-not-allowed hover:bg-accent hover:text-bg transition-colors"
         >
           send
@@ -2817,11 +2969,14 @@ function Bubble({
   role,
   content,
   channel,
+  attachments,
 }: {
   role: ChatMessage["role"];
   content: string;
   /** #130 Phase 3 v2: Channel-Icon im Bubble-Header rechts. Undefined/`web` → kein Icon. */
   channel?: MessageChannel;
+  /** SS4a: lokale Bild-Vorschau(en) (objectURL) in der User-Bubble. */
+  attachments?: { previewUrl: string; mimeType: string }[];
 }) {
   const isUser = role === "user";
   // ml-auto / mr-auto positioniert die Bubble innerhalb des max-w-3xl-
@@ -2853,6 +3008,19 @@ function Bubble({
         </div>
         <MessageChannelBadge channel={channel} />
       </div>
+      {attachments && attachments.length > 0 && (
+        <div className="flex flex-wrap gap-2 mb-2">
+          {attachments.map((a, i) => (
+            // eslint-disable-next-line @next/next/no-img-element -- objectURL-Vorschau, keine next/image-Optimierung möglich
+            <img
+              key={i}
+              src={a.previewUrl}
+              alt="Anhang"
+              className="max-h-40 max-w-full rounded border border-border"
+            />
+          ))}
+        </div>
+      )}
       {isUser ? (
         content
       ) : (
