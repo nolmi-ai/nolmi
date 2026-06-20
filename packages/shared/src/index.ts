@@ -185,9 +185,32 @@ export type TwinEvent = z.infer<typeof TwinEventSchema>;
 
 // ─── CHAT ────────────────────────────────────────────────────────────────────
 
+// Multimodal SS1: Anhang an einer Chat-Nachricht (z.B. ein Bild). 🔴 BEWUSST
+// nur eine REFERENZ (`ref`) auf den Store, KEINE Bytes/base64 im Schema — sonst
+// blähten die Bytes Audit-`data` + Embedding-Aggregat auf (Diagnose-Befund C).
+// Der Storage selbst (SS2) und der Message-Bau ans Modell (SS3) sind separate
+// Schritte; dieses Schema beschreibt nur, wie ein Anhang an einer Message hängt.
+export const AttachmentSchema = z.object({
+  id: z.string(),
+  /** Heute nur `image`; Erweiterung (pdf/doc) später additiv. */
+  type: z.enum(["image"]),
+  /** MIME des Originals, z.B. `image/png`, `image/jpeg`. */
+  mimeType: z.string(),
+  /** Referenz in den Store (Pfad/ID), NICHT der Inhalt. Bytes lädt SS3 erst
+   *  zur Call-Zeit nach — nie persistiert in der Message. */
+  ref: z.string(),
+  /** Optional fürs UI (Anzeige/Preview). */
+  filename: z.string().optional(),
+  sizeBytes: z.number().optional(),
+});
+
 export const ChatMessageSchema = z.object({
   role: z.enum(["user", "assistant", "system"]),
+  // 🔴 Abwärtskompatibel: `content` bleibt String — kein bestehender Pfad
+  // (Embedding-Aggregat, Replay, Audit, .length) bricht.
   content: z.string(),
+  // Multimodal SS1: optional. Nicht gesetzt = reiner Text-Pfad, unverändert.
+  attachments: z.array(AttachmentSchema).optional(),
 });
 
 // 3.2.H: User-getriggerte Tool-Use über den Tool-Picker. Wenn gesetzt, reicht
@@ -231,6 +254,7 @@ export const ChatResponseSchema = z.object({
   memoryHits: z.array(MemoryHitSchema).optional(),
 });
 
+export type Attachment = z.infer<typeof AttachmentSchema>;
 export type ChatMessage = z.infer<typeof ChatMessageSchema>;
 export type ChatRequest = z.infer<typeof ChatRequestSchema>;
 export type ChatResponse = z.infer<typeof ChatResponseSchema>;
