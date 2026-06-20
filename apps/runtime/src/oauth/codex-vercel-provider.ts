@@ -312,6 +312,35 @@ class CodexLanguageModel implements LanguageModelV3 {
 // History + Tool-Call-Echo + Tool-Result-Message im Prompt. Provider
 // übersetzt das transparent in Codex' §l-Pattern.
 
+// Content-Parts eines user-message-Items im Codex-Input. input_text wie bisher;
+// input_image (SS3b) = Spike-Format (image_url als data-URI). Der Adapter reicht
+// den Inhalt transparent als JSON durch (kein schmaler Wire-Type nötig).
+type CodexUserContentPart =
+  | { type: "input_text"; text: string }
+  | { type: "input_image"; image_url: string; detail: string };
+
+/**
+ * Baut aus V3-FilePart-Daten den `image_url`-String fürs Codex-input_image.
+ * V3-`data` ist `Uint8Array | string(base64) | URL`. SS3a/SS2 liefern Bytes
+ * (Uint8Array) → base64-data-URI; eine bereits fertige data:-URL oder http(s)-
+ * URL wird unverändert durchgereicht.
+ */
+function fileDataToDataUri(data: unknown, mediaType: string): string {
+  if (data instanceof URL) return data.toString();
+  if (typeof data === "string") {
+    return data.startsWith("data:") ? data : `data:${mediaType};base64,${data}`;
+  }
+  if (data instanceof Uint8Array) {
+    return `data:${mediaType};base64,${Buffer.from(data).toString("base64")}`;
+  }
+  // Defensiv: Buffer/ArrayBuffer-artiges → base64; sonst leerer data-URI.
+  try {
+    return `data:${mediaType};base64,${Buffer.from(data as Uint8Array).toString("base64")}`;
+  } catch {
+    return `data:${mediaType};base64,`;
+  }
+}
+
 export function mapV3PromptToCodex(prompt: LanguageModelV3Prompt): {
   instructions: string;
   input: CodexInputItemAny[];
@@ -325,18 +354,42 @@ export function mapV3PromptToCodex(prompt: LanguageModelV3Prompt): {
       continue;
     }
     if (msg.role === "user") {
-      const text = msg.content
-        .filter(
-          (p: { type: string }): p is { type: "text"; text: string } =>
-            p.type === "text",
-        )
-        .map((p: { text: string }) => p.text)
-        .join("\n");
+      // Multimodal SS3b: ALLE Parts mappen statt nur text zu filtern.
+      //   - text  → input_text (UNVERÄNDERT: alle text-Parts wie bisher mit
+      //             "\n" gejoint zu EINEM input_text → kein Wire-Drift).
+      //   - file  → 🔴 image-Part (V3 lowert ImagePart aus SS3a zu FilePart)
+      //             → input_image im Spike-bewiesenen Format (image_url als
+      //             base64-data-URI, OpenAI-Responses, d5e757e).
+      const textParts: string[] = [];
+      const imageParts: CodexUserContentPart[] = [];
+      for (const part of msg.content) {
+        if (part.type === "text") {
+          textParts.push(part.text);
+        } else if (
+          part.type === "file" &&
+          typeof part.mediaType === "string" &&
+          part.mediaType.startsWith("image/")
+        ) {
+          imageParts.push({
+            type: "input_image",
+            image_url: fileDataToDataUri(part.data, part.mediaType),
+            detail: "auto",
+          });
+        }
+        // Nicht-Bild-Files / andere Part-Typen ignoriert — SS3b deckt nur Bilder.
+      }
+      const text = textParts.join("\n");
+      const content: CodexUserContentPart[] = [];
+      if (text.length > 0) content.push({ type: "input_text", text });
+      for (const img of imageParts) content.push(img);
+      // 🔴 Abwärtskompat-Edge: ohne Bild + leerer Text → exakt wie heute EIN
+      // (leeres) input_text, damit der reine Text-Pfad byte-identisch bleibt.
+      if (content.length === 0) content.push({ type: "input_text", text });
       input.push({
         type: "message",
         role: "user",
-        content: [{ type: "input_text", text }],
-      });
+        content,
+      } as unknown as CodexInputItemAny);
       continue;
     }
     if (msg.role === "assistant") {
