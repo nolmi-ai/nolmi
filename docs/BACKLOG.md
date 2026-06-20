@@ -3344,11 +3344,13 @@ Code war komplett. Ablauf live bestätigt auf Prod: Owner approved → @markus f
 
 **Behoben (Weg 3 — ehrlicher Hint, kein Re-Routing):** Bei verbloser @-Mention im Owner-Chat (`respond_to_chat` + Target erkannt + KEIN `SEND_TRIGGERS`-Verb) injiziert `runOwnerDirect` einen weichen `extraSystem`-Hint → der Twin behauptet nicht mehr zu senden, sondern weist auf „Schreib @X: …" hin. Self-Mention ausgenommen; weicher Wortlaut hält Referenz-Fragen auf Kurs. `SEND_TRIGGERS` zu Modul-Konstante extrahiert. Verifiziert: verblos → Hint; Referenz-Frage → normal; mit Verb → send_to_twin via Approval. Bonus: alle 16 send_to_twin-Audits tragen ein Verb → 0 verblose Sends (das eine gemeldete „verbloses Send" war ein Reporting-Artefakt — echter Text trug „Schreib @florian:").
 
-### @-Mention soll autonom senden (Weg 2: Modell-Detektor-Pass) — OFFEN, eigener Bogen
+### @-Mention soll autonom senden (Weg 2: Modell-Detektor-Pass) — SS1+SS2 ✅ lokal (Schatten); SS3 OFFEN
 
-**Status:** OFFEN (geparkt, nicht dringend) · **Größe:** L · **Aus:** Tag 48 (Folge von Weg 3)
+**Status:** SS1+SS2 lokal fertig & verifiziert (`95233dc`, `a364ee2`, `a09e879`, Tag 49) · **NICHT deployt, Default=Schatten** · **SS3 (Prod-Schatten + Scharfschaltung) offen** · **Größe Rest:** S–M
 
-**Idee:** Verbloses `@X …` automatisch als **Sende-Absicht** erkennen (statt nur ehrlich auf das Verb hinzuweisen), sodass der Owner keine Verb-Form mehr tippen muss. 🔴 **Kern-Schwierigkeit:** robuste Disambiguierung Sende vs. Referenz/Frage (`@florian kurzer Test` = senden vs. `was hat @florian gesagt?` = Frage). Keyword-Heuristik zu brittle → der Code-Kommentar in `detectCapability` sieht selbst einen **Modell-Detektor-Pass** vor (ein kleiner Klassifikator-Call, der die Absicht bestimmt). Eigener Bogen, baut auf dem Weg-3-Hint auf (der bis dahin die ehrliche Zwischenlösung bleibt).
+**Gebaut (SS1+SS2):** `classifyMentionIntent` (SEND/CHAT via `generateObject` auf `deps.classifierModel`, fail-safe→CHAT, 5s) + Verdrahtung in `chat()` im **Schatten** hinter ENV-Gate `MENTION_AUTOSEND_ENABLED`. Gate: respond_to_chat + @-Target + kein Sende-Verb + nicht Self. Ohne ENV: kein Verhaltens-Change (Weg-3-Hint feuert weiter). Verifiziert: 13/13 (haiku), alle deferred→CHAT, kein falsches SEND; Approval-Gate code-seitig als unumgehbar bewiesen (Sicherheits-Audit, STAND Tag 49). 🔴 Befund: Klassifikator nutzt NIE Codex — eigene Tier (anthropic→haiku, openai→**gpt-4o-mini**).
+
+**🔴 SS3 (eigene Session, vorsichtigster Schritt):** (1) SS2 im **Schatten auf Prod** deployen → echte Prod-Klassifikationen beobachten, v.a. die **gpt-4o-mini-Tier** bei @markus (falls prod-openai — der einzige ungetestete Pfad; via `--twin=@markus` auf Prod oder `[mention-intent]`-Logs). (2) **Erst nach** Beobachtung `MENTION_AUTOSEND_ENABLED=true`. ggf. Timeout/Prompt nachschärfen.
 
 ### ✅ Repo- vs. Prod-Compose-Drift konsolidieren (Infra-Hygiene) — DONE (717721c, Tag 48)
 
