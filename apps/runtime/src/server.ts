@@ -1,6 +1,11 @@
 import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest } from "fastify";
 import cors from "@fastify/cors";
 import cookie from "@fastify/cookie";
+import multipart from "@fastify/multipart";
+import {
+  readUploadedFile,
+  validateAndSaveUpload,
+} from "./multimodal/attachment-upload.js";
 import { nanoid } from "nanoid";
 import { resolve } from "node:path";
 import { z } from "zod";
@@ -157,6 +162,15 @@ export async function createServer(deps: ServerDeps) {
     credentials: true,
   });
   await app.register(cookie);
+
+  // Multimodal SS2b: Upload-Plugin. 🔴 fileSize-Limit über die Plugin-`limits`
+  // (NICHT den globalen JSON-bodyLimit) — greift pro Datei beim Streamen.
+  // ATTACHMENT_MAX_BYTES (Default 10 MB). files:1 = ein Anhang pro Request.
+  const ATTACHMENT_MAX_BYTES =
+    Number(process.env.ATTACHMENT_MAX_BYTES) || 10 * 1024 * 1024;
+  await app.register(multipart, {
+    limits: { fileSize: ATTACHMENT_MAX_BYTES, files: 1 },
+  });
 
   // ─── Helpers ───────────────────────────────────────────────────────────────
 
@@ -401,6 +415,40 @@ export async function createServer(deps: ServerDeps) {
         const msg = err instanceof Error ? err.message : "Unknown error";
         return reply.status(500).send({ error: msg });
       }
+    },
+  );
+
+  // ─── Attachments-Upload (Multimodal SS2b) ──────────────────────────────────
+  // 🔴 Owner-only (requireOwner). Nimmt EIN Bild (multipart, Feld 'file'),
+  // prüft Größe (Plugin-Limit → truncated → 413), Magic-Bytes + Allowlist +
+  // gemeldet==echt (415), legt es twinId-isoliert ab (saveAttachment) und gibt
+  // die server-generierte `ref` zurück. Der Client setzt die `ref` dann in die
+  // Chat-Message (attachments[]). KEINE Bytes in DB/Audit — nur die ref.
+  app.post<{ Params: { handle: string } }>(
+    "/twins/:handle/attachments",
+    async (request, reply) => {
+      const ctx = await requireOwner(request, reply, request.params.handle);
+      if (!ctx) return;
+      const { entry } = ctx;
+
+      let parsed;
+      try {
+        parsed = await readUploadedFile(request);
+      } catch (err) {
+        // Multipart-Parse-Fehler (kein multipart-Body o.ä.) → 400, kein Crash.
+        return reply.status(400).send({
+          error: `Ungültiger Upload: ${err instanceof Error ? err.message : String(err)}`,
+        });
+      }
+
+      const result = validateAndSaveUpload({
+        twinId: entry.twinId,
+        buffer: parsed.buffer,
+        claimedMimeType: parsed.claimedMimeType,
+        truncated: parsed.truncated,
+        maxBytes: ATTACHMENT_MAX_BYTES,
+      });
+      return reply.status(result.status).send(result.body);
     },
   );
 
