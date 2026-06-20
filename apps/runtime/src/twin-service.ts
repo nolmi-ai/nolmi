@@ -1,4 +1,5 @@
 import type {
+  Attachment,
   AuditEntry,
   AuditToolCall,
   ChatMessage,
@@ -20,6 +21,7 @@ import {
 } from "ai";
 import type Database from "better-sqlite3";
 import { checkMandate } from "./mandates/service.js";
+import { loadAttachmentBytes } from "./multimodal/attachment-loader.js";
 import { AuditService } from "./audit/service.js";
 import type { EventBus } from "./events/bus.js";
 import type { BridgeClient } from "./bridge/client.js";
@@ -4179,10 +4181,27 @@ function extractMessages(entry: { input: Record<string, unknown> }, key: string)
  * Persona kommt über den `system`-Parameter von `generateText`, system-Slots
  * im messages-Array sind in der neuen API verboten/redundant.
  */
-function toModelMessages(messages: ChatMessage[]): ModelMessage[] {
+export function toModelMessages(messages: ChatMessage[]): ModelMessage[] {
   return messages
     .filter((m) => m.role !== "system")
     .map((m) => {
+      // Multimodal SS3a (Anthropic-Pfad): NUR wenn die Message Attachments
+      // trägt, bauen wir das Content-Array [Text-Part, …Image-Parts]. Bytes
+      // werden hier zur Call-Zeit aus dem Store geladen (loadAttachmentBytes),
+      // nie aus der Message gelesen (die hält nur die `ref`). Vercel-SDK +
+      // @ai-sdk/anthropic akzeptieren ImagePart { type:'image', image, mediaType }.
+      // 🔴 Codex-Pfad (mapV3PromptToCodex) bleibt unberührt — das ist SS3b.
+      if (m.attachments && m.attachments.length > 0) {
+        const parts: unknown[] = [];
+        // Leeren Text-Part vermeiden (Anthropic mag keine leeren Text-Blocks).
+        if (m.content) parts.push({ type: "text", text: m.content });
+        for (const a of m.attachments) {
+          parts.push(buildImagePart(a));
+        }
+        return { role: m.role, content: parts } as unknown as ModelMessage;
+      }
+
+      // 🔴 Abwärtskompatibel: ohne Attachments exakt wie bisher.
       // #131 Phase 3.4.3.1 Big-Bang: History-Replay-Messages haben role
       // "tool" und content-Array (tool-approval-response). assistant-
       // Messages aus V3-Pause haben auch content-Array (tool-call + tool-
@@ -4194,6 +4213,23 @@ function toModelMessages(messages: ChatMessage[]): ModelMessage[] {
         content: m.content,
       } as unknown as ModelMessage;
     });
+}
+
+/**
+ * Baut aus einem Attachment den Vercel-SDK-ImagePart. Lädt die Bytes über die
+ * Storage-Naht (SS3a: Test-Stub; SS2: echter /data-Store). `mediaType` kommt
+ * aus dem Schema-Feld `mimeType`.
+ */
+function buildImagePart(a: Attachment): {
+  type: "image";
+  image: Buffer;
+  mediaType: string;
+} {
+  return {
+    type: "image",
+    image: loadAttachmentBytes(a.ref),
+    mediaType: a.mimeType,
+  };
 }
 
 /**
