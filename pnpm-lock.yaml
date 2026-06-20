@@ -99,6 +99,9 @@ importers:
       fastify:
         specifier: ^5.0.0
         version: 5.8.5
+      ipaddr.js:
+        specifier: 2.3.0
+        version: 2.3.0
       iron-session:
         specifier: ^8.0.0
         version: 8.0.4
