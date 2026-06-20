@@ -231,16 +231,63 @@ export async function executeWebFetch({
   }
 }
 
-/** AI-SDK-Tool-Wrapper um executeWebFetch. needsApproval:false → auto. */
-export const webFetchTool = tool({
-  description:
-    "Ruft eine ÖFFENTLICHE http(s)-Webseite per GET ab und gibt den Textinhalt zurück (Recherche, z.B. llms.txt oder JSON-APIs). Nur text/JSON/XML, max ~2 MB. Interne/private/Metadata-Adressen sind blockiert.",
-  inputSchema: z.object({
-    url: z
-      .string()
-      .url()
-      .describe("Vollständige http(s)-URL der öffentlichen Seite"),
-  }),
-  needsApproval: false,
-  execute: executeWebFetch,
-});
+/** Audit-Record eines web_fetch-Calls — NUR Metadaten, NIE der Body. */
+export interface WebFetchAuditRecord {
+  url: string;
+  ok: boolean;
+  status?: number;
+  contentType?: string | null;
+  bytes?: number;
+  truncated?: boolean;
+  finalUrl?: string;
+  error?: string;
+}
+
+const WEB_FETCH_DESCRIPTION =
+  "Ruft eine ÖFFENTLICHE http(s)-Webseite per GET ab und gibt den Textinhalt zurück (Recherche, z.B. llms.txt oder JSON-APIs). Nur text/JSON/XML, max ~2 MB. Interne/private/Metadata-Adressen sind blockiert.";
+
+/**
+ * Baut das web_fetch-Tool. `onFetch` (optional) bekommt pro Call einen
+ * Metadaten-Record (OHNE Body) — der Caller schreibt daraus den Audit-Eintrag.
+ * needsApproval:false → auto; Sicherheit liegt im SSRF-Guard, Nachvollziehbarkeit
+ * im onFetch-Audit (Pflicht bei „alle Pfade"). onFetch-Fehler brechen den Fetch nie.
+ */
+export function buildWebFetchTool(
+  onFetch?: (record: WebFetchAuditRecord) => void | Promise<void>,
+) {
+  return tool({
+    description: WEB_FETCH_DESCRIPTION,
+    inputSchema: z.object({
+      url: z
+        .string()
+        .url()
+        .describe("Vollständige http(s)-URL der öffentlichen Seite"),
+    }),
+    needsApproval: false,
+    execute: async ({ url }: { url: string }): Promise<WebFetchResult> => {
+      const result = await executeWebFetch({ url });
+      if (onFetch) {
+        const record: WebFetchAuditRecord = result.ok
+          ? {
+              url,
+              ok: true,
+              status: result.status,
+              contentType: result.contentType,
+              bytes: result.body.length,
+              truncated: result.truncated,
+              finalUrl: result.finalUrl,
+            }
+          : { url, ok: false, error: result.error };
+        try {
+          await onFetch(record);
+        } catch {
+          // Audit-Schreibfehler darf den Fetch/Turn nie brechen.
+        }
+      }
+      return result;
+    },
+  });
+}
+
+/** Default-Tool ohne Audit-Recorder (Tests/Back-compat). */
+export const webFetchTool = buildWebFetchTool();

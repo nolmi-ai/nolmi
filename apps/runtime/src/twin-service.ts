@@ -107,6 +107,10 @@ import {
   type NudgeOutput,
 } from "./focus/proactive-nudge-service.js";
 import { classifyMentionIntent } from "./a2a/mention-intent-classifier.js";
+import {
+  buildWebFetchTool,
+  type WebFetchAuditRecord,
+} from "./web-fetch/web-fetch-tool.js";
 import { McpClientManager } from "./mcp/client-manager.js";
 import { McpSkillSync } from "./mcp/skill-sync.js";
 import { buildMcpToolsFromSkills } from "./mcp/tool-bridge.js";
@@ -2798,10 +2802,20 @@ export class TwinService {
       : { tools: {}, skillByToolKey: new Map<string, Skill>() };
     const mcpTools = mcpToolsResult.tools;
     const skillByToolKey = mcpToolsResult.skillByToolKey;
-    const hasTools = Object.keys(mcpTools).length > 0;
+    // web_fetch SS3: natives Tool IMMER ins Set — unabhängig vom enableMcpTools-
+    // Gate, also in JEDEM runModel-Pfad (Owner-Chat, A2A trusted-bypass,
+    // send_to_twin-Formulierung, Summary). onFetch schreibt pro Call einen
+    // web-fetch-Audit (url+status+bytes, KEIN Body) — die einzige Spur autonomer
+    // Web-Zugriffe. Autonome Engines (focus/reflection/nudge/extraction) gehen
+    // NICHT über runModel → kein web_fetch dort.
+    const allTools: ToolSet = {
+      ...mcpTools,
+      web_fetch: buildWebFetchTool((rec) => this.recordWebFetchAudit(rec)),
+    };
+    const hasTools = Object.keys(allTools).length > 0;
     if (hasTools) {
       console.log(
-        `[mcp:tools] passing ${Object.keys(mcpTools).length} tool(s) to LLM (twin=${this.deps.twinId})`,
+        `[mcp:tools] passing ${Object.keys(allTools).length} tool(s) to LLM (twin=${this.deps.twinId})`,
       );
     }
 
@@ -2866,7 +2880,7 @@ REGEL 6: Wenn der User dich explizit bittet, ein Tool zu nutzen ("rufe das X-Too
         const match = await classifyForcedTool({
           userMessage: lastUserMessage,
           skills,
-          availableToolKeys: new Set(Object.keys(mcpTools)),
+          availableToolKeys: new Set(Object.keys(allTools)),
           classifierModel: this.deps.classifierModel,
           twinId: this.deps.twinId,
         });
@@ -2885,7 +2899,7 @@ REGEL 6: Wenn der User dich explizit bittet, ein Tool zu nutzen ("rufe das X-Too
     const forcedTool =
       hasTools &&
       effectiveForcedToolChoice &&
-      mcpTools[effectiveForcedToolChoice.toolName] !== undefined
+      allTools[effectiveForcedToolChoice.toolName] !== undefined
         ? effectiveForcedToolChoice
         : null;
     if (effectiveForcedToolChoice && !forcedTool) {
@@ -2912,7 +2926,7 @@ REGEL 6: Wenn der User dich explizit bittet, ein Tool zu nutzen ("rufe das X-Too
         messages: toModelMessages(messages),
         ...(hasTools
           ? {
-              tools: mcpTools,
+              tools: allTools,
               stopWhen: stepCountIs(5),
               ...(forcedTool ? { toolChoice: forcedTool } : {}),
             }
@@ -2981,7 +2995,7 @@ REGEL 6: Wenn der User dich explizit bittet, ein Tool zu nutzen ("rufe das X-Too
             ...toModelMessages(messages),
             ...(sResponseMessages as Parameters<typeof toModelMessages>[0]),
           ],
-          tools: mcpTools,
+          tools: allTools,
           stopWhen: stepCountIs(2),
         });
         for await (const fChunk of followupStreamRes.fullStream) {
@@ -3004,7 +3018,10 @@ REGEL 6: Wenn der User dich explizit bittet, ein Tool zu nutzen ("rufe das X-Too
         return {
           toolName: tc.toolName,
           input: tc.input,
-          output: matchingResult ? matchingResult.output : null,
+          output: redactToolOutputForAudit(
+            tc.toolName,
+            matchingResult ? matchingResult.output : null,
+          ),
         };
       });
 
@@ -3057,7 +3074,7 @@ REGEL 6: Wenn der User dich explizit bittet, ein Tool zu nutzen ("rufe das X-Too
       messages: toModelMessages(messages),
       ...(hasTools
         ? {
-            tools: mcpTools,
+            tools: allTools,
             // 3.5.E.B: stopWhen-Array hat OR-Semantik — Multi-Step bricht ab,
             // sobald das Step-Limit (5) erreicht ist. Marker-StopCondition
             // (Phase 3.2.F) wurde mit Marker-Pattern in Sub-Phase F entfernt.
@@ -3112,7 +3129,7 @@ REGEL 6: Wenn der User dich explizit bittet, ein Tool zu nutzen ("rufe das X-Too
           ...toModelMessages(messages),
           ...result.response.messages,
         ],
-        tools: mcpTools,
+        tools: allTools,
         stopWhen: stepCountIs(2),
         // Kein toolChoice → Default 'auto'. LLM darf jetzt frei antworten.
       });
@@ -3138,7 +3155,10 @@ REGEL 6: Wenn der User dich explizit bittet, ein Tool zu nutzen ("rufe das X-Too
       return {
         toolName: tc.toolName,
         input: tc.input,
-        output: matchingResult ? matchingResult.output : null,
+        output: redactToolOutputForAudit(
+          tc.toolName,
+          matchingResult ? matchingResult.output : null,
+        ),
       };
     });
 
@@ -3750,6 +3770,37 @@ REGEL 6: Wenn der User dich explizit bittet, ein Tool zu nutzen ("rufe das X-Too
     this.deps.bus.emit({ type: "twin.idle", payload: {} });
   }
 
+  /**
+   * web_fetch SS3: schreibt pro web_fetch-Call einen Audit-Eintrag (Capability
+   * "web-fetch") — NUR Metadaten (url/status/contentType/bytes/truncated bzw.
+   * error), NIE der Body. Die einzige persistente Spur autonomer Web-Zugriffe
+   * (auch geblockte). Fehler hier brechen den Fetch/Turn nie (eigener try/catch).
+   */
+  private async recordWebFetchAudit(rec: WebFetchAuditRecord): Promise<void> {
+    try {
+      const audit = await this.deps.audit.start({
+        capability: "web-fetch",
+        mandateId: null,
+        input: { url: rec.url },
+        initialStatus: "executed",
+      });
+      await this.deps.audit.complete(audit.id, {
+        ok: rec.ok,
+        ...(rec.status !== undefined ? { status: rec.status } : {}),
+        ...(rec.contentType ? { contentType: rec.contentType } : {}),
+        ...(rec.bytes !== undefined ? { bytes: rec.bytes } : {}),
+        ...(rec.truncated !== undefined ? { truncated: rec.truncated } : {}),
+        ...(rec.finalUrl ? { finalUrl: rec.finalUrl } : {}),
+        ...(rec.error ? { error: rec.error } : {}),
+      });
+    } catch (err) {
+      console.warn(
+        `[web-fetch] Audit-Schreibfehler (twin=${this.deps.twinId}):`,
+        err instanceof Error ? err.message : err,
+      );
+    }
+  }
+
   private async safeAck(messageId: string): Promise<void> {
     if (!this.deps.bridgeClient) return;
     try {
@@ -3792,6 +3843,22 @@ Niemals "ae", "oe", "ue" oder "ss" als Ersatz verwenden.
 Auch nicht "ae" für Eigennamen wie "Bär" oder Begriffe wie
 "beschäftigt", "Größe", "schön".
 `.trim();
+
+/**
+ * web_fetch SS3: web_fetch-Tool-Output für die Audit-Metadata (metadata.toolCalls)
+ * redacten — der volle Body (bis 2 MB) gehört NICHT in den Audit-Trail. Nur
+ * Metadaten behalten, Body → bytes-Länge. Andere Tools unverändert durchreichen.
+ */
+function redactToolOutputForAudit(toolName: string, output: unknown): unknown {
+  if (toolName !== "web_fetch" || !output || typeof output !== "object") {
+    return output;
+  }
+  const { body, ...rest } = output as Record<string, unknown>;
+  return {
+    ...rest,
+    ...(typeof body === "string" ? { bytes: body.length } : {}),
+  };
+}
 
 /**
  * Owner-lokale Anzeige-Zeitzone für den „Heute"-Block im System-Prompt.
