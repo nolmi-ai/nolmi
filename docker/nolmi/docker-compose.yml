@@ -98,6 +98,9 @@ services:
       - REFLECTION_NUDGE_AUTOSEND_ENABLED=${REFLECTION_NUDGE_AUTOSEND_ENABLED:-}
       - PROACTIVE_NUDGE_ANLASS3_AUTOSEND_ENABLED=${PROACTIVE_NUDGE_ANLASS3_AUTOSEND_ENABLED:-}
       - OPEN_QUESTION_MAX_AGE_HOURS=${OPEN_QUESTION_MAX_AGE_HOURS:-}
+      # @-Mention-Autosend (Weg 2): verblose @-Mention → send_to_twin-Vorschlag
+      # (bleibt always_pending → Owner-Approval). Tag 50 scharf via VPS-.env.
+      - MENTION_AUTOSEND_ENABLED=${MENTION_AUTOSEND_ENABLED:-}
     labels:
       - "traefik.enable=true"
       - "traefik.docker.network=traefik-proxy"
