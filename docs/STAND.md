@@ -320,6 +320,18 @@ Der getaktete Production-Deploy ist durch: **`86ed1e4` → `6e32813`** auf `srv1
 - **Befund beim Build (jetzt dokumentiert):** der Prod-Stack nutzt `image:latest` ohne `build:` → `docker compose up -d` baut nichts; explizites `docker build` aus dem Repo-Root gehört davor. **DEPLOYMENT.md §3 entsprechend korrigiert** (inkl. Literal-Build-Arg-Warnung, da der #126-Guard ein leeres `${DOMAIN}` nicht abfängt).
 - **Smoke deckte eine UX-Lücke auf:** ein im Wizard angelegter Twin ist über die UI **nicht löschbar** (musste per DB-Skript raus) → neues BACKLOG-Item.
 
+## Tag 50 (21. Juni 2026) — 🚀 @-Mention-Autosend (Weg 2) scharfgeschaltet auf Prod + verifiziert
+
+**Tag 50 (Forts.) — `MENTION_AUTOSEND_ENABLED=true` auf Prod.** Eine **verblose** @-Mention im Owner-Chat, die der Klassifikator als **SEND** erkennt, wird jetzt zu einem `send_to_twin`-Vorschlag (statt nur Weg-3-Verb-Hint). Runtime-only (Flag pro Request aus `process.env` → `--force-recreate` genügt, kein Code/Build).
+
+🔴 **Befund-Korrektur (wichtig fürs Modell):** Der Mention-Klassifikator bei @markus läuft über **anthropic/claude-haiku-4-5** (Twin-`provider=anthropic`, `sk-ant-`-Key), **NICHT** gpt-4o-mini. Grund: `auth_mode=oauth` (Codex/gpt-5.5) betrifft **nur** den Chat-/SEND-Pfad; der Klassifikator zieht `resolveClassifierConfig(twin-provider + api_key)` → bei @markus anthropic. Der „eine ungetestete gpt-4o-mini-Pfad" **existiert bei @markus gar nicht** — es ist derselbe haiku-Tier, der lokal 13/13 bestand. Live-Call auf Prod bestätigt: „@florian kannst du Freitag?" → `intent=SEND` korrekt (kein fail-safe; Key gültig — @markus bootet nur mit entschlüsselbarem api_key, registry wirft sonst).
+
+🔴 **ENV-Mechanik (Drift-Falle erneut — diesmal abgefangen):** `MENTION_AUTOSEND_ENABLED` fehlte in der Whitelist. Gesetzt wie `ATTACHMENT_STORE_DIR`: Zeile in die **aktive** `/docker/nolmi/docker-compose.yml` (kein Symlink) + Wert in VPS-`.env`; **VOR** Recreate per `docker compose config | grep MENTION` verifiziert, **NACH** Recreate per `docker compose exec … printenv MENTION_AUTOSEND_ENABLED` → `true`. Parse: `process.env.MENTION_AUTOSEND_ENABLED?.trim().toLowerCase() === "true"`.
+
+🔴 **Sicherheit bestätigt — Scharfschalten ≠ Auto-Versand:** `send_to_twin` bleibt `always_pending` (Mandate, DB-bestätigt) → **Owner-Approval**; `ownerBypass` schließt `send_to_twin` aus. Worst case eines falschen SEND = ein überflüssiger Approval-Klick, **kein** ungewollter Bridge-Send.
+
+**Prod-Verifikation (Browser, beide grün):** (1) „@florian kannst du am Freitag?" → **SEND** → Approval-Prompt, nichts gesendet ohne Klick. (2) „@florian macht sowas auch" → **CHAT** → kein Send, Twin bietet selbst den expliziten „Schreib @florian: …"-Verb-Weg an. Die SEND/CHAT-Unterscheidung greift im echten Betrieb. → Damit ist der A2A-Autosend-Weg-2-Bogen (SS1 lokal → SS2 Schatten-Prod → SS3 scharf) **abgeschlossen**.
+
 ## Tag 50 (21. Juni 2026) — 🖼️🚀 Multimodaler Bildinput LIVE auf Prod (Codex-verifiziert, Persistenz bewiesen) + Compose-Drift-Lehre
 
 **Tag 50 — Bild-an-Twin ist live auf srv1712371.** Deploy auf `be4f0a7` (SS2e: compose-Whitelist `ATTACHMENT_STORE_DIR` + `gitignore data/`), **web + runtime neu gebaut** (UI sitzt im web-Bundle, Endpoints+Store im runtime), Bridge unberührt, **keine Migration**. Rollback-Tags `nolmi-{runtime,web}:rollback-premultimodal`.

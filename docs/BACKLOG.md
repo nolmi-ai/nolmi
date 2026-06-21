@@ -3356,13 +3356,17 @@ Code war komplett. Ablauf live bestätigt auf Prod: Owner approved → @markus f
 
 **Behoben (Weg 3 — ehrlicher Hint, kein Re-Routing):** Bei verbloser @-Mention im Owner-Chat (`respond_to_chat` + Target erkannt + KEIN `SEND_TRIGGERS`-Verb) injiziert `runOwnerDirect` einen weichen `extraSystem`-Hint → der Twin behauptet nicht mehr zu senden, sondern weist auf „Schreib @X: …" hin. Self-Mention ausgenommen; weicher Wortlaut hält Referenz-Fragen auf Kurs. `SEND_TRIGGERS` zu Modul-Konstante extrahiert. Verifiziert: verblos → Hint; Referenz-Frage → normal; mit Verb → send_to_twin via Approval. Bonus: alle 16 send_to_twin-Audits tragen ein Verb → 0 verblose Sends (das eine gemeldete „verbloses Send" war ein Reporting-Artefakt — echter Text trug „Schreib @florian:").
 
-### @-Mention soll autonom senden (Weg 2: Modell-Detektor-Pass) — SS1+SS2 ✅ live im Schatten auf Prod; SS3-Rest OFFEN
+### ✅ @-Mention soll autonom senden (Weg 2: Modell-Detektor-Pass) — SCHARF + verifiziert auf Prod (Tag 50)
 
-**Status:** SS1+SS2 ✅ **live im Schatten auf Prod** (Nebeneffekt des `a03984e`-web_fetch-Deploys, Tag 49 — `MENTION_AUTOSEND_ENABLED` nicht gesetzt → keine Verhaltensänderung) · **SS3-Schritt 1 (Prod-Schatten-Deploy) faktisch erledigt** · **OFFEN:** Prod-Schatten-Klassifikationen beobachten, dann scharfschalten · **Größe Rest:** S
+**Status:** ✅ **scharfgeschaltet** (`MENTION_AUTOSEND_ENABLED=true`, Tag 50) + Prod-verifiziert · **War:** S–M
 
-**Gebaut (SS1+SS2):** `classifyMentionIntent` (SEND/CHAT via `generateObject` auf `deps.classifierModel`, fail-safe→CHAT, 5s) + Verdrahtung in `chat()` im **Schatten** hinter ENV-Gate `MENTION_AUTOSEND_ENABLED`. Gate: respond_to_chat + @-Target + kein Sende-Verb + nicht Self. Ohne ENV: kein Verhaltens-Change (Weg-3-Hint feuert weiter). Verifiziert: 13/13 (haiku), alle deferred→CHAT, kein falsches SEND; Approval-Gate code-seitig als unumgehbar bewiesen (Sicherheits-Audit, STAND Tag 49). 🔴 Befund: Klassifikator nutzt NIE Codex — eigene Tier (anthropic→haiku, openai→**gpt-4o-mini**).
+**Gebaut (SS1+SS2, Tag 49):** `classifyMentionIntent` (SEND/CHAT via `generateObject` auf `deps.classifierModel`, fail-safe→CHAT, 5s) + Verdrahtung in `chat()` hinter ENV-Gate. Gate: respond_to_chat + @-Target + kein Sende-Verb + nicht Self. **Scharfgeschaltet (SS3, Tag 50):** ENV via aktive Compose (kein Symlink) + VPS-`.env`, `config|grep`+`printenv`-verifiziert (Drift-Falle abgefangen). Parse `=== "true"`, pro Request gelesen → `--force-recreate` genügt.
 
-**🔴 SS3 (eigene Session, vorsichtigster Schritt):** (1) ✅ **erledigt** — SS2 ist im **Schatten auf Prod** (mit `a03984e` mitgezogen). Verbleibend: echte Prod-Schatten-Klassifikationen beobachten, v.a. die **Classifier-Tier bei @markus** (`gpt-4o-mini` falls prod-openai — der einzige ungetestete Pfad; via `[mention-intent] gate=shadow`-Logs). (2) **Erst nach** Beobachtung `MENTION_AUTOSEND_ENABLED=true` scharfschalten. ggf. Timeout/Prompt nachschärfen.
+🔴 **Befund-Korrektur:** Klassifikator-Tier bei @markus ist **anthropic/haiku** (Twin-`provider=anthropic`+`sk-ant-`-Key), **nicht** gpt-4o-mini — `auth_mode=oauth` betrifft nur den Chat-Pfad, der Klassifikator zieht den Twin-provider. Der „ungetestete gpt-4o-mini-Pfad" existiert bei @markus nicht; es ist der lokal 13/13-bestandene haiku-Tier. Live-Prod-Call: „@florian kannst du Freitag?" → SEND korrekt.
+
+🔴 **Sicherheit:** Scharf ≠ Auto-Versand — `send_to_twin` bleibt `always_pending` (Mandate, DB-bestätigt) → Owner-Approval; `ownerBypass` schließt es aus. Falsches SEND = überflüssiger Approval-Klick. **Browser-verifiziert:** „kannst du Freitag?"→SEND→Approval-Prompt; „macht sowas auch"→CHAT→kein Send + Verb-Hint. Bogen (lokal→Schatten→scharf) abgeschlossen.
+
+**Optionales Folge-Item:** Schatten-/Armed-Klassifikationen als **Audit persistieren** (statt nur `console.log [mention-intent]`) — heute nicht nötig (Flag ist scharf), aber nützlich für künftige Klassifikator-Beobachtung/-Tuning, **da `--force-recreate` die Container-Logs wischt** (Tag-50-Lehre). Größe S.
 
 ### ✅ Repo- vs. Prod-Compose-Drift konsolidieren (Infra-Hygiene) — DONE (717721c, Tag 48)
 
@@ -3425,7 +3429,7 @@ Code war komplett. Ablauf live bestätigt auf Prod: Owner approved → @markus f
 
 ### Bestehende offene Items (Erinnerung)
 
-Beidseitiger A2A-Abbruch (Bridge-Signal), @-Mention-Autosend Scharfschaltung (Weg 2 — SS1+SS2 live im Schatten, nur noch beobachten+armen), Multimodal-Folge-Bögen (PDF/Multi-Image/STT/Provider/A2A-Leitplanke), Prod-Compose-Symlink-Frage, Telegram Rich-Messages/@-Mention, Twin-Löschung verwaister Bridge-Handles, OAuth-Backlog. (Multimodal Bildinput + web_fetch + Compose-Drift + Mention-ohne-Verb + Ungelesen-Indikator + Zeitgefühl = ✅ erledigt/live, Tag 47–50.)
+Beidseitiger A2A-Abbruch (Bridge-Signal), Mention-Klassifikationen als Audit persistieren (optional), Multimodal-Folge-Bögen (PDF/Multi-Image/STT/Provider/A2A-Leitplanke), Prod-Compose-Symlink-Frage, Telegram Rich-Messages/@-Mention, Twin-Löschung verwaister Bridge-Handles, OAuth-Backlog. (Mention-Autosend scharf + Multimodal Bildinput + web_fetch + Compose-Drift + Mention-ohne-Verb + Ungelesen-Indikator + Zeitgefühl = ✅ erledigt/live, Tag 47–50.)
 
 ---
 
