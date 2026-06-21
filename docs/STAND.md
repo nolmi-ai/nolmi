@@ -322,7 +322,7 @@ Der getaktete Production-Deploy ist durch: **`86ed1e4` → `6e32813`** auf `srv1
 
 ## Tag 50 (21. Juni 2026) — 📊 Mention-Klassifikations-Audit live auf Prod (Observability)
 
-**Tag 50 (Forts.) — der Mention-Klassifikator persistiert seine Urteile jetzt als Audit.** Commit **`46677c3`** (`recordMentionIntentAudit` nach `recordWebFetchAudit`-Vorbild: `capability=mention-intent`, `input{targetHandle, text:slice(280), textLength, gate, tier}`, `output{intent, reason}`, **fire-and-forget `void` + try/catch → bricht den Chat nie**). Keine Migration (capability ist freier TEXT). **Runtime-only Deploy.** Rollback-Tag `nolmi-runtime:rollback-tag50-premention-audit`.
+**Tag 50 (Forts.) — der Mention-Klassifikator persistiert seine Urteile jetzt als Audit.** Commit **`46677c3`** (`recordMentionIntentAudit` nach `recordWebFetchAudit`-Vorbild: `capability=mention-intent`, `input{targetHandle, text:slice(280), textLength, gate, tier}`, `output{intent, reason}`, **fire-and-forget `void` + try/catch → bricht den Chat nie**). Keine Migration (capability ist freier TEXT). **Runtime-only Deploy.** Rollback-Tag `nolmi-runtime:rollback-pre-mentionaudit`.
 
 🔴 **ERSTER Deploy nach dem Symlink-Umbau — die neue Disziplin angewandt:** `git pull` (Compose self-synct via Symlink) → `docker compose config` als **Gate VOR `up -d`** → runtime-build → `--force-recreate`. **Kein Drift-Vorfall** → die Symlink-Hygiene (`b164098`) bewährt sich beim ersten Folge-Deploy.
 
