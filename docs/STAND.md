@@ -320,6 +320,18 @@ Der getaktete Production-Deploy ist durch: **`86ed1e4` → `6e32813`** auf `srv1
 - **Befund beim Build (jetzt dokumentiert):** der Prod-Stack nutzt `image:latest` ohne `build:` → `docker compose up -d` baut nichts; explizites `docker build` aus dem Repo-Root gehört davor. **DEPLOYMENT.md §3 entsprechend korrigiert** (inkl. Literal-Build-Arg-Warnung, da der #126-Guard ein leeres `${DOMAIN}` nicht abfängt).
 - **Smoke deckte eine UX-Lücke auf:** ein im Wizard angelegter Twin ist über die UI **nicht löschbar** (musste per DB-Skript raus) → neues BACKLOG-Item.
 
+## Tag 50 (21. Juni 2026) — 🖼️📄🚀 Multi-Image + PDF LIVE auf Prod (Codex-PDF + Multi-Image verifiziert)
+
+**Tag 50 (Forts.) — Multi-Image + PDF/Dokument live auf srv1712371.** Gemeinsamer **web+runtime**-Deploy. Live-Commits: **`36ff022`** (Multi-Image), **`a310c3d`** (PDF Backend, beide Pfade), **`e76ce77`** (PDF Frontend/Datei-Chip). Rollback-Tags `nolmi-{runtime,web}:rollback-pre-pdf`.
+
+🔴 **Prod-Verifikation (echt, Browser):**
+1. **ERSTER Codex-Live-PDF:** @markus über **gpt-5.5/Codex** liest ein hochgeladenes PDF („6 Effective Prompting Techniques") + verarbeitet es **substanziell** (baut ein eigenes HARWAY-Framework daraus ab) → der **Produktiv-Adapter** verträgt echte PDFs (Spike-Format → Live-Pfad bestätigt).
+2. **Multi-Image live:** @markus referenziert **5 Bilder einzeln** (Bild 1–5) + ordnet Marketing-Assets zu → mehrere Bilder **distinkt** über Codex auf Prod. Beide (PDF + Multi-Image) **gleichzeitig im selben Chat**.
+
+**Deploy-Mechanik:** 2. Deploy nach dem Symlink-Umbau, `docker compose config`-Gate angewandt; web+runtime mit `--build-arg NEXT_PUBLIC_RUNTIME_URL` + Bundle-Grep (korrekt `runtime.nolmi.ai`, kein localhost). **Kein Drift-Vorfall** — Symlink-Disziplin bewährt sich erneut.
+
+**🎯 Multimodal-Komplex vollständig live:** Bild, Multi-Image, PDF/Dokument, Composer-Menü, Drag&Drop/Paste — über **beide** Modell-Pfade (Anthropic nativ + Codex). Verbleibend (Backlog): STT/Sprache, Provider-Erweiterung, A2A-Multimodal-Leitplanke, weitere Doc-Typen.
+
 ## Tag 50 (21. Juni 2026) — 📄 PDF/Dokument-Support lokal komplett (Backend + UI, NICHT deployt)
 
 **Tag 50 (Forts.) — PDF an den Twin.** Drei Commits: **`5fc3251`** (Spike: Codex/gpt-5.5 akzeptiert `input_file` — **Gate GRÜN**, Token `NOLMI-PDF-TEST-7392` auf Prod gelesen), **`a310c3d`** (SS1+SS2 Backend: Schema `type`-Enum +`"document"`, `buildAttachmentPart`-Branch image/document, Codex `input_file`, Upload-Allowlist +`application/pdf` +`%PDF-`-Magic-Bytes, `ATTACHMENT_MAX_BYTES` 10→20 MB), **`e76ce77`** (SS3 Frontend: Datei-Chip-Render an 3 Stellen, `attType` statt hartkodiertem `type:"image"`, GET-Download-Link, Persistenz-Brücke für Reload).

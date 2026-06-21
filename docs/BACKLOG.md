@@ -3408,10 +3408,10 @@ Code war komplett. Ablauf live bestätigt auf Prod: Owner approved → @markus f
 
 ### Multimodal/Provider — Folge-Bögen
 
-- **(a) SS4b-Rest — UI-Verfeinerung:** ✅ Composer-Menü (`27f24b8`) + Drag&Drop/Paste (`2235b06`) live; ✅ **Multi-Image lokal fertig** (`36ff022`, Frontend Single→Array, browser-verifiziert — Serie einzeln referenziert; **Deploy WEB-ONLY offen**). **OFFEN:** „Dokument"-Eintrag (PDF, braucht Modell-Pfad-Spike wie Bilder). Größe S.
+- **(a) SS4b-Rest — UI-Verfeinerung:** ✅ **LIVE** — Composer-Menü (`27f24b8`) + Drag&Drop/Paste (`2235b06`) + **Multi-Image** (`36ff022`, Tag 50 deployt, Prod-verifiziert: @markus referenziert 5 Bilder einzeln über Codex).
 - **(b) Sprachnachrichten an den Twin:** eigener **STT-Pipeline-Bogen** (Audio → Whisper → Text → Modell), **NICHT** Vision — distinkter Pfad. Größe M–L.
 - **(c) Provider-Erweiterung:** Ollama Cloud + OpenRouter (Connector mit Modell-Wechsel, Open-Source-LLMs). Größe M.
-- **(d) PDF/Dokument-Support:** ✅ **lokal komplett** (Spike `5fc3251` GRÜN → Backend `a310c3d` beide Pfade [Anthropic document-Block nativ + Codex `input_file`] → Frontend `e76ce77` Datei-Chip-Render). Additiv aufs Bild-Muster (dieselbe Naht, keine Dep, keine Migration). Browser-verifiziert (Anthropic liest PDF, Chip+Download, Misch Bild+PDF). **Deploy web+runtime offen** (🔴 Codex-Live-PDF-Smoke dabei — Format spike-bewiesen, Produktiv-Pfad erstmals). **OFFEN:** weitere Doc-Typen (docx/txt) später.
+- **(d) PDF/Dokument-Support:** ✅ **LIVE** (Tag 50). Spike `5fc3251` → Backend `a310c3d` (Anthropic document-Block nativ + Codex `input_file`) → Frontend `e76ce77` (Datei-Chip). Additiv aufs Bild-Muster (dieselbe Naht, keine Dep, keine Migration). **Prod-verifiziert:** erster Codex-Live-PDF (@markus/gpt-5.5 liest „6 Effective Prompting Techniques" + verarbeitet substanziell); Chip+Download; Misch Bild+PDF gleichzeitig. **OFFEN:** weitere Doc-Typen (docx/txt) später.
 - **(e) 🔴 Leitplanke A2A-Multimodal:** Falls Twins sich je Bilder schicken sollen — die heutige **strukturelle** Owner-only-Garantie (Bridge ohne attachments-Feld) **entfällt** dann. Bräuchte ein **explizites Trust-Gate** + Klärung, in **WESSEN** Store ein A2A-`ref` aufgelöst wird (Sender vs. Empfänger, twinId-Isolation). Nicht nebenbei einführen.
 
 ### ✅ Infra-Hygiene: Prod-Compose-Drift gelöst — Symlink wiederhergestellt (Tag 50)
@@ -3429,7 +3429,7 @@ Code war komplett. Ablauf live bestätigt auf Prod: Owner approved → @markus f
 
 ### Bestehende offene Items (Erinnerung)
 
-Beidseitiger A2A-Abbruch (Bridge-Signal), Multimodal-Folgen (STT/Sprache, Provider-Erweiterung, A2A-Multimodal-Leitplanke), Multimodal-Deploy (PDF web+runtime offen), Telegram Rich-Messages/@-Mention, Twin-Löschung verwaister Bridge-Handles, OAuth-Backlog. (PDF + Multi-Image lokal komplett + Mention-Klassifikations-Audit + Prod-Compose-Symlink + Mention-Autosend scharf + Multimodal Bildinput + web_fetch + Compose-Drift + Mention-ohne-Verb + Ungelesen-Indikator + Zeitgefühl = ✅ erledigt/live, Tag 47–50.)
+Beidseitiger A2A-Abbruch (Bridge-Signal), Multimodal-Folgen (STT/Sprache, Provider-Erweiterung Ollama/OpenRouter, A2A-Multimodal-Leitplanke, weitere Doc-Typen), Telegram Rich-Messages/@-Mention, Twin-Löschung verwaister Bridge-Handles, OAuth-Backlog. (Multimodal-Komplex KOMPLETT LIVE [Bild + Multi-Image + PDF + Composer-Menü + Drag&Drop/Paste, beide Pfade] + Mention-Klassifikations-Audit + Prod-Compose-Symlink + Mention-Autosend scharf + web_fetch + Compose-Drift + Mention-ohne-Verb + Ungelesen-Indikator + Zeitgefühl = ✅ erledigt/live, Tag 47–50.)
 
 ---
 
