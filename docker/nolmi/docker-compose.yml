@@ -69,6 +69,10 @@ services:
       - RUNTIME_HOST=0.0.0.0
       - RUNTIME_PORT=4000
       - TWIN_DATABASE_PATH=/data/twin.db
+      # Multimodal-Store (Bild-Anhänge). Wert MUSS in der VPS-.env stehen
+      # (ATTACHMENT_STORE_DIR=/data/attachments) — sonst Default im Container-FS
+      # → weg beim Recreate. ${VAR:-} = Drift-sichere Durchreichung.
+      - ATTACHMENT_STORE_DIR=${ATTACHMENT_STORE_DIR:-}
       - NOLMI_ENCRYPTION_KEY=${NOLMI_ENCRYPTION_KEY}
       - NOLMI_SESSION_SECRET=${NOLMI_SESSION_SECRET}
       - SESSION_COOKIE_DOMAIN=${SESSION_COOKIE_DOMAIN:-}

@@ -8,6 +8,7 @@ dist
 docker/traefik/htpasswd
 docker/traefik/letsencrypt/
 docker/traefik/acme*.json
+data/
 data/*.db
 data/*.db-journal
 apps/bridge/data/*.db
