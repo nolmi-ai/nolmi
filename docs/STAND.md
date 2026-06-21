@@ -320,6 +320,16 @@ Der getaktete Production-Deploy ist durch: **`86ed1e4` → `6e32813`** auf `srv1
 - **Befund beim Build (jetzt dokumentiert):** der Prod-Stack nutzt `image:latest` ohne `build:` → `docker compose up -d` baut nichts; explizites `docker build` aus dem Repo-Root gehört davor. **DEPLOYMENT.md §3 entsprechend korrigiert** (inkl. Literal-Build-Arg-Warnung, da der #126-Guard ein leeres `${DOMAIN}` nicht abfängt).
 - **Smoke deckte eine UX-Lücke auf:** ein im Wizard angelegter Twin ist über die UI **nicht löschbar** (musste per DB-Skript raus) → neues BACKLOG-Item.
 
+## Tag 50 (21. Juni 2026) — 📄 PDF/Dokument-Support lokal komplett (Backend + UI, NICHT deployt)
+
+**Tag 50 (Forts.) — PDF an den Twin.** Drei Commits: **`5fc3251`** (Spike: Codex/gpt-5.5 akzeptiert `input_file` — **Gate GRÜN**, Token `NOLMI-PDF-TEST-7392` auf Prod gelesen), **`a310c3d`** (SS1+SS2 Backend: Schema `type`-Enum +`"document"`, `buildAttachmentPart`-Branch image/document, Codex `input_file`, Upload-Allowlist +`application/pdf` +`%PDF-`-Magic-Bytes, `ATTACHMENT_MAX_BYTES` 10→20 MB), **`e76ce77`** (SS3 Frontend: Datei-Chip-Render an 3 Stellen, `attType` statt hartkodiertem `type:"image"`, GET-Download-Link, Persistenz-Brücke für Reload).
+
+🔴 **Verifikation (Browser, ECHT):** echtes PDF (Anthropic-Handout) hochgeladen → @markus **liest + fasst den Inhalt substanziell zusammen** → **Datei-Chip** (📄+Name) statt `<img>` → Download-Link öffnet das PDF → reload-fest. Anthropic-PDF lokal live (Token gelesen); image-Regression ok; **Mischfall Bild+PDF gleichzeitig** → beide korrekt unterschieden (Bild visuell beschrieben, PDF inhaltlich eingeordnet). Codex-PDF-Format spike-bewiesen (Live-Smoke beim Deploy).
+
+**Architektur:** additiv aufs Bild-Muster — **dieselbe `loadAttachmentBytes`-Naht, keine neue Dep, keine Migration**. Anthropic document-Block nativ, Codex `input_file`. Der einzige NEUE Frontend-Teil war der **Nicht-Bild-Render** (Datei-Chip).
+
+🔴 **OFFEN — Deploy = web + runtime** (Backend `a310c3d` + Frontend `e76ce77`). Symlink-Disziplin (`docker compose config`-Gate vor `up`); web-Build **mit `--build-arg NEXT_PUBLIC_RUNTIME_URL`** + Bundle-Grep, runtime-Build, `--force-recreate` beide, Rollback-Tags vorher. 🔴 **Codex-Live-PDF-Smoke beim Deploy** — erster echter PDF über gpt-5.5/Produktiv-Adapter (Format spike-bewiesen, Produktiv-Pfad erstmals live).
+
 ## Tag 50 (21. Juni 2026) — 🖼️🖼️ Multi-Image lokal fertig (Frontend Single→Array, NICHT deployt)
 
 **Tag 50 (Forts.) — mehrere Bilder pro Nachricht.** Commit **`36ff022`** — **reiner Frontend-Umbau** Single→Array: `pendingAttachments[]`/`optimisticAttachments[]`, `<input multiple>`, `handleFiles` iteriert **alle** Files (Picker/Drop/Paste) mit 1×N-Upload, Composer-Vorschau-Strip (jedes Thumbnail eigenes ×, `removeOnePending`), `MAX_IMAGES=6` Soft-Cap + Hinweis, per-File-Teilfehler-Banner. 🔴 **Backend UNVERÄNDERT** — `toModelMessages`/Codex/`runOwnerDirect`/GET + `Bubble`/`buildChatBlocks` waren schon Array-fähig (SS3a/SS3b-Erbe); keine Migration.

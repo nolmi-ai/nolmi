@@ -3411,7 +3411,7 @@ Code war komplett. Ablauf live bestätigt auf Prod: Owner approved → @markus f
 - **(a) SS4b-Rest — UI-Verfeinerung:** ✅ Composer-Menü (`27f24b8`) + Drag&Drop/Paste (`2235b06`) live; ✅ **Multi-Image lokal fertig** (`36ff022`, Frontend Single→Array, browser-verifiziert — Serie einzeln referenziert; **Deploy WEB-ONLY offen**). **OFFEN:** „Dokument"-Eintrag (PDF, braucht Modell-Pfad-Spike wie Bilder). Größe S.
 - **(b) Sprachnachrichten an den Twin:** eigener **STT-Pipeline-Bogen** (Audio → Whisper → Text → Modell), **NICHT** Vision — distinkter Pfad. Größe M–L.
 - **(c) Provider-Erweiterung:** Ollama Cloud + OpenRouter (Connector mit Modell-Wechsel, Open-Source-LLMs). Größe M.
-- **(d) PDF/Dokument-Support:** `AttachmentSchema.type`-Enum additiv erweitern (`image` → `+pdf`/`+doc`); Lade-/Weitergabe-Pfad analog Bild. Größe M.
+- **(d) PDF/Dokument-Support:** ✅ **lokal komplett** (Spike `5fc3251` GRÜN → Backend `a310c3d` beide Pfade [Anthropic document-Block nativ + Codex `input_file`] → Frontend `e76ce77` Datei-Chip-Render). Additiv aufs Bild-Muster (dieselbe Naht, keine Dep, keine Migration). Browser-verifiziert (Anthropic liest PDF, Chip+Download, Misch Bild+PDF). **Deploy web+runtime offen** (🔴 Codex-Live-PDF-Smoke dabei — Format spike-bewiesen, Produktiv-Pfad erstmals). **OFFEN:** weitere Doc-Typen (docx/txt) später.
 - **(e) 🔴 Leitplanke A2A-Multimodal:** Falls Twins sich je Bilder schicken sollen — die heutige **strukturelle** Owner-only-Garantie (Bridge ohne attachments-Feld) **entfällt** dann. Bräuchte ein **explizites Trust-Gate** + Klärung, in **WESSEN** Store ein A2A-`ref` aufgelöst wird (Sender vs. Empfänger, twinId-Isolation). Nicht nebenbei einführen.
 
 ### ✅ Infra-Hygiene: Prod-Compose-Drift gelöst — Symlink wiederhergestellt (Tag 50)
@@ -3429,7 +3429,7 @@ Code war komplett. Ablauf live bestätigt auf Prod: Owner approved → @markus f
 
 ### Bestehende offene Items (Erinnerung)
 
-Beidseitiger A2A-Abbruch (Bridge-Signal), Multimodal-Folge-Bögen (PDF/Multi-Image/STT/Provider/A2A-Leitplanke), Telegram Rich-Messages/@-Mention, Twin-Löschung verwaister Bridge-Handles, OAuth-Backlog. (Mention-Klassifikations-Audit + Prod-Compose-Symlink + Mention-Autosend scharf + Multimodal Bildinput + web_fetch + Compose-Drift + Mention-ohne-Verb + Ungelesen-Indikator + Zeitgefühl = ✅ erledigt/live, Tag 47–50.)
+Beidseitiger A2A-Abbruch (Bridge-Signal), Multimodal-Folgen (STT/Sprache, Provider-Erweiterung, A2A-Multimodal-Leitplanke), Multimodal-Deploy (PDF web+runtime offen), Telegram Rich-Messages/@-Mention, Twin-Löschung verwaister Bridge-Handles, OAuth-Backlog. (PDF + Multi-Image lokal komplett + Mention-Klassifikations-Audit + Prod-Compose-Symlink + Mention-Autosend scharf + Multimodal Bildinput + web_fetch + Compose-Drift + Mention-ohne-Verb + Ungelesen-Indikator + Zeitgefühl = ✅ erledigt/live, Tag 47–50.)
 
 ---
 
