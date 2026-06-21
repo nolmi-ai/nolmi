@@ -1875,6 +1875,8 @@ function DirectChat({
     useState<PendingAttachment | null>(null);
   const [uploading, setUploading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  // SS4b-1: ToolPicker ist jetzt controlled — geöffnet via ComposerMenu ("+").
+  const [toolPickerOpen, setToolPickerOpen] = useState(false);
 
   // Entfernt das pending Bild + gibt den objectURL frei (verhindert Leak).
   const clearPendingAttachment = useCallback(() => {
@@ -2560,19 +2562,22 @@ function DirectChat({
             rows={2}
           />
         </div>
-        {/* SS4a: Bild anhängen. Öffnet den versteckten File-Dialog. */}
-        <button
-          type="button"
-          onClick={() => fileInputRef.current?.click()}
+        {/* SS4b-1: ein "+" vereint Bild + Tool-Aufruf (anchored Menü nach oben).
+            Die Aktionen sind unverändert — Bild öffnet den File-Dialog, Tool
+            öffnet das (controlled) ToolPicker-Modal. */}
+        <ComposerMenu
           disabled={busy || uploading}
-          title="Bild anhängen (png/jpeg/webp/gif)"
-          className="px-3 py-2 border border-border text-muted text-sm rounded disabled:opacity-30 disabled:cursor-not-allowed hover:border-accent hover:text-accent transition-colors"
-        >
-          {uploading ? "…" : "Bild"}
-        </button>
-        {/* 3.2.H: Tool-Picker zwischen Input und Send. Klick öffnet Modal mit
-            aktiven MCP-Tools, Submit zwingt den Tool-Call. */}
-        <ToolPicker handle={handle} disabled={busy} onSend={sendToolFromPicker} />
+          uploading={uploading}
+          onPickImage={() => fileInputRef.current?.click()}
+          onPickTool={() => setToolPickerOpen(true)}
+        />
+        {/* 3.2.H/SS4b-1: ToolPicker-Modal, controlled über ComposerMenu. */}
+        <ToolPicker
+          handle={handle}
+          open={toolPickerOpen}
+          onOpenChange={setToolPickerOpen}
+          onSend={sendToolFromPicker}
+        />
         <button
           onClick={send}
           disabled={busy || uploading || (!input.trim() && !pendingAttachment)}
@@ -2985,6 +2990,90 @@ function NewConversationModal({
           </button>
         </div>
       </div>
+    </div>
+  );
+}
+
+// ─── Composer-Menü (SS4b-1) ─────────────────────────────────────────────────
+//
+// Ein "+" im Composer öffnet ein anchored Popover (nach oben, wie das Mention-
+// Autocomplete) mit "Bild" + "Tool aufrufen". Reiner Auswahl-Layer — die
+// Aktionen (File-Dialog / ToolPicker-Modal) liegen im Parent und sind
+// unverändert. Outside-Click + ESC schließen (ProfileMenu-Muster).
+function ComposerMenu({
+  disabled,
+  uploading,
+  onPickImage,
+  onPickTool,
+}: {
+  disabled: boolean;
+  uploading: boolean;
+  onPickImage: () => void;
+  onPickTool: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const onMouseDown = (e: MouseEvent) => {
+      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
+        setOpen(false);
+      }
+    };
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setOpen(false);
+    };
+    document.addEventListener("mousedown", onMouseDown);
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.removeEventListener("mousedown", onMouseDown);
+      document.removeEventListener("keydown", onKeyDown);
+    };
+  }, [open]);
+
+  function choose(action: () => void) {
+    setOpen(false);
+    action();
+  }
+
+  return (
+    <div ref={containerRef} className="relative h-full">
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        disabled={disabled}
+        aria-haspopup="menu"
+        aria-expanded={open}
+        title="Anhang oder Tool hinzufügen"
+        aria-label="Anhang oder Tool hinzufügen"
+        className="h-full px-3 border border-border rounded text-muted hover:text-accent hover:border-accent disabled:opacity-30 disabled:cursor-not-allowed transition-colors flex items-center justify-center"
+      >
+        <span className="text-xl leading-none">{uploading ? "…" : "+"}</span>
+      </button>
+      {open && (
+        <div
+          role="menu"
+          className="absolute bottom-full mb-1 right-0 w-44 bg-surface border border-border rounded shadow-lg z-30 py-1"
+        >
+          <button
+            type="button"
+            role="menuitem"
+            onClick={() => choose(onPickImage)}
+            className="block w-full text-left px-3 py-1.5 text-sm text-text hover:bg-bg transition-colors"
+          >
+            Bild
+          </button>
+          <button
+            type="button"
+            role="menuitem"
+            onClick={() => choose(onPickTool)}
+            className="block w-full text-left px-3 py-1.5 text-sm text-text hover:bg-bg transition-colors"
+          >
+            Tool aufrufen
+          </button>
+        </div>
+      )}
     </div>
   );
 }

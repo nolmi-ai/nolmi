@@ -24,12 +24,14 @@ const RUNTIME_URL = process.env.NEXT_PUBLIC_RUNTIME_URL ?? "http://localhost:400
 
 interface ToolPickerProps {
   handle: string;
-  disabled: boolean;
+  /** SS4b-1: controlled — der eigene +-Trigger entfällt; ComposerMenu öffnet das
+   *  Modal über `open`/`onOpenChange`. Modal-Stages (Stage1/Stage2) unverändert. */
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
   onSend: (toolName: string, args: Record<string, unknown>) => void | Promise<void>;
 }
 
-export function ToolPicker({ handle, disabled, onSend }: ToolPickerProps) {
-  const [open, setOpen] = useState(false);
+export function ToolPicker({ handle, open, onOpenChange, onSend }: ToolPickerProps) {
   const [tools, setTools] = useState<TwinToolListItem[] | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -61,7 +63,7 @@ export function ToolPicker({ handle, disabled, onSend }: ToolPickerProps) {
   }, [open, tools, loading, loadTools]);
 
   function close() {
-    setOpen(false);
+    onOpenChange(false);
     setSelected(null);
   }
 
@@ -73,20 +75,11 @@ export function ToolPicker({ handle, disabled, onSend }: ToolPickerProps) {
     await onSend(selected.toolName, args);
   }
 
+  // SS4b-1: kein eigener Trigger mehr — nur das Modal (controlled via `open`).
+  if (!open) return null;
+
   return (
     <>
-      <button
-        type="button"
-        onClick={() => setOpen(true)}
-        disabled={disabled}
-        title="Tool aufrufen"
-        aria-label="Tool aufrufen"
-        className="h-full px-3 border border-border rounded text-muted hover:text-accent hover:border-accent disabled:opacity-30 disabled:cursor-not-allowed transition-colors flex items-center justify-center"
-      >
-        {/* Plain "+" als Icon; bewusst kein SVG-Icon-Lib für nur ein Glyph. */}
-        <span className="text-xl leading-none">+</span>
-      </button>
-
       {open && (
         <div
           // Backdrop schließt das Modal — Standard-Konvention.
