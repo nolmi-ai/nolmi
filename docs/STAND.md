@@ -320,6 +320,22 @@ Der getaktete Production-Deploy ist durch: **`86ed1e4` → `6e32813`** auf `srv1
 - **Befund beim Build (jetzt dokumentiert):** der Prod-Stack nutzt `image:latest` ohne `build:` → `docker compose up -d` baut nichts; explizites `docker build` aus dem Repo-Root gehört davor. **DEPLOYMENT.md §3 entsprechend korrigiert** (inkl. Literal-Build-Arg-Warnung, da der #126-Guard ein leeres `${DOMAIN}` nicht abfängt).
 - **Smoke deckte eine UX-Lücke auf:** ein im Wizard angelegter Twin ist über die UI **nicht löschbar** (musste per DB-Skript raus) → neues BACKLOG-Item.
 
+## Tag 50 (21. Juni 2026) — 🎙️ STT-Bogen begonnen: Whisper-Infra-Spike auf Prod-VPS GRÜN (self-hosted machbar)
+
+**Tag 50 (Forts.) — Sprachnachrichten-Bogen gestartet, Machbarkeit auf dem VPS bewiesen.** Self-hosted Whisper, kein Audio extern. Infra-Spike auf srv1712371 GRÜN — noch KEIN Integrations-Code.
+
+🔴 **Setup-Befund (entscheidet die Integration):** Whisper als **OpenAI-kompatibler Sidecar** — Image `fedirz/faster-whisper-server:latest-cpu`, API `/v1/audio/transcriptions`. **Modell `small`** (base getestet → zu schwach: „Wester-Mobil"/„Lontag"/„Ferture"; small korrigiert das meiste). 🔴 **`initial_prompt` mit Domänen-Vokabular** (Nolmi, Whisper-Modell, Feature, Twin, Telegram, Deploy, Plattform, Spracherkennung) macht das Transkript **wortgenau** (fixt englische Fachbegriffe/Code-Switching) UND **senkt die Latenz** (16.8s→8.2s, Decoding konvergiert schneller). `language=de` explizit.
+
+**Messwerte** (espeak-Testaudio ~25 s, 2 vCPU): base 6.2s aber fehlerhaft; small ohne prompt 16.8s / 1.33 GB RAM, Fehler bei Fachbegriffen; **small+prompt 8.2s, wortgenau**. RAM unkritisch (6.2 GB available). **VPS-Gate grün:** RAM 7.8 GB (6.2 GB avail), 2 vCPU EPYC, **keine GPU → CPU-only**, 22 GB Platte.
+
+🔴 **Vorbehalt:** Test war **synthetisch** (espeak). Echte Voice (menschliche Stimme / Telegram-Opus / Dialekt) beim ersten realen Voice-Flow verifizieren — `initial_prompt` sichert die Fachbegriffe auch dort.
+
+🔴 **Nebenbefund (Sicherheit, aufgelöst):** Zombie-Container `competent_ramanujan` (8 Tage, 100% CPU/ein Kern) war ein **hängengebliebener Bundle-Grep vom 13.6.** mit falschem Scope (grep über `/` statt `.next/`), eigenes nolmi-web-Image, **keine Host-Mounts/Ports → harmlos**, entfernt (`docker rm -f`). **Lehre:** Bundle-Grep IMMER `docker run --rm` + Pfad `.next/`, nie über `/`.
+
+**Architektur (fundamentale Andersartigkeit):** Audio geht **NICHT nativ** ans Modell (anders als Bild/PDF) → **Transkriptions-Schritt DAVOR** (Audio → Whisper → Text → Modell). Ein `transcribeAudio(bytes)`-Helfer (HTTP an Sidecar, mit `initial_prompt`) von **beiden** Eingängen genutzt. Telegram: neuer `bot.on("voice")` (heute nur text, `telegraf-setup.ts:94`; voice = OGG/Opus via `getFileLink`). Web: `POST /twins/:handle/transcribe`. Audio wird **NICHT** Modell-Attachment — reine Vorverarbeitung.
+
+🔴 **OFFEN (Integration):** Sidecar ins Compose/Override (model-cache-Volume, `nolmi-internal`), `transcribeAudio`-Helfer, Telegram-`voice`-Handler, Web-`/transcribe`-Endpoint + UI.
+
 ## Tag 50 (21. Juni 2026) — 🖼️📄🚀 Multi-Image + PDF LIVE auf Prod (Codex-PDF + Multi-Image verifiziert)
 
 **Tag 50 (Forts.) — Multi-Image + PDF/Dokument live auf srv1712371.** Gemeinsamer **web+runtime**-Deploy. Live-Commits: **`36ff022`** (Multi-Image), **`a310c3d`** (PDF Backend, beide Pfade), **`e76ce77`** (PDF Frontend/Datei-Chip). Rollback-Tags `nolmi-{runtime,web}:rollback-pre-pdf`.
