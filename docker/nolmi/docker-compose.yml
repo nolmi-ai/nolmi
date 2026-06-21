@@ -80,6 +80,9 @@ services:
       # Interner Container-Hop zur Bridge — NICHT bridge.nolmi.ai (S4:
       # Hairpin-NAT-Vermeidung, Calls bleiben im nolmi-internal-Netz).
       - NOLMI_DEFAULT_BRIDGE_URL=http://nolmi-bridge:5100
+      # STT: interner Hop zum Whisper-Sidecar (nolmi-internal, kein externer Port).
+      # Default greift; per VPS-.env überschreibbar (oder leeren, um STT abzuschalten).
+      - WHISPER_URL=${WHISPER_URL:-http://nolmi-whisper:8000}
       - BRIDGE_REGISTER_TOKEN=${BRIDGE_REGISTER_TOKEN}
       - ACTIVE_PROVIDER=${ACTIVE_PROVIDER:-anthropic}
       - TELEGRAM_USE_POLLING=${TELEGRAM_USE_POLLING:-false}
@@ -139,6 +142,30 @@ services:
       - "traefik.http.routers.nolmi-bridge.tls.certresolver=${ACME_RESOLVER}"
       - "traefik.http.services.nolmi-bridge.loadbalancer.server.port=5100"
 
+  # ─── Whisper-STT-Sidecar (SS1) ──────────────────────────────────────────────
+  # Self-hosted Speech-to-Text (OpenAI-kompatible API /v1/audio/transcriptions).
+  # 🔴 INTERNAL-ONLY: nur am nolmi-internal-Netz, KEIN ports:, KEINE traefik-
+  # Labels — die runtime erreicht ihn über http://nolmi-whisper:8000 (WHISPER_URL).
+  # 🔴 KEIN depends_on von/auf runtime: STT ist lazy (nur bei Voice); ein down-
+  # Sidecar darf den Chat nicht blockieren (transcribeAudio fängt Fehler ab, SS2).
+  # `WHISPER__MODEL` (DOPPEL-Underscore = pydantic-nested-Settings des Images;
+  # verifiziert via Image-README, s. Commit-Notiz). `small` = faster-whisper-Alias
+  # → lädt Systran/faster-whisper-small. mem_limit/cpus: einzige schwere Last,
+  # darf den Stack (7.8 GB / 2 vCPU) nicht erdrücken. language/initial_prompt sind
+  # KEINE Container-ENV — die kommen per Request in SS2.
+  nolmi-whisper:
+    image: fedirz/faster-whisper-server:latest-cpu
+    container_name: nolmi-whisper
+    restart: unless-stopped
+    networks:
+      - nolmi-internal
+    volumes:
+      - nolmi-whisper-cache:/root/.cache/huggingface
+    environment:
+      - WHISPER__MODEL=${WHISPER_MODEL:-small}
+    mem_limit: 2500m
+    cpus: "1.5"
+
   nolmi-web:
     image: nolmi-web:latest
     container_name: nolmi-web
@@ -195,3 +222,7 @@ volumes:
     name: nolmi-runtime-data
   nolmi-bridge-data:
     name: nolmi-bridge-data
+  # Whisper-Modell-Cache (HF). Modell ist regenerierbar (re-download) → named
+  # Volume reicht; überlebt Recreate, kein VPS-Pfad → symlink-sauber in der Base.
+  nolmi-whisper-cache:
+    name: nolmi-whisper-cache
