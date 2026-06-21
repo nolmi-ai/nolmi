@@ -46,6 +46,10 @@ const ACCEPTED_IMAGE_MIME = [
   "image/gif",
 ];
 
+// Multimodal Multi-Image: Obergrenze pro Nachricht (Soft-Guard, überzählige
+// werden ignoriert + Hinweis). Backend hat kein Limit; das ist reine UX/Hygiene.
+const MAX_IMAGES = 6;
+
 // Audit-Capabilities, die im Direct-Chat-Verlauf erscheinen sollen.
 // "respond_to_chat" = Standard-Pfad, "owner-direct" = Owner-Bypass — beide
 // haben dasselbe Audit-Input-/Output-Schema (lastMessage + reply).
@@ -1875,32 +1879,40 @@ function DirectChat({
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  // Multimodal SS4a: hochgeladenes, noch nicht gesendetes Bild. `previewUrl` ist
-  // ein objectURL der LOKAL gewählten Datei (kein Server-Download — SS4b).
-  const [pendingAttachment, setPendingAttachment] =
-    useState<PendingAttachment | null>(null);
-  // Bild der gerade in-flight gesendeten Message (für die optimistische Bubble).
-  const [optimisticAttachment, setOptimisticAttachment] =
-    useState<PendingAttachment | null>(null);
-  const [uploading, setUploading] = useState(false);
+  // Multimodal Multi-Image: hochgeladene, noch nicht gesendete Bilder (Array).
+  // `previewUrl` je Eintrag ist ein objectURL der LOKAL gewählten Datei.
+  const [pendingAttachments, setPendingAttachments] = useState<PendingAttachment[]>([]);
+  // Bilder der gerade in-flight gesendeten Message (für die optimistische Bubble).
+  const [optimisticAttachments, setOptimisticAttachments] = useState<PendingAttachment[]>([]);
+  // Zähler laufender Uploads (mehrere parallel möglich) → "n lädt…".
+  const [uploading, setUploading] = useState(0);
   const fileInputRef = useRef<HTMLInputElement>(null);
   // SS4b-1: ToolPicker ist jetzt controlled — geöffnet via ComposerMenu ("+").
   const [toolPickerOpen, setToolPickerOpen] = useState(false);
   // SS4b-2: visuelles Feedback während ein File über den Composer gezogen wird.
   const [draggedOver, setDraggedOver] = useState(false);
 
-  // Entfernt das pending Bild + gibt den objectURL frei (verhindert Leak).
-  const clearPendingAttachment = useCallback(() => {
-    setPendingAttachment((prev) => {
-      if (prev) URL.revokeObjectURL(prev.previewUrl);
-      return null;
+  // Entfernt EIN pending Bild (per id) + gibt nur dessen objectURL frei.
+  const removeOnePending = useCallback((id: string) => {
+    setPendingAttachments((prev) => {
+      const hit = prev.find((a) => a.id === id);
+      if (hit) URL.revokeObjectURL(hit.previewUrl);
+      return prev.filter((a) => a.id !== id);
     });
   }, []);
 
-  // Pending-Bild bei Konversations-Reset/Unmount wegräumen (objectURL freigeben).
+  // Alle pending Bilder wegräumen + alle objectURLs freigeben (Reset/Unmount).
+  const clearAllPending = useCallback(() => {
+    setPendingAttachments((prev) => {
+      for (const a of prev) URL.revokeObjectURL(a.previewUrl);
+      return [];
+    });
+  }, []);
+
+  // Pending-Bilder bei Konversations-Reset/Unmount wegräumen.
   useEffect(() => {
-    return () => clearPendingAttachment();
-  }, [resetSeq, clearPendingAttachment]);
+    return () => clearAllPending();
+  }, [resetSeq, clearAllPending]);
   // @-Mention-Autocomplete: aktives Mention-Token (Query + Start-Offset im
   // Input) oder null, plus markierter Listenindex für Tastatur-Navigation.
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -1968,7 +1980,9 @@ function DirectChat({
 
   const chatBlocks = useMemo<ChatBlock[]>(() => {
     // SS4a: auch ein Bild-only-Send (leerer Text) erzeugt eine Bubble.
-    if (optimisticUser === null && !optimisticAttachment) return serverBlocks;
+    if (optimisticUser === null && optimisticAttachments.length === 0) {
+      return serverBlocks;
+    }
     return [
       ...serverBlocks,
       {
@@ -1976,17 +1990,16 @@ function DirectChat({
         content: optimisticUser ?? "",
         conversationId: activeConvId,
         auditId: null,
-        attachments: optimisticAttachment
-          ? [
-              {
-                src: optimisticAttachment.previewUrl,
-                mimeType: optimisticAttachment.mimeType,
-              },
-            ]
-          : undefined,
+        attachments:
+          optimisticAttachments.length > 0
+            ? optimisticAttachments.map((a) => ({
+                src: a.previewUrl,
+                mimeType: a.mimeType,
+              }))
+            : undefined,
       },
     ];
-  }, [serverBlocks, optimisticUser, optimisticAttachment, activeConvId]);
+  }, [serverBlocks, optimisticUser, optimisticAttachments, activeConvId]);
 
   const { containerRef, bottomRef, onScroll } = useAutoScroll(
     chatBlocks.length,
@@ -2070,15 +2083,20 @@ function DirectChat({
   async function send() {
     // SS4a: sendbar bei Text ODER pending Bild (Bild-only erlaubt). Nicht
     // während eines laufenden Uploads.
-    if ((!input.trim() && !pendingAttachment) || busy || uploading) return;
+    if (
+      (!input.trim() && pendingAttachments.length === 0) ||
+      busy ||
+      uploading > 0
+    )
+      return;
     const userText = input;
-    const attachment = pendingAttachment ?? undefined;
+    const attachments = pendingAttachments;
     setInput("");
     setMention(null);
-    // Ownership des objectURL geht an die optimistische Bubble über → hier KEIN
-    // revoke (clearPendingAttachment würde revoken); sendChat räumt am Ende auf.
-    setPendingAttachment(null);
-    await sendChat(userText, undefined, attachment);
+    // Ownership der objectURLs geht an die optimistische Bubble über → hier KEIN
+    // revoke (clearAllPending würde revoken); sendChat räumt am Ende auf.
+    setPendingAttachments([]);
+    await sendChat(userText, undefined, attachments);
   }
 
   // @-Mention: gefilterte Kandidaten zur aktuellen Query (Prefix-Match auf
@@ -2127,9 +2145,8 @@ function DirectChat({
   // Owner-Cookie via credentials:"include". Fehler (413/415/400) landen im
   // Banner. EINE Quelle für input-onChange, Drop UND Paste (kein Dup-Code).
   async function handleFile(file: File) {
-    if (busy || uploading) return;
-    setUploading(true);
-    setError(null);
+    if (busy) return;
+    setUploading((n) => n + 1);
     try {
       const fd = new FormData();
       fd.append("file", file);
@@ -2148,26 +2165,49 @@ function DirectChat({
         mimeType: string;
         sizeBytes: number;
       };
-      clearPendingAttachment(); // evtl. vorheriges Bild ersetzen (+ revoke)
-      setPendingAttachment({ ...saved, previewUrl: URL.createObjectURL(file) });
+      // Multi-Image: ANHÄNGEN (Auswahl-Reihenfolge), nicht ersetzen.
+      setPendingAttachments((prev) => [
+        ...prev,
+        { ...saved, previewUrl: URL.createObjectURL(file) },
+      ]);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Upload fehlgeschlagen");
+      // 🔴 Per-File-Fehler: andere Dateien bleiben; Banner nennt die gescheiterte.
+      const msg = err instanceof Error ? err.message : "Upload fehlgeschlagen";
+      setError(`Upload fehlgeschlagen (${file.name}): ${msg}`);
     } finally {
-      setUploading(false);
+      setUploading((n) => n - 1);
     }
   }
 
-  async function handleFileSelected(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0];
-    e.target.value = ""; // erlaubt erneute Auswahl derselben Datei
-    if (file) await handleFile(file);
+  // Multi-Image-Intake: filtert Nicht-Bilder, deckelt auf MAX_IMAGES (Rest +
+  // Hinweis), lädt jede akzeptierte Datei per 1×N-Upload. 🔴 SEQUENTIELL
+  // (await je Datei) → Append-Reihenfolge == Auswahl-Reihenfolge (parallel würde
+  // in Completion-Reihenfolge anhängen).
+  async function handleFiles(files: File[]) {
+    if (busy) return;
+    const images = files.filter((f) => ACCEPTED_IMAGE_MIME.includes(f.type));
+    const rejected = files.length - images.length;
+    const slotsLeft = Math.max(0, MAX_IMAGES - pendingAttachments.length);
+    const accepted = images.slice(0, slotsLeft);
+    const overflow = images.length - accepted.length;
+    const hints: string[] = [];
+    if (rejected > 0) hints.push(`${rejected} Nicht-Bild ignoriert (nur png/jpeg/webp/gif)`);
+    if (overflow > 0) hints.push(`max ${MAX_IMAGES} Bilder — ${overflow} ignoriert`);
+    if (hints.length > 0) setError(hints.join("; "));
+    else setError(null);
+    for (const f of accepted) await handleFile(f);
   }
 
-  // SS4b-2: Drag&Drop. Nur Bilder (Allowlist); 🔴 nur das ERSTE (Single-
-  // pendingAttachment, Multi-Image = Backlog). Nicht-Bild → dezenter Hinweis.
+  function handleFileSelected(e: React.ChangeEvent<HTMLInputElement>) {
+    const files = Array.from(e.target.files ?? []);
+    e.target.value = ""; // erlaubt erneute Auswahl derselben Datei(en)
+    void handleFiles(files);
+  }
+
+  // SS4b-2: Drag&Drop — alle gezogenen Dateien (Multi). Nicht-Bild → Hinweis.
   function handleDragOver(e: React.DragEvent) {
     e.preventDefault();
-    if (!busy && !uploading) setDraggedOver(true);
+    if (!busy) setDraggedOver(true);
   }
   function handleDragLeave(e: React.DragEvent) {
     // Kein Flackern beim Überfahren von Kind-Elementen: nur zurücksetzen, wenn
@@ -2178,14 +2218,7 @@ function DirectChat({
   function handleDrop(e: React.DragEvent) {
     e.preventDefault();
     setDraggedOver(false);
-    if (busy || uploading) return;
-    const file = e.dataTransfer.files?.[0];
-    if (!file) return;
-    if (!ACCEPTED_IMAGE_MIME.includes(file.type)) {
-      setError("Nur Bilder (png/jpeg/webp/gif) — andere Dateien werden ignoriert.");
-      return;
-    }
-    void handleFile(file);
+    void handleFiles(Array.from(e.dataTransfer.files ?? []));
   }
 
   // SS4b-2: Paste. 🔴 NUR den Bild-Fall abfangen (preventDefault) — normaler
@@ -2193,29 +2226,25 @@ function DirectChat({
   function handlePaste(e: React.ClipboardEvent<HTMLTextAreaElement>) {
     const items = e.clipboardData?.items;
     if (!items) return;
+    const imgs: File[] = [];
     for (const item of items) {
       if (item.kind === "file" && item.type.startsWith("image/")) {
-        e.preventDefault();
-        if (busy || uploading) return;
-        const file = item.getAsFile();
-        if (file && ACCEPTED_IMAGE_MIME.includes(file.type)) {
-          void handleFile(file);
-        } else {
-          setError("Bild-Format nicht unterstützt (nur png/jpeg/webp/gif).");
-        }
-        return;
+        const f = item.getAsFile();
+        if (f) imgs.push(f);
       }
     }
-    // Kein Bild im Clipboard → Default-Text-Paste läuft normal weiter.
+    if (imgs.length === 0) return; // kein Bild → Default-Text-Paste läuft weiter
+    e.preventDefault();
+    void handleFiles(imgs);
   }
 
   async function sendChat(
     userText: string,
     forcedToolChoice?: { type: "tool"; toolName: string },
-    attachment?: PendingAttachment,
+    attachments: PendingAttachment[] = [],
   ) {
     setOptimisticUser(userText);
-    setOptimisticAttachment(attachment ?? null);
+    setOptimisticAttachments(attachments);
     setBusy(true);
     setError(null);
 
@@ -2236,16 +2265,14 @@ function DirectChat({
             {
               role: "user",
               content: userText,
-              ...(attachment
+              ...(attachments.length > 0
                 ? {
-                    attachments: [
-                      {
-                        id: attachment.id,
-                        type: "image",
-                        mimeType: attachment.mimeType,
-                        ref: attachment.ref,
-                      },
-                    ],
+                    attachments: attachments.map((a) => ({
+                      id: a.id,
+                      type: "image",
+                      mimeType: a.mimeType,
+                      ref: a.ref,
+                    })),
                   }
                 : {}),
             },
@@ -2274,10 +2301,10 @@ function DirectChat({
       setError(err instanceof Error ? err.message : "Failed");
     } finally {
       setOptimisticUser(null);
-      // SS4a: optimistisches Bild abräumen + objectURL freigeben. Nach dem
-      // loadAudits()-Reload zeigt die Server-Bubble (noch) kein Bild (SS4b).
-      setOptimisticAttachment(null);
-      if (attachment) URL.revokeObjectURL(attachment.previewUrl);
+      // Optimistische Bilder abräumen + alle objectURLs freigeben. Nach dem
+      // loadAudits()-Reload lädt die Server-Bubble die Bilder aus dem GET-Endpoint.
+      setOptimisticAttachments([]);
+      for (const a of attachments) URL.revokeObjectURL(a.previewUrl);
       setBusy(false);
     }
   }
@@ -2531,31 +2558,41 @@ function DirectChat({
           draggedOver ? "ring-2 ring-accent ring-inset bg-accent/5" : ""
         }`}
       >
-        {/* SS4a: verstecktes File-Input — getriggert vom Bild-Button. */}
+        {/* SS4a/Multi: verstecktes File-Input — `multiple` für Mehrfachauswahl. */}
         <input
           ref={fileInputRef}
           type="file"
+          multiple
           accept="image/png,image/jpeg,image/webp,image/gif"
           onChange={handleFileSelected}
           className="hidden"
         />
-        {/* SS4a: Vorschau des pending Bildes mit Entfernen-Knopf. */}
-        {pendingAttachment && (
-          <div className="relative flex-shrink-0">
-            {/* eslint-disable-next-line @next/next/no-img-element -- objectURL-Vorschau */}
-            <img
-              src={pendingAttachment.previewUrl}
-              alt="Anhang"
-              className="h-12 w-12 object-cover rounded border border-border"
-            />
-            <button
-              type="button"
-              onClick={clearPendingAttachment}
-              title="Bild entfernen"
-              className="absolute -top-1.5 -right-1.5 h-4 w-4 flex items-center justify-center rounded-full bg-surface border border-border text-muted text-[10px] leading-none hover:border-warn hover:text-warn"
-            >
-              ×
-            </button>
+        {/* Multi-Image: Vorschau-Strip, jedes Bild mit eigenem ×. Plus "n lädt…". */}
+        {(pendingAttachments.length > 0 || uploading > 0) && (
+          <div className="flex items-center gap-1 flex-shrink-0 max-w-[45%] overflow-x-auto">
+            {pendingAttachments.map((a) => (
+              <div key={a.id} className="relative flex-shrink-0">
+                {/* eslint-disable-next-line @next/next/no-img-element -- objectURL-Vorschau */}
+                <img
+                  src={a.previewUrl}
+                  alt="Anhang"
+                  className="h-12 w-12 object-cover rounded border border-border"
+                />
+                <button
+                  type="button"
+                  onClick={() => removeOnePending(a.id)}
+                  title="Bild entfernen"
+                  className="absolute -top-1.5 -right-1.5 h-4 w-4 flex items-center justify-center rounded-full bg-surface border border-border text-muted text-[10px] leading-none hover:border-warn hover:text-warn"
+                >
+                  ×
+                </button>
+              </div>
+            ))}
+            {uploading > 0 && (
+              <span className="text-[10px] text-muted whitespace-nowrap px-1">
+                {uploading} lädt…
+              </span>
+            )}
           </div>
         )}
         <div className="relative flex-1 h-full">
@@ -2636,8 +2673,8 @@ function DirectChat({
             Die Aktionen sind unverändert — Bild öffnet den File-Dialog, Tool
             öffnet das (controlled) ToolPicker-Modal. */}
         <ComposerMenu
-          disabled={busy || uploading}
-          uploading={uploading}
+          disabled={busy || uploading > 0}
+          uploading={uploading > 0}
           onPickImage={() => fileInputRef.current?.click()}
           onPickTool={() => setToolPickerOpen(true)}
         />
@@ -2650,7 +2687,7 @@ function DirectChat({
         />
         <button
           onClick={send}
-          disabled={busy || uploading || (!input.trim() && !pendingAttachment)}
+          disabled={busy || uploading > 0 || (!input.trim() && pendingAttachments.length === 0)}
           className="px-4 py-2 border border-accent text-accent text-sm rounded disabled:opacity-30 disabled:cursor-not-allowed hover:bg-accent hover:text-bg transition-colors"
         >
           send
