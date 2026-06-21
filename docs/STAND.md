@@ -320,6 +320,16 @@ Der getaktete Production-Deploy ist durch: **`86ed1e4` → `6e32813`** auf `srv1
 - **Befund beim Build (jetzt dokumentiert):** der Prod-Stack nutzt `image:latest` ohne `build:` → `docker compose up -d` baut nichts; explizites `docker build` aus dem Repo-Root gehört davor. **DEPLOYMENT.md §3 entsprechend korrigiert** (inkl. Literal-Build-Arg-Warnung, da der #126-Guard ein leeres `${DOMAIN}` nicht abfängt).
 - **Smoke deckte eine UX-Lücke auf:** ein im Wizard angelegter Twin ist über die UI **nicht löschbar** (musste per DB-Skript raus) → neues BACKLOG-Item.
 
+## Tag 50 (21. Juni 2026) — 🔧 Prod-Compose-Drift dauerhaft behoben — Symlink wiederhergestellt
+
+**Tag 50 (Forts.) — `/docker/nolmi/docker-compose.yml` ist wieder ein Symlink aufs Repo** (`repo/docker/nolmi/docker-compose.yml`) — das **dokumentierte Soll-Layout** (`override.yml.example`), das seit ~2. Juni zur eigenständigen Kopie degradiert war und heute 2× die ENV-Drift-Falle auslöste (ATTACHMENT_STORE_DIR, MENTION_AUTOSEND_ENABLED). Vorbedingung-Commit **`c508628`** (MENTION_AUTOSEND_ENABLED ins Repo back-portiert, damit der Symlink die manuell gesetzte Zeile nicht frisst; ATTACHMENT_STORE_DIR war via `be4f0a7` schon drin).
+
+🔴 **Befund:** Die eigenständige Kopie war **reine Drift, KEIN bewusster VPS-Sonderfall** — der Repo-Base trägt **null** literale VPS-Werte (alles `${VAR:-}`/parametrisiert, Default `nolmi.ai`), und VPS-Lokales (Modell-Cache, docs/mcp-Live-Mounts) liegt korrekt in `docker-compose.override.yml` (existiert seit 29. Mai). Diff aktiv↔repo war nur: Repo hatte **mehr** (Kommentare) + die eine MENTION-Zeile fehlte im Repo.
+
+**Umbau-Mechanik (drift-sicher, kein Blind-Switch):** (1) MENTION ins Repo back-porten + push, (2) Repo pullen, (3) 🔴 **Äquivalenz-Beweis VOR dem Switch:** `docker compose config` (Symlink-Test + Override + `.env`) **diff-gleich** zur aktiven Auflösung (128 Zeilen, ✅ identisch), (4) Backup `docker-compose.yml.standalone-bak`, (5) `ln -sf`, (6) **Verhaltens-Beweis:** recreate + `printenv ATTACHMENT_STORE_DIR MENTION_AUTOSEND_ENABLED` → `/data/attachments` + `true` (beide Flags greifen weiter).
+
+🔴 **NEUE DEPLOY-DISZIPLIN (verbindlich):** Der Symlink macht `git pull` **„scharf"** — Compose-Änderungen im Repo wirken nach `pull` **direkt** auf Prod (Self-Sync, gewollt). **Deshalb bleibt `docker compose config` als Check VOR jedem `up -d` Pflicht** — fängt einen kaputten Compose-Commit ab, bevor er den Stack trifft. Ersetzt die alte stille Drift-Falle durch ein bewusstes Pre-Deploy-Gate. (Memory `prod-vps-deploy-mechanik` aktualisiert.)
+
 ## Tag 50 (21. Juni 2026) — 🚀 @-Mention-Autosend (Weg 2) scharfgeschaltet auf Prod + verifiziert
 
 **Tag 50 (Forts.) — `MENTION_AUTOSEND_ENABLED=true` auf Prod.** Eine **verblose** @-Mention im Owner-Chat, die der Klassifikator als **SEND** erkennt, wird jetzt zu einem `send_to_twin`-Vorschlag (statt nur Weg-3-Verb-Hint). Runtime-only (Flag pro Request aus `process.env` → `--force-recreate` genügt, kein Code/Build).

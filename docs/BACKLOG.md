@@ -3414,11 +3414,11 @@ Code war komplett. Ablauf live bestätigt auf Prod: Owner approved → @markus f
 - **(d) PDF/Dokument-Support:** `AttachmentSchema.type`-Enum additiv erweitern (`image` → `+pdf`/`+doc`); Lade-/Weitergabe-Pfad analog Bild. Größe M.
 - **(e) 🔴 Leitplanke A2A-Multimodal:** Falls Twins sich je Bilder schicken sollen — die heutige **strukturelle** Owner-only-Garantie (Bridge ohne attachments-Feld) **entfällt** dann. Bräuchte ein **explizites Trust-Gate** + Klärung, in **WESSEN** Store ein A2A-`ref` aufgelöst wird (Sender vs. Empfänger, twinId-Isolation). Nicht nebenbei einführen.
 
-### 🔴 Infra-Hygiene: aktive Prod-Compose ist KEIN Symlink (wiederkehrende Falle)
+### ✅ Infra-Hygiene: Prod-Compose-Drift gelöst — Symlink wiederhergestellt (Tag 50)
 
-**Status:** OFFEN · **Größe:** S (Entscheidung + ggf. einmalige Aktion) · **Aus:** Tag-50-Multimodal-Deploy
+**Status:** ✅ **GELÖST** (Tag 50) · **War:** S · **Aus:** Tag-50-Multimodal-Deploy
 
-**Befund:** `/docker/nolmi/docker-compose.yml` auf srv1712371 ist eine **eigenständige Kopie**, kein Symlink aufs Repo. `git pull` ändert nur `repo/docker/nolmi/docker-compose.yml` → neue ENV-Whitelist-Zeilen landen **nicht** in der aktiven Datei und werden still ignoriert (`docker compose config` zeigt sie nicht → Container-Default greift). Kostete beim Multimodal-Deploy fast die Persistenz (vom Persistenz-Test abgefangen). **Entscheiden:** aktive Datei zum **Symlink** aufs Repo machen (self-syncing bei `git pull`) ODER Trennung bewusst behalten + jede Compose-Änderung manuell in die aktive Datei spiegeln. Solange getrennt: **jede künftige `${VAR:-}`-Whitelist-Zeile** braucht den manuellen Sync-Schritt. Memory `prod-vps-deploy-mechanik` hält den Stand.
+**Behoben:** `/docker/nolmi/docker-compose.yml` ist wieder ein **Symlink** aufs Repo (das dokumentierte Soll-Layout aus `override.yml.example`; seit ~2. Juni zur eigenständigen Kopie degradiert). Vorbedingung `c508628` (MENTION_AUTOSEND_ENABLED ins Repo back-portiert; ATTACHMENT_STORE_DIR via `be4f0a7` schon drin). Befund: war **reine Drift**, kein VPS-Sonderfall — Repo-Base ohne literale VPS-Werte, Lokales in `docker-compose.override.yml`. Umbau drift-sicher: Äquivalenz-Beweis (`docker compose config` diff-gleich, 128 Z.) **vor** dem `ln -sf`, Backup `.standalone-bak`, Verhaltens-Beweis nach recreate (`printenv` → beide Flags greifen). 🔴 **Neue Disziplin:** Symlink macht `git pull` scharf → `docker compose config` als Gate VOR jedem `up -d` bleibt Pflicht (bewusstes Pre-Deploy-Gate statt stiller Drift-Falle). Memory `prod-vps-deploy-mechanik` aktualisiert. `data/` gitignored (`be4f0a7`).
 
 ### Telegram: Rich Messages + @-Mention im Telegram-Kanal
 
@@ -3429,7 +3429,7 @@ Code war komplett. Ablauf live bestätigt auf Prod: Owner approved → @markus f
 
 ### Bestehende offene Items (Erinnerung)
 
-Beidseitiger A2A-Abbruch (Bridge-Signal), Mention-Klassifikationen als Audit persistieren (optional), Multimodal-Folge-Bögen (PDF/Multi-Image/STT/Provider/A2A-Leitplanke), Prod-Compose-Symlink-Frage, Telegram Rich-Messages/@-Mention, Twin-Löschung verwaister Bridge-Handles, OAuth-Backlog. (Mention-Autosend scharf + Multimodal Bildinput + web_fetch + Compose-Drift + Mention-ohne-Verb + Ungelesen-Indikator + Zeitgefühl = ✅ erledigt/live, Tag 47–50.)
+Beidseitiger A2A-Abbruch (Bridge-Signal), Mention-Klassifikationen als Audit persistieren (optional), Multimodal-Folge-Bögen (PDF/Multi-Image/STT/Provider/A2A-Leitplanke), Telegram Rich-Messages/@-Mention, Twin-Löschung verwaister Bridge-Handles, OAuth-Backlog. (Prod-Compose-Symlink + Mention-Autosend scharf + Multimodal Bildinput + web_fetch + Compose-Drift + Mention-ohne-Verb + Ungelesen-Indikator + Zeitgefühl = ✅ erledigt/live, Tag 47–50.)
 
 ---
 
