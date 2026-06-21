@@ -4271,7 +4271,7 @@ export function toModelMessages(
         // (content="") enthält das Array NUR den/die Image-Part(s).
         if (m.content.trim()) parts.push({ type: "text", text: m.content });
         for (const a of m.attachments) {
-          parts.push(buildImagePart(a, twinId));
+          parts.push(buildAttachmentPart(a, twinId));
         }
         return { role: m.role, content: parts } as unknown as ModelMessage;
       }
@@ -4291,23 +4291,29 @@ export function toModelMessages(
 }
 
 /**
- * Baut aus einem Attachment den Vercel-SDK-ImagePart. Lädt die Bytes über die
- * Storage-Naht (SS3a: Test-Stub; SS2: echter /data-Store). `mediaType` kommt
- * aus dem Schema-Feld `mimeType`.
+ * Baut aus einem Attachment den passenden Vercel-SDK-Part. Bytes über dieselbe
+ * Storage-Naht (`loadAttachmentBytes`); `mediaType` aus dem Schema (`mimeType`).
+ *   - image    → ImagePart `{type:"image", image, mediaType}` (UNVERÄNDERT,
+ *                @ai-sdk/anthropic + Codex via SS3b).
+ *   - document → FilePart `{type:"file", data, mediaType, filename?}` → Anthropic
+ *                document-Block (nativer PDF), Codex → input_file (mapV3PromptToCodex).
  */
-function buildImagePart(
+function buildAttachmentPart(
   a: Attachment,
   twinId: string,
-): {
-  type: "image";
-  image: Buffer;
-  mediaType: string;
-} {
-  return {
-    type: "image",
-    image: loadAttachmentBytes(twinId, a.ref),
-    mediaType: a.mimeType,
-  };
+):
+  | { type: "image"; image: Buffer; mediaType: string }
+  | { type: "file"; data: Buffer; mediaType: string; filename?: string } {
+  const bytes = loadAttachmentBytes(twinId, a.ref);
+  if (a.type === "document") {
+    return {
+      type: "file",
+      data: bytes,
+      mediaType: a.mimeType,
+      ...(a.filename ? { filename: a.filename } : {}),
+    };
+  }
+  return { type: "image", image: bytes, mediaType: a.mimeType };
 }
 
 /**

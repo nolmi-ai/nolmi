@@ -192,9 +192,9 @@ export type TwinEvent = z.infer<typeof TwinEventSchema>;
 // Schritte; dieses Schema beschreibt nur, wie ein Anhang an einer Message hängt.
 export const AttachmentSchema = z.object({
   id: z.string(),
-  /** Heute nur `image`; Erweiterung (pdf/doc) später additiv. */
-  type: z.enum(["image"]),
-  /** MIME des Originals, z.B. `image/png`, `image/jpeg`. */
+  /** `image` (png/jpeg/webp/gif) oder `document` (pdf). Additiv erweiterbar. */
+  type: z.enum(["image", "document"]),
+  /** MIME des Originals, z.B. `image/png`, `application/pdf`. */
   mimeType: z.string(),
   /** Referenz in den Store (Pfad/ID), NICHT der Inhalt. Bytes lädt SS3 erst
    *  zur Call-Zeit nach — nie persistiert in der Message. */

@@ -5,7 +5,7 @@ import multipart from "@fastify/multipart";
 import {
   readUploadedFile,
   validateAndSaveUpload,
-  sniffImageMime,
+  sniffAttachmentMime,
 } from "./multimodal/attachment-upload.js";
 import { loadAttachmentBytes } from "./multimodal/attachment-store.js";
 import { nanoid } from "nanoid";
@@ -167,9 +167,11 @@ export async function createServer(deps: ServerDeps) {
 
   // Multimodal SS2b: Upload-Plugin. 🔴 fileSize-Limit über die Plugin-`limits`
   // (NICHT den globalen JSON-bodyLimit) — greift pro Datei beim Streamen.
-  // ATTACHMENT_MAX_BYTES (Default 10 MB). files:1 = ein Anhang pro Request.
+  // ATTACHMENT_MAX_BYTES (Default 20 MB — PDFs laufen größer als Bilder; per ENV
+  // anpassbar, Codex/Responses-input_file verträgt bis ~32 MB). files:1 = ein
+  // Anhang pro Request.
   const ATTACHMENT_MAX_BYTES =
-    Number(process.env.ATTACHMENT_MAX_BYTES) || 10 * 1024 * 1024;
+    Number(process.env.ATTACHMENT_MAX_BYTES) || 20 * 1024 * 1024;
   await app.register(multipart, {
     limits: { fileSize: ATTACHMENT_MAX_BYTES, files: 1 },
   });
@@ -457,7 +459,7 @@ export async function createServer(deps: ServerDeps) {
   // ─── Attachment-Download (Multimodal-Fix) ──────────────────────────────────
   // 🔴 Owner-only + twinId-isoliert: serviert die Bytes eines Anhangs für die
   // Bild-Quelle der Chat-Bubble (<img src> nach optimistic→server-Reload). Der
-  // Content-Type kommt aus den Magic-Bytes (sniffImageMime), nicht aus Client-
+  // Content-Type kommt aus den Magic-Bytes (sniffAttachmentMime), nicht aus Client-
   // Angaben. ref liegt NUR im Ordner DIESES Twins → fremder Twin / Traversal →
   // loadAttachmentBytes wirft → 404. Same-site-Cookie (sameSite:lax, Domain
   // .nolmi.ai) wird vom <img> automatisch mitgeschickt.
@@ -472,7 +474,7 @@ export async function createServer(deps: ServerDeps) {
       } catch {
         return reply.status(404).send({ error: "Anhang nicht gefunden" });
       }
-      const mime = sniffImageMime(bytes) ?? "application/octet-stream";
+      const mime = sniffAttachmentMime(bytes) ?? "application/octet-stream";
       return reply
         .header("Cache-Control", "private, max-age=3600")
         .type(mime)

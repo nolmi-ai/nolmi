@@ -317,7 +317,8 @@ class CodexLanguageModel implements LanguageModelV3 {
 // den Inhalt transparent als JSON durch (kein schmaler Wire-Type nötig).
 type CodexUserContentPart =
   | { type: "input_text"; text: string }
-  | { type: "input_image"; image_url: string; detail: string };
+  | { type: "input_image"; image_url: string; detail: string }
+  | { type: "input_file"; filename: string; file_data: string };
 
 /**
  * Baut aus V3-FilePart-Daten den `image_url`-String fürs Codex-input_image.
@@ -357,31 +358,36 @@ export function mapV3PromptToCodex(prompt: LanguageModelV3Prompt): {
       // Multimodal SS3b: ALLE Parts mappen statt nur text zu filtern.
       //   - text  → input_text (UNVERÄNDERT: alle text-Parts wie bisher mit
       //             "\n" gejoint zu EINEM input_text → kein Wire-Drift).
-      //   - file  → 🔴 image-Part (V3 lowert ImagePart aus SS3a zu FilePart)
-      //             → input_image im Spike-bewiesenen Format (image_url als
-      //             base64-data-URI, OpenAI-Responses, d5e757e).
+      //   - file (image/*) → input_image im Spike-Format (image_url data-URI, d5e757e).
+      //   - file (application/pdf) → 🔴 input_file im Spike-Format (file_data
+      //     data-URI + filename, OpenAI-Responses, PDF-Spike 5fc3251).
       const textParts: string[] = [];
-      const imageParts: CodexUserContentPart[] = [];
+      const mediaParts: CodexUserContentPart[] = [];
       for (const part of msg.content) {
         if (part.type === "text") {
           textParts.push(part.text);
-        } else if (
-          part.type === "file" &&
-          typeof part.mediaType === "string" &&
-          part.mediaType.startsWith("image/")
-        ) {
-          imageParts.push({
-            type: "input_image",
-            image_url: fileDataToDataUri(part.data, part.mediaType),
-            detail: "auto",
-          });
+        } else if (part.type === "file" && typeof part.mediaType === "string") {
+          if (part.mediaType.startsWith("image/")) {
+            mediaParts.push({
+              type: "input_image",
+              image_url: fileDataToDataUri(part.data, part.mediaType),
+              detail: "auto",
+            });
+          } else if (part.mediaType === "application/pdf") {
+            mediaParts.push({
+              type: "input_file",
+              filename: part.filename ?? "document.pdf",
+              file_data: fileDataToDataUri(part.data, part.mediaType),
+            });
+          }
+          // andere File-Typen ignoriert (nur image + pdf unterstützt).
         }
-        // Nicht-Bild-Files / andere Part-Typen ignoriert — SS3b deckt nur Bilder.
+        // andere Part-Typen (z.B. reasoning) im user-Slot: kein Codex-Effekt.
       }
       const text = textParts.join("\n");
       const content: CodexUserContentPart[] = [];
       if (text.length > 0) content.push({ type: "input_text", text });
-      for (const img of imageParts) content.push(img);
+      for (const part of mediaParts) content.push(part);
       // 🔴 Abwärtskompat-Edge: ohne Bild + leerer Text → exakt wie heute EIN
       // (leeres) input_text, damit der reine Text-Pfad byte-identisch bleibt.
       if (content.length === 0) content.push({ type: "input_text", text });

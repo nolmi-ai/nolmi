@@ -47,6 +47,28 @@ export function sniffImageMime(buf: Buffer): string | null {
   return null;
 }
 
+/** Erlaubte Attachment-MIME-Typen: Bilder + PDF. */
+export const ALLOWED_ATTACHMENT_MIME = new Set<string>([
+  ...ALLOWED_IMAGE_MIME,
+  "application/pdf",
+]);
+
+/**
+ * Erkennt das echte Attachment-Format anhand der Magic-Bytes: Bilder (via
+ * sniffImageMime) ODER PDF (`%PDF-` = 25 50 44 46 2D). Null, wenn nichts Erlaubtes.
+ * Auch vom GET-Endpoint genutzt → liefert dort den korrekten Content-Type.
+ */
+export function sniffAttachmentMime(buf: Buffer): string | null {
+  const img = sniffImageMime(buf);
+  if (img) return img;
+  if (buf.length >= 5 &&
+    buf[0] === 0x25 && buf[1] === 0x50 && buf[2] === 0x44 && buf[3] === 0x46 &&
+    buf[4] === 0x2d) {
+    return "application/pdf";
+  }
+  return null;
+}
+
 /**
  * Liest die EINE Upload-Datei aus dem multipart-Request. Kapselt die
  * @fastify/multipart-Mechanik (request.file → toBuffer) inkl. Größen-
@@ -103,12 +125,12 @@ export function validateAndSaveUpload(opts: {
   if (!opts.buffer || opts.buffer.length === 0) {
     return { status: 400, body: { error: "Keine Datei im Upload (Feld 'file' fehlt oder leer)" } };
   }
-  const sniffed = sniffImageMime(opts.buffer);
+  const sniffed = sniffAttachmentMime(opts.buffer);
   if (!sniffed) {
-    return { status: 415, body: { error: "Kein erkanntes Bildformat (nur png/jpeg/webp/gif)" } };
+    return { status: 415, body: { error: "Kein erkanntes Format (nur png/jpeg/webp/gif/pdf)" } };
   }
   const claimed = opts.claimedMimeType;
-  if (!claimed || !ALLOWED_IMAGE_MIME.has(claimed)) {
+  if (!claimed || !ALLOWED_ATTACHMENT_MIME.has(claimed)) {
     return { status: 415, body: { error: `Content-Type nicht erlaubt: ${claimed ?? "(keiner)"}` } };
   }
   // 🔴 Anti-Spoofing: gemeldeter Typ muss zu den echten Bytes passen.
