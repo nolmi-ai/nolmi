@@ -39,15 +39,21 @@ const RUNTIME_URL = process.env.NEXT_PUBLIC_RUNTIME_URL ?? "http://localhost:400
 
 // Multimodal: erlaubte Bild-MIME-Typen (Client-Vorfilter für input/Drop/Paste;
 // die autoritative Prüfung macht der Upload-Endpoint via Magic-Bytes).
-const ACCEPTED_IMAGE_MIME = [
+const ACCEPTED_ATTACHMENT_MIME = [
   "image/png",
   "image/jpeg",
   "image/webp",
   "image/gif",
+  "application/pdf",
 ];
 
-// Multimodal Multi-Image: Obergrenze pro Nachricht (Soft-Guard, überzählige
-// werden ignoriert + Hinweis). Backend hat kein Limit; das ist reine UX/Hygiene.
+// PDF → document, sonst (Bilder) → image. Steuert Render + Backend-Branch.
+function attachmentTypeFor(mime: string): "image" | "document" {
+  return mime === "application/pdf" ? "document" : "image";
+}
+
+// Multimodal: Obergrenze Anhänge pro Nachricht (Soft-Guard, überzählige werden
+// ignoriert + Hinweis). Backend hat kein Limit; reine UX/Hygiene.
 const MAX_IMAGES = 6;
 
 // Audit-Capabilities, die im Direct-Chat-Verlauf erscheinen sollen.
@@ -1596,9 +1602,22 @@ type MessageChannel = "web" | "telegram" | "discord" | "whatsapp";
 type PendingAttachment = {
   ref: string;
   id: string;
+  // image (png/jpeg/webp/gif) oder document (pdf) — steuert Render + Backend-Branch.
+  attType: "image" | "document";
   mimeType: string;
   sizeBytes: number;
+  filename?: string;
   previewUrl: string;
+};
+
+// Render-Form eines Anhangs in einer Bubble. `src` = objectURL (optimistisch)
+// ODER GET-Endpoint-URL (Server-Block). image → <img src>; document → Datei-Chip
+// (Dateiname + Download-Link auf src). Beide same-site-Cookie-fähig.
+type RenderAttachment = {
+  attType: "image" | "document";
+  src: string;
+  mimeType: string;
+  filename?: string;
 };
 
 type ChatBlock =
@@ -1608,10 +1627,7 @@ type ChatBlock =
       conversationId: string | null;
       auditId: string | null;
       channel?: MessageChannel;
-      // SS4a/Fix: Bild-Vorschau(en). `src` ist entweder ein lokaler objectURL
-      // (optimistische Bubble) ODER die GET-Endpoint-URL (Server-Block, lädt
-      // owner-only + same-site-Cookie). Beide direkt in <img src> nutzbar.
-      attachments?: { src: string; mimeType: string }[];
+      attachments?: RenderAttachment[];
     }
   | {
       kind: "assistant";
@@ -1653,7 +1669,7 @@ interface AuditOwnerDirectShape {
   messages?: {
     role?: string;
     content?: string;
-    attachments?: { ref?: string; mimeType?: string }[];
+    attachments?: { ref?: string; mimeType?: string; type?: string; filename?: string }[];
   }[];
   /** #130 Phase 3: optionaler Channel-Marker. */
   channel?: MessageChannel;
@@ -1786,12 +1802,22 @@ function buildChatBlocksFromAudits(
     const lastUserMsg = Array.isArray(input.messages)
       ? [...input.messages].reverse().find((m) => m.role === "user")
       : undefined;
-    const attachments = lastUserMsg?.attachments
-      ?.filter((a): a is { ref: string; mimeType?: string } => typeof a.ref === "string")
-      .map((a) => ({
-        src: `${RUNTIME_URL}/twins/${handle}/attachments/${encodeURIComponent(a.ref)}`,
-        mimeType: a.mimeType ?? "image/*",
-      }));
+    const attachments: RenderAttachment[] | undefined = lastUserMsg?.attachments
+      ?.filter((a): a is { ref: string; mimeType?: string; type?: string; filename?: string } =>
+        typeof a.ref === "string",
+      )
+      .map((a) => {
+        const mimeType = a.mimeType ?? "image/*";
+        // attType aus dem persistierten `type` (sendChat schickt es), sonst aus MIME ableiten.
+        const attType: "image" | "document" =
+          a.type === "document" || mimeType === "application/pdf" ? "document" : "image";
+        return {
+          attType,
+          src: `${RUNTIME_URL}/twins/${handle}/attachments/${encodeURIComponent(a.ref)}`,
+          mimeType,
+          filename: a.filename,
+        };
+      });
     // 🔴 Bild-only (userText="") NICHT überspringen, solange ein Anhang da ist.
     // Skip nur, wenn weder Text noch Anhang vorhanden, oder keine Antwort.
     const hasUserContent = userText.length > 0 || (attachments?.length ?? 0) > 0;
@@ -1993,8 +2019,10 @@ function DirectChat({
         attachments:
           optimisticAttachments.length > 0
             ? optimisticAttachments.map((a) => ({
+                attType: a.attType,
                 src: a.previewUrl,
                 mimeType: a.mimeType,
+                filename: a.filename,
               }))
             : undefined,
       },
@@ -2165,10 +2193,16 @@ function DirectChat({
         mimeType: string;
         sizeBytes: number;
       };
-      // Multi-Image: ANHÄNGEN (Auswahl-Reihenfolge), nicht ersetzen.
+      // ANHÄNGEN (Auswahl-Reihenfolge). attType aus dem (vom Endpoint via
+      // Magic-Bytes bestätigten) MIME; filename aus der lokalen Datei.
       setPendingAttachments((prev) => [
         ...prev,
-        { ...saved, previewUrl: URL.createObjectURL(file) },
+        {
+          ...saved,
+          attType: attachmentTypeFor(saved.mimeType),
+          filename: file.name,
+          previewUrl: URL.createObjectURL(file),
+        },
       ]);
     } catch (err) {
       // 🔴 Per-File-Fehler: andere Dateien bleiben; Banner nennt die gescheiterte.
@@ -2185,14 +2219,14 @@ function DirectChat({
   // in Completion-Reihenfolge anhängen).
   async function handleFiles(files: File[]) {
     if (busy) return;
-    const images = files.filter((f) => ACCEPTED_IMAGE_MIME.includes(f.type));
+    const images = files.filter((f) => ACCEPTED_ATTACHMENT_MIME.includes(f.type));
     const rejected = files.length - images.length;
     const slotsLeft = Math.max(0, MAX_IMAGES - pendingAttachments.length);
     const accepted = images.slice(0, slotsLeft);
     const overflow = images.length - accepted.length;
     const hints: string[] = [];
-    if (rejected > 0) hints.push(`${rejected} Nicht-Bild ignoriert (nur png/jpeg/webp/gif)`);
-    if (overflow > 0) hints.push(`max ${MAX_IMAGES} Bilder — ${overflow} ignoriert`);
+    if (rejected > 0) hints.push(`${rejected} nicht unterstützt ignoriert (nur png/jpeg/webp/gif/pdf)`);
+    if (overflow > 0) hints.push(`max ${MAX_IMAGES} Anhänge — ${overflow} ignoriert`);
     if (hints.length > 0) setError(hints.join("; "));
     else setError(null);
     for (const f of accepted) await handleFile(f);
@@ -2269,9 +2303,10 @@ function DirectChat({
                 ? {
                     attachments: attachments.map((a) => ({
                       id: a.id,
-                      type: "image",
+                      type: a.attType,
                       mimeType: a.mimeType,
                       ref: a.ref,
+                      ...(a.filename ? { filename: a.filename } : {}),
                     })),
                   }
                 : {}),
@@ -2563,7 +2598,7 @@ function DirectChat({
           ref={fileInputRef}
           type="file"
           multiple
-          accept="image/png,image/jpeg,image/webp,image/gif"
+          accept="image/png,image/jpeg,image/webp,image/gif,application/pdf"
           onChange={handleFileSelected}
           className="hidden"
         />
@@ -2572,16 +2607,27 @@ function DirectChat({
           <div className="flex items-center gap-1 flex-shrink-0 max-w-[45%] overflow-x-auto">
             {pendingAttachments.map((a) => (
               <div key={a.id} className="relative flex-shrink-0">
-                {/* eslint-disable-next-line @next/next/no-img-element -- objectURL-Vorschau */}
-                <img
-                  src={a.previewUrl}
-                  alt="Anhang"
-                  className="h-12 w-12 object-cover rounded border border-border"
-                />
+                {a.attType === "document" ? (
+                  // PDF/Dokument: Chip (Icon + Dateiname), kein kaputtes <img>.
+                  <div
+                    title={a.filename ?? "Dokument"}
+                    className="h-12 w-28 flex items-center gap-1.5 px-2 rounded border border-border bg-bg text-text"
+                  >
+                    <span className="text-base leading-none">📄</span>
+                    <span className="truncate text-[10px] font-mono">{a.filename ?? "PDF"}</span>
+                  </div>
+                ) : (
+                  // eslint-disable-next-line @next/next/no-img-element -- objectURL-Vorschau
+                  <img
+                    src={a.previewUrl}
+                    alt={a.filename ?? "Anhang"}
+                    className="h-12 w-12 object-cover rounded border border-border"
+                  />
+                )}
                 <button
                   type="button"
                   onClick={() => removeOnePending(a.id)}
-                  title="Bild entfernen"
+                  title="Anhang entfernen"
                   className="absolute -top-1.5 -right-1.5 h-4 w-4 flex items-center justify-center rounded-full bg-surface border border-border text-muted text-[10px] leading-none hover:border-warn hover:text-warn"
                 >
                   ×
@@ -3197,9 +3243,8 @@ function Bubble({
   content: string;
   /** #130 Phase 3 v2: Channel-Icon im Bubble-Header rechts. Undefined/`web` → kein Icon. */
   channel?: MessageChannel;
-  /** SS4a/Fix: Bild-Vorschau(en) — `src` ist objectURL (optimistisch) ODER
-   *  GET-Endpoint-URL (Server-Block). Direkt in <img src> nutzbar. */
-  attachments?: { src: string; mimeType: string }[];
+  /** Anhänge: image → <img>, document → Datei-Chip mit Download-Link (src). */
+  attachments?: RenderAttachment[];
 }) {
   const isUser = role === "user";
   // ml-auto / mr-auto positioniert die Bubble innerhalb des max-w-3xl-
@@ -3233,15 +3278,31 @@ function Bubble({
       </div>
       {attachments && attachments.length > 0 && (
         <div className="flex flex-wrap gap-2 mb-2">
-          {attachments.map((a, i) => (
-            // eslint-disable-next-line @next/next/no-img-element -- objectURL/GET-URL, keine next/image-Optimierung möglich
-            <img
-              key={i}
-              src={a.src}
-              alt="Anhang"
-              className="max-h-40 max-w-full rounded border border-border"
-            />
-          ))}
+          {attachments.map((a, i) =>
+            a.attType === "document" ? (
+              // PDF/Dokument: kein <img> — Datei-Chip mit Download-Link (öffnet
+              // den GET-Endpoint bzw. den lokalen objectURL im neuen Tab).
+              <a
+                key={i}
+                href={a.src}
+                target="_blank"
+                rel="noreferrer"
+                title={a.filename ?? "Dokument öffnen"}
+                className="flex items-center gap-2 max-w-full px-2.5 py-1.5 rounded border border-border text-text hover:border-accent hover:text-accent transition-colors"
+              >
+                <span className="text-base leading-none">📄</span>
+                <span className="truncate text-xs font-mono">{a.filename ?? "Dokument.pdf"}</span>
+              </a>
+            ) : (
+              // eslint-disable-next-line @next/next/no-img-element -- objectURL/GET-URL, keine next/image-Optimierung möglich
+              <img
+                key={i}
+                src={a.src}
+                alt={a.filename ?? "Anhang"}
+                className="max-h-40 max-w-full rounded border border-border"
+              />
+            ),
+          )}
         </div>
       )}
       {isUser ? (
