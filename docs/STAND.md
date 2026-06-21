@@ -320,6 +320,20 @@ Der getaktete Production-Deploy ist durch: **`86ed1e4` → `6e32813`** auf `srv1
 - **Befund beim Build (jetzt dokumentiert):** der Prod-Stack nutzt `image:latest` ohne `build:` → `docker compose up -d` baut nichts; explizites `docker build` aus dem Repo-Root gehört davor. **DEPLOYMENT.md §3 entsprechend korrigiert** (inkl. Literal-Build-Arg-Warnung, da der #126-Guard ein leeres `${DOMAIN}` nicht abfängt).
 - **Smoke deckte eine UX-Lücke auf:** ein im Wizard angelegter Twin ist über die UI **nicht löschbar** (musste per DB-Skript raus) → neues BACKLOG-Item.
 
+## Tag 50 (21. Juni 2026) — 🎙️🚀 STT SS1: Whisper-Sidecar live auf Prod (interner Pfad bewiesen)
+
+**Tag 50 (Forts.) — der Whisper-Sidecar ist ein echter Stack-Service auf srv1712371.** Commits: **`dfe8a98`** (Service in Repo-Base, internal-only) + **`c967c96`** (Doc-Fix ENV-Key). Deploy: `docker compose up -d nolmi-whisper` (Public-Image `fedirz/faster-whisper-server:latest-cpu`, **kein Build**), named Volume `nolmi-whisper-cache`, `config`-Gate grün.
+
+🔴 **Prod-verifiziert:** (a) Sidecar läuft **internal-only** (`nolmi-internal`, kein Port/traefik). (b) **`WHISPER__MODEL=small` greift** — Log „Model small loaded in 6.13s". (c) 🔴 **Interner Pfad bewiesen:** `nolmi-runtime` erreicht `http://nolmi-whisper:8000`, echte Transkription durchgelaufen (runtime kopiert Audio → POST → Transkript zurück — genau der Pfad, den SS2 nutzt).
+
+🔴 **Zwei Befunde für SS2+/UX:**
+1. **Lazy-Load:** Der Sidecar lädt `small` **on-demand beim ersten Request** (~6 s Aufschlag) + **entlädt nach 300 s idle** („scheduling offload in 300s") → der erste Voice nach einer Pause ist ~6 s langsamer. Optimierbar später (idle-offload aus / keep-warm) — erstmal notiert.
+2. **`initial_prompt` hilft, ist aber NICHT perfekt:** bei **kurzem** Audio „Whisper"→„Vista" trotz Prompt (bei längerem espeak-Satz war „Whisper-Modell" korrekt). → **small ist „gut genug für den Sinn", nicht wortperfekt.** Ehrliche Erwartung.
+
+🔴 **OFFEN — Echt-Voice-Vorbehalt WEITER ungelöst:** Beide Tests waren **synthetisch** (espeak). Echte Voice (Stimme/Mikro/Telegram-Opus) noch NIE getestet → vor oder spätestens beim ersten echten Telegram-Flow (SS3) verifizieren, ob small+prompt bei echter Stimme brauchbar ist.
+
+**Setup für SS2:** `POST {WHISPER_URL}/v1/audio/transcriptions`, multipart `file` + `model=small` + `language=de` + `initial_prompt` (Domänen-Vokabular). `WHISPER_URL=http://nolmi-whisper:8000` (runtime-ENV, Default greift).
+
 ## Tag 50 (21. Juni 2026) — 🎙️ STT-Bogen begonnen: Whisper-Infra-Spike auf Prod-VPS GRÜN (self-hosted machbar)
 
 **Tag 50 (Forts.) — Sprachnachrichten-Bogen gestartet, Machbarkeit auf dem VPS bewiesen.** Self-hosted Whisper, kein Audio extern. Infra-Spike auf srv1712371 GRÜN — noch KEIN Integrations-Code.
