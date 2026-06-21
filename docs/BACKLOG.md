@@ -3366,7 +3366,7 @@ Code war komplett. Ablauf live bestätigt auf Prod: Owner approved → @markus f
 
 🔴 **Sicherheit:** Scharf ≠ Auto-Versand — `send_to_twin` bleibt `always_pending` (Mandate, DB-bestätigt) → Owner-Approval; `ownerBypass` schließt es aus. Falsches SEND = überflüssiger Approval-Klick. **Browser-verifiziert:** „kannst du Freitag?"→SEND→Approval-Prompt; „macht sowas auch"→CHAT→kein Send + Verb-Hint. Bogen (lokal→Schatten→scharf) abgeschlossen.
 
-**Optionales Folge-Item:** Schatten-/Armed-Klassifikationen als **Audit persistieren** (statt nur `console.log [mention-intent]`) — heute nicht nötig (Flag ist scharf), aber nützlich für künftige Klassifikator-Beobachtung/-Tuning, **da `--force-recreate` die Container-Logs wischt** (Tag-50-Lehre). Größe S.
+**✅ Folge-Item erledigt (Tag 50):** Klassifikationen werden jetzt als **Audit persistiert** (`46677c3`, `recordMentionIntentAudit`: capability `mention-intent`, `input{targetHandle,text slice280,textLength,gate,tier}` + `output{intent,reason}`, fire-and-forget + try/catch, keine Migration). Überlebt `--force-recreate` (löst die Log-Flüchtigkeit), kein UI-Leak (nicht in `DIRECT_CHAT_CAPABILITIES`). Live + Prod-verifiziert (`gate:armed`, `tier:haiku`, `intent:SEND`). Auswertung: `SELECT … WHERE capability='mention-intent'`.
 
 ### ✅ Repo- vs. Prod-Compose-Drift konsolidieren (Infra-Hygiene) — DONE (717721c, Tag 48)
 
@@ -3429,7 +3429,7 @@ Code war komplett. Ablauf live bestätigt auf Prod: Owner approved → @markus f
 
 ### Bestehende offene Items (Erinnerung)
 
-Beidseitiger A2A-Abbruch (Bridge-Signal), Mention-Klassifikationen als Audit persistieren (optional), Multimodal-Folge-Bögen (PDF/Multi-Image/STT/Provider/A2A-Leitplanke), Telegram Rich-Messages/@-Mention, Twin-Löschung verwaister Bridge-Handles, OAuth-Backlog. (Prod-Compose-Symlink + Mention-Autosend scharf + Multimodal Bildinput + web_fetch + Compose-Drift + Mention-ohne-Verb + Ungelesen-Indikator + Zeitgefühl = ✅ erledigt/live, Tag 47–50.)
+Beidseitiger A2A-Abbruch (Bridge-Signal), Multimodal-Folge-Bögen (PDF/Multi-Image/STT/Provider/A2A-Leitplanke), Telegram Rich-Messages/@-Mention, Twin-Löschung verwaister Bridge-Handles, OAuth-Backlog. (Mention-Klassifikations-Audit + Prod-Compose-Symlink + Mention-Autosend scharf + Multimodal Bildinput + web_fetch + Compose-Drift + Mention-ohne-Verb + Ungelesen-Indikator + Zeitgefühl = ✅ erledigt/live, Tag 47–50.)
 
 ---
 

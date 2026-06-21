@@ -320,6 +320,16 @@ Der getaktete Production-Deploy ist durch: **`86ed1e4` → `6e32813`** auf `srv1
 - **Befund beim Build (jetzt dokumentiert):** der Prod-Stack nutzt `image:latest` ohne `build:` → `docker compose up -d` baut nichts; explizites `docker build` aus dem Repo-Root gehört davor. **DEPLOYMENT.md §3 entsprechend korrigiert** (inkl. Literal-Build-Arg-Warnung, da der #126-Guard ein leeres `${DOMAIN}` nicht abfängt).
 - **Smoke deckte eine UX-Lücke auf:** ein im Wizard angelegter Twin ist über die UI **nicht löschbar** (musste per DB-Skript raus) → neues BACKLOG-Item.
 
+## Tag 50 (21. Juni 2026) — 📊 Mention-Klassifikations-Audit live auf Prod (Observability)
+
+**Tag 50 (Forts.) — der Mention-Klassifikator persistiert seine Urteile jetzt als Audit.** Commit **`46677c3`** (`recordMentionIntentAudit` nach `recordWebFetchAudit`-Vorbild: `capability=mention-intent`, `input{targetHandle, text:slice(280), textLength, gate, tier}`, `output{intent, reason}`, **fire-and-forget `void` + try/catch → bricht den Chat nie**). Keine Migration (capability ist freier TEXT). **Runtime-only Deploy.** Rollback-Tag `nolmi-runtime:rollback-tag50-premention-audit`.
+
+🔴 **ERSTER Deploy nach dem Symlink-Umbau — die neue Disziplin angewandt:** `git pull` (Compose self-synct via Symlink) → `docker compose config` als **Gate VOR `up -d`** → runtime-build → `--force-recreate`. **Kein Drift-Vorfall** → die Symlink-Hygiene (`b164098`) bewährt sich beim ersten Folge-Deploy.
+
+**Prod-Beweis:** verblose @-Mention → persistenter Audit (`2026-06-21T10:32`, `gate:armed`, `tier:anthropic/claude-haiku-4-5`, `intent:SEND`). Bestätigt nebenbei zwei frühere Befunde live: **Mention-Autosend scharf** + **Klassifikator-Tier = haiku** (nicht gpt-4o-mini). Der Audit **überlebt `--force-recreate`** → löst die Tag-50-Log-Flüchtigkeit.
+
+**Wert:** Observability — künftige Klassifikator-Beobachtung/-Tuning über persistente Audits (`SELECT … WHERE capability='mention-intent'`), **kein UI** (`mention-intent` fehlt in `DIRECT_CHAT_CAPABILITIES` → keine Bubble). Nutzen entsteht über die Zeit (Zeitreihe echter Klassifikationen, jetzt da Autosend scharf ist).
+
 ## Tag 50 (21. Juni 2026) — 🔧 Prod-Compose-Drift dauerhaft behoben — Symlink wiederhergestellt
 
 **Tag 50 (Forts.) — `/docker/nolmi/docker-compose.yml` ist wieder ein Symlink aufs Repo** (`repo/docker/nolmi/docker-compose.yml`) — das **dokumentierte Soll-Layout** (`override.yml.example`), das seit ~2. Juni zur eigenständigen Kopie degradiert war und heute 2× die ENV-Drift-Falle auslöste (ATTACHMENT_STORE_DIR, MENTION_AUTOSEND_ENABLED). Vorbedingung-Commit **`c508628`** (MENTION_AUTOSEND_ENABLED ins Repo back-portiert, damit der Symlink die manuell gesetzte Zeile nicht frisst; ATTACHMENT_STORE_DIR war via `be4f0a7` schon drin).
