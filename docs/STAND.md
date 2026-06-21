@@ -320,6 +320,22 @@ Der getaktete Production-Deploy ist durch: **`86ed1e4` → `6e32813`** auf `srv1
 - **Befund beim Build (jetzt dokumentiert):** der Prod-Stack nutzt `image:latest` ohne `build:` → `docker compose up -d` baut nichts; explizites `docker build` aus dem Repo-Root gehört davor. **DEPLOYMENT.md §3 entsprechend korrigiert** (inkl. Literal-Build-Arg-Warnung, da der #126-Guard ein leeres `${DOMAIN}` nicht abfängt).
 - **Smoke deckte eine UX-Lücke auf:** ein im Wizard angelegter Twin ist über die UI **nicht löschbar** (musste per DB-Skript raus) → neues BACKLOG-Item.
 
+## Tag 50 (21. Juni 2026) — 🖼️🚀 Multimodaler Bildinput LIVE auf Prod (Codex-verifiziert, Persistenz bewiesen) + Compose-Drift-Lehre
+
+**Tag 50 — Bild-an-Twin ist live auf srv1712371.** Deploy auf `be4f0a7` (SS2e: compose-Whitelist `ATTACHMENT_STORE_DIR` + `gitignore data/`), **web + runtime neu gebaut** (UI sitzt im web-Bundle, Endpoints+Store im runtime), Bridge unberührt, **keine Migration**. Rollback-Tags `nolmi-{runtime,web}:rollback-premultimodal`.
+
+🔴 **Prod-Verifikation (echt):**
+1. **Codex-Bild-Test LIVE bestanden:** @markus über **gpt-5.5/Codex** beschreibt ein hochgeladenes Bild **spezifisch** (Module, Circuit-Strukturen, rote Nodes, HE-Logo erkannt) → der **Produktiv-Codex-Adapter** sieht Bilder, nicht nur der Spike (`d5e757e`). Damit ist der eine ungetestete Pfad (gpt-5.5 `input_image` über den echten Adapter) bestätigt.
+2. **Persistenz bewiesen:** Upload landet in `/data/attachments/<twinId>/<att_id>` (persistentes Volume `nolmi-runtime-data`), **überlebt `docker compose up -d --force-recreate`** (Bild lädt danach weiter aus dem GET-Endpoint).
+
+🔴 **DEPLOY-LEHRE 1 (verbindlich):** Die **aktive** Prod-Compose `/docker/nolmi/docker-compose.yml` ist **KEIN Symlink** aufs Repo, sondern eine **eigenständige Kopie** (Stand 17.6.). `git pull` bringt Compose-Änderungen nur ins `repo/docker/nolmi/docker-compose.yml` — die **aktive** Datei muss **separat manuell gepflegt** werden, sonst werden neue ENV-Whitelist-Zeilen **still ignoriert** (`docker compose config` zeigt sie nicht → ENV leer im Container → Default greift). Das kostete beim Multimodal-Deploy fast die Persistenz (Bilder im Container-FS statt Volume) — **aufgedeckt durch den Persistenz-Test VOR echtem Datenverlust**. Diagnose-Kette: `.env`✅ + repo-compose✅ + `docker compose config | grep ATTACHMENT_STORE_DIR` **LEER** → aktive Datei ≠ repo-Datei.
+
+🔴 **DEPLOY-LEHRE 2:** `${VAR:-}` mit leerem Default in der Whitelist reicht **nicht allein** — ohne `.env`-Wert bekommt der Container `""` → `resolveWorkspacePath` behandelt `""` wie *unset* → Container-FS-Default. **Beide** nötig: Whitelist-Zeile (in der **aktiven** Compose) **UND** `.env`-Wert (`ATTACHMENT_STORE_DIR=/data/attachments`).
+
+**SS2d (Owner-only) — strukturell bestätigt (kein Code):** Bridge-Messages tragen **kein** `attachments`-Feld, und `buildBridgeThread` strippt auf `{role, content}` → der A2A-Pfad betritt den Attachment-Zweig in `toModelMessages` **nie** → `loadAttachmentBytes` wird im A2A-Pfad nie gerufen. **Kein Gate nötig** (anders als `web_fetch`, das `enableMcpTools` brauchte). Plus Defense-in-depth: Upload/GET sind `requireOwner` + twinId-isoliert.
+
+**Bogen-Abschluss:** Multimodaler Bildinput ist damit **vollständig live** — Spike (`d5e757e`) → Schema/Store/Endpoints/UI (Tag 49) → Fixes (`2c8b19a`/`6f6b39d`) → SS4b-UI (`27f24b8`/`2235b06`) → SS2e (`be4f0a7`) → Prod-Deploy + Verifikation (Tag 50). Offene Folge-Bögen (SS4b-Rest, STT/Sprache, Provider-Erweiterung, PDF, A2A-Multimodal-Leitplanke) im BACKLOG.
+
 ## Tag 49 (20. Juni 2026) — 🖼️ Multimodaler Input (Bild an Twin) lokal vollständig — Backend + UI, beide Modell-Pfade (NICHT deployt)
 
 **Tag 49 (Forts.) — Owner kann ein Bild an seinen Twin schicken, der Twin „sieht" es. Lokal Ende-zu-Ende fertig, bewusst NICHT deployt.** Nur Owner-Chat, beide Modell-Pfade (Anthropic lokal + Codex/gpt-5.5 Spike-bewiesen). Bogen in Sub-Schritten:

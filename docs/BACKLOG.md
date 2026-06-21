@@ -3396,20 +3396,25 @@ Code war komplett. Ablauf live bestätigt auf Prod: Owner approved → @markus f
 
 **Wurzel (DB-bewiesen):** Merge-Slot-Kollision — `reply-received` + `trusted-bypass` teilen `input.bridgeMessageId`; `mergeAuditIntoBridgeMessages` (DESC-first-wins) gab den `receivedIndex`-Slot dem neueren `trusted-bypass` → Message rendert als trusted-bypass → mark-read-Filter (`=== "reply-received"`) übersprang sie → `read_at` blieb NULL → `countUnreadRepliesByPartner` zählte ewig. Vierfelder-Korrelation 14/0/0/9. **Fix:** `reply-received` bekommt Präzedenz im received-Slot, `trusted-bypass` bleibt Fallback (florian-initiierte Nachrichten haben NUR trusted-bypass). Live: unread 14→0 nach Öffnen, Indikator verschwindet.
 
-### ✅ Multimodaler Input: Bild an Twin — LOKAL VOLLSTÄNDIG (Tag 49), Prod-Deploy offen
+### ✅ Multimodaler Input: Bild an Twin — LIVE AUF PROD (Tag 50)
 
-**Status:** ✅ lokal Ende-zu-Ende (Backend + UI, beide Modell-Pfade) · **NICHT deployt** · **War:** L · **Aus:** Tag 47
+**Status:** ✅ **LIVE & verifiziert** (`be4f0a7`, web+runtime, Tag 50) · **War:** L · **Aus:** Tag 47
 
-**Gebaut (Tag 49):** Owner-Chat-Bild-Input. Spike `d5e757e` (Codex/gpt-5.5 `input_image` Gate GRÜN, Prod-bewiesen) → SS1 Schema `b1616e8` → SS3a Anthropic `4da9152` → SS3b Codex `8d57028` → SS2a Store+harte-twin-Isolation `d1623ec` → SS2b Upload-Endpoint (owner-only, Magic-Bytes, Größen-Limit) `3563d12` → SS4a Web-UI `1f73c1b` → Fixes `2c8b19a` (attachment-drop in runOwnerDirect) + `6f6b39d` (Render-Bugs + GET-Endpoint). Verifiziert lokal im Browser: Twin beschreibt das Bild spezifisch, bleibt nach Streaming/Reload sichtbar; harte Isolation (fremder twinId → 404). Bug-Lehren im STAND Tag 49.
+**Gebaut (Tag 49) + deployt (Tag 50):** Owner-Chat-Bild-Input. Spike `d5e757e` → SS1 `b1616e8` → SS3a `4da9152` → SS3b `8d57028` → SS2a `d1623ec` → SS2b `3563d12` → SS4a `1f73c1b` → Fixes `2c8b19a`/`6f6b39d` → SS4b-1 Composer-Menü `27f24b8` → SS4b-2 Drag&Drop/Paste `2235b06` → SS2e compose-Whitelist+gitignore `be4f0a7`. **Prod-verifiziert (Tag 50):** Codex/gpt-5.5 beschreibt ein Bild spezifisch (Module/Circuit/HE-Logo) über den **Produktiv-Adapter**; Persistenz bewiesen (`/data/attachments/<twinId>/<id>` überlebt `--force-recreate`). SS2d strukturell owner-only (Bridge ohne attachments-Feld). Voller Bogen + Deploy-Lehren im STAND Tag 50.
 
-**🔴 OFFEN vor Prod-Deploy:** **SS2e** `ATTACHMENT_STORE_DIR=/data/attachments` in compose-Whitelist + VPS-`.env` (sonst Store im Container-FS, weg beim Recreate); **SS2d** Owner-only-Surface bestätigen (A2A/trusted-bypass trägt keine attachments); **Codex-Live-Smoke** auf Prod (gpt-5.5 über Produktiv-Adapter, wie Spike); `data/` zu `.gitignore`.
+### Multimodal/Provider — Folge-Bögen
 
-### Multimodal/Provider — Folge-Bögen (Tag 49)
-
-- **(a) SS4b — UI-Verfeinerung:** „Bild"-Button raus → „+" wird Dropdown (Bild/Dokument/Tool); Drag-&-Drop ins Input-Feld; Paste (Clipboard-Bild); Multi-Image. Größe S–M.
+- **(a) SS4b-Rest — UI-Verfeinerung:** ✅ Composer-Menü (`27f24b8`) + Drag&Drop/Paste (`2235b06`) live. **OFFEN:** „Dokument"-Eintrag (PDF), Multi-Image. Größe S.
 - **(b) Sprachnachrichten an den Twin:** eigener **STT-Pipeline-Bogen** (Audio → Whisper → Text → Modell), **NICHT** Vision — distinkter Pfad. Größe M–L.
 - **(c) Provider-Erweiterung:** Ollama Cloud + OpenRouter (Connector mit Modell-Wechsel, Open-Source-LLMs). Größe M.
 - **(d) PDF/Dokument-Support:** `AttachmentSchema.type`-Enum additiv erweitern (`image` → `+pdf`/`+doc`); Lade-/Weitergabe-Pfad analog Bild. Größe M.
+- **(e) 🔴 Leitplanke A2A-Multimodal:** Falls Twins sich je Bilder schicken sollen — die heutige **strukturelle** Owner-only-Garantie (Bridge ohne attachments-Feld) **entfällt** dann. Bräuchte ein **explizites Trust-Gate** + Klärung, in **WESSEN** Store ein A2A-`ref` aufgelöst wird (Sender vs. Empfänger, twinId-Isolation). Nicht nebenbei einführen.
+
+### 🔴 Infra-Hygiene: aktive Prod-Compose ist KEIN Symlink (wiederkehrende Falle)
+
+**Status:** OFFEN · **Größe:** S (Entscheidung + ggf. einmalige Aktion) · **Aus:** Tag-50-Multimodal-Deploy
+
+**Befund:** `/docker/nolmi/docker-compose.yml` auf srv1712371 ist eine **eigenständige Kopie**, kein Symlink aufs Repo. `git pull` ändert nur `repo/docker/nolmi/docker-compose.yml` → neue ENV-Whitelist-Zeilen landen **nicht** in der aktiven Datei und werden still ignoriert (`docker compose config` zeigt sie nicht → Container-Default greift). Kostete beim Multimodal-Deploy fast die Persistenz (vom Persistenz-Test abgefangen). **Entscheiden:** aktive Datei zum **Symlink** aufs Repo machen (self-syncing bei `git pull`) ODER Trennung bewusst behalten + jede Compose-Änderung manuell in die aktive Datei spiegeln. Solange getrennt: **jede künftige `${VAR:-}`-Whitelist-Zeile** braucht den manuellen Sync-Schritt. Memory `prod-vps-deploy-mechanik` hält den Stand.
 
 ### Telegram: Rich Messages + @-Mention im Telegram-Kanal
 
@@ -3420,7 +3425,7 @@ Code war komplett. Ablauf live bestätigt auf Prod: Owner approved → @markus f
 
 ### Bestehende offene Items (Erinnerung)
 
-Beidseitiger A2A-Abbruch (Bridge-Signal), @-Mention-Autosend Scharfschaltung (Weg 2 — SS1+SS2 live im Schatten, nur noch beobachten+armen), multimodaler Input, Telegram Rich-Messages/@-Mention, Twin-Löschung verwaister Bridge-Handles, OAuth-Backlog. (web_fetch + Compose-Drift + Mention-ohne-Verb + Ungelesen-Indikator + Zeitgefühl = ✅ erledigt, Tag 47/48/49.)
+Beidseitiger A2A-Abbruch (Bridge-Signal), @-Mention-Autosend Scharfschaltung (Weg 2 — SS1+SS2 live im Schatten, nur noch beobachten+armen), Multimodal-Folge-Bögen (PDF/Multi-Image/STT/Provider/A2A-Leitplanke), Prod-Compose-Symlink-Frage, Telegram Rich-Messages/@-Mention, Twin-Löschung verwaister Bridge-Handles, OAuth-Backlog. (Multimodal Bildinput + web_fetch + Compose-Drift + Mention-ohne-Verb + Ungelesen-Indikator + Zeitgefühl = ✅ erledigt/live, Tag 47–50.)
 
 ---
 
