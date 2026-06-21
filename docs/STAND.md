@@ -320,6 +320,16 @@ Der getaktete Production-Deploy ist durch: **`86ed1e4` → `6e32813`** auf `srv1
 - **Befund beim Build (jetzt dokumentiert):** der Prod-Stack nutzt `image:latest` ohne `build:` → `docker compose up -d` baut nichts; explizites `docker build` aus dem Repo-Root gehört davor. **DEPLOYMENT.md §3 entsprechend korrigiert** (inkl. Literal-Build-Arg-Warnung, da der #126-Guard ein leeres `${DOMAIN}` nicht abfängt).
 - **Smoke deckte eine UX-Lücke auf:** ein im Wizard angelegter Twin ist über die UI **nicht löschbar** (musste per DB-Skript raus) → neues BACKLOG-Item.
 
+## Tag 50 (21. Juni 2026) — 🖼️🖼️ Multi-Image lokal fertig (Frontend Single→Array, NICHT deployt)
+
+**Tag 50 (Forts.) — mehrere Bilder pro Nachricht.** Commit **`36ff022`** — **reiner Frontend-Umbau** Single→Array: `pendingAttachments[]`/`optimisticAttachments[]`, `<input multiple>`, `handleFiles` iteriert **alle** Files (Picker/Drop/Paste) mit 1×N-Upload, Composer-Vorschau-Strip (jedes Thumbnail eigenes ×, `removeOnePending`), `MAX_IMAGES=6` Soft-Cap + Hinweis, per-File-Teilfehler-Banner. 🔴 **Backend UNVERÄNDERT** — `toModelMessages`/Codex/`runOwnerDirect`/GET + `Bubble`/`buildChatBlocks` waren schon Array-fähig (SS3a/SS3b-Erbe); keine Migration.
+
+🔴 **Verifikation (Browser, ECHT):** mehrere Bilder hochgeladen → @markus beschreibt die ganze **Serie einzeln referenziert** („Bild 3", „Bild 5", „Panoramas 1,2,5", „Konsistenz über die Serie") → mehrere Bilder gehen **distinkt** durch beide Modell-Pfade (Codex live). Einzelbild-Regression ok (1-Element-Array == altes Single). Per-Item-× entfernt nur eins. Nach Reload laden alle aus dem GET-Endpoint.
+
+**Bau-Entscheidungen:** Uploads **sequentiell** (`await` je Datei) → Append-Reihenfolge == Auswahl-Reihenfolge (Korrektheit > paralleler Spinner). Upload bleibt **1 File/Request × N** (kein `files:N`-Umbau). objectURL-Lifecycle gezielt (Ownership ans Optimistic beim Send, sonst gezieltes revoke — keine Leaks).
+
+🔴 **OFFEN — Deploy = WEB-ONLY** (reiner Frontend-Bogen). Mit der frischen Symlink-Disziplin: `git pull` (Compose self-synct) → `docker compose config`-Gate → web-Build **mit `--build-arg NEXT_PUBLIC_RUNTIME_URL=https://runtime.nolmi.ai`** + Bundle-Grep → `--force-recreate nolmi-web`. **`nolmi-runtime` NICHT neu bauen** (Backend unberührt). Rollback-Tag vor Deploy setzen.
+
 ## Tag 50 (21. Juni 2026) — 📊 Mention-Klassifikations-Audit live auf Prod (Observability)
 
 **Tag 50 (Forts.) — der Mention-Klassifikator persistiert seine Urteile jetzt als Audit.** Commit **`46677c3`** (`recordMentionIntentAudit` nach `recordWebFetchAudit`-Vorbild: `capability=mention-intent`, `input{targetHandle, text:slice(280), textLength, gate, tier}`, `output{intent, reason}`, **fire-and-forget `void` + try/catch → bricht den Chat nie**). Keine Migration (capability ist freier TEXT). **Runtime-only Deploy.** Rollback-Tag `nolmi-runtime:rollback-pre-mentionaudit`.

@@ -3408,7 +3408,7 @@ Code war komplett. Ablauf live bestätigt auf Prod: Owner approved → @markus f
 
 ### Multimodal/Provider — Folge-Bögen
 
-- **(a) SS4b-Rest — UI-Verfeinerung:** ✅ Composer-Menü (`27f24b8`) + Drag&Drop/Paste (`2235b06`) live. **OFFEN:** „Dokument"-Eintrag (PDF), Multi-Image. Größe S.
+- **(a) SS4b-Rest — UI-Verfeinerung:** ✅ Composer-Menü (`27f24b8`) + Drag&Drop/Paste (`2235b06`) live; ✅ **Multi-Image lokal fertig** (`36ff022`, Frontend Single→Array, browser-verifiziert — Serie einzeln referenziert; **Deploy WEB-ONLY offen**). **OFFEN:** „Dokument"-Eintrag (PDF, braucht Modell-Pfad-Spike wie Bilder). Größe S.
 - **(b) Sprachnachrichten an den Twin:** eigener **STT-Pipeline-Bogen** (Audio → Whisper → Text → Modell), **NICHT** Vision — distinkter Pfad. Größe M–L.
 - **(c) Provider-Erweiterung:** Ollama Cloud + OpenRouter (Connector mit Modell-Wechsel, Open-Source-LLMs). Größe M.
 - **(d) PDF/Dokument-Support:** `AttachmentSchema.type`-Enum additiv erweitern (`image` → `+pdf`/`+doc`); Lade-/Weitergabe-Pfad analog Bild. Größe M.
