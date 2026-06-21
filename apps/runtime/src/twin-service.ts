@@ -839,6 +839,17 @@ export class TwinService {
             `intent=${result.intent} gate=${armed ? "armed" : "shadow"} ` +
             `reason="${result.reason}" text="${lastUser.slice(0, 80).replace(/\n/g, " ")}"`,
         );
+        // Observability: Klassifikation persistieren (console.log ist flüchtig,
+        // Recreate wischt). 🔴 Fire-and-forget — die Methode schluckt Fehler, der
+        // Hotpath wartet nicht. Additiv; ändert das Klassifikator-Verhalten nicht.
+        void this.recordMentionIntentAudit({
+          text: lastUser,
+          targetHandle: mentioned,
+          intent: result.intent,
+          reason: result.reason,
+          gate: armed ? "armed" : "shadow",
+          tier: this.deps.classifierModelLabel,
+        });
         if (armed && result.intent === "SEND") {
           detection = { capability: "send_to_twin", targetHandle: mentioned };
         }
@@ -3815,6 +3826,47 @@ REGEL 6: Wenn der User dich explizit bittet, ein Tool zu nutzen ("rufe das X-Too
     } catch (err) {
       console.warn(
         `[web-fetch] Audit-Schreibfehler (twin=${this.deps.twinId}):`,
+        err instanceof Error ? err.message : err,
+      );
+    }
+  }
+
+  /**
+   * Observability: hält eine Mention-Intent-Klassifikation als Audit fest
+   * (capability `mention-intent`). console.log (twin-service.ts:837) ist
+   * flüchtig — Recreate wischt; der Audit überlebt und ist per DB-Query
+   * auswertbar. `mention-intent` fehlt in `DIRECT_CHAT_CAPABILITIES` (Web) →
+   * rendert NICHT als Chat-Bubble. `text` truncatet (~280 Z., Owner-eigen).
+   * 🔴 Wie recordWebFetchAudit: try/catch — wirft NIE (fire-and-forget aufgerufen).
+   */
+  private async recordMentionIntentAudit(rec: {
+    text: string;
+    targetHandle: string;
+    intent: string;
+    reason: string;
+    gate: "armed" | "shadow";
+    tier: string;
+  }): Promise<void> {
+    try {
+      const audit = await this.deps.audit.start({
+        capability: "mention-intent",
+        mandateId: null,
+        input: {
+          targetHandle: rec.targetHandle,
+          text: rec.text.slice(0, 280),
+          textLength: rec.text.length,
+          gate: rec.gate,
+          tier: rec.tier,
+        },
+        initialStatus: "executed",
+      });
+      await this.deps.audit.complete(audit.id, {
+        intent: rec.intent,
+        reason: rec.reason,
+      });
+    } catch (err) {
+      console.warn(
+        `[mention-intent] Audit-Schreibfehler (twin=${this.deps.twinId}):`,
         err instanceof Error ? err.message : err,
       );
     }
