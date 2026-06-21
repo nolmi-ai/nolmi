@@ -37,6 +37,15 @@ import { formatRelative } from "../../../lib/time-format";
 
 const RUNTIME_URL = process.env.NEXT_PUBLIC_RUNTIME_URL ?? "http://localhost:4000";
 
+// Multimodal: erlaubte Bild-MIME-Typen (Client-Vorfilter für input/Drop/Paste;
+// die autoritative Prüfung macht der Upload-Endpoint via Magic-Bytes).
+const ACCEPTED_IMAGE_MIME = [
+  "image/png",
+  "image/jpeg",
+  "image/webp",
+  "image/gif",
+];
+
 // Audit-Capabilities, die im Direct-Chat-Verlauf erscheinen sollen.
 // "respond_to_chat" = Standard-Pfad, "owner-direct" = Owner-Bypass — beide
 // haben dasselbe Audit-Input-/Output-Schema (lastMessage + reply).
@@ -1877,6 +1886,8 @@ function DirectChat({
   const fileInputRef = useRef<HTMLInputElement>(null);
   // SS4b-1: ToolPicker ist jetzt controlled — geöffnet via ComposerMenu ("+").
   const [toolPickerOpen, setToolPickerOpen] = useState(false);
+  // SS4b-2: visuelles Feedback während ein File über den Composer gezogen wird.
+  const [draggedOver, setDraggedOver] = useState(false);
 
   // Entfernt das pending Bild + gibt den objectURL frei (verhindert Leak).
   const clearPendingAttachment = useCallback(() => {
@@ -2111,13 +2122,12 @@ function DirectChat({
     });
   }
 
-  // Multimodal SS4a: ein Bild hochladen → ref vom Server. FormData (kein
-  // Content-Type-Header: der Browser setzt multipart-boundary selbst), Owner-
-  // Cookie via credentials:"include". Fehler (413/415/400) landen im Banner.
-  async function handleFileSelected(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0];
-    e.target.value = ""; // erlaubt erneute Auswahl derselben Datei
-    if (!file) return;
+  // Multimodal SS4a/SS4b-2: Kern-Upload eines Bildes → ref vom Server. FormData
+  // (kein Content-Type-Header: der Browser setzt multipart-boundary selbst),
+  // Owner-Cookie via credentials:"include". Fehler (413/415/400) landen im
+  // Banner. EINE Quelle für input-onChange, Drop UND Paste (kein Dup-Code).
+  async function handleFile(file: File) {
+    if (busy || uploading) return;
     setUploading(true);
     setError(null);
     try {
@@ -2145,6 +2155,58 @@ function DirectChat({
     } finally {
       setUploading(false);
     }
+  }
+
+  async function handleFileSelected(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    e.target.value = ""; // erlaubt erneute Auswahl derselben Datei
+    if (file) await handleFile(file);
+  }
+
+  // SS4b-2: Drag&Drop. Nur Bilder (Allowlist); 🔴 nur das ERSTE (Single-
+  // pendingAttachment, Multi-Image = Backlog). Nicht-Bild → dezenter Hinweis.
+  function handleDragOver(e: React.DragEvent) {
+    e.preventDefault();
+    if (!busy && !uploading) setDraggedOver(true);
+  }
+  function handleDragLeave(e: React.DragEvent) {
+    // Kein Flackern beim Überfahren von Kind-Elementen: nur zurücksetzen, wenn
+    // der Zeiger den Container wirklich verlässt.
+    if (e.currentTarget.contains(e.relatedTarget as Node | null)) return;
+    setDraggedOver(false);
+  }
+  function handleDrop(e: React.DragEvent) {
+    e.preventDefault();
+    setDraggedOver(false);
+    if (busy || uploading) return;
+    const file = e.dataTransfer.files?.[0];
+    if (!file) return;
+    if (!ACCEPTED_IMAGE_MIME.includes(file.type)) {
+      setError("Nur Bilder (png/jpeg/webp/gif) — andere Dateien werden ignoriert.");
+      return;
+    }
+    void handleFile(file);
+  }
+
+  // SS4b-2: Paste. 🔴 NUR den Bild-Fall abfangen (preventDefault) — normaler
+  // Text-Paste bleibt unberührt (string-Items matchen die Bild-Schleife nicht).
+  function handlePaste(e: React.ClipboardEvent<HTMLTextAreaElement>) {
+    const items = e.clipboardData?.items;
+    if (!items) return;
+    for (const item of items) {
+      if (item.kind === "file" && item.type.startsWith("image/")) {
+        e.preventDefault();
+        if (busy || uploading) return;
+        const file = item.getAsFile();
+        if (file && ACCEPTED_IMAGE_MIME.includes(file.type)) {
+          void handleFile(file);
+        } else {
+          setError("Bild-Format nicht unterstützt (nur png/jpeg/webp/gif).");
+        }
+        return;
+      }
+    }
+    // Kein Bild im Clipboard → Default-Text-Paste läuft normal weiter.
   }
 
   async function sendChat(
@@ -2461,7 +2523,14 @@ function DirectChat({
           <div ref={bottomRef} />
         </div>
       </div>
-      <div className="h-20 border-t border-border bg-surface px-6 py-3 flex items-center gap-2 flex-shrink-0">
+      <div
+        onDragOver={handleDragOver}
+        onDragLeave={handleDragLeave}
+        onDrop={handleDrop}
+        className={`h-20 border-t border-border bg-surface px-6 py-3 flex items-center gap-2 flex-shrink-0 transition-colors ${
+          draggedOver ? "ring-2 ring-accent ring-inset bg-accent/5" : ""
+        }`}
+      >
         {/* SS4a: verstecktes File-Input — getriggert vom Bild-Button. */}
         <input
           ref={fileInputRef}
@@ -2521,6 +2590,7 @@ function DirectChat({
             ref={textareaRef}
             value={input}
             onChange={handleInputChange}
+            onPaste={handlePaste}
             onBlur={() => setMention(null)}
             onKeyDown={(e) => {
               // Mention-Dropdown offen: Navigation/Auswahl fängt die Tasten ab,
