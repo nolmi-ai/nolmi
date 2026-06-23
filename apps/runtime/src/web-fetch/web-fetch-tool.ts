@@ -25,7 +25,10 @@ import {
 export const NOLMI_UA =
   "Mozilla/5.0 (compatible) Safari/537.36 Nolmi/0.1 (+harwayexperience.com)";
 
-const TIMEOUT_MS = 10_000;
+// Gesamt-Timeout (Connect + TLS + Body + Redirect-Kette). 25s großzügig genug
+// für kurz überlastete Hosts (httpbin: 10s zu knapp, Minuten später 899ms);
+// per ENV justierbar (analog MAX_BYTES).
+const TIMEOUT_MS = Number(process.env.WEB_FETCH_TIMEOUT_MS) || 25_000;
 // ENV-Override v.a. für Tests (kleine Grenze → Truncation deterministisch prüfbar).
 const MAX_BYTES = Number(process.env.WEB_FETCH_MAX_BYTES) || 2 * 1024 * 1024;
 
@@ -222,7 +225,9 @@ export async function executeWebFetch({
       }
     } catch (err) {
       if (err instanceof Error && err.name === "AbortError")
-        return errResult(`Timeout nach ${TIMEOUT_MS}ms`);
+        return errResult(
+          `Zeitüberschreitung: Die Seite hat nicht innerhalb von ${TIMEOUT_MS / 1000}s geantwortet — evtl. kurz überlastet, später erneut versuchen.`,
+        );
       if (err instanceof SsrfError) return errResult(err.message);
       return errResult(err instanceof Error ? err.message : String(err));
     } finally {
